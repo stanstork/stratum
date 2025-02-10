@@ -1,0 +1,13 @@
+[db.mysql]
+host = "localhost"
+port = 3306
+user = "user"
+password = "password"
+database = "testdb"
+
+[db.postgres]
+host = "localhost"
+port = 5432
+user = "user"
+password = "password"
+database = "testdb"

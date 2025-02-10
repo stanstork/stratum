@@ -3,6 +3,12 @@ name = "cli"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+engine = { path = "../engine" }
+tokio = { version = "1.43.0", features = ["full"] }
+sqlx = { version = "0.8.3", features = [
+    "mysql",
+    "postgres",
+    "runtime-tokio",
+    "tls-native-tls",
+] }
