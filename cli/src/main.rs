@@ -1,6 +1,5 @@
 use clap::Parser;
-use engine::db::con::DbConnection;
-use sqlx::{MySql, Pool, Postgres};
+use engine::db::source::{DataSource, MySqlDataSource};
 
 #[derive(Parser)]
 struct Cli {
@@ -14,21 +13,12 @@ struct Cli {
 async fn main() -> Result<(), sqlx::Error> {
     let cli = Cli::parse();
 
-    let mysql_pool: Pool<MySql> = DbConnection::connect(&cli.mysql_url).await?;
-    let postgres_pool: Pool<Postgres> = DbConnection::connect(&cli.postgres_url).await?;
+    let data_source = MySqlDataSource::new(&cli.mysql_url).await?;
+    let query = "SELECT * FROM products";
+    let data = data_source.fetch_data(query).await?;
 
-    // Check if the connection is alive
-    if mysql_pool.is_connected().await {
-        println!("🔄 MySQL connection is alive!");
-    } else {
-        println!("⚠️ MySQL connection failed!");
-    }
-
-    // Check if the connection is alive
-    if postgres_pool.is_connected().await {
-        println!("🔄 PostgreSQL connection is alive!");
-    } else {
-        println!("⚠️ PostgreSQL connection failed!");
+    for row in data {
+        println!("{}", row);
     }
 
     Ok(())
