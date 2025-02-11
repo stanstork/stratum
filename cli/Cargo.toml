@@ -12,3 +12,4 @@ sqlx = { version = "0.8.3", features = [
     "runtime-tokio",
     "tls-native-tls",
 ] }
+clap = { version = "4.5.28", features = ["derive"] }

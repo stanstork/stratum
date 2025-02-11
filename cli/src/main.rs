@@ -1,12 +1,21 @@
-use engine::{config::Config, db::con::DbConnection};
+use clap::Parser;
+use engine::db::con::DbConnection;
 use sqlx::{MySql, Pool, Postgres};
+
+#[derive(Parser)]
+struct Cli {
+    #[arg(long, help = "MySQL connection URL")]
+    mysql_url: String,
+    #[arg(long, help = "PostgreSQL connection URL")]
+    postgres_url: String,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), sqlx::Error> {
-    let config = Config::from_file(".cargo/config.toml").expect("Failed to load config file");
+    let cli = Cli::parse();
 
-    let mysql_pool: Pool<MySql> = DbConnection::connect(&config.mysql_url()).await?;
-    let postgres_pool: Pool<Postgres> = DbConnection::connect(&config.postgres_url()).await?;
+    let mysql_pool: Pool<MySql> = DbConnection::connect(&cli.mysql_url).await?;
+    let postgres_pool: Pool<Postgres> = DbConnection::connect(&cli.postgres_url).await?;
 
     // Check if the connection is alive
     if mysql_pool.is_connected().await {
