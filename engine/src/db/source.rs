@@ -1,3 +1,4 @@
+use super::col::{ColumnMetadata, ColumnType};
 use super::conn::DbConnection;
 use async_trait::async_trait;
 use futures::TryStreamExt;
@@ -28,31 +29,13 @@ impl DataSource for MySqlDataSource {
 
         while let Some(row) = rows.try_next().await? {
             let columns = row.columns();
-            let mut row_string = Vec::new();
+            // let mut row_string = Vec::new();
             for col in columns.iter() {
-                let col_type = col.type_info();
-                let type_name = col_type.name();
-
-                match type_name {
-                    "INT" => {
-                        let value: i32 = row.get::<i32, _>(col.name());
-                        row_string.push(value.to_string());
-                    }
-                    "VARCHAR" => {
-                        let value: String = row.get::<String, _>(col.name());
-                        row_string.push(value);
-                    }
-                    "DECIMAL" | "NUMERIC" => {
-                        let value: BigDecimal = row.get::<BigDecimal, _>(col.name());
-                        row_string.push(value.to_string());
-                    }
-                    _ => {
-                        row_string.push("Unknown".to_string());
-                    }
-                }
+                let col_def = ColumnMetadata::from(col);
+                println!("{:?}", col_def);
             }
 
-            data.push(row_string.join(", "));
+            // data.push(row_string.join(", "));
         }
 
         Ok(data)
