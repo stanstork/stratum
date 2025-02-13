@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sqlx::mysql::MySqlColumn;
-use sqlx::{Column, TypeInfo};
+use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ColumnType {
@@ -97,18 +96,8 @@ impl ColumnFlags {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ColumnMetadata {
-    pub(crate) ordinal: usize,
-    pub(crate) name: String,
-    pub(crate) type_info: ColumnType,
-}
-
-impl From<&MySqlColumn> for ColumnMetadata {
-    fn from(column: &MySqlColumn) -> Self {
-        Self {
-            ordinal: column.ordinal(),
-            name: column.name().to_string(),
-            type_info: ColumnType::from(column.type_info().name()),
-        }
-    }
+pub struct ColumnValue {
+    pub name: String,
+    pub value: Value,
+    pub type_info: ColumnType,
 }

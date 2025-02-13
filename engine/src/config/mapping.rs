@@ -1,4 +1,4 @@
-use super::{column::ColumnType, transform::Transformation};
+use crate::{database::column::ColumnType, transform::transform::Transformation};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

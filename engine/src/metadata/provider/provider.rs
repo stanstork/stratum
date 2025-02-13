@@ -1,4 +1,4 @@
-use super::ForeignKeyMetadata;
+use crate::metadata::fk::ForeignKeyMetadata;
 use async_trait::async_trait;
 use sqlx::{Database, Error, Pool};
 

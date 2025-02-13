@@ -1,15 +1,13 @@
-use crate::database::{
+use super::{
     column::ColumnMetadata,
-    connection::{DbConnection, MySqlConnection},
-    mapping::TableMapping,
+    fk::ForeignKeyMetadata,
+    provider::{mysql::MySqlMetadataProvider, provider::DbMetadataProvider},
 };
-use mysql::MySqlMetadataProvider;
-use provider::DbMetadataProvider;
+use crate::{
+    config::mapping::TableMapping,
+    database::connection::{DbConnection, MySqlConnection},
+};
 use sqlx::{Column, Row};
-
-pub mod mysql;
-pub mod postgres;
-pub mod provider;
 
 #[derive(Debug)]
 pub struct TableMetadata {
@@ -17,13 +15,6 @@ pub struct TableMetadata {
     pub columns: Vec<ColumnMetadata>,
     pub primary_key: Vec<String>,
     pub foreign_keys: Vec<ForeignKeyMetadata>,
-}
-
-#[derive(Debug)]
-pub struct ForeignKeyMetadata {
-    pub column: String,
-    pub foreign_table: String,
-    pub foreign_column: String,
 }
 
 impl TableMetadata {
