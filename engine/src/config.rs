@@ -1,4 +1,4 @@
-use crate::db::mapping::TableMapping;
+use crate::database::mapping::TableMapping;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]

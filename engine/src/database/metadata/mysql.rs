@@ -1,30 +1,25 @@
-use super::{metadata::ForeignKeyMetadata, DbMetadataProvider};
+use super::provider::DbMetadataProvider;
+use crate::database::metadata::ForeignKeyMetadata;
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use sqlx::{MySql, Pool, Row};
 
-pub struct MySqlMetadataProvider {
-    conn: Pool<MySql>,
-}
-
-impl MySqlMetadataProvider {
-    pub fn new(conn: Pool<MySql>) -> Self {
-        Self { conn }
-    }
-}
+pub struct MySqlMetadataProvider;
 
 #[async_trait]
 impl DbMetadataProvider for MySqlMetadataProvider {
-    async fn get_primary_key(&self, table: &str) -> Result<Vec<String>, sqlx::Error> {
+    type DB = MySql;
+
+    async fn get_primary_key(table: &str, conn: &Pool<MySql>) -> Result<Vec<String>, sqlx::Error> {
         let query = format!(
             "SELECT COLUMN_NAME 
             FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE 
-            WHERE TABLE_NAME = {} 
+            WHERE TABLE_NAME = '{}' 
             AND CONSTRAINT_NAME = 'PRIMARY'",
             table
         );
 
-        let mut rows = sqlx::query(&query).fetch(&self.conn);
+        let mut rows = sqlx::query(&query).fetch(conn);
         let mut primary_keys = Vec::new();
 
         while let Some(row) = rows.try_next().await? {
@@ -35,15 +30,18 @@ impl DbMetadataProvider for MySqlMetadataProvider {
         Ok(primary_keys)
     }
 
-    async fn get_foreign_keys(&self, table: &str) -> Result<Vec<ForeignKeyMetadata>, sqlx::Error> {
+    async fn get_foreign_keys(
+        table: &str,
+        conn: &Pool<MySql>,
+    ) -> Result<Vec<ForeignKeyMetadata>, sqlx::Error> {
         let query = format!(
             "SELECT COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
             FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
-            WHERE TABLE_NAME = {} AND REFERENCED_TABLE_NAME IS NOT NULL",
+            WHERE TABLE_NAME = '{}' AND REFERENCED_TABLE_NAME IS NOT NULL",
             table
         );
 
-        let mut rows = sqlx::query(&query).fetch(&self.conn);
+        let mut rows = sqlx::query(&query).fetch(conn);
         let mut foreign_keys = Vec::new();
 
         while let Some(row) = rows.try_next().await? {

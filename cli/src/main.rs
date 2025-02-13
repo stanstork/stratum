@@ -1,13 +1,5 @@
 use clap::Parser;
-use engine::{
-    config::{self, read_config},
-    db::{
-        conn::DbConnection,
-        metadata::metadata::TableMetadata,
-        source::{DataSource, MySqlDataSource},
-    },
-};
-use sqlx::{MySql, Pool};
+use engine::{config::read_config, database::source::MySqlDataSource};
 
 #[derive(Parser)]
 struct Cli {
@@ -19,10 +11,9 @@ struct Cli {
 async fn main() -> Result<(), sqlx::Error> {
     let cli = Cli::parse();
     let config = read_config(&cli.config).expect("Failed to read config file");
-    let metadata =
-        TableMetadata::from_mapping(config.mappings()[0].clone(), config.source()).await?;
+    let mysql_source = MySqlDataSource::new(config.source(), config.mappings.clone()).await?;
 
-    println!("{:#?}", metadata);
+    println!("Metadata: {:#?}", mysql_source.metadata());
 
     Ok(())
 }

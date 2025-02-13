@@ -1,9 +1,7 @@
-pub mod col;
-pub mod conn;
-pub mod dest;
+pub mod column;
+pub mod connection;
 pub mod mapping;
 pub mod metadata;
 pub mod source;
 pub mod transform;
-pub mod types;
 pub mod utils;
