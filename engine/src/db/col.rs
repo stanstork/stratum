@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::mysql::MySqlColumn;
 use sqlx::{Column, TypeInfo};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ColumnType {
     Decimal,
     Tiny,

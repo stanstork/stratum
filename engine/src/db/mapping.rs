@@ -2,7 +2,7 @@ use super::{col::ColumnType, transform::Transformation};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableMapping {
     pub table: String,
     #[serde(deserialize_with = "deserialize_columns")]
@@ -10,7 +10,7 @@ pub struct TableMapping {
     pub transform: Vec<Transformation>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ColumnMapping {
     pub column: String,
     pub target_type: Option<ColumnType>,

@@ -3,9 +3,9 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    pub(crate) source: String,
-    pub(crate) destination: String,
-    pub(crate) mappings: Vec<TableMapping>,
+    pub source: String,
+    pub destination: String,
+    pub mappings: Vec<TableMapping>,
 }
 
 impl Config {

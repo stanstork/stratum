@@ -2,11 +2,11 @@ source: "mysql://user:password@localhost:3306/testdb"
 destination: "postgres://user:password@localhost:5432/testdb"
 
 mappings:
-  - table: "users"
+  - table: "products"
     columns:
       id: "id"
       name: "full_name"
-      created_at: "created_at::timestamp"
+      price: "price::timestamp"
     transform:
       - function: "upper"
         args: ["full_name"]

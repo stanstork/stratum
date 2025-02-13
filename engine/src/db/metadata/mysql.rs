@@ -7,6 +7,12 @@ pub struct MySqlMetadataProvider {
     conn: Pool<MySql>,
 }
 
+impl MySqlMetadataProvider {
+    pub fn new(conn: Pool<MySql>) -> Self {
+        Self { conn }
+    }
+}
+
 #[async_trait]
 impl DbMetadataProvider for MySqlMetadataProvider {
     async fn get_primary_key(&self, table: &str) -> Result<Vec<String>, sqlx::Error> {
