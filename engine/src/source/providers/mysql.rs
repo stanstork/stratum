@@ -1,4 +1,3 @@
-use super::datasource::DataSource;
 use crate::{
     config::mapping::TableMapping,
     database::{
@@ -7,6 +6,7 @@ use crate::{
         row::{MySqlRowDataExt, RowData, RowDataExt},
     },
     metadata::table::TableMetadata,
+    source::datasource::DataSource,
 };
 use async_trait::async_trait;
 use sqlx::Error;

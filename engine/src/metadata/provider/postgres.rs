@@ -1,5 +1,5 @@
-use super::provider::DbMetadataProvider;
-use crate::metadata::fk::ForeignKeyMetadata;
+use super::base::DbMetadataProvider;
+use crate::metadata::foreign_key::ForeignKeyMetadata;
 use async_trait::async_trait;
 use sqlx::{Pool, Postgres};
 

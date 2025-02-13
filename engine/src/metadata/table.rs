@@ -1,7 +1,7 @@
 use super::{
     column::ColumnMetadata,
-    fk::ForeignKeyMetadata,
-    provider::{mysql::MySqlMetadataProvider, provider::DbMetadataProvider},
+    foreign_key::ForeignKeyMetadata,
+    provider::{base::DbMetadataProvider, mysql::MySqlMetadataProvider},
 };
 use crate::{
     config::mapping::TableMapping,

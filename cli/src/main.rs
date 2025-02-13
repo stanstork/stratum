@@ -1,7 +1,7 @@
 use clap::Parser;
 use engine::{
     config::config::read_config,
-    source::{datasource::DataSource, mysql::MySqlDataSource},
+    source::{datasource::DataSource, providers::mysql::MySqlDataSource},
 };
 
 #[derive(Parser)]

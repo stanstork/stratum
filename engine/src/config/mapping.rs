@@ -1,4 +1,4 @@
-use crate::{database::column::ColumnType, transform::transform::Transformation};
+use crate::{metadata::column::ColumnType, transform::transform::Transformation};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -20,7 +20,7 @@ impl From<String> for ColumnMapping {
     fn from(column: String) -> Self {
         let parts = column.split("::").collect::<Vec<&str>>();
         let column = parts[0].to_string();
-        let target_type = parts.get(1).map(|t| ColumnType::from(*t));
+        let target_type = parts.get(1).map(|t| ColumnType::try_from(*t).unwrap());
         Self {
             column,
             target_type,

@@ -1,15 +1,16 @@
-use super::column::{ColumnType, ColumnValue};
+use crate::metadata::column::{ColumnData, ColumnType, ColumnValue};
 use bigdecimal::{BigDecimal, ToPrimitive};
-use serde_json::{Number, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlx::{mysql::MySqlRow, Column, Row, TypeInfo};
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RowData {
-    pub columns: Vec<ColumnValue>,
+    pub columns: Vec<ColumnData>,
 }
 
 pub trait RowDataExt {
-    type Row: sqlx::Row;
+    type Row: Row;
 
     fn from_row(row: &Self::Row) -> RowData;
 }
@@ -23,34 +24,39 @@ impl RowDataExt for MySqlRowDataExt {
     fn from_row(row: &Self::Row) -> RowData {
         let mut columns = Vec::new();
 
-        for column in row.columns().iter() {
+        for column in row.columns() {
             let name = column.name().to_string();
-            let column_type = ColumnType::from(column.type_info().name());
+            let column_type =
+                ColumnType::try_from(column.type_info().name()).unwrap_or_else(|_| {
+                    eprintln!("Unknown column type: {}", column.type_info().name());
+                    ColumnType::String
+                });
 
             let value = match column_type {
                 ColumnType::Int24 | ColumnType::Long => row
                     .try_get::<i32, _>(column.ordinal())
-                    .map(|v| Value::Number(Number::from(v)))
-                    .unwrap_or(Value::Null),
+                    .ok()
+                    .map(|v| ColumnValue::Int(v as i64)),
                 ColumnType::Float => row
                     .try_get::<f64, _>(column.ordinal())
-                    .map(|v| Value::Number(Number::from_f64(v).unwrap()))
-                    .unwrap_or(Value::Null),
+                    .ok()
+                    .map(ColumnValue::Float),
                 ColumnType::Decimal => row
                     .try_get::<BigDecimal, _>(column.ordinal())
-                    .map(|v| Value::Number(Number::from_f64(v.to_f64().unwrap()).unwrap()))
-                    .unwrap_or(Value::Null),
+                    .ok()
+                    .and_then(|v| v.to_f64().map(ColumnValue::Float)),
                 ColumnType::String | ColumnType::VarChar => row
                     .try_get::<String, _>(column.ordinal())
-                    .map(Value::String)
-                    .unwrap_or(Value::Null),
+                    .ok()
+                    .map(ColumnValue::String),
                 ColumnType::Json => row
                     .try_get::<Value, _>(column.ordinal())
-                    .unwrap_or(Value::Null),
-                _ => Value::Null,
+                    .ok()
+                    .map(ColumnValue::Json),
+                _ => None,
             };
 
-            columns.push(ColumnValue {
+            columns.push(ColumnData {
                 name,
                 value,
                 type_info: column_type,
