@@ -1,3 +1,5 @@
+use crate::metadata::column::ColumnValue;
+
 pub struct QueryBuilder {
     pub query: String,
     pub params: Vec<String>,
@@ -40,6 +42,28 @@ impl QueryBuilder {
     pub fn limit(&mut self, limit: usize) -> &mut Self {
         self.query.push_str(" LIMIT ");
         self.query.push_str(&limit.to_string());
+        self
+    }
+
+    pub fn insert_into(&mut self, table: &str, columns: &Vec<(String, String)>) -> &mut Self {
+        self.query.push_str("INSERT INTO ");
+        self.query.push_str(table);
+        self.query.push_str(" (");
+
+        let column_names = columns
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        self.query.push_str(&column_names.join(", "));
+        self.query.push_str(") VALUES (");
+
+        let mut params = Vec::new();
+        for (_, value) in columns.iter() {
+            params.push(value.clone());
+        }
+
+        self.query.push_str(&params.join(", "));
+        self.query.push_str(")");
         self
     }
 

@@ -1,4 +1,5 @@
 use chrono::{NaiveDate, NaiveDateTime};
+use core::fmt;
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::MySqlColumn;
 use sqlx::{Column, TypeInfo};
@@ -123,4 +124,20 @@ pub struct ColumnData {
     pub name: String,
     pub value: Option<ColumnValue>,
     pub type_info: ColumnType,
+}
+
+impl fmt::Display for ColumnValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ColumnValue::Int(v) => write!(f, "{}", v),
+            ColumnValue::Float(v) => write!(f, "{:.15}", v),
+            ColumnValue::String(v) => write!(f, "'{}'", v),
+            ColumnValue::Boolean(v) => write!(f, "{}", v),
+            ColumnValue::Json(v) => write!(f, "{}", v),
+            ColumnValue::Uuid(v) => write!(f, "{}", v),
+            ColumnValue::Bytes(v) => write!(f, "{:?}", v),
+            ColumnValue::Date(v) => write!(f, "{}", v),
+            ColumnValue::Timestamp(v) => write!(f, "{}", v),
+        }
+    }
 }
