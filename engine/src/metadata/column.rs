@@ -105,7 +105,7 @@ impl TryFrom<&str> for ColumnType {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ColumnValue {
     Int(i64),
     Float(f64),
@@ -118,7 +118,7 @@ pub enum ColumnValue {
     Timestamp(NaiveDateTime),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ColumnData {
     pub name: String,
     pub value: Option<ColumnValue>,

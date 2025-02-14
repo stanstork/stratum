@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{mysql::MySqlRow, Column, Row, TypeInfo};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RowData {
     pub columns: Vec<ColumnData>,
 }

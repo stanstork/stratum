@@ -1,4 +1,4 @@
-use crate::{metadata::column::ColumnType, transform::transform::Transformation};
+use crate::transform::mapping::TransformMapping;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -6,35 +6,14 @@ use std::collections::HashMap;
 pub struct TableMapping {
     pub table: String,
     #[serde(deserialize_with = "deserialize_columns")]
-    pub columns: HashMap<String, ColumnMapping>,
-    pub transform: Vec<Transformation>,
+    pub columns: HashMap<String, String>,
+    pub transform: Vec<TransformMapping>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ColumnMapping {
-    pub column: String,
-    pub target_type: Option<ColumnType>,
-}
-
-impl From<String> for ColumnMapping {
-    fn from(column: String) -> Self {
-        let parts = column.split("::").collect::<Vec<&str>>();
-        let column = parts[0].to_string();
-        let target_type = parts.get(1).map(|t| ColumnType::try_from(*t).unwrap());
-        Self {
-            column,
-            target_type,
-        }
-    }
-}
-
-fn deserialize_columns<'de, D>(deserializer: D) -> Result<HashMap<String, ColumnMapping>, D::Error>
+fn deserialize_columns<'de, D>(deserializer: D) -> Result<HashMap<String, String>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     let raw: HashMap<String, String> = HashMap::deserialize(deserializer)?;
-    Ok(raw
-        .into_iter()
-        .map(|(k, v)| (k, ColumnMapping::from(v)))
-        .collect())
+    Ok(raw.into_iter().map(|(k, v)| (k, v.to_string())).collect())
 }

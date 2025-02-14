@@ -25,5 +25,8 @@ impl Config {
 pub fn read_config(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
     let config = std::fs::read_to_string(path)?;
     let config: Config = serde_yaml::from_str(&config)?;
+
+    println!("{:#?}", config);
+
     Ok(config)
 }

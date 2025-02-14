@@ -6,9 +6,9 @@ mappings:
     columns:
       id: "id"
       name: "full_name"
-      price: "price::timestamp"
+      price: "price"
     transform:
-      - function: "upper"
-        args: ["full_name"]
+      - function: "uppercase"
+        args: ["name"]
       - function: "cast"
         args: ["created_at", "timestamp"]
