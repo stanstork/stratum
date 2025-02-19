@@ -2,20 +2,21 @@ use super::Destination;
 use crate::{
     config::mapping::TableMapping,
     database::{
-        connection::{DbConnection, MySqlConnection},
+        managers::{base::DbManager, mysql::MySqlManager},
         row::RowData,
     },
 };
 use async_trait::async_trait;
 
 pub struct MySqlDestination {
-    conn: MySqlConnection,
+    manager: MySqlManager,
 }
 
 impl MySqlDestination {
     pub async fn new(url: &str, mapping: TableMapping) -> Result<Self, sqlx::Error> {
-        let conn = DbConnection::connect(url).await?;
-        Ok(Self { conn })
+        let manager = MySqlManager::connect(url).await?;
+
+        Ok(Self { manager })
     }
 }
 

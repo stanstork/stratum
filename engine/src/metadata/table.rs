@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{
     config::mapping::TableMapping,
-    database::connection::{DbConnection, MySqlConnection},
+    database::managers::{base::DbManager, mysql::MySqlManager},
 };
 use sqlx::{Column, Row};
 
@@ -20,10 +20,10 @@ pub struct TableMetadata {
 impl TableMetadata {
     pub async fn from_mapping(
         mapping: TableMapping,
-        conn: &MySqlConnection,
+        manager: &MySqlManager,
     ) -> Result<Self, sqlx::Error> {
         let query = format!("SELECT * FROM {} LIMIT 1", mapping.table);
-        let row = sqlx::query(&query).fetch_one(conn.pool()).await?;
+        let row = sqlx::query(&query).fetch_one(manager.pool()).await?;
 
         let columns = row
             .columns()
@@ -39,9 +39,9 @@ impl TableMetadata {
         Ok(Self {
             name: mapping.table.clone(),
             columns,
-            primary_key: MySqlMetadataProvider::get_primary_key(&mapping.table, conn.pool())
+            primary_key: MySqlMetadataProvider::get_primary_key(&mapping.table, manager.pool())
                 .await?,
-            foreign_keys: MySqlMetadataProvider::get_foreign_keys(&mapping.table, conn.pool())
+            foreign_keys: MySqlMetadataProvider::get_foreign_keys(&mapping.table, manager.pool())
                 .await?,
         })
     }

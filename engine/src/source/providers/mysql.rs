@@ -1,7 +1,7 @@
 use crate::{
     config::mapping::TableMapping,
     database::{
-        connection::{DbConnection, MySqlConnection},
+        managers::{base::DbManager, mysql::MySqlManager},
         query,
         row::{MySqlRowDataExt, RowData, RowDataExt},
     },
@@ -13,15 +13,15 @@ use sqlx::Error;
 
 pub struct MySqlDataSource {
     metadata: TableMetadata,
-    conn: MySqlConnection,
+    manager: MySqlManager,
 }
 
 impl MySqlDataSource {
     pub async fn new(url: &str, mapping: TableMapping) -> Result<Self, Error> {
-        let conn = MySqlConnection::connect(url).await?;
-        let metadata = TableMetadata::from_mapping(mapping, &conn).await?;
+        let manager = MySqlManager::connect(url).await?;
+        let metadata = TableMetadata::from_mapping(mapping, &manager).await?;
 
-        Ok(Self { metadata, conn })
+        Ok(Self { metadata, manager })
     }
 
     pub fn metadata(&self) -> &TableMetadata {
@@ -45,7 +45,7 @@ impl DataSource for MySqlDataSource {
         query.select(&columns).from(self.metadata.name.clone());
         let query = query.build();
 
-        let rows = sqlx::query(&query.0).fetch_all(self.conn.pool()).await?;
+        let rows = sqlx::query(&query.0).fetch_all(self.manager.pool()).await?;
         for row in rows.iter() {
             let row_data = MySqlRowDataExt::from_row(row);
             results.push(row_data);

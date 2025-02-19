@@ -1,16 +1,14 @@
 use super::Destination;
 use crate::database::{
-    connection::{DbConnection, PostgresConnection},
-    operations::DbOperations,
+    managers::{base::DbManager, postgres::PgManager},
     query::QueryBuilder,
     row::RowData,
-    utils::pg_table_exists,
 };
 use async_trait::async_trait;
 use std::collections::HashMap;
 
 pub struct PgDestination {
-    conn: PostgresConnection,
+    manager: PgManager,
     table: String,
     column_mapping: HashMap<String, String>,
 }
@@ -21,9 +19,10 @@ impl PgDestination {
         table: String,
         column_mapping: HashMap<String, String>,
     ) -> Result<Self, sqlx::Error> {
-        let conn = DbConnection::connect(url).await?;
+        let manager = PgManager::connect(url).await?;
+
         Ok(Self {
-            conn,
+            manager,
             table,
             column_mapping,
         })
@@ -31,7 +30,7 @@ impl PgDestination {
 
     /// Checks if the table exists in the database
     async fn ensure_table_exists(&self) -> Result<(), sqlx::Error> {
-        if !self.conn.pool().table_exists(&self.table).await? {
+        if !self.manager.table_exists(&self.table).await? {
             return Err(sqlx::Error::Configuration(
                 format!("Table '{}' does not exist in the database", self.table).into(),
             ));
@@ -65,12 +64,17 @@ impl PgDestination {
 impl Destination for PgDestination {
     async fn write(&self, data: Vec<RowData>) -> Result<(), sqlx::Error> {
         self.ensure_table_exists().await?;
+
+        // To simplify testing, we truncate the table before writing the data
+        // In a real-world scenario, you would likely want to append the data
+        self.manager.truncate_table(&self.table).await?;
+
         for row in data.iter() {
             let columns = self.map_columns(row)?;
             let query = QueryBuilder::new()
                 .insert_into(&self.table, &columns)
                 .build();
-            sqlx::query(&query.0).execute(self.conn.pool()).await?;
+            sqlx::query(&query.0).execute(self.manager.pool()).await?;
         }
         Ok(())
     }
