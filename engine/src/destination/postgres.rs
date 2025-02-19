@@ -74,7 +74,10 @@ impl Destination for PgDestination {
             let query = QueryBuilder::new()
                 .insert_into(&self.table, &columns)
                 .build();
-            sqlx::query(&query.0).execute(self.manager.pool()).await?;
+
+            if let Err(err) = sqlx::query(&query.0).execute(self.manager.pool()).await {
+                eprintln!("Error writing row: {:?}", err);
+            }
         }
         Ok(())
     }
