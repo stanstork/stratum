@@ -11,3 +11,9 @@ pub async fn pg_table_exists(pool: &Pool<Postgres>, table: &str) -> Result<bool,
     let exists: bool = row.get(0);
     Ok(exists)
 }
+
+pub async fn pg_truncate_table(pool: &Pool<Postgres>, table: &str) -> Result<(), sqlx::Error> {
+    let query = format!("TRUNCATE TABLE {}", table);
+    sqlx::query(&query).execute(pool).await?;
+    Ok(())
+}

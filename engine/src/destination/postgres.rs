@@ -1,6 +1,7 @@
 use super::Destination;
 use crate::database::{
     connection::{DbConnection, PostgresConnection},
+    operations::DbOperations,
     query::QueryBuilder,
     row::RowData,
     utils::pg_table_exists,
@@ -30,7 +31,7 @@ impl PgDestination {
 
     /// Checks if the table exists in the database
     async fn ensure_table_exists(&self) -> Result<(), sqlx::Error> {
-        if !pg_table_exists(self.conn.pool(), self.table.as_str()).await? {
+        if !self.conn.pool().table_exists(&self.table).await? {
             return Err(sqlx::Error::Configuration(
                 format!("Table '{}' does not exist in the database", self.table).into(),
             ));
