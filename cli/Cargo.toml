@@ -13,3 +13,5 @@ sqlx = { version = "0.8.3", features = [
     "tls-native-tls",
 ] }
 clap = { version = "4.5.28", features = ["derive"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

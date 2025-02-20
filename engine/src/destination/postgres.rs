@@ -6,6 +6,7 @@ use crate::database::{
 };
 use async_trait::async_trait;
 use std::collections::HashMap;
+use tracing::error;
 
 pub struct PgDestination {
     manager: PgManager,
@@ -69,14 +70,27 @@ impl Destination for PgDestination {
         // In a real-world scenario, you would likely want to append the data
         self.manager.truncate_table(&self.table).await?;
 
-        for row in data.iter() {
-            let columns = self.map_columns(row)?;
+        for (i, row) in data.iter().enumerate() {
+            let columns = match self.map_columns(row) {
+                Ok(cols) => cols,
+                Err(e) => {
+                    error!(
+                        "Failed to map columns for row {} in table '{}': {:?}",
+                        i, self.table, e
+                    );
+                    continue;
+                }
+            };
+
             let query = QueryBuilder::new()
                 .insert_into(&self.table, &columns)
                 .build();
 
             if let Err(err) = sqlx::query(&query.0).execute(self.manager.pool()).await {
-                eprintln!("Error writing row: {:?}", err);
+                error!(
+                    "Error writing row {} to table '{}': {:?}",
+                    i, self.table, err
+                );
             }
         }
         Ok(())
