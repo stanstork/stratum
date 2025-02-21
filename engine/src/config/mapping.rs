@@ -5,15 +5,23 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableMapping {
     pub table: String,
-    #[serde(deserialize_with = "deserialize_columns")]
-    pub columns: HashMap<String, String>,
-    pub transform: Vec<TransformMapping>,
+    #[serde(default, deserialize_with = "deserialize_columns")]
+    pub columns: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub transform: Option<Vec<TransformMapping>>,
+    #[serde(default)]
+    pub infer_schema: bool,
 }
 
-fn deserialize_columns<'de, D>(deserializer: D) -> Result<HashMap<String, String>, D::Error>
+fn deserialize_columns<'de, D>(deserializer: D) -> Result<Option<HashMap<String, String>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     let raw: HashMap<String, String> = HashMap::deserialize(deserializer)?;
-    Ok(raw.into_iter().map(|(k, v)| (k, v.to_string())).collect())
+    let columns = raw
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+
+    Ok(Some(columns))
 }

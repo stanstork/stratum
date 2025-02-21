@@ -1,7 +1,7 @@
 use super::Destination;
 use crate::database::{
     managers::{base::DbManager, postgres::PgManager},
-    query::QueryBuilder,
+    query::builder::QueryBuilder,
     row::RowData,
 };
 use async_trait::async_trait;

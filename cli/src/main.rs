@@ -25,79 +25,93 @@ async fn main() -> Result<(), sqlx::Error> {
 
     match cli.command {
         Commands::Migrate { config } => {
-            info!("Starting migration with config: {}", config);
-            if let Err(e) = run_migration(&config).await {
-                error!("Migration failed: {}", e);
-            }
+            init_source(&config).await?;
         }
     }
 
     Ok(())
 }
 
-async fn run_migration(config_path: &str) -> Result<(), sqlx::Error> {
-    info!("Reading config file: {}", config_path);
+async fn init_source(config_path: &str) -> Result<(), sqlx::Error> {
+    println!("Reading config file: {}", config_path);
     let config = read_config(config_path).expect("Failed to read config file");
 
-    for mapping in &config.mappings {
+    println!("Config: {:#?}", config);
+
+    for mapping in config.mappings.iter() {
         let table = mapping.table.clone();
-        info!("Starting migration for table: {}", table);
+        let source = MySqlDataSource::new(config.source(), mapping.clone()).await?;
 
-        // Initialize MySQL source
-        info!("Initializing MySQL source for table: {}", table);
-        let mysql_source = match MySqlDataSource::new(config.source(), mapping.clone()).await {
-            Ok(source) => source,
-            Err(e) => {
-                error!("Failed to initialize MySQL source for {}: {}", table, e);
-                continue;
-            }
-        };
-
-        // Create transformation pipeline
-        info!("Creating transformation pipeline for table: {}", table);
-        let pipeline = TransformPipeline::from_mapping(mapping.transform.clone());
-
-        // Fetch and transform data
-        info!("Fetching data from MySQL for table: {}", table);
-        let data = match mysql_source.fetch_data().await {
-            Ok(d) => d,
-            Err(e) => {
-                error!("Failed to fetch data for {}: {}", table, e);
-                continue;
-            }
-        };
-
-        info!("Transforming {} rows for table: {}", data.len(), table);
-        let transformed_data: Vec<_> = data.iter().map(|row| pipeline.apply(row)).collect();
-
-        // Initialize Postgres destination
-        info!("Initializing Postgres destination for table: {}", table);
-        let dest =
-            match PgDestination::new(config.destination(), table.clone(), mapping.columns.clone())
-                .await
-            {
-                Ok(d) => d,
-                Err(e) => {
-                    error!(
-                        "Failed to initialize Postgres destination for {}: {}",
-                        table, e
-                    );
-                    continue;
-                }
-            };
-
-        // Attempt to write data and handle errors
-        info!(
-            "Writing {} transformed rows to table: {}",
-            transformed_data.len(),
-            table
-        );
-        match dest.write(transformed_data).await {
-            Ok(_) => info!("Data successfully written to destination: {}", table),
-            Err(err) => error!("Failed to write data to {}: {}", table, err),
-        }
+        println!("Table: {}", table);
+        println!("Metadata: {:#?}", source.metadata());
     }
 
-    info!("Migration process completed.");
     Ok(())
 }
+
+// async fn run_migration(config_path: &str) -> Result<(), sqlx::Error> {
+//     info!("Reading config file: {}", config_path);
+//     let config = read_config(config_path).expect("Failed to read config file");
+
+//     for mapping in &config.mappings {
+//         let table = mapping.table.clone();
+//         info!("Starting migration for table: {}", table);
+
+//         // Initialize MySQL source
+//         info!("Initializing MySQL source for table: {}", table);
+//         let mysql_source = match MySqlDataSource::new(config.source(), mapping.clone()).await {
+//             Ok(source) => source,
+//             Err(e) => {
+//                 error!("Failed to initialize MySQL source for {}: {}", table, e);
+//                 continue;
+//             }
+//         };
+
+//         // Create transformation pipeline
+//         info!("Creating transformation pipeline for table: {}", table);
+//         let pipeline = TransformPipeline::from_mapping(mapping.transform.clone());
+
+//         // Fetch and transform data
+//         info!("Fetching data from MySQL for table: {}", table);
+//         let data = match mysql_source.fetch_data().await {
+//             Ok(d) => d,
+//             Err(e) => {
+//                 error!("Failed to fetch data for {}: {}", table, e);
+//                 continue;
+//             }
+//         };
+
+//         info!("Transforming {} rows for table: {}", data.len(), table);
+//         let transformed_data: Vec<_> = data.iter().map(|row| pipeline.apply(row)).collect();
+
+//         // Initialize Postgres destination
+//         info!("Initializing Postgres destination for table: {}", table);
+//         let dest =
+//             match PgDestination::new(config.destination(), table.clone(), mapping.columns.clone())
+//                 .await
+//             {
+//                 Ok(d) => d,
+//                 Err(e) => {
+//                     error!(
+//                         "Failed to initialize Postgres destination for {}: {}",
+//                         table, e
+//                     );
+//                     continue;
+//                 }
+//             };
+
+//         // Attempt to write data and handle errors
+//         info!(
+//             "Writing {} transformed rows to table: {}",
+//             transformed_data.len(),
+//             table
+//         );
+//         match dest.write(transformed_data).await {
+//             Ok(_) => info!("Data successfully written to destination: {}", table),
+//             Err(err) => error!("Failed to write data to {}: {}", table, err),
+//         }
+//     }
+
+//     info!("Migration process completed.");
+//     Ok(())
+// }

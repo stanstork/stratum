@@ -1,5 +1,3 @@
-use crate::metadata::column::ColumnValue;
-
 pub struct QueryBuilder {
     pub query: String,
     pub params: Vec<String>,

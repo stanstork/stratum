@@ -2,7 +2,7 @@ use crate::{
     config::mapping::TableMapping,
     database::{
         managers::{base::DbManager, mysql::MySqlManager},
-        query,
+        query::builder::QueryBuilder,
         row::{MySqlRowDataExt, RowData, RowDataExt},
     },
     metadata::table::TableMetadata,
@@ -21,6 +21,8 @@ impl MySqlDataSource {
         let manager = MySqlManager::connect(url).await?;
         let metadata = TableMetadata::from_mapping(mapping, &manager).await?;
 
+        println!("Table metadata: {:?}", metadata);
+
         Ok(Self { metadata, manager })
     }
 
@@ -34,12 +36,12 @@ impl DataSource for MySqlDataSource {
     async fn fetch_data(&self) -> Result<Vec<RowData>, Error> {
         let mut results = Vec::new();
 
-        let mut query = query::QueryBuilder::new();
+        let mut query = QueryBuilder::new();
         let columns = self
             .metadata
             .columns
             .iter()
-            .map(|col| col.name.clone())
+            .map(|col| col.0.clone())
             .collect::<Vec<_>>();
 
         query.select(&columns).from(self.metadata.name.clone());

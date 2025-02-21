@@ -1,4 +1,4 @@
-use crate::metadata::column::{ColumnData, ColumnType, ColumnValue};
+use crate::metadata::column::{ColumnData, ColumnDataType, ColumnValue};
 use bigdecimal::{BigDecimal, ToPrimitive};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -27,29 +27,29 @@ impl RowDataExt for MySqlRowDataExt {
         for column in row.columns() {
             let name = column.name().to_string();
             let column_type =
-                ColumnType::try_from(column.type_info().name()).unwrap_or_else(|_| {
+                ColumnDataType::try_from(column.type_info().name()).unwrap_or_else(|_| {
                     eprintln!("Unknown column type: {}", column.type_info().name());
-                    ColumnType::String
+                    ColumnDataType::String
                 });
 
             let value = match column_type {
-                ColumnType::Int24 | ColumnType::Long => row
+                ColumnDataType::Int24 | ColumnDataType::Long => row
                     .try_get::<i32, _>(column.ordinal())
                     .ok()
                     .map(|v| ColumnValue::Int(v as i64)),
-                ColumnType::Float => row
+                ColumnDataType::Float => row
                     .try_get::<f64, _>(column.ordinal())
                     .ok()
                     .map(ColumnValue::Float),
-                ColumnType::Decimal => row
+                ColumnDataType::Decimal => row
                     .try_get::<BigDecimal, _>(column.ordinal())
                     .ok()
                     .and_then(|v| v.to_f64().map(ColumnValue::Float)),
-                ColumnType::String | ColumnType::VarChar => row
+                ColumnDataType::String | ColumnDataType::VarChar => row
                     .try_get::<String, _>(column.ordinal())
                     .ok()
                     .map(ColumnValue::String),
-                ColumnType::Json => row
+                ColumnDataType::Json => row
                     .try_get::<Value, _>(column.ordinal())
                     .ok()
                     .map(ColumnValue::Json),
