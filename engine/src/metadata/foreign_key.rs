@@ -1,6 +1,6 @@
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ForeignKeyMetadata {
     pub column: String,
-    pub foreign_table: String,
-    pub foreign_column: String,
+    pub referenced_table: String,
+    pub referenced_column: String,
 }

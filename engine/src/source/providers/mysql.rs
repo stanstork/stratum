@@ -10,6 +10,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use sqlx::Error;
+use std::collections::{HashMap, HashSet};
 
 pub struct MySqlDataSource {
     metadata: TableMetadata,
@@ -19,7 +20,11 @@ pub struct MySqlDataSource {
 impl MySqlDataSource {
     pub async fn new(url: &str, mapping: TableMapping) -> Result<Self, Error> {
         let manager = MySqlManager::connect(url).await?;
-        let metadata = TableMetadata::from_mapping(mapping, &manager).await?;
+
+        let mut graph = HashMap::new();
+        let mut visited = HashSet::new();
+        let metadata =
+            TableMetadata::build_graph(&mapping.table, &manager, &mut graph, &mut visited).await?;
 
         println!("Table metadata: {:?}", metadata);
 

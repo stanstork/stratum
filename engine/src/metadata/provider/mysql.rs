@@ -46,13 +46,13 @@ impl DbMetadataProvider for MySqlMetadataProvider {
 
         while let Some(row) = rows.try_next().await? {
             let column_name: String = row.get("COLUMN_NAME");
-            let foreign_table: String = row.get("REFERENCED_TABLE_NAME");
-            let foreign_column: String = row.get("REFERENCED_COLUMN_NAME");
+            let referenced_table: String = row.get("REFERENCED_TABLE_NAME");
+            let referenced_column: String = row.get("REFERENCED_COLUMN_NAME");
 
             foreign_keys.push(ForeignKeyMetadata {
                 column: column_name,
-                foreign_table,
-                foreign_column,
+                referenced_table,
+                referenced_column,
             });
         }
 
