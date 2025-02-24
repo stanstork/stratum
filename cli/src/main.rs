@@ -17,7 +17,7 @@ struct Cli {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), sqlx::Error> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logger
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
@@ -32,7 +32,7 @@ async fn main() -> Result<(), sqlx::Error> {
     Ok(())
 }
 
-async fn init_source(config_path: &str) -> Result<(), sqlx::Error> {
+async fn init_source(config_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     println!("Reading config file: {}", config_path);
     let config = read_config(config_path).expect("Failed to read config file");
 

@@ -1,8 +1,5 @@
 use super::{column::ColumnMetadata, foreign_key::ForeignKeyMetadata};
-use crate::database::{
-    managers::{base::DbManager, mysql::MySqlManager},
-    query::loader::QueryLoader,
-};
+use sql_adapter::{db_manager::DbManager, mysql::MySqlManager, query::loader::QueryLoader};
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
@@ -76,51 +73,53 @@ impl TableMetadata {
     }
 
     pub async fn from_table(table: &str, manager: &MySqlManager) -> Result<Self, sqlx::Error> {
-        let query = QueryLoader::table_metadata_query()
-            .map_err(|_| sqlx::Error::Configuration("Table metadata query not found".into()))?;
+        // let query = QueryLoader::table_metadata_query()
+        //     .map_err(|_| sqlx::Error::Configuration("Table metadata query not found".into()))?;
 
-        let rows = sqlx::query(&query)
-            .bind(table)
-            .bind(table)
-            .bind(table)
-            .bind(table)
-            .fetch_all(manager.pool())
-            .await?;
+        // let rows = sqlx::query(&query)
+        //     .bind(table)
+        //     .bind(table)
+        //     .bind(table)
+        //     .bind(table)
+        //     .fetch_all(manager.pool())
+        //     .await?;
 
-        let columns: HashMap<String, ColumnMetadata> = rows
-            .iter()
-            .map(|row| ColumnMetadata::from(row))
-            .map(|col| (col.name.clone(), col))
-            .collect();
+        // let columns: HashMap<String, ColumnMetadata> = rows
+        //     .iter()
+        //     .map(|row| ColumnMetadata::from(row))
+        //     .map(|col| (col.name.clone(), col))
+        //     .collect();
 
-        let primary_keys: Vec<String> = columns
-            .values()
-            .filter(|col| col.is_primary_key)
-            .map(|col| col.name.clone())
-            .collect();
+        // let primary_keys: Vec<String> = columns
+        //     .values()
+        //     .filter(|col| col.is_primary_key)
+        //     .map(|col| col.name.clone())
+        //     .collect();
 
-        let foreign_keys: Vec<ForeignKeyMetadata> = columns
-            .values()
-            .filter_map(|col| {
-                col.referenced_table
-                    .as_ref()
-                    .zip(col.referenced_column.as_ref())
-                    .map(|(ref_table, ref_column)| ForeignKeyMetadata {
-                        column: col.name.clone(),
-                        referenced_table: ref_table.clone(),
-                        referenced_column: ref_column.clone(),
-                    })
-            })
-            .collect();
+        // let foreign_keys: Vec<ForeignKeyMetadata> = columns
+        //     .values()
+        //     .filter_map(|col| {
+        //         col.referenced_table
+        //             .as_ref()
+        //             .zip(col.referenced_column.as_ref())
+        //             .map(|(ref_table, ref_column)| ForeignKeyMetadata {
+        //                 column: col.name.clone(),
+        //                 referenced_table: ref_table.clone(),
+        //                 referenced_column: ref_column.clone(),
+        //             })
+        //     })
+        //     .collect();
 
-        Ok(Self {
-            name: table.to_string(),
-            schema: None,
-            columns,
-            primary_keys,
-            foreign_keys,
-            referenced_tables: HashMap::new(),
-            referencing_tables: HashMap::new(),
-        })
+        // Ok(Self {
+        //     name: table.to_string(),
+        //     schema: None,
+        //     columns,
+        //     primary_keys,
+        //     foreign_keys,
+        //     referenced_tables: HashMap::new(),
+        //     referencing_tables: HashMap::new(),
+        // })
+
+        todo!()
     }
 }

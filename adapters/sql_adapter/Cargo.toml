@@ -1,0 +1,15 @@
+[package]
+name = "sql_adapter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = "0.1.86"
+sqlx = { version = "0.8.3", features = [
+    "mysql",
+    "postgres",
+    "runtime-tokio",
+    "tls-native-tls",
+    "bigdecimal",
+] }
+tokio = { version = "1.43.0", features = ["full"] }

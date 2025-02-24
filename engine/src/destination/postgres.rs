@@ -1,10 +1,7 @@
 use super::Destination;
-use crate::database::{
-    managers::{base::DbManager, postgres::PgManager},
-    query::builder::QueryBuilder,
-    row::RowData,
-};
+use crate::database::row::RowData;
 use async_trait::async_trait;
+use sql_adapter::{db_manager::DbManager, postgres::PgManager, query::builder::QueryBuilder};
 use std::collections::HashMap;
 use tracing::error;
 
@@ -19,9 +16,8 @@ impl PgDestination {
         url: &str,
         table: String,
         column_mapping: HashMap<String, String>,
-    ) -> Result<Self, sqlx::Error> {
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let manager = PgManager::connect(url).await?;
-
         Ok(Self {
             manager,
             table,
@@ -30,11 +26,9 @@ impl PgDestination {
     }
 
     /// Checks if the table exists in the database
-    async fn ensure_table_exists(&self) -> Result<(), sqlx::Error> {
+    async fn ensure_table_exists(&self) -> Result<(), Box<dyn std::error::Error>> {
         if !self.manager.table_exists(&self.table).await? {
-            return Err(sqlx::Error::Configuration(
-                format!("Table '{}' does not exist in the database", self.table).into(),
-            ));
+            return Err("Table does not exist".into());
         }
         Ok(())
     }
@@ -63,7 +57,7 @@ impl PgDestination {
 
 #[async_trait]
 impl Destination for PgDestination {
-    async fn write(&self, data: Vec<RowData>) -> Result<(), sqlx::Error> {
+    async fn write(&self, data: Vec<RowData>) -> Result<(), Box<dyn std::error::Error>> {
         self.ensure_table_exists().await?;
 
         // To simplify testing, we truncate the table before writing the data
@@ -86,12 +80,12 @@ impl Destination for PgDestination {
                 .insert_into(&self.table, &columns)
                 .build();
 
-            if let Err(err) = sqlx::query(&query.0).execute(self.manager.pool()).await {
-                error!(
-                    "Error writing row {} to table '{}': {:?}",
-                    i, self.table, err
-                );
-            }
+            // if let Err(err) = sqlx::query(&query.0).execute(self.manager.pool()).await {
+            //     error!(
+            //         "Error writing row {} to table '{}': {:?}",
+            //         i, self.table, err
+            //     );
+            // }
         }
         Ok(())
     }

@@ -1,4 +1,4 @@
-use super::base::DbManager;
+use crate::db_manager::DbManager;
 use async_trait::async_trait;
 use sqlx::{MySql, Pool, Row};
 
@@ -8,18 +8,12 @@ pub struct MySqlManager {
 
 #[async_trait]
 impl DbManager for MySqlManager {
-    type DB = MySql;
-
-    async fn connect(url: &str) -> Result<Self, sqlx::Error> {
+    async fn connect(url: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let pool = Pool::connect(url).await?;
         Ok(MySqlManager { pool })
     }
 
-    fn pool(&self) -> &Pool<Self::DB> {
-        &self.pool
-    }
-
-    async fn table_exists(&self, table: &str) -> Result<bool, sqlx::Error> {
+    async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
         let query = "SELECT EXISTS (
             SELECT table_name
             FROM information_schema.tables
@@ -27,17 +21,14 @@ impl DbManager for MySqlManager {
             AND table_name = $1
         )";
 
-        let row = sqlx::query(query)
-            .bind(table)
-            .fetch_one(self.pool())
-            .await?;
+        let row = sqlx::query(query).bind(table).fetch_one(&self.pool).await?;
         let exists: bool = row.get(0);
         Ok(exists)
     }
 
-    async fn truncate_table(&self, table: &str) -> Result<(), sqlx::Error> {
+    async fn truncate_table(&self, table: &str) -> Result<(), Box<dyn std::error::Error>> {
         let query = format!("TRUNCATE TABLE {}", table);
-        sqlx::query(&query).execute(self.pool()).await?;
+        sqlx::query(&query).execute(&self.pool).await?;
         Ok(())
     }
 }
