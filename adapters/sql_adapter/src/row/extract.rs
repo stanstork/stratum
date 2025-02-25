@@ -1,16 +1,11 @@
+use super::row::RowData;
 use crate::metadata::column::{
     data_type::ColumnDataType,
     value::{ColumnData, ColumnValue},
 };
 use bigdecimal::{BigDecimal, ToPrimitive};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{mysql::MySqlRow, Column, Row, TypeInfo};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RowData {
-    pub columns: Vec<ColumnData>,
-}
 
 pub trait RowDataExt {
     type Row: Row;

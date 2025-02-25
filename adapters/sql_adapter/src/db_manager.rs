@@ -1,4 +1,4 @@
-use crate::{metadata::table::TableMetadata, row::RowData};
+use crate::{metadata::table::TableMetadata, row::row::RowData};
 use async_trait::async_trait;
 
 #[async_trait]
@@ -10,6 +10,7 @@ pub trait DbManager {
     async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>>;
     async fn truncate_table(&self, table: &str) -> Result<(), Box<dyn std::error::Error>>;
 
+    async fn execute(&self, query: &str) -> Result<(), Box<dyn std::error::Error>>;
     async fn fetch_metadata(
         &self,
         table: &str,

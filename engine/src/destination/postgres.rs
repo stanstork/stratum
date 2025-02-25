@@ -1,7 +1,8 @@
-use super::Destination;
+use super::data_dest::DataDestination;
+use crate::source::record::DataRecord;
 use async_trait::async_trait;
 use sql_adapter::{
-    db_manager::DbManager, postgres::PgManager, query::builder::SqlQueryBuilder, row::RowData,
+    db_manager::DbManager, postgres::PgManager, query::builder::SqlQueryBuilder, row::row::RowData,
 };
 use std::collections::HashMap;
 use tracing::error;
@@ -35,7 +36,12 @@ impl PgDestination {
     }
 
     /// Maps row data into column names and values
-    fn map_columns(&self, row: &RowData) -> Result<Vec<(String, String)>, sqlx::Error> {
+    fn map_columns(&self, row: &Box<dyn DataRecord>) -> Result<Vec<(String, String)>, sqlx::Error> {
+        let row = row
+            .as_any()
+            .downcast_ref::<RowData>()
+            .ok_or_else(|| sqlx::Error::Configuration("Invalid row data type".into()))?;
+
         let columns = row
             .columns
             .iter()
@@ -57,8 +63,13 @@ impl PgDestination {
 }
 
 #[async_trait]
-impl Destination for PgDestination {
-    async fn write(&self, data: Vec<RowData>) -> Result<(), Box<dyn std::error::Error>> {
+impl DataDestination for PgDestination {
+    type Record = Box<dyn DataRecord>;
+
+    async fn write(
+        &self,
+        data: Vec<Box<dyn DataRecord>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         self.ensure_table_exists().await?;
 
         // To simplify testing, we truncate the table before writing the data
@@ -81,12 +92,12 @@ impl Destination for PgDestination {
                 .insert_into(&self.table, &columns)
                 .build();
 
-            // if let Err(err) = sqlx::query(&query.0).execute(self.manager.pool()).await {
-            //     error!(
-            //         "Error writing row {} to table '{}': {:?}",
-            //         i, self.table, err
-            //     );
-            // }
+            if let Err(err) = self.manager.execute(&query.0).await {
+                error!(
+                    "Error writing row {} to table '{}': {:?}",
+                    i, self.table, err
+                );
+            }
         }
         Ok(())
     }

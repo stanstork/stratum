@@ -13,7 +13,7 @@ impl Config {
         &self.source
     }
 
-    pub fn destination(&self) -> &str {
+    pub fn dest(&self) -> &str {
         &self.destination
     }
 

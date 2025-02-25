@@ -1,5 +1,5 @@
 use crate::transform::pipeline::Transform;
-use sql_adapter::{metadata::column::value::ColumnValue, row::RowData};
+use sql_adapter::{metadata::column::value::ColumnValue, row::row::RowData};
 use std::collections::HashSet;
 
 pub struct UpperCaseFunction {

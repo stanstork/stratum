@@ -1,4 +1,4 @@
-use crate::{db_manager::DbManager, metadata::table::TableMetadata, row::RowData};
+use crate::{db_manager::DbManager, metadata::table::TableMetadata, row::row::RowData};
 use async_trait::async_trait;
 use sqlx::{Pool, Postgres, Row};
 
@@ -23,6 +23,11 @@ impl DbManager for PgManager {
         let row = sqlx::query(query).bind(table).fetch_one(&self.pool).await?;
         let exists: bool = row.get(0);
         Ok(exists)
+    }
+
+    async fn execute(&self, query: &str) -> Result<(), Box<dyn std::error::Error>> {
+        sqlx::query(query).execute(&self.pool).await?;
+        Ok(())
     }
 
     async fn truncate_table(&self, table: &str) -> Result<(), Box<dyn std::error::Error>> {

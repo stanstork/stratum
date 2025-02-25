@@ -1,7 +1,7 @@
-use super::Destination;
-use crate::config::mapping::TableMapping;
+use super::data_dest::DataDestination;
+use crate::{config::mapping::TableMapping, source::record::DataRecord};
 use async_trait::async_trait;
-use sql_adapter::{db_manager::DbManager, mysql::MySqlManager, row::RowData};
+use sql_adapter::{db_manager::DbManager, mysql::MySqlManager};
 
 pub struct MySqlDestination {
     manager: MySqlManager,
@@ -15,8 +15,13 @@ impl MySqlDestination {
 }
 
 #[async_trait]
-impl Destination for MySqlDestination {
-    async fn write(&self, data: Vec<RowData>) -> Result<(), Box<dyn std::error::Error>> {
+impl DataDestination for MySqlDestination {
+    type Record = Box<dyn DataRecord>;
+
+    async fn write(
+        &self,
+        data: Vec<Box<dyn DataRecord>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 }

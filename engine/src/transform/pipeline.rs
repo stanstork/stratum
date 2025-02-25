@@ -1,5 +1,5 @@
 use super::{functions::uppercase::UpperCaseFunction, mapping::TransformMapping};
-use sql_adapter::row::RowData;
+use sql_adapter::row::row::RowData;
 
 pub trait Transform {
     fn apply(&self, row: &RowData) -> RowData;

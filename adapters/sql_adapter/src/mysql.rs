@@ -4,7 +4,10 @@ use crate::{
         column::metadata::ColumnMetadata, foreign_key::ForeignKeyMetadata, table::TableMetadata,
     },
     query::loader::QueryLoader,
-    row::{MySqlRowDataExt, RowData, RowDataExt},
+    row::{
+        extract::{MySqlRowDataExt, RowDataExt},
+        row::RowData,
+    },
 };
 use async_trait::async_trait;
 use sqlx::{MySql, Pool, Row};
@@ -37,6 +40,11 @@ impl DbManager for MySqlManager {
     async fn truncate_table(&self, table: &str) -> Result<(), Box<dyn std::error::Error>> {
         let query = format!("TRUNCATE TABLE {}", table);
         sqlx::query(&query).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    async fn execute(&self, query: &str) -> Result<(), Box<dyn std::error::Error>> {
+        sqlx::query(query).execute(&self.pool).await?;
         Ok(())
     }
 
