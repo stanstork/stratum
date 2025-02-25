@@ -1,9 +1,9 @@
-pub struct QueryBuilder {
+pub struct SqlQueryBuilder {
     pub query: String,
     pub params: Vec<String>,
 }
 
-impl QueryBuilder {
+impl SqlQueryBuilder {
     pub fn new() -> Self {
         Self {
             query: String::new(),

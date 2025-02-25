@@ -4,7 +4,7 @@ pub struct QueryLoader;
 
 impl QueryLoader {
     pub fn table_metadata_query() -> Result<String, Box<dyn std::error::Error>> {
-        Self::load_query("../queries/table_metadata.sql")
+        Self::load_query("queries/table_metadata.sql")
     }
 
     fn load_query(file_path: &str) -> Result<String, Box<dyn std::error::Error>> {

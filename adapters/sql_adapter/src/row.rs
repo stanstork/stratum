@@ -1,4 +1,7 @@
-use crate::metadata::column::{ColumnData, ColumnDataType, ColumnValue};
+use crate::metadata::column::{
+    data_type::ColumnDataType,
+    value::{ColumnData, ColumnValue},
+};
 use bigdecimal::{BigDecimal, ToPrimitive};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

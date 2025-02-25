@@ -1,6 +1,14 @@
-use crate::db_manager::DbManager;
+use crate::{
+    db_manager::DbManager,
+    metadata::{
+        column::metadata::ColumnMetadata, foreign_key::ForeignKeyMetadata, table::TableMetadata,
+    },
+    query::loader::QueryLoader,
+    row::{MySqlRowDataExt, RowData, RowDataExt},
+};
 use async_trait::async_trait;
 use sqlx::{MySql, Pool, Row};
+use std::collections::HashMap;
 
 pub struct MySqlManager {
     pool: Pool<MySql>,
@@ -30,5 +38,65 @@ impl DbManager for MySqlManager {
         let query = format!("TRUNCATE TABLE {}", table);
         sqlx::query(&query).execute(&self.pool).await?;
         Ok(())
+    }
+
+    async fn fetch_metadata(
+        &self,
+        table: &str,
+    ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
+        let query = QueryLoader::table_metadata_query()
+            .map_err(|_| sqlx::Error::Configuration("Table metadata query not found".into()))?;
+
+        let rows = sqlx::query(&query)
+            .bind(table)
+            .bind(table)
+            .bind(table)
+            .bind(table)
+            .fetch_all(&self.pool)
+            .await?;
+
+        let columns: HashMap<String, ColumnMetadata> = rows
+            .iter()
+            .map(|row| ColumnMetadata::from(row))
+            .map(|col| (col.name.clone(), col))
+            .collect();
+
+        let primary_keys: Vec<String> = columns
+            .values()
+            .filter(|col| col.is_primary_key)
+            .map(|col| col.name.clone())
+            .collect();
+
+        let foreign_keys: Vec<ForeignKeyMetadata> = columns
+            .values()
+            .filter_map(|col| {
+                col.referenced_table
+                    .as_ref()
+                    .zip(col.referenced_column.as_ref())
+                    .map(|(ref_table, ref_column)| ForeignKeyMetadata {
+                        column: col.name.clone(),
+                        referenced_table: ref_table.clone(),
+                        referenced_column: ref_column.clone(),
+                    })
+            })
+            .collect();
+
+        Ok(TableMetadata {
+            name: table.to_string(),
+            schema: None,
+            columns,
+            primary_keys,
+            foreign_keys,
+            referenced_tables: HashMap::new(),
+            referencing_tables: HashMap::new(),
+        })
+    }
+
+    async fn fetch_all(&self, query: &str) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
+        let rows = sqlx::query(&query).fetch_all(&self.pool).await?;
+        Ok(rows
+            .iter()
+            .map(|row| MySqlRowDataExt::from_row(row))
+            .collect())
     }
 }

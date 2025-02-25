@@ -1,7 +1,7 @@
 use super::Destination;
-use crate::{config::mapping::TableMapping, database::row::RowData};
+use crate::config::mapping::TableMapping;
 use async_trait::async_trait;
-use sql_adapter::{db_manager::DbManager, mysql::MySqlManager};
+use sql_adapter::{db_manager::DbManager, mysql::MySqlManager, row::RowData};
 
 pub struct MySqlDestination {
     manager: MySqlManager,

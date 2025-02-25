@@ -1,7 +1,8 @@
 use super::Destination;
-use crate::database::row::RowData;
 use async_trait::async_trait;
-use sql_adapter::{db_manager::DbManager, postgres::PgManager, query::builder::QueryBuilder};
+use sql_adapter::{
+    db_manager::DbManager, postgres::PgManager, query::builder::SqlQueryBuilder, row::RowData,
+};
 use std::collections::HashMap;
 use tracing::error;
 
@@ -76,7 +77,7 @@ impl Destination for PgDestination {
                 }
             };
 
-            let query = QueryBuilder::new()
+            let query = SqlQueryBuilder::new()
                 .insert_into(&self.table, &columns)
                 .build();
 

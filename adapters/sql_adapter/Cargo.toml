@@ -13,3 +13,9 @@ sqlx = { version = "0.8.3", features = [
     "bigdecimal",
 ] }
 tokio = { version = "1.43.0", features = ["full"] }
+bigdecimal = "0.4.7"
+chrono = { version = "0.4.39", features = ["serde"] }
+uuid = { version = "1.13.1", features = ["serde"] }
+serde_json = "1.0.138"
+lazy_static = "1.5.0"
+serde = "1.0.217"

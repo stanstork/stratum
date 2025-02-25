@@ -1,4 +1,4 @@
-use crate::db_manager::DbManager;
+use crate::{db_manager::DbManager, metadata::table::TableMetadata, row::RowData};
 use async_trait::async_trait;
 use sqlx::{Pool, Postgres, Row};
 
@@ -29,5 +29,16 @@ impl DbManager for PgManager {
         let query = format!("TRUNCATE TABLE {}", table);
         sqlx::query(&query).execute(&self.pool).await?;
         Ok(())
+    }
+
+    async fn fetch_metadata(
+        &self,
+        table: &str,
+    ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
+        todo!("Implement fetch_metadata for Postgres")
+    }
+
+    async fn fetch_all(&self, query: &str) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
+        todo!("Implement fetch_all for Postgres")
     }
 }
