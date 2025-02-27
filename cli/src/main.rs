@@ -1,13 +1,14 @@
 use clap::Parser;
 use commands::Commands;
 use engine::{
-    config::config::{read_config, Config},
-    destination::{data_dest::DataDestination, postgres::PgDestination},
+    config::config::Config,
+    destination::postgres::PgDestination,
     source::{
         data_source::{create_data_source, DataSource, DataSourceType},
         record::DataRecord,
     },
 };
+use smql::parser::parse;
 use sql_adapter::db_type::DbType;
 use tracing::Level;
 pub mod commands;
@@ -28,23 +29,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Commands::Migrate { config } => {
-            let config = read_config(&config).expect("Failed to read config file");
+            let source = read_migration_config(&config).expect("Failed to read config file");
+            println!("Source: {}", source);
 
-            let source = init_source(&config).await?;
-            let data = source.fetch_data().await?;
+            parse(&source).expect("Failed to parse config file");
 
-            // Print data
-            for record in data.iter() {
-                println!("{}", record.debug());
-            }
+            // let source = init_source(&config).await?;
+            // let data = source.fetch_data().await?;
 
-            // Initialize destination
-            let dest = init_destination(&config).await?;
+            // // Print data
+            // for record in data.iter() {
+            //     println!("{}", record.debug());
+            // }
 
-            match dest.write(data).await {
-                Ok(_) => println!("Data written successfully"),
-                Err(e) => println!("Error writing data: {:?}", e),
-            }
+            // // Initialize destination
+            // let dest = init_destination(&config).await?;
+
+            // match dest.write(data).await {
+            //     Ok(_) => println!("Data written successfully"),
+            //     Err(e) => println!("Error writing data: {:?}", e),
+            // }
         }
     }
 
@@ -68,4 +72,9 @@ async fn init_destination(config: &Config) -> Result<PgDestination, Box<dyn std:
         Ok(dest) => return Ok(dest),
         Err(e) => return Err(e),
     }
+}
+
+fn read_migration_config(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let config = std::fs::read_to_string(path)?;
+    Ok(config)
 }

@@ -1,0 +1,25 @@
+WHITESPACE  = _{ " " | "\t" | "\n" | "\r" }
+COMMENT     = _{ "//" ~ (!"\n" ~ ANY)* }
+
+ident       = @{ (ASCII_ALPHANUMERIC | "_")+ }
+string      = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+number      = @{ ASCII_DIGIT+ }
+
+database_url = { string }
+
+program = _{ SOI ~ WHITESPACE* ~ statement* ~ (WHITESPACE* ~ statement)* ~ WHITESPACE* ~ EOI }
+
+statement = _{
+    connections
+}
+
+connections = { 
+    "CONNECTIONS" ~ WHITESPACE* ~ "(" 
+    ~ connection_pair ~ ("," ~ WHITESPACE* ~ connection_pair)* 
+    ~ WHITESPACE* ~ ")" ~ WHITESPACE* ~ ";"
+}
+
+connection_pair = { 
+    "SOURCE" ~ WHITESPACE* ~ database_url 
+    | "DESTINATION" ~ WHITESPACE* ~ database_url 
+}
