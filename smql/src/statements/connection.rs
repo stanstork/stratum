@@ -8,6 +8,9 @@ pub struct Connection {
 }
 
 impl Connection {
+    const SOURCE: &'static str = "source";
+    const DESTINATION: &'static str = "destination";
+
     pub fn parse(pair: Pair<Rule>) -> Self {
         let mut source = String::new();
         let mut destination = String::new();
@@ -28,9 +31,9 @@ impl Connection {
                     .to_string();
 
                 match key.as_str() {
-                    "source" => source = value,
-                    "destination" => destination = value,
-                    _ => unreachable!(),
+                    Self::SOURCE => source = value,
+                    Self::DESTINATION => destination = value,
+                    _ => panic!("Invalid connection key: {}", key),
                 }
             }
         }
