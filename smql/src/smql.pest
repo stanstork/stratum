@@ -1,54 +1,134 @@
+// ==============================
+//         Basic Rules
+// ==============================
+
 WHITESPACE  = _{ " " | "\t" | "\n" | "\r" }
 COMMENT     = _{ "//" ~ (!"\n" ~ ANY)* }
 
 ident       = @{ (ASCII_ALPHANUMERIC | "_")+ }
 string      = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
-number      = @{ ASCII_DIGIT+ }
+
+integer     = @{ ASCII_DIGIT+ }
+decimal     = @{ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* }
+
 boolean     = { "TRUE" | "FALSE" }
+operator    = { "+" | "-" | "*" | "/" }
 
 database_url = { string }
 
-program = _{ SOI ~ WHITESPACE* ~ statement* ~ (WHITESPACE* ~ statement)* ~ WHITESPACE* ~ EOI }
+// ==============================
+//         Program Structure
+// ==============================
+
+program = _{ SOI ~ WHITESPACE* ~ statement* ~ WHITESPACE* ~ EOI }
 
 statement = _{
     connections
     | migrate
     | filter
+    | map
+    | load
+    | aggregate
 }
 
+// ==============================
+//         CONNECTIONS
+// ==============================
+
 connections = { 
-    "CONNECTIONS" ~ WHITESPACE* ~ "(" 
+    ^"CONNECTIONS" ~ WHITESPACE* ~ "(" 
     ~ connection_pair ~ ("," ~ WHITESPACE* ~ connection_pair)* 
     ~ WHITESPACE* ~ ")" ~ WHITESPACE* ~ ";"
 }
 
 connection_pair = { 
-    "SOURCE" ~ WHITESPACE* ~ database_url 
-    | "DESTINATION" ~ WHITESPACE* ~ database_url 
+    ^"SOURCE" ~ WHITESPACE* ~ database_url 
+    | ^"DESTINATION" ~ WHITESPACE* ~ database_url 
 }
 
+// ==============================
+//         MIGRATE
+// ==============================
+
 migrate = {
-    "MIGRATE" ~ WHITESPACE* ~ ident
-    ~ WHITESPACE* ~ "TO" ~ WHITESPACE* ~ ident
+    ^"MIGRATE" ~ WHITESPACE* ~ ident ~ ("," ~ WHITESPACE* ~ ident)*
+    ~ WHITESPACE* ~ ^"TO" ~ WHITESPACE* ~ ident
     ~ WHITESPACE* ~ migrate_settings?
     ~ WHITESPACE* ~ ";"
 }
 
 migrate_settings = {
-    "WITH" ~ WHITESPACE* ~ "SETTINGS" ~ WHITESPACE* ~ "("
-    ~ WHITESPACE* ~ setting_pair ~ ("," ~ WHITESPACE* ~ setting_pair)*
+    ^"WITH" ~ WHITESPACE* ~ ^"SETTINGS" ~ WHITESPACE* ~ "("
+    ~ setting_pair ~ ("," ~ WHITESPACE* ~ setting_pair)* 
     ~ WHITESPACE* ~ ")"
 }
 
 setting_pair = {
-    ident ~ WHITESPACE* ~ "=" ~ WHITESPACE* ~ (boolean | number | ident)
+    ident ~ WHITESPACE* ~ "=" ~ WHITESPACE* ~ (boolean | decimal | integer | ident)
 }
 
+// ==============================
+//         FILTER
+// ==============================
+
 filter = {
-    "FILTER" ~ WHITESPACE* ~ "("
+    ^"FILTER" ~ WHITESPACE* ~ "("
     ~ WHITESPACE* ~ condition ~ ("," ~ WHITESPACE* ~ condition)*
     ~ WHITESPACE* ~ ")" ~ WHITESPACE* ~ ";"
 }
 
-condition  = { ident ~ WHITESPACE* ~ comparator ~ WHITESPACE* ~ (string | number | boolean) }
-comparator = { "=" | "!=" | ">" | ">=" | "<" | "<=" }
+condition = { ident ~ WHITESPACE* ~ (">=" | "<=" | "!=" | "=" | ">" | "<") ~ WHITESPACE* ~ (string | decimal | integer | boolean) }
+
+// ==============================
+//         LOOKUPS (LOAD)
+// ==============================
+
+load = {
+    ^"LOAD" ~ WHITESPACE* ~ ident // Lookup name
+    ~ WHITESPACE* ~ ^"FROM" ~ WHITESPACE* ~ ident  // Table name
+    ~ WHITESPACE* ~ ^"USING" ~ WHITESPACE* ~ ident  // Key column
+    ~ WHITESPACE* ~ ";"
+}
+
+// ==============================
+//         MAP
+// ==============================
+
+map = {
+    ^"MAP" ~ WHITESPACE* ~ "("
+    ~ mapping ~ ("," ~ WHITESPACE* ~ mapping)* 
+    ~ WHITESPACE* ~ ")" ~ WHITESPACE* ~ ";"
+}
+
+mapping = { expression ~ WHITESPACE* ~ "->" ~ WHITESPACE* ~ ident }
+
+// ==============================
+//         AGGREGATE
+// ==============================
+
+aggregate = {
+    ^"AGGREGATE" ~ WHITESPACE* ~ "("
+    ~ aggregation ~ ("," ~ WHITESPACE* ~ aggregation)*
+    ~ WHITESPACE* ~ ")" ~ WHITESPACE* ~ ";"
+}
+
+aggregation = { aggregate_function ~ "(" ~ (lookup_expression | ident | "*") ~ ")" ~ WHITESPACE* ~ "->" ~ WHITESPACE* ~ ident }
+
+aggregate_function = { "SUM" | "AVG" | "COUNT" | "MIN" | "MAX" }
+
+// ==============================
+//         EXPRESSIONS
+// ==============================
+
+expression = { arithmetic_expression | function_call | lookup_expression | ident | string | decimal | integer }
+
+arithmetic_expression = { 
+    (function_call | lookup_expression | decimal | integer | ident) 
+    ~ (WHITESPACE* ~ operator ~ WHITESPACE* ~ (function_call | lookup_expression | decimal | integer | ident))+ 
+}
+
+function_call = { ident ~ "(" ~ function_args? ~ ")" }
+
+function_args = { (arithmetic_expression | lookup_expression | expression) ~ ("," ~ WHITESPACE* ~ (arithmetic_expression | lookup_expression | expression))* }
+
+lookup_expression = { ident ~ "[" ~ ident ~ "]" ~ ("." ~ ident)? }

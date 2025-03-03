@@ -1,0 +1,15 @@
+CONNECTIONS (
+    SOURCE "mysql://user:password@localhost:3306/testdb",
+    DESTINATION "postgres://user:password@localhost:5432/testdb"
+);
+
+MIGRATE sales TO sales_summary
+WITH SETTINGS (
+    CREATE_TABLE = TRUE
+);
+
+AGGREGATE (
+    COUNT(*) -> total_orders,
+    SUM(price) -> total_revenue,
+    AVG(price) -> avg_order_value
+);
