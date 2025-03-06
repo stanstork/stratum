@@ -11,10 +11,13 @@ string      = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
 integer     = @{ ASCII_DIGIT+ }
 decimal     = @{ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* }
 
-boolean     = { "TRUE" | "FALSE" }
+boolean     = { ^"TRUE" | ^"FALSE" }
 operator    = { "+" | "-" | "*" | "/" }
+comparator  = {">=" | "<=" | "!=" | "=" | ">" | "<"}
 
 database_url = { string }
+
+no_explicit_param = { "*" }
 
 // ==============================
 //         Program Structure
@@ -77,7 +80,7 @@ filter = {
     ~ WHITESPACE* ~ ")" ~ WHITESPACE* ~ ";"
 }
 
-condition = { ident ~ WHITESPACE* ~ (">=" | "<=" | "!=" | "=" | ">" | "<") ~ WHITESPACE* ~ (string | decimal | integer | boolean) }
+condition = { ident ~ WHITESPACE* ~ comparator ~ WHITESPACE* ~ (string | decimal | integer | boolean) }
 
 // ==============================
 //         LOOKUPS (LOAD)
@@ -112,7 +115,7 @@ aggregate = {
     ~ WHITESPACE* ~ ")" ~ WHITESPACE* ~ ";"
 }
 
-aggregation = { aggregate_function ~ "(" ~ (lookup_expression | ident | "*") ~ ")" ~ WHITESPACE* ~ "->" ~ WHITESPACE* ~ ident }
+aggregation = { aggregate_function ~ "(" ~ (lookup_expression | ident | no_explicit_param) ~ ")" ~ WHITESPACE* ~ "->" ~ WHITESPACE* ~ ident }
 
 aggregate_function = { "SUM" | "AVG" | "COUNT" | "MIN" | "MAX" }
 

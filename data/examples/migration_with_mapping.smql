@@ -5,7 +5,7 @@ CONNECTIONS (
 
 FILTER (
     status = "active",
-    age > 18
+    age >= 18
 );
 
 MIGRATE orders TO orders_collection

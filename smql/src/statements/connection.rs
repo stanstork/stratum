@@ -1,4 +1,4 @@
-use crate::parser::Rule;
+use crate::parser::{Rule, StatementParser};
 use pest::iterators::Pair;
 
 #[derive(Debug, Clone)]
@@ -10,8 +10,10 @@ pub struct Connection {
 impl Connection {
     const SOURCE: &'static str = "source";
     const DESTINATION: &'static str = "destination";
+}
 
-    pub fn parse(pair: Pair<Rule>) -> Self {
+impl StatementParser for Connection {
+    fn parse(pair: Pair<Rule>) -> Self {
         let mut source = String::new();
         let mut destination = String::new();
 

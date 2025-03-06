@@ -1,31 +1,37 @@
-use pest::Parser;
+use crate::statements::{
+    aggregate::Aggregate, connection::Connection, filter::Filter, load::Load, mapping::Map,
+    migrate::Migrate, statement::Statement,
+};
+use pest::{iterators::Pair, Parser};
 use pest_derive::Parser;
-
-use crate::statements::connection::Connection;
 
 #[derive(Parser)]
 #[grammar = "smql.pest"]
 pub struct SmqlParser;
 
-pub fn parse(source: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let pairs = SmqlParser::parse(Rule::program, source)?;
+pub trait StatementParser {
+    fn parse(pair: Pair<Rule>) -> Self;
+}
 
-    println!("Pairs: {:#?}", pairs);
-    for pair in pairs.clone() {
-        println!("Rule: {:#?}", pair.as_rule());
-        println!("Span: {:#?}", pair.as_span());
-        println!("As String: {:#?}", pair.as_str());
-    }
+pub fn parse(source: &str) -> Result<Vec<Statement>, Box<dyn std::error::Error>> {
+    let mut statements = vec![];
+    let pairs =
+        SmqlParser::parse(Rule::program, source).map_err(|e| format!("Parsing failed: {}", e))?;
 
     for pair in pairs {
-        match pair.as_rule() {
-            Rule::connections => {
-                let connections = Connection::parse(pair);
-                println!("{:#?}", connections);
-            }
-            _ => {}
-        }
+        let statement = match pair.as_rule() {
+            Rule::connections => Statement::Connections(Connection::parse(pair)),
+            Rule::migrate => Statement::Migrate(Migrate::parse(pair)),
+            Rule::filter => Statement::Filter(Filter::parse(pair)),
+            Rule::load => Statement::Load(Load::parse(pair)),
+            Rule::map => Statement::Map(Map::parse(pair)),
+            Rule::aggregate => Statement::Aggregate(Aggregate::parse(pair)),
+            Rule::EOI => continue,
+            _ => return Err(format!("Unexpected rule: {:?}", pair.as_rule()).into()),
+        };
+
+        statements.push(statement);
     }
 
-    Ok(())
+    Ok(statements)
 }
