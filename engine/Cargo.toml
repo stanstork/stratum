@@ -25,3 +25,4 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 lazy_static = "1.5.0"
 sql_adapter = { path = "../adapters/sql_adapter" }
+smql = { path = "../smql" }

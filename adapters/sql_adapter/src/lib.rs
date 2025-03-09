@@ -1,4 +1,5 @@
 use adapter::DbAdapter;
+use smql::statements::connection::DataFormat;
 use std::error::Error;
 
 pub mod adapter;
@@ -12,6 +13,16 @@ pub mod row;
 pub enum DbEngine {
     Postgres,
     MySql,
+}
+
+impl DbEngine {
+    pub fn from_data_format(data_format: DataFormat) -> Self {
+        match data_format {
+            DataFormat::Postgres => DbEngine::Postgres,
+            DataFormat::MySql => DbEngine::MySql,
+            _ => panic!("Unsupported data format"),
+        }
+    }
 }
 
 pub async fn get_db_adapter(

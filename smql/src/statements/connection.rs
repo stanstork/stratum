@@ -20,7 +20,7 @@ pub struct ConnectionPair {
     pub con_type: ConnectionType,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum DataFormat {
     MySql,
     Postgres,

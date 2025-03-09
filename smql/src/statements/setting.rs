@@ -23,7 +23,7 @@ impl StatementParser for Setting {
             .next()
             .expect("Expected setting key")
             .as_str()
-            .to_string();
+            .to_lowercase();
 
         let value_pair = inner.next().expect("Expected setting value");
 

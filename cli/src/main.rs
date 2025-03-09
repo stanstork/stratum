@@ -3,6 +3,7 @@ use commands::Commands;
 use engine::{
     config::config::Config,
     destination::postgres::PgDestination,
+    runner,
     source::{
         data_source::{create_data_source, DataSource, DataSourceType},
         record::DataRecord,
@@ -31,7 +32,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Migrate { config } => {
             let source = read_migration_config(&config).expect("Failed to read config file");
             let plan = parse(&source).expect("Failed to parse config file");
-            producer::run(plan).expect("Failed to run migration");
+
+            runner::run(plan).await?;
         }
     }
 
