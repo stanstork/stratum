@@ -13,8 +13,8 @@ mod tests {
     fn test_parse_connections() {
         let input = r#"
             CONNECTIONS (
-                SOURCE "mysql://user:password@localhost:3306/db",
-                DESTINATION "postgres://user:password@localhost:5432/db"
+                SOURCE MYSQL "mysql://user:password@localhost:3306/db",
+                DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
             );
         "#;
         assert_parses(input);
@@ -96,8 +96,8 @@ mod tests {
     fn test_parse_large_config() {
         let input = r#"
             CONNECTIONS (
-                SOURCE "mysql://user:password@source_db",
-                DESTINATION "postgres://user:password@dest_db"
+                SOURCE MYSQL "mysql://user:password@source_db",
+                DESTINATION POSTGRES "postgres://user:password@dest_db"
             );
 
             MIGRATE users TO customers
@@ -133,8 +133,8 @@ mod tests {
     fn test_parse_mixed_case_and_whitespace() {
         let input = r#"
                 connections (
-                    source "mysql://user:pass@db",
-                    destination "postgres://user:pass@db"
+                    source mysql "mysql://user:pass@db",
+                    destination postgres "postgres://user:pass@db"
                 );
 
                 migrate   Orders   TO customers   WITH SETTINGS ( infer_schema = true   );
@@ -163,8 +163,8 @@ mod tests {
     fn test_parse_multiple_statements() {
         let input = r#"
             CONNECTIONS (
-                SOURCE "mysql://source_db",
-                DESTINATION "postgres://dest_db"
+                SOURCE MYSQL "mysql://source_db",
+                DESTINATION POSTGRES "postgres://dest_db"
             );
 
             MIGRATE orders TO transactions;

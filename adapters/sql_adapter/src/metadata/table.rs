@@ -1,5 +1,5 @@
 use super::{column::metadata::ColumnMetadata, foreign_key::ForeignKeyMetadata};
-use crate::{db_manager::DbManager, mysql::MySqlManager};
+use crate::{adapter::DbAdapter, mysql::MySqlAdapter};
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
@@ -20,7 +20,7 @@ pub struct TableMetadata {
 impl TableMetadata {
     pub fn build_dep_graph<'a>(
         table_name: &'a str,
-        manager: &'a MySqlManager,
+        manager: &'a MySqlAdapter,
         graph: &'a mut HashMap<String, TableMetadata>,
         visited: &'a mut HashSet<String>,
     ) -> Pin<Box<dyn Future<Output = Result<TableMetadata, Box<dyn std::error::Error>>> + 'a>> {

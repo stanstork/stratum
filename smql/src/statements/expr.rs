@@ -4,7 +4,7 @@ use pest::iterators::Pair;
 // ─────────────────────────────────────────────────────────────
 // EXPRESSIONS: Used across statements
 // ─────────────────────────────────────────────────────────────
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expression {
     Arithmetic {
         left: Box<Expression>,
@@ -24,7 +24,7 @@ pub enum Expression {
     Identifier(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Operator {
     Add,
     Subtract,
@@ -32,7 +32,7 @@ pub enum Operator {
     Divide,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Literal {
     String(String),
     Integer(i64),

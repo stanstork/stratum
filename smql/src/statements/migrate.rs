@@ -6,7 +6,7 @@ use pest::iterators::Pair;
 // MIGRATE statement
 // Example: MIGRATE source1,source2 TO target WITH SETTINGS (setting1 = "value", setting2 = 42)
 // ─────────────────────────────────────────────────────────────
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Migrate {
     pub source: Vec<String>,
     pub target: String,

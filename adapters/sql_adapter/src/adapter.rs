@@ -2,7 +2,7 @@ use crate::{metadata::table::TableMetadata, row::row::RowData};
 use async_trait::async_trait;
 
 #[async_trait]
-pub trait DbManager {
+pub trait DbAdapter {
     async fn connect(url: &str) -> Result<Self, Box<dyn std::error::Error>>
     where
         Self: Sized;
@@ -15,5 +15,5 @@ pub trait DbManager {
         &self,
         table: &str,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>>;
-    async fn fetch_all(&self, query: &str) -> Result<Vec<RowData>, Box<dyn std::error::Error>>;
+    async fn fetch_rows(&self, query: &str) -> Result<Vec<RowData>, Box<dyn std::error::Error>>;
 }

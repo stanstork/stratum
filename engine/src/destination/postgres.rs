@@ -2,13 +2,13 @@ use super::data_dest::DataDestination;
 use crate::source::record::DataRecord;
 use async_trait::async_trait;
 use sql_adapter::{
-    db_manager::DbManager, postgres::PgManager, query::builder::SqlQueryBuilder, row::row::RowData,
+    adapter::DbAdapter, postgres::PgAdapter, query::builder::SqlQueryBuilder, row::row::RowData,
 };
 use std::collections::HashMap;
 use tracing::error;
 
 pub struct PgDestination {
-    manager: PgManager,
+    manager: PgAdapter,
     table: String,
     column_mapping: HashMap<String, String>,
 }
@@ -19,7 +19,7 @@ impl PgDestination {
         table: String,
         column_mapping: HashMap<String, String>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let manager = PgManager::connect(url).await?;
+        let manager = PgAdapter::connect(url).await?;
         Ok(Self {
             manager,
             table,

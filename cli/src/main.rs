@@ -30,25 +30,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::Migrate { config } => {
             let source = read_migration_config(&config).expect("Failed to read config file");
-            println!("Source: {}", source);
-
-            parse(&source).expect("Failed to parse config file");
-
-            // let source = init_source(&config).await?;
-            // let data = source.fetch_data().await?;
-
-            // // Print data
-            // for record in data.iter() {
-            //     println!("{}", record.debug());
-            // }
-
-            // // Initialize destination
-            // let dest = init_destination(&config).await?;
-
-            // match dest.write(data).await {
-            //     Ok(_) => println!("Data written successfully"),
-            //     Err(e) => println!("Error writing data: {:?}", e),
-            // }
+            let plan = parse(&source).expect("Failed to parse config file");
+            producer::run(plan).expect("Failed to run migration");
         }
     }
 

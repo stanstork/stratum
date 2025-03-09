@@ -6,19 +6,19 @@ use pest::iterators::Pair;
 // FILTER statement
 // Example: FILTER (status = "active", age > 18)
 // ─────────────────────────────────────────────────────────────
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Filter {
     pub conditions: Vec<Condition>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Condition {
     pub field: String,
     pub comparator: Comparator,
     pub value: Expression,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Comparator {
     Equal,
     NotEqual,

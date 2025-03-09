@@ -4,19 +4,19 @@ use crate::{
 };
 use async_trait::async_trait;
 use sql_adapter::{
-    db_manager::DbManager, metadata::table::TableMetadata, mysql::MySqlManager,
+    adapter::DbAdapter, metadata::table::TableMetadata, mysql::MySqlAdapter,
     query::builder::SqlQueryBuilder,
 };
 use std::collections::{HashMap, HashSet};
 
 pub struct MySqlDataSource {
     metadata: TableMetadata,
-    manager: MySqlManager,
+    manager: MySqlAdapter,
 }
 
 impl MySqlDataSource {
     pub async fn new(url: &str, mapping: TableMapping) -> Result<Self, Box<dyn std::error::Error>> {
-        let manager = MySqlManager::connect(url).await?;
+        let manager = MySqlAdapter::connect(url).await?;
         let metadata = Self::build_metadata(&manager, &mapping).await?;
 
         Ok(Self { metadata, manager })
@@ -27,7 +27,7 @@ impl MySqlDataSource {
     }
 
     async fn build_metadata(
-        manager: &MySqlManager,
+        manager: &MySqlAdapter,
         mapping: &TableMapping,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
         let mut graph = HashMap::new();
@@ -55,7 +55,7 @@ impl DataSource for MySqlDataSource {
             .select(&columns)
             .from(self.metadata.name.clone())
             .build();
-        let rows = self.manager.fetch_all(&query.0).await?;
+        let rows = self.manager.fetch_rows(&query.0).await?;
         let records = rows
             .into_iter()
             .map(|row| Box::new(row) as Box<dyn DataRecord>)

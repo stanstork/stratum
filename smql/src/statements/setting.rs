@@ -1,13 +1,13 @@
 use crate::parser::{Rule, StatementParser};
 use pest::iterators::Pair;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Setting {
     pub key: String,
     pub value: SettingValue,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SettingValue {
     String(String),
     Integer(i64),

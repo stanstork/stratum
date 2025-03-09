@@ -1,6 +1,6 @@
 CONNECTIONS (
-    SOURCE "mysql://legacy_db",
-    DESTINATION "postgresql://new_db"
+    SOURCE MYSQL "mysql://legacy_db",
+    DESTINATION POSTGRES "postgresql://new_db"
 );
 
 MIGRATE products_a, products_b TO unified_products;

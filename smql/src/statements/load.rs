@@ -5,7 +5,7 @@ use pest::iterators::Pair;
 // LOAD statement
 // Example: LOAD users FROM users USING user_id
 // ─────────────────────────────────────────────────────────────
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Load {
     pub name: String,
     pub source: String,

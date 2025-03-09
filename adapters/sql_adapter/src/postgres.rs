@@ -1,16 +1,16 @@
-use crate::{db_manager::DbManager, metadata::table::TableMetadata, row::row::RowData};
+use crate::{adapter::DbAdapter, metadata::table::TableMetadata, row::row::RowData};
 use async_trait::async_trait;
 use sqlx::{Pool, Postgres, Row};
 
-pub struct PgManager {
+pub struct PgAdapter {
     pool: Pool<Postgres>,
 }
 
 #[async_trait]
-impl DbManager for PgManager {
+impl DbAdapter for PgAdapter {
     async fn connect(url: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let pool = Pool::connect(url).await?;
-        Ok(PgManager { pool })
+        Ok(PgAdapter { pool })
     }
 
     async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
@@ -43,7 +43,7 @@ impl DbManager for PgManager {
         todo!("Implement fetch_metadata for Postgres")
     }
 
-    async fn fetch_all(&self, query: &str) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
+    async fn fetch_rows(&self, query: &str) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
         todo!("Implement fetch_all for Postgres")
     }
 }

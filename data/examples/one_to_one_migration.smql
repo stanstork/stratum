@@ -1,6 +1,6 @@
 CONNECTIONS (
-    SOURCE "mysql://user:password@localhost:3306/testdb",
-    DESTINATION "postgres://user:password@localhost:5432/testdb"
+    SOURCE MYSQL "mysql://user:password@localhost:3306/testdb",
+    DESTINATION POSTGRES "postgres://user:password@localhost:5432/testdb"
 );
 
 MIGRATE orders TO orders_collection

@@ -1,15 +1,15 @@
 use super::data_dest::DataDestination;
 use crate::{config::mapping::TableMapping, source::record::DataRecord};
 use async_trait::async_trait;
-use sql_adapter::{db_manager::DbManager, mysql::MySqlManager};
+use sql_adapter::{adapter::DbAdapter, mysql::MySqlAdapter};
 
 pub struct MySqlDestination {
-    manager: MySqlManager,
+    manager: MySqlAdapter,
 }
 
 impl MySqlDestination {
     pub async fn new(url: &str, mapping: TableMapping) -> Result<Self, Box<dyn std::error::Error>> {
-        let manager = MySqlManager::connect(url).await?;
+        let manager = MySqlAdapter::connect(url).await?;
         Ok(Self { manager })
     }
 }

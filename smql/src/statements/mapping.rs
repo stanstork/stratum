@@ -11,7 +11,7 @@ pub struct Map {
     pub mappings: Vec<Mapping>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Mapping {
     ColumnToColumn {
         source: String,

@@ -11,14 +11,14 @@ pub struct Aggregate {
     pub aggregations: Vec<Aggregation>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Aggregation {
     pub function: AggregateFunction,
     pub column: Expression,
     pub target: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AggregateFunction {
     Count,
     Sum,

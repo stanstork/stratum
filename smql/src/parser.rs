@@ -1,6 +1,9 @@
-use crate::statements::{
-    aggregate::Aggregate, connection::Connection, filter::Filter, load::Load, mapping::Map,
-    migrate::Migrate, statement::Statement,
+use crate::{
+    plan::MigrationPlan,
+    statements::{
+        aggregate::Aggregate, connection::Connection, filter::Filter, load::Load, mapping::Map,
+        migrate::Migrate, statement::Statement,
+    },
 };
 use pest::{iterators::Pair, Parser};
 use pest_derive::Parser;
@@ -13,7 +16,7 @@ pub trait StatementParser {
     fn parse(pair: Pair<Rule>) -> Self;
 }
 
-pub fn parse(source: &str) -> Result<Vec<Statement>, Box<dyn std::error::Error>> {
+pub fn parse(source: &str) -> Result<MigrationPlan, Box<dyn std::error::Error>> {
     let mut statements = vec![];
     let pairs =
         SmqlParser::parse(Rule::program, source).map_err(|e| format!("Parsing failed: {}", e))?;
@@ -33,5 +36,5 @@ pub fn parse(source: &str) -> Result<Vec<Statement>, Box<dyn std::error::Error>>
         statements.push(statement);
     }
 
-    Ok(statements)
+    Ok(MigrationPlan::from_statements(statements))
 }

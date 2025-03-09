@@ -15,9 +15,11 @@ boolean     = { ^"TRUE" | ^"FALSE" }
 operator    = { "+" | "-" | "*" | "/" }
 comparator  = {">=" | "<=" | "!=" | "=" | ">" | "<"}
 
-database_url = { string }
-
 no_explicit_param = { "*" }
+
+data_format     = { ^"MYSQL" | ^"POSTGRES" | ^"SQLITE" | ^"MONGODB" }
+con_str         = { string }
+connection_type = { ^"SOURCE" | ^"DESTINATION" }
 
 // ==============================
 //         Program Structure
@@ -45,8 +47,9 @@ connections = {
 }
 
 connection_pair = { 
-    ^"SOURCE" ~ WHITESPACE* ~ database_url 
-    | ^"DESTINATION" ~ WHITESPACE* ~ database_url 
+    connection_type ~ WHITESPACE* 
+    ~ data_format ~ WHITESPACE* 
+    ~ con_str 
 }
 
 // ==============================

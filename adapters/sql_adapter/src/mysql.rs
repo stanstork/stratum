@@ -1,5 +1,5 @@
 use crate::{
-    db_manager::DbManager,
+    adapter::DbAdapter,
     metadata::{
         column::metadata::ColumnMetadata, foreign_key::ForeignKeyMetadata, table::TableMetadata,
     },
@@ -13,15 +13,15 @@ use async_trait::async_trait;
 use sqlx::{MySql, Pool, Row};
 use std::collections::HashMap;
 
-pub struct MySqlManager {
+pub struct MySqlAdapter {
     pool: Pool<MySql>,
 }
 
 #[async_trait]
-impl DbManager for MySqlManager {
+impl DbAdapter for MySqlAdapter {
     async fn connect(url: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let pool = Pool::connect(url).await?;
-        Ok(MySqlManager { pool })
+        Ok(MySqlAdapter { pool })
     }
 
     async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
@@ -100,7 +100,7 @@ impl DbManager for MySqlManager {
         })
     }
 
-    async fn fetch_all(&self, query: &str) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
+    async fn fetch_rows(&self, query: &str) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
         let rows = sqlx::query(&query).fetch_all(&self.pool).await?;
         Ok(rows
             .iter()
