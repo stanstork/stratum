@@ -58,7 +58,7 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
                 }
             }
 
-            offset += 100;
+            offset += state.lock().await.batch_size;
         }
     });
 

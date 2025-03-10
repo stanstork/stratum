@@ -24,7 +24,7 @@ impl MigrationSetting for InferSchemaSetting {
 impl MigrationSetting for BatchSizeSetting {
     async fn apply(&self, state: Arc<Mutex<MigrationState>>) {
         let mut state = state.lock().await;
-        state.batch_size = self.0;
+        state.batch_size = self.0 as usize;
         println!("Batch size setting applied");
     }
 }

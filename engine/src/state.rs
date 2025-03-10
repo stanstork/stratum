@@ -1,5 +1,5 @@
 pub struct MigrationState {
-    pub batch_size: i64,
+    pub batch_size: usize,
     pub infer_schema: bool,
 }
 
