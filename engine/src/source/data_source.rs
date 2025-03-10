@@ -1,43 +1,33 @@
 use super::{providers::mysql::MySqlDataSource, record::DataRecord};
-use crate::config::config::Config;
 use async_trait::async_trait;
-use sql_adapter::db_type::DbType;
-
-pub enum DataSourceType {
-    File,
-    Database(DbType),
-    Api,
-    // Add more types as needed
-}
+use smql::statements::connection::DataFormat;
+use sql_adapter::adapter::DbAdapter;
 
 #[async_trait]
-pub trait DataSource {
+pub trait DataSource: Send + Sync {
     type Record: DataRecord + Send + Sync + 'static;
 
-    async fn fetch_data(&self) -> Result<Vec<Self::Record>, Box<dyn std::error::Error>>;
+    async fn fetch_data(
+        &self,
+        batch_size: usize,
+        offset: Option<usize>,
+    ) -> Result<Vec<Self::Record>, Box<dyn std::error::Error>>;
 }
 
 pub async fn create_data_source(
-    source_type: DataSourceType,
-    config: &Config,
-) -> Result<Box<dyn DataSource<Record = Box<dyn DataRecord>>>, Box<dyn std::error::Error>> {
-    match source_type {
-        DataSourceType::File => {
-            // Implement file data source creation
-            unimplemented!("File data source not implemented")
+    source: String,
+    data_format: DataFormat,
+    adapter: Box<dyn DbAdapter + Send + Sync>,
+) -> Result<
+    Box<dyn DataSource<Record = Box<dyn DataRecord + Send + Sync>>>,
+    Box<dyn std::error::Error>,
+> {
+    match data_format {
+        DataFormat::MySql => {
+            let source = MySqlDataSource::new(&source, adapter).await?;
+            Ok(Box::new(source))
         }
-        DataSourceType::Database(db_type) => match db_type {
-            DbType::MySql => {
-                let source =
-                    MySqlDataSource::new(&config.source, config.mappings[0].clone()).await?;
-                Ok(Box::new(source))
-            }
-            DbType::Postgres => unimplemented!("Postgres data source not implemented"),
-            DbType::Other(_) => unimplemented!("Other database types not implemented"),
-        },
-        DataSourceType::Api => {
-            // Implement API data source creation
-            unimplemented!("API data source not implemented")
-        }
+        DataFormat::Postgres => unimplemented!("Postgres data source not implemented"),
+        _ => unimplemented!("Unsupported data source"),
     }
 }

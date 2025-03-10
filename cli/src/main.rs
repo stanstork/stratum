@@ -1,16 +1,7 @@
 use clap::Parser;
 use commands::Commands;
-use engine::{
-    config::config::Config,
-    destination::postgres::PgDestination,
-    runner,
-    source::{
-        data_source::{create_data_source, DataSource, DataSourceType},
-        record::DataRecord,
-    },
-};
+use engine::runner;
 use smql::parser::parse;
-use sql_adapter::db_type::DbType;
 use tracing::Level;
 pub mod commands;
 
@@ -38,25 +29,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
-}
-
-async fn init_source(
-    config: &Config,
-) -> Result<Box<dyn DataSource<Record = Box<dyn DataRecord>>>, Box<dyn std::error::Error>> {
-    match create_data_source(DataSourceType::Database(DbType::MySql), &config).await {
-        Ok(source) => return Ok(source),
-        Err(e) => return Err(e),
-    }
-}
-
-async fn init_destination(config: &Config) -> Result<PgDestination, Box<dyn std::error::Error>> {
-    let mapping = config.mappings.first().unwrap();
-    let columns = mapping.columns.clone().unwrap();
-
-    match PgDestination::new(config.dest(), mapping.table.clone(), columns).await {
-        Ok(dest) => return Ok(dest),
-        Err(e) => return Err(e),
-    }
 }
 
 fn read_migration_config(path: &str) -> Result<String, Box<dyn std::error::Error>> {

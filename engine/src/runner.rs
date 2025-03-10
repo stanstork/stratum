@@ -1,5 +1,7 @@
 use crate::{
+    buffer::RecordBuffer,
     settings::{BatchSizeSetting, InferSchemaSetting, MigrationSetting},
+    source::data_source::create_data_source,
     state::MigrationState,
 };
 use smql::{
@@ -18,13 +20,53 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
         &plan.connections.source.con_str,
     )
     .await?;
-    let settings = parse_settings(&plan.migration.settings);
+    let table = plan.migration.source.first().unwrap().clone();
 
+    let data_source = Arc::new(
+        create_data_source(table, plan.connections.source.data_format, source_adapter).await?,
+    );
+
+    let buffer = Arc::new(RecordBuffer::new("migration_buffer")); // Wrap in Arc
+
+    let settings = parse_settings(&plan.migration.settings);
     for setting in settings.iter() {
         setting.apply(state.clone()).await;
     }
 
-    todo!()
+    let buffer_clone = Arc::clone(&buffer);
+    let data_source_clone = Arc::clone(&data_source);
+
+    // Spawn producer task
+    let producer_task = tokio::spawn(async move {
+        let mut offset = 0;
+        loop {
+            let records = data_source_clone
+                .fetch_data(100, Some(offset))
+                .await
+                .unwrap();
+
+            println!("Fetched {} records", records.len());
+
+            if records.is_empty() {
+                break;
+            }
+
+            for record in records {
+                if let Err(e) = buffer_clone.store(record.serialize()) {
+                    eprintln!("Failed to store record: {}", e);
+                    return;
+                }
+            }
+
+            offset += 100;
+        }
+    });
+
+    producer_task.await?;
+
+    // Consumer code will go here
+
+    Ok(())
 }
 
 fn parse_settings(settings: &Vec<Setting>) -> Vec<Box<dyn MigrationSetting>> {

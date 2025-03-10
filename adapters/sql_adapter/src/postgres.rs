@@ -1,4 +1,7 @@
-use crate::{adapter::DbAdapter, metadata::table::TableMetadata, row::row::RowData};
+use crate::{
+    adapter::DbAdapter, metadata::table::TableMetadata, requests::FetchRowsRequest,
+    row::row::RowData,
+};
 use async_trait::async_trait;
 use sqlx::{Pool, Postgres, Row};
 
@@ -43,7 +46,10 @@ impl DbAdapter for PgAdapter {
         todo!("Implement fetch_metadata for Postgres")
     }
 
-    async fn fetch_rows(&self, query: &str) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
+    async fn fetch_rows(
+        &self,
+        request: FetchRowsRequest,
+    ) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
         todo!("Implement fetch_all for Postgres")
     }
 }

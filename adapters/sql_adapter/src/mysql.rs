@@ -3,7 +3,8 @@ use crate::{
     metadata::{
         column::metadata::ColumnMetadata, foreign_key::ForeignKeyMetadata, table::TableMetadata,
     },
-    query::loader::QueryLoader,
+    query::{builder::SqlQueryBuilder, loader::QueryLoader},
+    requests::FetchRowsRequest,
     row::{
         extract::{MySqlRowDataExt, RowDataExt},
         row::RowData,
@@ -100,8 +101,18 @@ impl DbAdapter for MySqlAdapter {
         })
     }
 
-    async fn fetch_rows(&self, query: &str) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
-        let rows = sqlx::query(&query).fetch_all(&self.pool).await?;
+    async fn fetch_rows(
+        &self,
+        request: FetchRowsRequest,
+    ) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
+        let query = SqlQueryBuilder::new()
+            .select(&request.columns, request.table.as_str())
+            .from(request.table)
+            .limit(request.limit)
+            .offset(request.offset.unwrap_or(0))
+            .build();
+
+        let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
         Ok(rows
             .iter()
             .map(|row| MySqlRowDataExt::from_row(row))

@@ -1,4 +1,4 @@
-use crate::{metadata::table::TableMetadata, row::row::RowData};
+use crate::{metadata::table::TableMetadata, requests::FetchRowsRequest, row::row::RowData};
 use async_trait::async_trait;
 
 #[async_trait]
@@ -15,5 +15,8 @@ pub trait DbAdapter {
         &self,
         table: &str,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>>;
-    async fn fetch_rows(&self, query: &str) -> Result<Vec<RowData>, Box<dyn std::error::Error>>;
+    async fn fetch_rows(
+        &self,
+        request: FetchRowsRequest,
+    ) -> Result<Vec<RowData>, Box<dyn std::error::Error>>;
 }

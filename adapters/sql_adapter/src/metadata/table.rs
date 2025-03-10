@@ -20,7 +20,7 @@ pub struct TableMetadata {
 impl TableMetadata {
     pub fn build_dep_graph<'a>(
         table_name: &'a str,
-        manager: &'a MySqlAdapter,
+        adapter: &'a Box<dyn DbAdapter + Send + Sync>,
         graph: &'a mut HashMap<String, TableMetadata>,
         visited: &'a mut HashSet<String>,
     ) -> Pin<Box<dyn Future<Output = Result<TableMetadata, Box<dyn std::error::Error>>> + 'a>> {
@@ -33,7 +33,7 @@ impl TableMetadata {
                 return Err("Circular reference detected".into());
             }
 
-            let mut metadata = manager.fetch_metadata(table_name).await?;
+            let mut metadata = adapter.fetch_metadata(table_name).await?;
             graph.insert(table_name.to_string(), metadata.clone());
 
             for fk in &metadata.foreign_keys {
@@ -41,7 +41,7 @@ impl TableMetadata {
 
                 if !graph.contains_key(ref_table) {
                     let ref_metadata =
-                        Self::build_dep_graph(ref_table, manager, graph, visited).await?;
+                        Self::build_dep_graph(ref_table, adapter, graph, visited).await?;
 
                     metadata
                         .referenced_tables

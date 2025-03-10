@@ -11,9 +11,15 @@ impl SqlQueryBuilder {
         }
     }
 
-    pub fn select(&mut self, columns: &Vec<String>) -> &mut Self {
+    pub fn select(&mut self, columns: &Vec<String>, alias: &str) -> &mut Self {
         self.query.push_str("SELECT ");
-        self.query.push_str(&columns.join(", "));
+
+        let formatted_columns: Vec<String> = columns
+            .iter()
+            .map(|col| format!("{}.{} AS {}", alias, col, col))
+            .collect();
+
+        self.query.push_str(&formatted_columns.join(", "));
         self
     }
 
@@ -40,6 +46,12 @@ impl SqlQueryBuilder {
     pub fn limit(&mut self, limit: usize) -> &mut Self {
         self.query.push_str(" LIMIT ");
         self.query.push_str(&limit.to_string());
+        self
+    }
+
+    pub fn offset(&mut self, offset: usize) -> &mut Self {
+        self.query.push_str(" OFFSET ");
+        self.query.push_str(&offset.to_string());
         self
     }
 

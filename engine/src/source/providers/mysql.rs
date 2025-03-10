@@ -1,64 +1,72 @@
-use crate::{
-    config::mapping::TableMapping,
-    source::{data_source::DataSource, record::DataRecord},
-};
+use crate::source::{data_source::DataSource, record::DataRecord};
 use async_trait::async_trait;
-use sql_adapter::{
-    adapter::DbAdapter, metadata::table::TableMetadata, mysql::MySqlAdapter,
-    query::builder::SqlQueryBuilder,
-};
+use sql_adapter::{adapter::DbAdapter, metadata::table::TableMetadata, requests::FetchRowsRequest};
 use std::collections::{HashMap, HashSet};
 
 pub struct MySqlDataSource {
-    metadata: TableMetadata,
-    manager: MySqlAdapter,
+    metadata: Option<TableMetadata>,
+    table: String,
+    adapter: Box<dyn DbAdapter + Send + Sync>,
 }
 
 impl MySqlDataSource {
-    pub async fn new(url: &str, mapping: TableMapping) -> Result<Self, Box<dyn std::error::Error>> {
-        let manager = MySqlAdapter::connect(url).await?;
-        let metadata = Self::build_metadata(&manager, &mapping).await?;
-
-        Ok(Self { metadata, manager })
+    pub async fn new(
+        table: &str,
+        adapter: Box<dyn DbAdapter + Send + Sync>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let metadata = Self::build_metadata(&adapter, table).await.ok();
+        let source = MySqlDataSource {
+            metadata,
+            table: table.to_string(),
+            adapter,
+        };
+        Ok(source)
     }
 
-    pub fn metadata(&self) -> &TableMetadata {
+    pub fn metadata(&self) -> &Option<TableMetadata> {
         &self.metadata
     }
 
     async fn build_metadata(
-        manager: &MySqlAdapter,
-        mapping: &TableMapping,
+        adapter: &Box<dyn DbAdapter + Send + Sync>,
+        table: &str,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
         let mut graph = HashMap::new();
         let mut visited = HashSet::new();
         let metadata =
-            TableMetadata::build_dep_graph(&mapping.table, manager, &mut graph, &mut visited)
-                .await?;
+            TableMetadata::build_dep_graph(table, adapter, &mut graph, &mut visited).await?;
         Ok(metadata)
     }
 }
 
 #[async_trait]
 impl DataSource for MySqlDataSource {
-    type Record = Box<dyn DataRecord>;
+    type Record = Box<dyn DataRecord + Send + Sync>;
 
-    async fn fetch_data(&self) -> Result<Vec<Box<dyn DataRecord>>, Box<dyn std::error::Error>> {
-        let mut builder = SqlQueryBuilder::new();
+    async fn fetch_data(
+        &self,
+        batch_size: usize,
+        offset: Option<usize>,
+    ) -> Result<Vec<Box<dyn DataRecord + Send + Sync>>, Box<dyn std::error::Error>> {
         let columns = self
-            .metadata
+            .metadata()
+            .as_ref()
+            .unwrap()
             .columns
-            .iter()
-            .map(|col| col.0.clone())
-            .collect::<Vec<_>>();
-        let query = builder
-            .select(&columns)
-            .from(self.metadata.name.clone())
-            .build();
-        let rows = self.manager.fetch_rows(&query.0).await?;
+            .keys()
+            .cloned()
+            .collect();
+        let request = FetchRowsRequest {
+            table: self.table.clone(),
+            columns,
+            limit: batch_size,
+            offset,
+        };
+
+        let rows = self.adapter.fetch_rows(request).await?;
         let records = rows
             .into_iter()
-            .map(|row| Box::new(row) as Box<dyn DataRecord>)
+            .map(|row| Box::new(row) as Box<dyn DataRecord + Send + Sync>)
             .collect();
 
         Ok(records)
