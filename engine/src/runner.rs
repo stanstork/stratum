@@ -1,5 +1,7 @@
 use crate::{
     buffer::RecordBuffer,
+    context::MigrationContext,
+    destination::data_dest::create_data_destination,
     settings::{BatchSizeSetting, InferSchemaSetting, MigrationSetting},
     source::data_source::create_data_source,
     state::MigrationState,
@@ -20,13 +22,29 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
         &plan.connections.source.con_str,
     )
     .await?;
+    let destination_adapter = get_db_adapter(
+        DbEngine::from_data_format(plan.connections.destination.data_format),
+        &plan.connections.destination.con_str,
+    )
+    .await?;
+
     let table = plan.migration.source.first().unwrap().clone();
 
     let data_source = Arc::new(
         create_data_source(table, plan.connections.source.data_format, source_adapter).await?,
     );
+    let data_destination = Arc::new(
+        create_data_destination(plan.connections.source.data_format, destination_adapter).await?,
+    );
 
-    let buffer = Arc::new(RecordBuffer::new("migration_buffer")); // Wrap in Arc
+    let buffer = Arc::new(RecordBuffer::new("migration_buffer"));
+
+    let context = Arc::new(MigrationContext {
+        state: Arc::clone(&state),
+        source: Arc::clone(&data_source),
+        destination: Arc::clone(&data_destination),
+        buffer: Arc::clone(&buffer),
+    });
 
     let settings = parse_settings(&plan.migration.settings);
     for setting in settings.iter() {
