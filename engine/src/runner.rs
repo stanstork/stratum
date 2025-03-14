@@ -34,21 +34,27 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
         create_data_source(table, plan.connections.source.data_format, source_adapter).await?,
     );
     let data_destination = Arc::new(
-        create_data_destination(plan.connections.source.data_format, destination_adapter).await?,
+        create_data_destination(
+            plan.connections.destination.data_format,
+            destination_adapter,
+        )
+        .await?,
     );
 
     let buffer = Arc::new(RecordBuffer::new("migration_buffer"));
 
-    let context = Arc::new(MigrationContext {
+    let context = Arc::new(Mutex::new(MigrationContext {
         state: Arc::clone(&state),
         source: Arc::clone(&data_source),
         destination: Arc::clone(&data_destination),
         buffer: Arc::clone(&buffer),
-    });
+        source_data_format: plan.connections.source.data_format,
+        destination_data_format: plan.connections.destination.data_format,
+    }));
 
     let settings = parse_settings(&plan.migration.settings);
     for setting in settings.iter() {
-        setting.apply(state.clone()).await;
+        setting.apply(Arc::clone(&context)).await?;
     }
 
     let buffer_clone = Arc::clone(&buffer);

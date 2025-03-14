@@ -1,8 +1,12 @@
-use super::data_dest::DataDestination;
+use super::data_dest::{DataDestination, DbDataDestination};
 use crate::source::record::DataRecord;
 use async_trait::async_trait;
 use sql_adapter::{
-    adapter::DbAdapter, postgres::PgAdapter, query::builder::SqlQueryBuilder, row::row::RowData,
+    adapter::DbAdapter,
+    metadata::table::TableMetadata,
+    postgres::PgAdapter,
+    query::builder::{ColumnInfo, SqlQueryBuilder},
+    row::row::RowData,
 };
 use std::collections::HashMap;
 use tracing::error;
@@ -19,11 +23,12 @@ impl PgDestination {
     }
 
     /// Checks if the table exists in the database
-    async fn ensure_table_exists(&self) -> Result<(), Box<dyn std::error::Error>> {
-        // if !self.manager.table_exists(&self.table).await? {
-        //     return Err("Table does not exist".into());
-        // }
-        Ok(())
+    pub async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        if self.adapter.table_exists(table).await? {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     /// Maps row data into column names and values
@@ -62,7 +67,7 @@ impl DataDestination for PgDestination {
         &self,
         data: Vec<Box<dyn DataRecord + Send + Sync>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        self.ensure_table_exists().await?;
+        // self.ensure_table_exists().await?;
 
         // To simplify testing, we truncate the table before writing the data
         // In a real-world scenario, you would likely want to append the data
@@ -91,6 +96,39 @@ impl DataDestination for PgDestination {
         //         );
         //     }
         // }
+        Ok(())
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+#[async_trait]
+impl DbDataDestination for PgDestination {
+    async fn infer_schema(
+        &self,
+        metadata: &TableMetadata,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let columns = metadata
+            .columns
+            .iter()
+            .map(|(name, col)| ColumnInfo {
+                name: name.clone(),
+                data_type: col.data_type.to_pg_string(),
+                is_nullable: col.is_nullable,
+                is_primary_key: metadata.primary_keys.contains(name),
+                default: col.default_value.as_ref().map(ToString::to_string),
+            })
+            .collect::<Vec<_>>();
+
+        let query = SqlQueryBuilder::new()
+            .create_table(&metadata.name, &columns)
+            .build();
+
+        println!("{}", query.0);
+
+        // self.manager.execute(&query.0).await?;
         Ok(())
     }
 }

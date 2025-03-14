@@ -3,6 +3,14 @@ pub struct SqlQueryBuilder {
     pub params: Vec<String>,
 }
 
+pub struct ColumnInfo {
+    pub name: String,
+    pub data_type: String,
+    pub is_nullable: bool,
+    pub is_primary_key: bool,
+    pub default: Option<String>,
+}
+
 impl SqlQueryBuilder {
     pub fn new() -> Self {
         Self {
@@ -11,73 +19,82 @@ impl SqlQueryBuilder {
         }
     }
 
-    pub fn select(&mut self, columns: &Vec<String>, alias: &str) -> &mut Self {
-        self.query.push_str("SELECT ");
-
+    pub fn select(mut self, columns: &Vec<String>, alias: &str) -> Self {
         let formatted_columns: Vec<String> = columns
             .iter()
             .map(|col| format!("{}.{} AS {}", alias, col, col))
             .collect();
 
-        self.query.push_str(&formatted_columns.join(", "));
+        self.query
+            .push_str(&format!("SELECT {}", formatted_columns.join(", ")));
         self
     }
 
-    pub fn from(&mut self, table: String) -> &mut Self {
+    pub fn from(mut self, table: &str) -> Self {
         self.query.push_str(" FROM ");
-        self.query.push_str(&table);
-        self
-    }
-
-    pub fn where_clause(&mut self, condition: &str) -> &mut Self {
-        self.query.push_str(" WHERE ");
-        self.query.push_str(condition);
-        self
-    }
-
-    pub fn order_by(&mut self, column: &str, direction: &str) -> &mut Self {
-        self.query.push_str(" ORDER BY ");
-        self.query.push_str(column);
-        self.query.push_str(" ");
-        self.query.push_str(direction);
-        self
-    }
-
-    pub fn limit(&mut self, limit: usize) -> &mut Self {
-        self.query.push_str(" LIMIT ");
-        self.query.push_str(&limit.to_string());
-        self
-    }
-
-    pub fn offset(&mut self, offset: usize) -> &mut Self {
-        self.query.push_str(" OFFSET ");
-        self.query.push_str(&offset.to_string());
-        self
-    }
-
-    pub fn insert_into(&mut self, table: &str, columns: &Vec<(String, String)>) -> &mut Self {
-        self.query.push_str("INSERT INTO ");
         self.query.push_str(table);
-        self.query.push_str(" (");
-
-        let column_names = columns
-            .iter()
-            .map(|(name, _)| name.clone())
-            .collect::<Vec<_>>();
-        self.query.push_str(&column_names.join(", "));
-        self.query.push_str(") VALUES (");
-
-        let mut params = Vec::new();
-        for (_, value) in columns.iter() {
-            params.push(value.clone());
-        }
-
-        self.query.push_str(&params.join(", "));
-        self.query.push_str(")");
         self
     }
 
-    pub fn build(&self) -> (String, Vec<String>) {
-        (self.query.clone(), self.params.clone())
+    pub fn insert_into(mut self, table: &str, columns: &[(&str, &str)]) -> Self {
+        let (cols, values): (Vec<&str>, Vec<&str>) = columns.iter().cloned().unzip();
+
+        self.query.push_str(&format!(
+            "INSERT INTO {} ({}) VALUES ({})",
+            table,
+            cols.join(", "),
+            values.join(", ")
+        ));
+        self
+    }
+
+    pub fn create_table(mut self, table: &str, columns: &Vec<ColumnInfo>) -> Self {
+        self.query.push_str(&format!("CREATE TABLE {} (", table));
+
+        let column_defs: Vec<String> = columns
+            .iter()
+            .map(|col| {
+                let mut definition = format!("{} {}", col.name, col.data_type);
+                if col.is_primary_key {
+                    definition.push_str(" PRIMARY KEY");
+                }
+                if !col.is_nullable {
+                    definition.push_str(" NOT NULL");
+                }
+                if let Some(default_val) = &col.default {
+                    definition.push_str(&format!(" DEFAULT {}", default_val));
+                }
+                definition
+            })
+            .collect();
+
+        self.query.push_str(&column_defs.join(", "));
+        self.query.push(')');
+        self
+    }
+
+    pub fn order_by(mut self, column: &str, direction: &str) -> Self {
+        self.query
+            .push_str(&format!(" ORDER BY {} {}", column, direction));
+        self
+    }
+
+    pub fn limit(mut self, limit: usize) -> Self {
+        self.query.push_str(&format!(" LIMIT {}", limit));
+        self
+    }
+
+    pub fn offset(mut self, offset: usize) -> Self {
+        self.query.push_str(&format!(" OFFSET {}", offset));
+        self
+    }
+
+    pub fn add_param(mut self, param: &str) -> Self {
+        self.params.push(param.to_owned());
+        self
+    }
+
+    pub fn build(self) -> (String, Vec<String>) {
+        (self.query, self.params)
     }
 }

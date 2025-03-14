@@ -17,4 +17,8 @@ impl DataDestination for MySqlDestination {
     ) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

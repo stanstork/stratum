@@ -1,4 +1,7 @@
-use crate::source::{data_source::DataSource, record::DataRecord};
+use crate::source::{
+    data_source::{DataSource, DbDataSource},
+    record::DataRecord,
+};
 use async_trait::async_trait;
 use sql_adapter::{adapter::DbAdapter, metadata::table::TableMetadata, requests::FetchRowsRequest};
 use std::collections::{HashMap, HashSet};
@@ -70,5 +73,17 @@ impl DataSource for MySqlDataSource {
             .collect();
 
         Ok(records)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+#[async_trait]
+impl DbDataSource for MySqlDataSource {
+    async fn get_metadata(&self) -> Result<TableMetadata, Box<dyn std::error::Error>> {
+        let metadata = self.metadata().as_ref().unwrap();
+        Ok(metadata.clone())
     }
 }
