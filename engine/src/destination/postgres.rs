@@ -5,10 +5,10 @@ use sql_adapter::{
     adapter::DbAdapter,
     metadata::table::TableMetadata,
     postgres::PgAdapter,
-    query::builder::{ColumnInfo, SqlQueryBuilder},
+    query::builder::{ColumnInfo, ForeignKeyInfo, SqlQueryBuilder},
     row::row::RowData,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tracing::error;
 
 pub struct PgDestination {
@@ -110,7 +110,53 @@ impl DbDataDestination for PgDestination {
         &self,
         metadata: &TableMetadata,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let columns = metadata
+        let mut visited = HashSet::new();
+        let mut query_builder = SqlQueryBuilder::new().begin_transaction();
+
+        // Collect tables recursively and ensure correct creation order
+        self.collect_referenced_tables(metadata, &mut visited, &mut query_builder);
+
+        query_builder = query_builder.commit_transaction();
+
+        let (query, _) = query_builder.build();
+        println!("{}", query);
+
+        // if let Err(err) = self.adapter.execute(&query).await {
+        //     eprintln!("Failed to create tables: {:?}", err);
+        //     return Err(err);
+        // }
+
+        Ok(())
+    }
+}
+
+impl PgDestination {
+    fn collect_referenced_tables<'a>(
+        &self,
+        table: &'a TableMetadata,
+        visited: &mut HashSet<String>,
+        query_builder: &mut SqlQueryBuilder,
+    ) {
+        if visited.contains(&table.name) {
+            return;
+        }
+
+        for referenced_table in table.referenced_tables.values() {
+            self.collect_referenced_tables(referenced_table, visited, query_builder);
+        }
+
+        let columns = self.get_columns(table);
+        let foreign_keys = self.get_foreign_keys(table);
+
+        *query_builder = query_builder
+            .clone()
+            .create_table(&table.name, &columns, &foreign_keys);
+
+        visited.insert(table.name.clone());
+    }
+
+    fn get_columns(&self, metadata: &TableMetadata) -> Vec<ColumnInfo> {
+        metadata
             .columns
             .iter()
             .map(|(name, col)| ColumnInfo {
@@ -120,15 +166,18 @@ impl DbDataDestination for PgDestination {
                 is_primary_key: metadata.primary_keys.contains(name),
                 default: col.default_value.as_ref().map(ToString::to_string),
             })
-            .collect::<Vec<_>>();
+            .collect::<Vec<_>>()
+    }
 
-        let query = SqlQueryBuilder::new()
-            .create_table(&metadata.name, &columns)
-            .build();
-
-        println!("{}", query.0);
-
-        // self.manager.execute(&query.0).await?;
-        Ok(())
+    fn get_foreign_keys(&self, metadata: &TableMetadata) -> Vec<ForeignKeyInfo> {
+        metadata
+            .foreign_keys
+            .iter()
+            .map(|fk| ForeignKeyInfo {
+                column: fk.column.clone(),
+                referenced_table: fk.referenced_table.clone(),
+                referenced_column: fk.referenced_column.clone(),
+            })
+            .collect::<Vec<_>>()
     }
 }

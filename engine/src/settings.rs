@@ -50,10 +50,10 @@ impl MigrationSetting for InferSchemaSetting {
                     .downcast_ref::<PgDestination>()
                     .ok_or_else(|| "Failed to downcast destination to PgDestination")?;
 
-                if !destination.table_exists(&metadata.name).await? {
-                    println!("Table does not exist, creating table");
-                    destination.infer_schema(&metadata).await?;
-                }
+                // if !destination.table_exists(&metadata.name).await? {
+                //     println!("Table does not exist, creating table");
+                destination.infer_schema(&metadata).await?;
+                // }
             }
             _ => unimplemented!("Unsupported data destination"),
         }

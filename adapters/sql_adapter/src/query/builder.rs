@@ -1,3 +1,4 @@
+#[derive(Debug, Clone)]
 pub struct SqlQueryBuilder {
     pub query: String,
     pub params: Vec<String>,
@@ -11,12 +12,28 @@ pub struct ColumnInfo {
     pub default: Option<String>,
 }
 
+pub struct ForeignKeyInfo {
+    pub column: String,
+    pub referenced_table: String,
+    pub referenced_column: String,
+}
+
 impl SqlQueryBuilder {
     pub fn new() -> Self {
         Self {
             query: String::new(),
             params: Vec::new(),
         }
+    }
+
+    pub fn begin_transaction(mut self) -> Self {
+        self.query.push_str("BEGIN;\n");
+        self
+    }
+
+    pub fn commit_transaction(mut self) -> Self {
+        self.query.push_str("\nCOMMIT;");
+        self
     }
 
     pub fn select(mut self, columns: &Vec<String>, alias: &str) -> Self {
@@ -48,13 +65,19 @@ impl SqlQueryBuilder {
         self
     }
 
-    pub fn create_table(mut self, table: &str, columns: &Vec<ColumnInfo>) -> Self {
-        self.query.push_str(&format!("CREATE TABLE {} (", table));
+    pub fn create_table(
+        mut self,
+        table: &str,
+        columns: &Vec<ColumnInfo>,
+        foreign_keys: &Vec<ForeignKeyInfo>,
+    ) -> Self {
+        self.query
+            .push_str(&format!("\nCREATE TABLE {} (\n", table));
 
         let column_defs: Vec<String> = columns
             .iter()
             .map(|col| {
-                let mut definition = format!("{} {}", col.name, col.data_type);
+                let mut definition = format!("\t{} {}", col.name, col.data_type);
                 if col.is_primary_key {
                     definition.push_str(" PRIMARY KEY");
                 }
@@ -68,8 +91,25 @@ impl SqlQueryBuilder {
             })
             .collect();
 
-        self.query.push_str(&column_defs.join(", "));
-        self.query.push(')');
+        let foreign_key_defs: Vec<String> = foreign_keys
+            .iter()
+            .map(|fk| {
+                format!(
+                    "\tFOREIGN KEY ({}) REFERENCES {}({})",
+                    fk.column, fk.referenced_table, fk.referenced_column
+                )
+            })
+            .collect();
+
+        let all_defs = column_defs
+            .into_iter()
+            .chain(foreign_key_defs.into_iter())
+            .collect::<Vec<_>>()
+            .join(",\n");
+
+        self.query.push_str(&all_defs);
+        self.query.push_str("\n);\n");
+
         self
     }
 
