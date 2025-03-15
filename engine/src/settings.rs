@@ -1,6 +1,9 @@
 use crate::{
     context::MigrationContext,
-    destination::{data_dest::DbDataDestination, postgres::PgDestination},
+    destination::{
+        data_dest::{DataDestination, DbDataDestination},
+        postgres::PgDestination,
+    },
     source::{
         data_source::{DataSource, DbDataSource},
         providers::mysql::MySqlDataSource,
@@ -29,31 +32,16 @@ impl MigrationSetting for InferSchemaSetting {
         context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let context = context.lock().await;
-        let metadata = match context.source_data_format {
-            DataFormat::MySql => {
-                context
-                    .source
-                    .as_any()
-                    .downcast_ref::<MySqlDataSource>()
-                    .ok_or_else(|| "Failed to downcast source to MySqlDataSource")?
-                    .get_metadata()
-                    .await?
+        let metadata = match (&context.source, &context.source_data_format) {
+            (DataSource::Database(source), DataFormat::MySql | DataFormat::Postgres) => {
+                source.get_metadata().await?
             }
             _ => return Err("Unsupported data source format".into()),
         };
 
-        match context.destination_data_format {
-            DataFormat::Postgres => {
-                let destination = context
-                    .destination
-                    .as_any()
-                    .downcast_ref::<PgDestination>()
-                    .ok_or_else(|| "Failed to downcast destination to PgDestination")?;
-
-                // if !destination.table_exists(&metadata.name).await? {
-                //     println!("Table does not exist, creating table");
+        match (&context.destination, &context.destination_data_format) {
+            (DataDestination::Database(destination), DataFormat::MySql | DataFormat::Postgres) => {
                 destination.infer_schema(&metadata).await?;
-                // }
             }
             _ => unimplemented!("Unsupported data destination"),
         }

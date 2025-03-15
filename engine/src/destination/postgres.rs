@@ -1,4 +1,4 @@
-use super::data_dest::{DataDestination, DbDataDestination};
+use super::data_dest::DbDataDestination;
 use crate::source::record::DataRecord;
 use async_trait::async_trait;
 use sql_adapter::{
@@ -60,8 +60,31 @@ impl PgDestination {
 }
 
 #[async_trait]
-impl DataDestination for PgDestination {
+impl DbDataDestination for PgDestination {
     type Record = Box<dyn DataRecord + Send + Sync>;
+
+    async fn infer_schema(
+        &self,
+        metadata: &TableMetadata,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut visited = HashSet::new();
+        let mut query_builder = SqlQueryBuilder::new().begin_transaction();
+
+        // Collect tables recursively and ensure correct creation order
+        self.collect_referenced_tables(metadata, &mut visited, &mut query_builder);
+
+        query_builder = query_builder.commit_transaction();
+
+        let (query, _) = query_builder.build();
+        println!("{}", query);
+
+        // if let Err(err) = self.adapter.execute(&query).await {
+        //     eprintln!("Failed to create tables: {:?}", err);
+        //     return Err(err);
+        // }
+
+        Ok(())
+    }
 
     async fn write(
         &self,
@@ -101,32 +124,6 @@ impl DataDestination for PgDestination {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
-    }
-}
-
-#[async_trait]
-impl DbDataDestination for PgDestination {
-    async fn infer_schema(
-        &self,
-        metadata: &TableMetadata,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut visited = HashSet::new();
-        let mut query_builder = SqlQueryBuilder::new().begin_transaction();
-
-        // Collect tables recursively and ensure correct creation order
-        self.collect_referenced_tables(metadata, &mut visited, &mut query_builder);
-
-        query_builder = query_builder.commit_transaction();
-
-        let (query, _) = query_builder.build();
-        println!("{}", query);
-
-        // if let Err(err) = self.adapter.execute(&query).await {
-        //     eprintln!("Failed to create tables: {:?}", err);
-        //     return Err(err);
-        // }
-
-        Ok(())
     }
 }
 

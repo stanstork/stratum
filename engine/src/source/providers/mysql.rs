@@ -43,7 +43,7 @@ impl MySqlDataSource {
 }
 
 #[async_trait]
-impl DataSource for MySqlDataSource {
+impl DbDataSource for MySqlDataSource {
     type Record = Box<dyn DataRecord + Send + Sync>;
 
     async fn fetch_data(
@@ -75,15 +75,12 @@ impl DataSource for MySqlDataSource {
         Ok(records)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-#[async_trait]
-impl DbDataSource for MySqlDataSource {
     async fn get_metadata(&self) -> Result<TableMetadata, Box<dyn std::error::Error>> {
         let metadata = self.metadata().as_ref().unwrap();
         Ok(metadata.clone())
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }

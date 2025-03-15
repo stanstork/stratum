@@ -4,8 +4,12 @@ use smql::statements::connection::DataFormat;
 use sql_adapter::{adapter::DbAdapter, metadata::table::TableMetadata};
 use std::{any::Any, sync::Arc};
 
+pub enum DataSource {
+    Database(Arc<dyn DbDataSource<Record = Box<dyn DataRecord + Send + Sync>>>),
+}
+
 #[async_trait]
-pub trait DataSource: Send + Sync + Any {
+pub trait DbDataSource: Send + Sync + Any {
     type Record: DataRecord + Send + Sync + 'static;
 
     fn as_any(&self) -> &dyn std::any::Any;
@@ -15,10 +19,6 @@ pub trait DataSource: Send + Sync + Any {
         batch_size: usize,
         offset: Option<usize>,
     ) -> Result<Vec<Self::Record>, Box<dyn std::error::Error>>;
-}
-
-#[async_trait]
-pub trait DbDataSource: DataSource {
     async fn get_metadata(&self) -> Result<TableMetadata, Box<dyn std::error::Error>>;
 }
 
@@ -27,7 +27,7 @@ pub async fn create_data_source(
     data_format: DataFormat,
     adapter: Box<dyn DbAdapter + Send + Sync>,
 ) -> Result<
-    Arc<dyn DataSource<Record = Box<dyn DataRecord + Send + Sync>>>,
+    Arc<dyn DbDataSource<Record = Box<dyn DataRecord + Send + Sync>>>,
     Box<dyn std::error::Error>,
 > {
     match data_format {
