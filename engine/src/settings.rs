@@ -1,18 +1,12 @@
 use crate::{
-    context::MigrationContext,
-    destination::{
-        data_dest::{DataDestination, DbDataDestination},
-        postgres::PgDestination,
-    },
-    source::{
-        data_source::{DataSource, DbDataSource},
-        providers::mysql::MySqlDataSource,
-    },
+    context::MigrationContext, destination::data_dest::DataDestination,
+    source::data_source::DataSource,
 };
 use async_trait::async_trait;
 use smql::statements::connection::DataFormat;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::info;
 
 #[async_trait]
 pub trait MigrationSetting {
@@ -33,20 +27,24 @@ impl MigrationSetting for InferSchemaSetting {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let context = context.lock().await;
         let metadata = match (&context.source, &context.source_data_format) {
-            (DataSource::Database(source), DataFormat::MySql | DataFormat::Postgres) => {
+            (DataSource::Database(source), format)
+                if format.intersects(DataFormat::sql_databases()) =>
+            {
                 source.get_metadata().await?
             }
             _ => return Err("Unsupported data source format".into()),
         };
 
-        match (&context.destination, &context.destination_data_format) {
-            (DataDestination::Database(destination), DataFormat::MySql | DataFormat::Postgres) => {
+        match (&context.destination, context.destination_data_format) {
+            (DataDestination::Database(destination), format)
+                if format.intersects(DataFormat::sql_databases()) =>
+            {
                 destination.infer_schema(&metadata).await?;
             }
             _ => unimplemented!("Unsupported data destination"),
         }
 
-        println!("Infer schema setting applied");
+        info!("Infer schema setting applied");
         Ok(())
     }
 }
@@ -60,7 +58,7 @@ impl MigrationSetting for BatchSizeSetting {
         let context = context.lock().await;
         let mut state = context.state.lock().await;
         state.batch_size = self.0 as usize;
-        println!("Batch size setting applied");
+        info!("Batch size setting applied");
         Ok(())
     }
 }

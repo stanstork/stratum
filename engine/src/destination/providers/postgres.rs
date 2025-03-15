@@ -1,15 +1,12 @@
-use super::data_dest::DbDataDestination;
-use crate::source::record::DataRecord;
+use crate::{destination::data_dest::DbDataDestination, record::DataRecord};
 use async_trait::async_trait;
 use sql_adapter::{
     adapter::DbAdapter,
     metadata::table::TableMetadata,
-    postgres::PgAdapter,
     query::builder::{ColumnInfo, ForeignKeyInfo, SqlQueryBuilder},
-    row::row::RowData,
 };
-use std::collections::{HashMap, HashSet};
-use tracing::error;
+use std::collections::HashSet;
+use tracing::{error, info};
 
 pub struct PgDestination {
     adapter: Box<dyn DbAdapter + Send + Sync>,
@@ -24,11 +21,7 @@ impl PgDestination {
 
     /// Checks if the table exists in the database
     pub async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        if self.adapter.table_exists(table).await? {
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        self.adapter.table_exists(table).await.map_err(Into::into)
     }
 
     /// Maps row data into column names and values
@@ -67,22 +60,28 @@ impl DbDataDestination for PgDestination {
         &self,
         metadata: &TableMetadata,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.table_exists(&metadata.name).await? {
+            info!("Table '{}' already exists", metadata.name);
+            return Ok(());
+        }
+
         let mut visited = HashSet::new();
-        let mut query_builder = SqlQueryBuilder::new().begin_transaction();
+        let mut queries = Vec::new();
 
         // Collect tables recursively and ensure correct creation order
-        self.collect_referenced_tables(metadata, &mut visited, &mut query_builder);
+        self.collect_ref_tables(metadata, &mut visited, &mut queries);
 
-        query_builder = query_builder.commit_transaction();
+        for query in queries {
+            let sql = query.build().0;
+            info!("Executing query: {}", sql);
 
-        let (query, _) = query_builder.build();
-        println!("{}", query);
+            if let Err(err) = self.adapter.execute(&sql).await {
+                error!("Failed to execute query: {}\nError: {:?}", sql, err);
+                return Err(err.into());
+            }
+        }
 
-        // if let Err(err) = self.adapter.execute(&query).await {
-        //     eprintln!("Failed to create tables: {:?}", err);
-        //     return Err(err);
-        // }
-
+        info!("Schema inference completed");
         Ok(())
     }
 
@@ -121,34 +120,29 @@ impl DbDataDestination for PgDestination {
         // }
         Ok(())
     }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
 }
 
 impl PgDestination {
-    fn collect_referenced_tables<'a>(
+    fn collect_ref_tables<'a>(
         &self,
         table: &'a TableMetadata,
         visited: &mut HashSet<String>,
-        query_builder: &mut SqlQueryBuilder,
+        queries: &mut Vec<SqlQueryBuilder>,
     ) {
         if visited.contains(&table.name) {
             return;
         }
 
         for referenced_table in table.referenced_tables.values() {
-            self.collect_referenced_tables(referenced_table, visited, query_builder);
+            self.collect_ref_tables(referenced_table, visited, queries);
         }
 
         let columns = self.get_columns(table);
         let foreign_keys = self.get_foreign_keys(table);
+        let query_builder =
+            SqlQueryBuilder::new().create_table(&table.name, &columns, &foreign_keys);
 
-        *query_builder = query_builder
-            .clone()
-            .create_table(&table.name, &columns, &foreign_keys);
-
+        queries.push(query_builder);
         visited.insert(table.name.clone());
     }
 

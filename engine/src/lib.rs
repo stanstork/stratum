@@ -1,7 +1,10 @@
 pub mod buffer;
 pub mod config;
+pub mod consumer;
 pub mod context;
 pub mod destination;
+pub mod producer;
+pub mod record;
 pub mod runner;
 pub mod settings;
 pub mod source;

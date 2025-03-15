@@ -1,6 +1,6 @@
 use super::data_type::ColumnDataType;
 use bigdecimal::{BigDecimal, ToPrimitive};
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::mysql::MySqlRow;
@@ -18,7 +18,7 @@ pub enum ColumnValue {
     Uuid(Uuid),
     Bytes(Vec<u8>),
     Date(NaiveDate),
-    Timestamp(NaiveDateTime),
+    Timestamp(DateTime<Utc>),
 }
 
 impl ColumnValue {
@@ -37,6 +37,10 @@ impl ColumnValue {
                 row.try_get::<String, _>(name).ok().map(Self::String)
             }
             ColumnDataType::Json => row.try_get::<Value, _>(name).ok().map(Self::Json),
+            ColumnDataType::Timestamp => row
+                .try_get::<DateTime<Utc>, _>(name)
+                .ok()
+                .map(Self::Timestamp),
             _ => None,
         }
     }

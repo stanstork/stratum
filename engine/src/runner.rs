@@ -1,10 +1,11 @@
 use crate::{
-    buffer::RecordBuffer,
+    consumer::spawn_consumer,
     context::MigrationContext,
     destination::data_dest::{create_data_destination, DataDestination},
+    producer::spawn_producer,
+    record::register_data_record,
     settings::{BatchSizeSetting, InferSchemaSetting, MigrationSetting},
     source::data_source::{create_data_source, DataSource},
-    state::MigrationState,
 };
 use smql::{
     plan::MigrationPlan,
@@ -13,12 +14,35 @@ use smql::{
         setting::{Setting, SettingValue},
     },
 };
-use sql_adapter::{get_db_adapter, DbEngine};
+use sql_adapter::{get_db_adapter, row::row::RowData, DbEngine};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::info;
 
 pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
-    let state = Arc::new(Mutex::new(MigrationState::new()));
+    info!("Running migration");
+
+    // Register RowData type for deserialization
+    register_data_record::<RowData>("RowData").await;
+
+    let (data_source, data_destination) = setup_connections(&plan).await?;
+    let context = MigrationContext::init(data_source, data_destination, &plan);
+
+    apply_settings(&plan, Arc::clone(&context)).await?;
+
+    let producer = spawn_producer(Arc::clone(&context)).await;
+    let consumer = spawn_consumer(Arc::clone(&context)).await;
+
+    // Wait for both producer and consumer to finish
+    tokio::try_join!(producer, consumer)?;
+
+    Ok(())
+}
+
+async fn setup_connections(
+    plan: &MigrationPlan,
+) -> Result<(DataSource, DataDestination), Box<dyn std::error::Error>> {
+    info!("Setting up connections");
 
     let source_adapter = get_db_adapter(
         DbEngine::from_data_format(plan.connections.source.data_format),
@@ -31,74 +55,32 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
     )
     .await?;
 
-    let table = plan.migration.source.first().unwrap().clone();
-
     let data_source = match plan.connections.source.data_format {
-        DataFormat::MySql => DataSource::Database(
-            create_data_source(table, plan.connections.source.data_format, source_adapter).await?,
-        ),
+        DataFormat::MySql => DataSource::Database(create_data_source(&plan, source_adapter).await?),
         _ => unimplemented!("Unsupported data source"),
     };
-
     let data_destination = match plan.connections.destination.data_format {
-        DataFormat::Postgres => DataDestination::Database(
-            create_data_destination(
-                plan.connections.destination.data_format,
-                destination_adapter,
-            )
-            .await?,
-        ),
+        DataFormat::Postgres => {
+            DataDestination::Database(create_data_destination(&plan, destination_adapter).await?)
+        }
         _ => unimplemented!("Unsupported data destination"),
     };
 
-    let buffer = Arc::new(RecordBuffer::new("migration_buffer"));
+    Ok((data_source, data_destination))
+}
 
-    let context = Arc::new(Mutex::new(MigrationContext {
-        state: Arc::clone(&state),
-        source: data_source,
-        destination: data_destination,
-        buffer: Arc::clone(&buffer),
-        source_data_format: plan.connections.source.data_format,
-        destination_data_format: plan.connections.destination.data_format,
-    }));
+async fn apply_settings(
+    plan: &MigrationPlan,
+    context: Arc<Mutex<MigrationContext>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    info!("Applying migration settings");
 
     let settings = parse_settings(&plan.migration.settings);
     for setting in settings.iter() {
         setting.apply(Arc::clone(&context)).await?;
     }
 
-    // let buffer_clone = Arc::clone(&buffer);
-    // let data_source_clone = Arc::clone(&data_source);
-
-    // // Spawn producer task
-    // let producer_task = tokio::spawn(async move {
-    //     let mut offset = 0;
-    //     loop {
-    //         let records = data_source_clone
-    //             .fetch_data(100, Some(offset))
-    //             .await
-    //             .unwrap();
-
-    //         println!("Fetched {} records", records.len());
-
-    //         if records.is_empty() {
-    //             break;
-    //         }
-
-    //         for record in records {
-    //             if let Err(e) = buffer_clone.store(record.serialize()) {
-    //                 eprintln!("Failed to store record: {}", e);
-    //                 return;
-    //             }
-    //         }
-
-    //         offset += state.lock().await.batch_size;
-    //     }
-    // });
-
-    // producer_task.await?;
-
-    // Consumer code will go here
+    context.lock().await.debug_state().await;
 
     Ok(())
 }

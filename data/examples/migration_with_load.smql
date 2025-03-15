@@ -11,7 +11,8 @@ FILTER (
 MIGRATE orders TO orders_collection
 WITH SETTINGS (
     INFER_SCHEMA = TRUE,
-    CREATE_TABLE = TRUE
+    CREATE_TABLE = TRUE,
+    BATCH_SIZE   = 10
 );
 
 LOAD users FROM users USING user_id;

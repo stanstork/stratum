@@ -105,13 +105,6 @@ impl DbAdapter for MySqlAdapter {
         &self,
         request: FetchRowsRequest,
     ) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
-        // let query = SqlQueryBuilder::new()
-        //     .select(&request.columns, request.table.as_str())
-        //     .from(request.table)
-        //     .limit(request.limit)
-        //     .offset(request.offset.unwrap_or(0))
-        //     .build();
-
         let query = SqlQueryBuilder::new()
             .select(&request.columns, request.table.as_str())
             .from(&request.table)

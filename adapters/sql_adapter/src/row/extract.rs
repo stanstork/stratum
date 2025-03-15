@@ -4,6 +4,7 @@ use crate::metadata::column::{
     value::{ColumnData, ColumnValue},
 };
 use bigdecimal::{BigDecimal, ToPrimitive};
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::{mysql::MySqlRow, Column, Row, TypeInfo};
 
@@ -30,6 +31,8 @@ impl RowDataExt for MySqlRowDataExt {
                     ColumnDataType::String
                 });
 
+            println!("Column type: {:?}", column_type);
+
             let value = match column_type {
                 ColumnDataType::Int24 | ColumnDataType::Long => row
                     .try_get::<i32, _>(column.ordinal())
@@ -51,6 +54,10 @@ impl RowDataExt for MySqlRowDataExt {
                     .try_get::<Value, _>(column.ordinal())
                     .ok()
                     .map(ColumnValue::Json),
+                ColumnDataType::Timestamp => row
+                    .try_get::<DateTime<Utc>, _>(column.ordinal())
+                    .ok()
+                    .map(ColumnValue::Timestamp),
                 _ => None,
             };
 

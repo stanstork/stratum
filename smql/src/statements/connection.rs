@@ -1,4 +1,5 @@
 use crate::parser::{Rule, StatementParser};
+use bitflags::bitflags;
 use pest::iterators::Pair;
 
 #[derive(Debug, Clone)]
@@ -20,12 +21,14 @@ pub struct ConnectionPair {
     pub con_type: ConnectionType,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum DataFormat {
-    MySql,
-    Postgres,
-    Sqlite,
-    Mongo,
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct DataFormat: u8 {
+        const MySql    = 0b0001;
+        const Postgres = 0b0010;
+        const Sqlite   = 0b0100;
+        const Mongo    = 0b1000;
+    }
 }
 
 impl DataFormat {
@@ -37,6 +40,10 @@ impl DataFormat {
             "mongo" => Ok(DataFormat::Mongo),
             _ => Err(format!("Invalid data format: {}", pair.as_str())),
         }
+    }
+
+    pub const fn sql_databases() -> Self {
+        Self::MySql.union(Self::Postgres).union(Self::Sqlite)
     }
 }
 

@@ -25,4 +25,14 @@ impl RecordBuffer {
         self.db.flush()?; // Ensure data is written to disk
         Ok(())
     }
+
+    pub fn read_next(&self) -> Option<Vec<u8>> {
+        let mut iter = self.db.iter();
+        if let Some(Ok((key, value))) = iter.next() {
+            let _ = self.db.remove(&key); // Remove after reading
+            Some(value.to_vec())
+        } else {
+            None
+        }
+    }
 }
