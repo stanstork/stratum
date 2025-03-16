@@ -1,6 +1,10 @@
 use crate::{
-    adapter::DbAdapter, metadata::table::TableMetadata, requests::FetchRowsRequest,
-    row::row::RowData,
+    adapter::DbAdapter,
+    db_type::DbType,
+    metadata::{provider::MetadataProvider, table::TableMetadata},
+    query::loader::QueryLoader,
+    requests::FetchRowsRequest,
+    row::row::{DbRow, RowData},
 };
 use async_trait::async_trait;
 use sqlx::{Pool, Postgres, Row};
@@ -44,7 +48,14 @@ impl DbAdapter for PgAdapter {
         &self,
         table: &str,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
-        todo!("Implement fetch_metadata for Postgres")
+        let query = QueryLoader::table_metadata_query(DbType::Postgres)
+            .map_err(|_| sqlx::Error::Configuration("Table metadata query not found".into()))?
+            .replace("{table}", table);
+
+        let rows = sqlx::query(&query).fetch_all(&self.pool).await?;
+        let rows = rows.iter().map(|row| DbRow::PostgresRow(row)).collect();
+
+        MetadataProvider::process_metadata_rows(table, &rows)
     }
 
     async fn fetch_rows(

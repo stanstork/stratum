@@ -80,8 +80,13 @@ lazy_static! {
 }
 
 impl ColumnDataType {
-    pub fn from_row(row: &MySqlRow) -> Self {
+    pub fn from_mysql_row(row: &MySqlRow) -> Self {
         let data_type_str = row.try_get::<String, _>("DATA_TYPE").unwrap_or_default();
+        Self::try_from(data_type_str.as_str()).unwrap_or(Self::String)
+    }
+
+    pub fn from_pg_row(row: &sqlx::postgres::PgRow) -> Self {
+        let data_type_str = row.try_get::<String, _>("data_type").unwrap_or_default();
         Self::try_from(data_type_str.as_str()).unwrap_or(Self::String)
     }
 }

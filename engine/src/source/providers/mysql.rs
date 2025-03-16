@@ -2,7 +2,7 @@ use crate::{record::DataRecord, source::data_source::DbDataSource};
 use async_trait::async_trait;
 use sql_adapter::{
     adapter::DbAdapter,
-    metadata::{table::TableMetadata, utils::build_table_metadata},
+    metadata::{provider::MetadataProvider, table::TableMetadata},
     mysql::MySqlAdapter,
     requests::FetchRowsRequest,
 };
@@ -19,7 +19,7 @@ impl MySqlDataSource {
         adapter: MySqlAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let boxed_adapter: Box<dyn DbAdapter + Send + Sync> = Box::new(adapter.clone());
-        let metadata = build_table_metadata(&boxed_adapter, table).await?;
+        let metadata = MetadataProvider::build_table_metadata(&boxed_adapter, table).await?;
 
         let source = MySqlDataSource {
             metadata,

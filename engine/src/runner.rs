@@ -15,7 +15,7 @@ use smql::{
         setting::{Setting, SettingValue},
     },
 };
-use sql_adapter::{metadata::utils::build_table_metadata, row::row::RowData};
+use sql_adapter::{metadata::provider::MetadataProvider, row::row::RowData};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -30,7 +30,7 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
     let context = MigrationContext::init(data_source, data_destination, &plan);
 
     apply_settings(&plan, Arc::clone(&context)).await?;
-    validate_data_destination(&plan, &context.lock().await.destination).await?;
+    validate_destination(&plan, &context.lock().await.destination).await?;
 
     let producer = spawn_producer(Arc::clone(&context)).await;
     let consumer = spawn_consumer(Arc::clone(&context)).await;
@@ -87,14 +87,15 @@ async fn apply_settings(
     Ok(())
 }
 
-async fn validate_data_destination(
+async fn validate_destination(
     plan: &MigrationPlan,
     destination: &DataDestination,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match destination {
         DataDestination::Database(destination) => {
             let dest_table = plan.migration.target.clone();
-            let metadata = build_table_metadata(&destination.adapter(), &dest_table).await?;
+            let metadata =
+                MetadataProvider::build_table_metadata(&destination.adapter(), &dest_table).await?;
             println!("Dest metadata: {:#?}", metadata);
             // destination.validate_schema(&metadata).await?
         }

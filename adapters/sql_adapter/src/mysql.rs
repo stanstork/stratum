@@ -1,18 +1,16 @@
 use crate::{
     adapter::DbAdapter,
-    metadata::{
-        column::metadata::ColumnMetadata, foreign_key::ForeignKeyMetadata, table::TableMetadata,
-    },
+    db_type::DbType,
+    metadata::{provider::MetadataProvider, table::TableMetadata},
     query::{builder::SqlQueryBuilder, loader::QueryLoader},
     requests::FetchRowsRequest,
     row::{
         extract::{MySqlRowDataExt, RowDataExt},
-        row::RowData,
+        row::{DbRow, RowData},
     },
 };
 use async_trait::async_trait;
 use sqlx::{MySql, Pool, Row};
-use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct MySqlAdapter {
@@ -27,21 +25,20 @@ impl DbAdapter for MySqlAdapter {
     }
 
     async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        let query = "SELECT EXISTS (
-            SELECT table_name
-            FROM information_schema.tables
-            WHERE table_schema = 'test'
-            AND table_name = $1
-        )";
+        let query = QueryLoader::table_exists_query(DbType::MySql)
+            .map_err(|_| sqlx::Error::Configuration("Table exists query not found".into()))?;
+        let row = sqlx::query(&query)
+            .bind(table)
+            .fetch_one(&self.pool)
+            .await?;
 
-        let row = sqlx::query(query).bind(table).fetch_one(&self.pool).await?;
-        let exists: bool = row.get(0);
-        Ok(exists)
+        Ok(row.get(0))
     }
 
     async fn truncate_table(&self, table: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let query = format!("TRUNCATE TABLE {}", table);
-        sqlx::query(&query).execute(&self.pool).await?;
+        let query = QueryLoader::truncate_table_query(DbType::MySql)
+            .map_err(|_| sqlx::Error::Configuration("Truncate table query not found".into()))?;
+        sqlx::query(&query).bind(table).execute(&self.pool).await?;
         Ok(())
     }
 
@@ -54,9 +51,8 @@ impl DbAdapter for MySqlAdapter {
         &self,
         table: &str,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
-        let query = QueryLoader::table_metadata_query()
+        let query = QueryLoader::table_metadata_query(DbType::MySql)
             .map_err(|_| sqlx::Error::Configuration("Table metadata query not found".into()))?;
-
         let rows = sqlx::query(&query)
             .bind(table)
             .bind(table)
@@ -64,42 +60,9 @@ impl DbAdapter for MySqlAdapter {
             .bind(table)
             .fetch_all(&self.pool)
             .await?;
+        let rows = rows.iter().map(|row| DbRow::MySqlRow(row)).collect();
 
-        let columns: HashMap<String, ColumnMetadata> = rows
-            .iter()
-            .map(|row| ColumnMetadata::from(row))
-            .map(|col| (col.name.clone(), col))
-            .collect();
-
-        let primary_keys: Vec<String> = columns
-            .values()
-            .filter(|col| col.is_primary_key)
-            .map(|col| col.name.clone())
-            .collect();
-
-        let foreign_keys: Vec<ForeignKeyMetadata> = columns
-            .values()
-            .filter_map(|col| {
-                col.referenced_table
-                    .as_ref()
-                    .zip(col.referenced_column.as_ref())
-                    .map(|(ref_table, ref_column)| ForeignKeyMetadata {
-                        column: col.name.clone(),
-                        referenced_table: ref_table.clone(),
-                        referenced_column: ref_column.clone(),
-                    })
-            })
-            .collect();
-
-        Ok(TableMetadata {
-            name: table.to_string(),
-            schema: None,
-            columns,
-            primary_keys,
-            foreign_keys,
-            referenced_tables: HashMap::new(),
-            referencing_tables: HashMap::new(),
-        })
+        MetadataProvider::process_metadata_rows(table, &rows)
     }
 
     async fn fetch_rows(

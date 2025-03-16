@@ -31,8 +31,6 @@ impl RowDataExt for MySqlRowDataExt {
                     ColumnDataType::String
                 });
 
-            println!("Column type: {:?}", column_type);
-
             let value = match column_type {
                 ColumnDataType::Int24 | ColumnDataType::Long => row
                     .try_get::<i32, _>(column.ordinal())

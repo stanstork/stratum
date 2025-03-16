@@ -4,6 +4,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::mysql::MySqlRow;
+use sqlx::postgres::PgRow;
 use sqlx::Row;
 use std::fmt;
 use uuid::Uuid;
@@ -22,7 +23,30 @@ pub enum ColumnValue {
 }
 
 impl ColumnValue {
-    pub fn from_row(row: &MySqlRow, data_type: ColumnDataType, name: &str) -> Option<Self> {
+    pub fn from_mysql_row(row: &MySqlRow, data_type: ColumnDataType, name: &str) -> Option<Self> {
+        match data_type {
+            ColumnDataType::Int24 | ColumnDataType::Long => row
+                .try_get::<i32, _>(name)
+                .ok()
+                .map(|v| Self::Int(v as i64)),
+            ColumnDataType::Float => row.try_get::<f64, _>(name).ok().map(Self::Float),
+            ColumnDataType::Decimal => row
+                .try_get::<BigDecimal, _>(name)
+                .ok()
+                .and_then(|v| v.to_f64().map(Self::Float)),
+            ColumnDataType::String | ColumnDataType::VarChar => {
+                row.try_get::<String, _>(name).ok().map(Self::String)
+            }
+            ColumnDataType::Json => row.try_get::<Value, _>(name).ok().map(Self::Json),
+            ColumnDataType::Timestamp => row
+                .try_get::<DateTime<Utc>, _>(name)
+                .ok()
+                .map(Self::Timestamp),
+            _ => None,
+        }
+    }
+
+    pub fn from_pg_row(row: &PgRow, data_type: ColumnDataType, name: &str) -> Option<Self> {
         match data_type {
             ColumnDataType::Int24 | ColumnDataType::Long => row
                 .try_get::<i32, _>(name)

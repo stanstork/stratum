@@ -5,3 +5,8 @@ use serde::{Deserialize, Serialize};
 pub struct RowData {
     pub columns: Vec<ColumnData>,
 }
+
+pub enum DbRow<'a> {
+    MySqlRow(&'a sqlx::mysql::MySqlRow),
+    PostgresRow(&'a sqlx::postgres::PgRow),
+}

@@ -8,7 +8,7 @@ FILTER (
     age > 18
 );
 
-MIGRATE orders TO orders_collection
+MIGRATE orders TO orders
 WITH SETTINGS (
     INFER_SCHEMA = TRUE,
     CREATE_TABLE = TRUE,
