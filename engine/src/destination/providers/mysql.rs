@@ -1,9 +1,9 @@
 use crate::{destination::data_dest::DbDataDestination, record::DataRecord};
 use async_trait::async_trait;
-use sql_adapter::{metadata::table::TableMetadata, mysql::MySqlAdapter};
+use sql_adapter::{adapter::DbAdapter, metadata::table::TableMetadata, mysql::MySqlAdapter};
 
 pub struct MySqlDestination {
-    manager: MySqlAdapter,
+    adapter: MySqlAdapter,
 }
 
 #[async_trait]
@@ -22,5 +22,16 @@ impl DbDataDestination for MySqlDestination {
         metadata: &TableMetadata,
     ) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
+    }
+
+    async fn validate_schema(
+        &self,
+        metadata: &TableMetadata,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+    fn adapter(&self) -> Box<dyn DbAdapter + Send + Sync> {
+        Box::new(self.adapter.clone())
     }
 }

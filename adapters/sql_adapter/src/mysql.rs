@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use sqlx::{MySql, Pool, Row};
 use std::collections::HashMap;
 
+#[derive(Clone)]
 pub struct MySqlAdapter {
     pool: Pool<MySql>,
 }

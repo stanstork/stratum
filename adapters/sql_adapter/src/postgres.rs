@@ -5,6 +5,7 @@ use crate::{
 use async_trait::async_trait;
 use sqlx::{Pool, Postgres, Row};
 
+#[derive(Clone)]
 pub struct PgAdapter {
     pool: Pool<Postgres>,
 }

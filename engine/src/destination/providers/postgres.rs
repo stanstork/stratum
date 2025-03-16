@@ -3,19 +3,18 @@ use async_trait::async_trait;
 use sql_adapter::{
     adapter::DbAdapter,
     metadata::table::TableMetadata,
+    postgres::PgAdapter,
     query::builder::{ColumnInfo, ForeignKeyInfo, SqlQueryBuilder},
 };
 use std::collections::HashSet;
 use tracing::{error, info};
 
 pub struct PgDestination {
-    adapter: Box<dyn DbAdapter + Send + Sync>,
+    adapter: PgAdapter,
 }
 
 impl PgDestination {
-    pub fn new(
-        adapter: Box<dyn DbAdapter + Send + Sync>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(adapter: PgAdapter) -> Result<Self, Box<dyn std::error::Error>> {
         Ok(PgDestination { adapter })
     }
 
@@ -85,6 +84,13 @@ impl DbDataDestination for PgDestination {
         Ok(())
     }
 
+    async fn validate_schema(
+        &self,
+        metadata: &TableMetadata,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        todo!("Implement schema validation")
+    }
+
     async fn write(
         &self,
         data: Vec<Box<dyn DataRecord + Send + Sync>>,
@@ -119,6 +125,10 @@ impl DbDataDestination for PgDestination {
         //     }
         // }
         Ok(())
+    }
+
+    fn adapter(&self) -> Box<dyn DbAdapter + Send + Sync> {
+        Box::new(self.adapter.clone())
     }
 }
 

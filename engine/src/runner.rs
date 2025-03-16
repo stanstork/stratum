@@ -1,4 +1,5 @@
 use crate::{
+    adapter::get_adapter,
     consumer::spawn_consumer,
     context::MigrationContext,
     destination::data_dest::{create_data_destination, DataDestination},
@@ -14,7 +15,7 @@ use smql::{
         setting::{Setting, SettingValue},
     },
 };
-use sql_adapter::{get_db_adapter, row::row::RowData, DbEngine};
+use sql_adapter::{metadata::utils::build_table_metadata, row::row::RowData};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -29,6 +30,7 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
     let context = MigrationContext::init(data_source, data_destination, &plan);
 
     apply_settings(&plan, Arc::clone(&context)).await?;
+    validate_data_destination(&plan, &context.lock().await.destination).await?;
 
     let producer = spawn_producer(Arc::clone(&context)).await;
     let consumer = spawn_consumer(Arc::clone(&context)).await;
@@ -44,13 +46,13 @@ async fn setup_connections(
 ) -> Result<(DataSource, DataDestination), Box<dyn std::error::Error>> {
     info!("Setting up connections");
 
-    let source_adapter = get_db_adapter(
-        DbEngine::from_data_format(plan.connections.source.data_format),
+    let source_adapter = get_adapter(
+        plan.connections.source.data_format,
         &plan.connections.source.con_str,
     )
     .await?;
-    let destination_adapter = get_db_adapter(
-        DbEngine::from_data_format(plan.connections.destination.data_format),
+    let destination_adapter = get_adapter(
+        plan.connections.destination.data_format,
         &plan.connections.destination.con_str,
     )
     .await?;
@@ -81,6 +83,22 @@ async fn apply_settings(
     }
 
     context.lock().await.debug_state().await;
+
+    Ok(())
+}
+
+async fn validate_data_destination(
+    plan: &MigrationPlan,
+    destination: &DataDestination,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match destination {
+        DataDestination::Database(destination) => {
+            let dest_table = plan.migration.target.clone();
+            let metadata = build_table_metadata(&destination.adapter(), &dest_table).await?;
+            println!("Dest metadata: {:#?}", metadata);
+            // destination.validate_schema(&metadata).await?
+        }
+    }
 
     Ok(())
 }

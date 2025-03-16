@@ -1,20 +1,26 @@
 use crate::{record::DataRecord, source::data_source::DbDataSource};
 use async_trait::async_trait;
-use sql_adapter::{adapter::DbAdapter, metadata::table::TableMetadata, requests::FetchRowsRequest};
-use std::collections::{HashMap, HashSet};
+use sql_adapter::{
+    adapter::DbAdapter,
+    metadata::{table::TableMetadata, utils::build_table_metadata},
+    mysql::MySqlAdapter,
+    requests::FetchRowsRequest,
+};
 
 pub struct MySqlDataSource {
-    metadata: Option<TableMetadata>,
+    metadata: TableMetadata,
     table: String,
-    adapter: Box<dyn DbAdapter + Send + Sync>,
+    adapter: MySqlAdapter,
 }
 
 impl MySqlDataSource {
     pub async fn new(
         table: &str,
-        adapter: Box<dyn DbAdapter + Send + Sync>,
+        adapter: MySqlAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let metadata = Self::build_metadata(&adapter, table).await.ok();
+        let boxed_adapter: Box<dyn DbAdapter + Send + Sync> = Box::new(adapter.clone());
+        let metadata = build_table_metadata(&boxed_adapter, table).await?;
+
         let source = MySqlDataSource {
             metadata,
             table: table.to_string(),
@@ -23,19 +29,8 @@ impl MySqlDataSource {
         Ok(source)
     }
 
-    pub fn metadata(&self) -> &Option<TableMetadata> {
+    pub fn metadata(&self) -> &TableMetadata {
         &self.metadata
-    }
-
-    async fn build_metadata(
-        adapter: &Box<dyn DbAdapter + Send + Sync>,
-        table: &str,
-    ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
-        let mut graph = HashMap::new();
-        let mut visited = HashSet::new();
-        let metadata =
-            TableMetadata::build_dep_graph(table, adapter, &mut graph, &mut visited).await?;
-        Ok(metadata)
     }
 }
 
@@ -48,14 +43,7 @@ impl DbDataSource for MySqlDataSource {
         batch_size: usize,
         offset: Option<usize>,
     ) -> Result<Vec<Box<dyn DataRecord + Send + Sync>>, Box<dyn std::error::Error>> {
-        let columns = self
-            .metadata()
-            .as_ref()
-            .unwrap()
-            .columns
-            .keys()
-            .cloned()
-            .collect();
+        let columns = self.metadata().columns.keys().cloned().collect();
         let request = FetchRowsRequest {
             table: self.table.clone(),
             columns,
@@ -73,7 +61,7 @@ impl DbDataSource for MySqlDataSource {
     }
 
     async fn get_metadata(&self) -> Result<TableMetadata, Box<dyn std::error::Error>> {
-        let metadata = self.metadata().as_ref().unwrap();
+        let metadata = self.metadata();
         Ok(metadata.clone())
     }
 }

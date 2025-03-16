@@ -1,5 +1,5 @@
 use super::{column::metadata::ColumnMetadata, foreign_key::ForeignKeyMetadata};
-use crate::{adapter::DbAdapter, mysql::MySqlAdapter};
+use crate::adapter::DbAdapter;
 use std::{
     collections::{HashMap, HashSet},
     future::Future,

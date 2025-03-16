@@ -1,5 +1,5 @@
 use super::providers::postgres::PgDestination;
-use crate::record::DataRecord;
+use crate::{adapter::Adapter, record::DataRecord};
 use async_trait::async_trait;
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::{adapter::DbAdapter, metadata::table::TableMetadata};
@@ -18,11 +18,17 @@ pub trait DbDataDestination: Send + Sync {
         &self,
         metadata: &TableMetadata,
     ) -> Result<(), Box<dyn std::error::Error>>;
+    async fn validate_schema(
+        &self,
+        metadata: &TableMetadata,
+    ) -> Result<(), Box<dyn std::error::Error>>;
+
+    fn adapter(&self) -> Box<dyn DbAdapter + Send + Sync>;
 }
 
 pub async fn create_data_destination(
     plan: &MigrationPlan,
-    adapter: Box<dyn DbAdapter + Send + Sync>,
+    adapter: Adapter,
 ) -> Result<
     Arc<dyn DbDataDestination<Record = Box<dyn DataRecord + Send + Sync>>>,
     Box<dyn std::error::Error>,
@@ -31,8 +37,12 @@ pub async fn create_data_destination(
 
     match data_format {
         DataFormat::Postgres => {
-            let destination = PgDestination::new(adapter)?;
-            Ok(Arc::new(destination))
+            if let Adapter::Postgres(adapter) = adapter {
+                let destination = PgDestination::new(adapter)?;
+                Ok(Arc::new(destination))
+            } else {
+                panic!("Invalid adapter type")
+            }
         }
         DataFormat::MySql => unimplemented!("MySql data destination not implemented"),
         _ => unimplemented!("Unsupported data destination"),

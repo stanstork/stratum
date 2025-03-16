@@ -1,10 +1,11 @@
 use super::providers::mysql::MySqlDataSource;
-use crate::record::DataRecord;
+use crate::{adapter::Adapter, record::DataRecord};
 use async_trait::async_trait;
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
-use sql_adapter::{adapter::DbAdapter, metadata::table::TableMetadata};
+use sql_adapter::metadata::table::TableMetadata;
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub enum DataSource {
     Database(Arc<dyn DbDataSource<Record = Box<dyn DataRecord + Send + Sync>>>),
 }
@@ -23,7 +24,7 @@ pub trait DbDataSource: Send + Sync {
 
 pub async fn create_data_source(
     plan: &MigrationPlan,
-    adapter: Box<dyn DbAdapter + Send + Sync>,
+    adapter: Adapter,
 ) -> Result<
     Arc<dyn DbDataSource<Record = Box<dyn DataRecord + Send + Sync>>>,
     Box<dyn std::error::Error>,
@@ -33,8 +34,12 @@ pub async fn create_data_source(
 
     match data_format {
         DataFormat::MySql => {
-            let source = MySqlDataSource::new(&source, adapter).await?;
-            Ok(Arc::new(source))
+            if let Adapter::MySql(adapter) = adapter {
+                let source = MySqlDataSource::new(&source, adapter).await?;
+                Ok(Arc::new(source))
+            } else {
+                panic!("Invalid adapter type")
+            }
         }
         DataFormat::Postgres => unimplemented!("Postgres data source not implemented"),
         _ => unimplemented!("Unsupported data source"),
