@@ -5,7 +5,7 @@ use crate::{
     query::{builder::SqlQueryBuilder, loader::QueryLoader},
     requests::FetchRowsRequest,
     row::{
-        extract::{MySqlRowDataExt, RowDataExt},
+        extract::RowExtractor,
         row::{DbRow, RowData},
     },
 };
@@ -25,19 +25,16 @@ impl DbAdapter for MySqlAdapter {
     }
 
     async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        let query = QueryLoader::table_exists_query(DbType::MySql)
-            .map_err(|_| sqlx::Error::Configuration("Table exists query not found".into()))?;
+        let query = QueryLoader::table_exists_query(DbType::MySql)?;
         let row = sqlx::query(&query)
             .bind(table)
             .fetch_one(&self.pool)
             .await?;
-
         Ok(row.get(0))
     }
 
     async fn truncate_table(&self, table: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let query = QueryLoader::truncate_table_query(DbType::MySql)
-            .map_err(|_| sqlx::Error::Configuration("Truncate table query not found".into()))?;
+        let query = QueryLoader::truncate_table_query(DbType::MySql)?;
         sqlx::query(&query).bind(table).execute(&self.pool).await?;
         Ok(())
     }
@@ -51,8 +48,7 @@ impl DbAdapter for MySqlAdapter {
         &self,
         table: &str,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
-        let query = QueryLoader::table_metadata_query(DbType::MySql)
-            .map_err(|_| sqlx::Error::Configuration("Table metadata query not found".into()))?;
+        let query = QueryLoader::table_metadata_query(DbType::MySql)?;
         let rows = sqlx::query(&query)
             .bind(table)
             .bind(table)
@@ -75,11 +71,11 @@ impl DbAdapter for MySqlAdapter {
             .limit(request.limit)
             .offset(request.offset.unwrap_or(0))
             .build();
-
         let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
+
         Ok(rows
             .iter()
-            .map(|row| MySqlRowDataExt::from_row(row))
+            .map(|row| RowExtractor::from_row(&DbRow::MySqlRow(row)))
             .collect())
     }
 }

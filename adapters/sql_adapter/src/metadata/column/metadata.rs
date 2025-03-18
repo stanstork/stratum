@@ -1,11 +1,21 @@
-use crate::row::row::DbRow;
-
-use super::data_type;
 use super::{data_type::ColumnDataType, value::ColumnValue};
+use crate::row::row::DbRow;
 use serde::{Deserialize, Serialize};
-use sqlx::mysql::MySqlRow;
-use sqlx::postgres::PgRow;
-use sqlx::Row;
+
+const COL_ORDINAL_POSITION: &str = "ordinal_position";
+const COL_COLUMN_NAME: &str = "column_name";
+const COL_IS_NULLABLE: &str = "is_nullable";
+const COL_COLUMN_DEFAULT: &str = "column_default";
+const COL_CHAR_MAX_LENGTH: &str = "character_maximum_length";
+const COL_NUMERIC_PRECISION: &str = "numeric_precision";
+const COL_NUMERIC_SCALE: &str = "numeric_scale";
+const COL_IS_PRIMARY_KEY: &str = "is_primary_key";
+const COL_IS_UNIQUE: &str = "is_unique";
+const COL_IS_AUTO_INCREMENT: &str = "is_auto_increment";
+const COL_REFERENCED_TABLE: &str = "referenced_table";
+const COL_REFERENCED_COLUMN: &str = "referenced_column";
+const COL_ON_DELETE: &str = "on_delete";
+const COL_ON_UPDATE: &str = "on_update";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ColumnMetadata {
@@ -27,88 +37,26 @@ pub struct ColumnMetadata {
     pub on_update: Option<String>,
 }
 
-// impl From<&MySqlRow> for ColumnMetadata {
-//     fn from(row: &MySqlRow) -> Self {
-//         let data_type = ColumnDataType::from_row(row);
-//         Self {
-//             ordinal: row.try_get::<i32, _>("ORDINAL_POSITION").unwrap_or(0) as usize,
-//             name: row.try_get::<String, _>("COLUMN_NAME").unwrap_or_default(),
-//             data_type,
-//             is_nullable: row.try_get::<i32, _>("IS_NULLABLE").unwrap_or(0) == 1,
-//             has_default: row.try_get::<i32, _>("HAS_DEFAULT").unwrap_or(0) == 1,
-//             default_value: ColumnValue::from_mysql_row(row, data_type, "COLUMN_DEFAULT"),
-//             char_max_length: row
-//                 .try_get::<i64, _>("CHARACTER_MAXIMUM_LENGTH")
-//                 .ok()
-//                 .map(|v| v as usize),
-//             num_precision: row.try_get::<u32, _>("NUMERIC_PRECISION").ok(),
-//             num_scale: row.try_get::<u32, _>("NUMERIC_SCALE").ok(),
-//             is_primary_key: row.try_get::<i32, _>("IS_PRIMARY_KEY").unwrap_or(0) == 1,
-//             is_unique: row.try_get::<i32, _>("IS_UNIQUE").unwrap_or(0) == 1,
-//             is_auto_increment: row.try_get::<i32, _>("IS_AUTO_INCREMENT").unwrap_or(0) == 1,
-//             referenced_table: row.try_get::<String, _>("REFERENCED_TABLE").ok(),
-//             referenced_column: row.try_get::<String, _>("REFERENCED_COLUMN").ok(),
-//             on_delete: row.try_get::<String, _>("ON_DELETE").ok(),
-//             on_update: row.try_get::<String, _>("ON_UPDATE").ok(),
-//         }
-//     }
-// }
-
-// impl From<&PgRow> for ColumnMetadata {
-//     fn from(row: &PgRow) -> Self {
-//         let data_type = ColumnDataType::from_row(row);
-//         Self {
-//             ordinal: row.try_get::<i32, _>("ordinal_position").unwrap_or(0) as usize,
-//             name: row.try_get::<String, _>("column_name").unwrap_or_default(),
-//             data_type,
-//             is_nullable: row.try_get::<String, _>("is_nullable").unwrap_or_default() == "YES",
-//             has_default: row.try_get::<String, _>("column_default").is_ok(),
-//             default_value: ColumnValue::from_pg_row(row, data_type, "column_default"),
-//             char_max_length: row
-//                 .try_get::<i64, _>("character_maximum_length")
-//                 .ok()
-//                 .map(|v| v as usize),
-//             num_precision: row
-//                 .try_get::<i32, _>("numeric_precision")
-//                 .ok()
-//                 .map(|v| v as u32),
-//             num_scale: row
-//                 .try_get::<i32, _>("numeric_scale")
-//                 .ok()
-//                 .map(|v| v as u32),
-//             is_primary_key: row.try_get::<bool, _>("is_primary_key").unwrap_or(false),
-//             is_unique: row.try_get::<bool, _>("is_unique").unwrap_or(false),
-//             is_auto_increment: row.try_get::<bool, _>("is_auto_increment").unwrap_or(false),
-//             referenced_table: row.try_get::<String, _>("referenced_table").ok(),
-//             referenced_column: row.try_get::<String, _>("referenced_column").ok(),
-//             on_delete: row.try_get::<String, _>("on_delete").ok(),
-//             on_update: row.try_get::<String, _>("on_update").ok(),
-//         }
-//     }
-// }
-
 impl From<&DbRow<'_>> for ColumnMetadata {
     fn from(row: &DbRow) -> Self {
         let data_type = ColumnDataType::from_row(row);
         Self {
-            ordinal: row.try_get_i32("ordinal_position").unwrap_or(0) as usize,
-            name: row.try_get_string("column_name").unwrap_or_default(),
+            ordinal: row.try_get_i32(COL_ORDINAL_POSITION).unwrap_or(0) as usize,
+            name: row.try_get_string(COL_COLUMN_NAME).unwrap_or_default(),
             data_type,
-            is_nullable: row.try_get_string("is_nullable").unwrap_or_default() == "YES",
-            has_default: row.try_get_string("column_default").is_some(),
-            default_value: ColumnValue::from_row(row, data_type, "column_default"),
-            char_max_length: row
-                .try_get_i64("character_maximum_length")
-                .map(|v| v as usize),
-            num_precision: row.try_get_i32("numeric_precision").map(|v| v as u32),
-            num_scale: row.try_get_i32("numeric_scale").map(|v| v as u32),
-            is_primary_key: row.try_get_bool("is_primary_key").unwrap_or(false),
-            is_unique: row.try_get_bool("is_unique").unwrap_or(false),
-            is_auto_increment: row.try_get_bool("is_auto_increment").unwrap_or(false),
-            referenced_table: row.try_get_string("referenced_table"),
-            referenced_column: row.try_get_string("referenced_column"),
-            on_delete: row.try_get_string("on_delete"),
-            on_update: row.try_get_string("on_update"),
+            is_nullable: row.try_get_string(COL_IS_NULLABLE).unwrap_or_default() == "YES",
+            has_default: row.try_get_string(COL_COLUMN_DEFAULT).is_some(),
+            default_value: ColumnValue::from_row(row, data_type, COL_COLUMN_DEFAULT),
+            char_max_length: row.try_get_i64(COL_CHAR_MAX_LENGTH).map(|v| v as usize),
+            num_precision: row.try_get_i32(COL_NUMERIC_PRECISION).map(|v| v as u32),
+            num_scale: row.try_get_i32(COL_NUMERIC_SCALE).map(|v| v as u32),
+            is_primary_key: row.try_get_bool(COL_IS_PRIMARY_KEY).unwrap_or(false),
+            is_unique: row.try_get_bool(COL_IS_UNIQUE).unwrap_or(false),
+            is_auto_increment: row.try_get_bool(COL_IS_AUTO_INCREMENT).unwrap_or(false),
+            referenced_table: row.try_get_string(COL_REFERENCED_TABLE),
+            referenced_column: row.try_get_string(COL_REFERENCED_COLUMN),
+            on_delete: row.try_get_string(COL_ON_DELETE),
+            on_update: row.try_get_string(COL_ON_UPDATE),
         }
     }
 }

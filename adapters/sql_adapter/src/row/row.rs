@@ -1,6 +1,6 @@
 use crate::metadata::column::value::ColumnData;
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
+use sqlx::{Column, Row, TypeInfo};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RowData {
@@ -13,6 +13,20 @@ pub enum DbRow<'a> {
 }
 
 impl DbRow<'_> {
+    pub fn columns(&self) -> Vec<&str> {
+        match self {
+            DbRow::MySqlRow(row) => row.columns().iter().map(|col| col.name()).collect(),
+            DbRow::PostgresRow(row) => row.columns().iter().map(|col| col.name()).collect(),
+        }
+    }
+
+    pub fn column_type(&self, name: &str) -> &str {
+        match self {
+            DbRow::MySqlRow(row) => row.column(name).type_info().name(),
+            DbRow::PostgresRow(row) => row.column(name).type_info().name(),
+        }
+    }
+
     pub fn try_get_i32(&self, name: &str) -> Option<i32> {
         match self {
             DbRow::MySqlRow(row) => row.try_get::<i32, _>(name).ok(),

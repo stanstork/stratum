@@ -1,4 +1,7 @@
-use crate::{metadata::table::TableMetadata, requests::FetchRowsRequest, row::row::RowData};
+use crate::{
+    db_type::DbType, metadata::table::TableMetadata, mysql, postgres, requests::FetchRowsRequest,
+    row::row::RowData,
+};
 use async_trait::async_trait;
 
 #[async_trait]
@@ -19,4 +22,21 @@ pub trait DbAdapter {
         &self,
         request: FetchRowsRequest,
     ) -> Result<Vec<RowData>, Box<dyn std::error::Error>>;
+}
+
+pub async fn get_db_adapter(
+    db_type: DbType,
+    conn_str: &str,
+) -> Result<Box<dyn DbAdapter + Send + Sync>, Box<dyn std::error::Error>> {
+    match db_type {
+        DbType::Postgres => {
+            let adapter = postgres::PgAdapter::connect(conn_str).await?;
+            Ok(Box::new(adapter))
+        }
+        DbType::MySql => {
+            let adapter = mysql::MySqlAdapter::connect(conn_str).await?;
+            Ok(Box::new(adapter))
+        }
+        _ => Err("Unsupported database type".into()),
+    }
 }
