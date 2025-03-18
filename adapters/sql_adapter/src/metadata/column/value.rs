@@ -1,3 +1,5 @@
+use crate::row::row::DbRow;
+
 use super::data_type::ColumnDataType;
 use bigdecimal::{BigDecimal, ToPrimitive};
 use chrono::{DateTime, NaiveDate, Utc};
@@ -23,48 +25,20 @@ pub enum ColumnValue {
 }
 
 impl ColumnValue {
-    pub fn from_mysql_row(row: &MySqlRow, data_type: ColumnDataType, name: &str) -> Option<Self> {
+    pub fn from_row(row: &DbRow, data_type: ColumnDataType, name: &str) -> Option<Self> {
         match data_type {
-            ColumnDataType::Int24 | ColumnDataType::Long => row
-                .try_get::<i32, _>(name)
-                .ok()
-                .map(|v| Self::Int(v as i64)),
-            ColumnDataType::Float => row.try_get::<f64, _>(name).ok().map(Self::Float),
+            ColumnDataType::Int24 | ColumnDataType::Long => {
+                row.try_get_i32(name).map(|v| Self::Int(v as i64))
+            }
+            ColumnDataType::Float => row.try_get_f64(name).map(Self::Float),
             ColumnDataType::Decimal => row
-                .try_get::<BigDecimal, _>(name)
-                .ok()
+                .try_get_bigdecimal(name)
                 .and_then(|v| v.to_f64().map(Self::Float)),
             ColumnDataType::String | ColumnDataType::VarChar => {
-                row.try_get::<String, _>(name).ok().map(Self::String)
+                row.try_get_string(name).map(Self::String)
             }
-            ColumnDataType::Json => row.try_get::<Value, _>(name).ok().map(Self::Json),
-            ColumnDataType::Timestamp => row
-                .try_get::<DateTime<Utc>, _>(name)
-                .ok()
-                .map(Self::Timestamp),
-            _ => None,
-        }
-    }
-
-    pub fn from_pg_row(row: &PgRow, data_type: ColumnDataType, name: &str) -> Option<Self> {
-        match data_type {
-            ColumnDataType::Int24 | ColumnDataType::Long => row
-                .try_get::<i32, _>(name)
-                .ok()
-                .map(|v| Self::Int(v as i64)),
-            ColumnDataType::Float => row.try_get::<f64, _>(name).ok().map(Self::Float),
-            ColumnDataType::Decimal => row
-                .try_get::<BigDecimal, _>(name)
-                .ok()
-                .and_then(|v| v.to_f64().map(Self::Float)),
-            ColumnDataType::String | ColumnDataType::VarChar => {
-                row.try_get::<String, _>(name).ok().map(Self::String)
-            }
-            ColumnDataType::Json => row.try_get::<Value, _>(name).ok().map(Self::Json),
-            ColumnDataType::Timestamp => row
-                .try_get::<DateTime<Utc>, _>(name)
-                .ok()
-                .map(Self::Timestamp),
+            ColumnDataType::Json => row.try_get_json(name).map(Self::Json),
+            ColumnDataType::Timestamp => row.try_get_timestamp(name).map(Self::Timestamp),
             _ => None,
         }
     }

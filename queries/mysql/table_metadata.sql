@@ -30,22 +30,22 @@ foreign_keys AS (
     WHERE kcu.TABLE_NAME = ?
 )
 SELECT 
-    c.ORDINAL_POSITION,
-    c.COLUMN_NAME, 
-    CAST(c.DATA_TYPE AS CHAR) AS DATA_TYPE, 
-    c.IS_NULLABLE = 'YES' AS IS_NULLABLE,
-    c.COLUMN_DEFAULT IS NOT NULL AS HAS_DEFAULT,
-    c.COLUMN_DEFAULT,
-    c.CHARACTER_MAXIMUM_LENGTH,
-    c.NUMERIC_PRECISION,
-    c.NUMERIC_SCALE,
-    EXISTS (SELECT 1 FROM primary_keys pk WHERE pk.COLUMN_NAME = c.COLUMN_NAME) AS IS_PRIMARY_KEY,
-    EXISTS (SELECT 1 FROM unique_constraints uq WHERE uq.COLUMN_NAME = c.COLUMN_NAME) AS IS_UNIQUE,
-    c.EXTRA LIKE '%auto_increment%' AS IS_AUTO_INCREMENT,
-    CAST(fk.referenced_table AS CHAR) AS REFERENCED_TABLE,
-    fk.referenced_column AS REFERENCED_COLUMN,
-    CAST(fk.on_delete AS CHAR) AS ON_DELETE,
-    CAST(fk.on_update AS CHAR) AS ON_UPDATE
+    c.ORDINAL_POSITION AS ordinal_position,
+    c.COLUMN_NAME AS column_name,
+    CAST(c.DATA_TYPE AS CHAR) AS data_type,
+    c.IS_NULLABLE = 'YES' AS is_nullable,
+    c.COLUMN_DEFAULT IS NOT NULL AS has_default,
+    c.COLUMN_DEFAULT AS default_value,
+    c.CHARACTER_MAXIMUM_LENGTH AS character_maximum_length,
+    c.NUMERIC_PRECISION AS numeric_precision,
+    c.NUMERIC_SCALE AS numeric_scale,
+    EXISTS (SELECT 1 FROM primary_keys pk WHERE pk.COLUMN_NAME = c.COLUMN_NAME) AS is_primary_key,
+    EXISTS (SELECT 1 FROM unique_constraints uq WHERE uq.COLUMN_NAME = c.COLUMN_NAME) AS is_unique,
+    c.EXTRA LIKE '%auto_increment%' AS is_auto_increment,
+    CAST(fk.referenced_table AS CHAR) AS referenced_table,
+    fk.referenced_column AS referenced_column,
+    CAST(fk.on_delete AS CHAR) AS on_delete,
+    CAST(fk.on_update AS CHAR) AS on_update
 FROM information_schema.COLUMNS c
 LEFT JOIN foreign_keys fk 
     ON c.COLUMN_NAME = fk.COLUMN_NAME

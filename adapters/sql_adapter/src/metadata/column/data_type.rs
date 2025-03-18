@@ -1,8 +1,8 @@
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
-use sqlx::mysql::MySqlRow;
-use sqlx::Row;
 use std::collections::HashMap;
+
+use crate::row::row::DbRow;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum ColumnDataType {
@@ -80,13 +80,19 @@ lazy_static! {
 }
 
 impl ColumnDataType {
-    pub fn from_mysql_row(row: &MySqlRow) -> Self {
-        let data_type_str = row.try_get::<String, _>("DATA_TYPE").unwrap_or_default();
-        Self::try_from(data_type_str.as_str()).unwrap_or(Self::String)
+    pub fn from_row(row: &DbRow) -> Self {
+        match row {
+            DbRow::MySqlRow(row) => Self::from_sqlx_row(*row),
+            DbRow::PostgresRow(row) => Self::from_sqlx_row(*row),
+        }
     }
 
-    pub fn from_pg_row(row: &sqlx::postgres::PgRow) -> Self {
-        let data_type_str = row.try_get::<String, _>("data_type").unwrap_or_default();
+    fn from_sqlx_row<'r, T: sqlx::Row>(row: &'r T) -> Self
+    where
+        String: sqlx::Decode<'r, T::Database> + sqlx::Type<T::Database>,
+        for<'q> &'q str: sqlx::ColumnIndex<T>,
+    {
+        let data_type_str: String = row.try_get("data_type").unwrap_or_default();
         Self::try_from(data_type_str.as_str()).unwrap_or(Self::String)
     }
 }

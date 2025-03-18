@@ -28,10 +28,7 @@ impl MetadataProvider {
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
         let columns: HashMap<String, ColumnMetadata> = rows
             .iter()
-            .map(|row| match row {
-                DbRow::PostgresRow(row) => ColumnMetadata::from(*row),
-                DbRow::MySqlRow(row) => ColumnMetadata::from(*row),
-            })
+            .map(ColumnMetadata::from)
             .map(|col| (col.name.clone(), col))
             .collect();
 
