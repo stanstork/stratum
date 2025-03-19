@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use crate::row::row::DbRow;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum ColumnDataType {
     Decimal,
     Tiny,
@@ -75,6 +75,10 @@ lazy_static! {
         m.insert("MEDIUMTEXT", ColumnDataType::MediumBlob);
         m.insert("LONGBLOB", ColumnDataType::LongBlob);
         m.insert("LONGTEXT", ColumnDataType::LongBlob);
+        m.insert("INTEGER", ColumnDataType::Long);
+        m.insert("NUMERIC", ColumnDataType::Decimal);
+        m.insert("TIMESTAMP WITH TIME ZONE", ColumnDataType::Timestamp);
+        m.insert("TIMESTAMP WITHOUT TIME ZONE", ColumnDataType::Timestamp);
         m
     };
 }

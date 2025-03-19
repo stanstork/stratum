@@ -7,6 +7,7 @@ use crate::{
     record::register_data_record,
     settings::{BatchSizeSetting, InferSchemaSetting, MigrationSetting},
     source::data_source::{create_data_source, DataSource},
+    validate::schema_validator::{SchemaValidationMode, SchemaValidator},
 };
 use smql::{
     plan::MigrationPlan,
@@ -15,10 +16,10 @@ use smql::{
         setting::{Setting, SettingValue},
     },
 };
-use sql_adapter::{metadata::provider::MetadataProvider, row::row::RowData};
+use sql_adapter::row::row::RowData;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::info;
+use tracing::{error, info};
 
 pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
     info!("Running migration");
@@ -30,7 +31,7 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
     let context = MigrationContext::init(data_source, data_destination, &plan);
 
     apply_settings(&plan, Arc::clone(&context)).await?;
-    validate_destination(&plan, &context.lock().await.destination).await?;
+    validate_destination(&plan, Arc::clone(&context)).await?;
 
     let producer = spawn_producer(Arc::clone(&context)).await;
     let consumer = spawn_consumer(Arc::clone(&context)).await;
@@ -89,15 +90,37 @@ async fn apply_settings(
 
 async fn validate_destination(
     plan: &MigrationPlan,
-    destination: &DataDestination,
+    context: Arc<Mutex<MigrationContext>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    match destination {
-        DataDestination::Database(destination) => {
-            let dest_table = plan.migration.target.clone();
-            let metadata =
-                MetadataProvider::build_table_metadata(&destination.adapter(), &dest_table).await?;
-            println!("Dest metadata: {:#?}", metadata);
-            // destination.validate_schema(&metadata).await?
+    let context = context.lock().await;
+    let source_metadata = match (&context.source, &context.source_data_format) {
+        (DataSource::Database(source), format)
+            if format.intersects(DataFormat::sql_databases()) =>
+        {
+            source.get_metadata().await?
+        }
+        _ => return Err("Unsupported data source format".into()),
+    };
+    let destination_metadata = match (&context.destination, context.destination_data_format) {
+        (DataDestination::Database(destination), format)
+            if format.intersects(DataFormat::sql_databases()) =>
+        {
+            destination
+                .adapter()
+                .fetch_metadata(&plan.migration.target)
+                .await?
+        }
+        _ => unimplemented!("Unsupported data destination"),
+    };
+
+    let validator = SchemaValidator::new(&source_metadata, &destination_metadata);
+
+    if context.state.lock().await.infer_schema {
+        if let Err(err) = validator.validate(SchemaValidationMode::OneToOne) {
+            error!("Schema validation failed: {:?}", err);
+            return Err(err.into());
+        } else {
+            info!("Schema validation passed");
         }
     }
 

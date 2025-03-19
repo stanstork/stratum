@@ -44,6 +44,8 @@ impl MigrationSetting for InferSchemaSetting {
             _ => unimplemented!("Unsupported data destination"),
         }
 
+        context.state.lock().await.infer_schema = true;
+
         info!("Infer schema setting applied");
         Ok(())
     }
