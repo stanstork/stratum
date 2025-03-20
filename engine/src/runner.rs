@@ -80,7 +80,7 @@ async fn apply_settings(
 
     let settings = parse_settings(&plan.migration.settings);
     for setting in settings.iter() {
-        setting.apply(Arc::clone(&context)).await?;
+        setting.apply(plan, Arc::clone(&context)).await?;
     }
 
     context.lock().await.debug_state().await;

@@ -1,3 +1,5 @@
+use crate::requests::JoinClause;
+
 #[derive(Debug, Clone)]
 pub struct SqlQueryBuilder {
     pub query: String,
@@ -18,6 +20,13 @@ pub struct ForeignKeyInfo {
     pub referenced_column: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct SelectColumn {
+    pub table: String,
+    pub column: String,
+    pub alias: Option<String>,
+}
+
 impl SqlQueryBuilder {
     pub fn new() -> Self {
         Self {
@@ -36,20 +45,42 @@ impl SqlQueryBuilder {
         self
     }
 
-    pub fn select(mut self, columns: &Vec<String>, alias: &str) -> Self {
-        let formatted_columns: Vec<String> = columns
+    pub fn select(mut self, columns: &Vec<SelectColumn>) -> Self {
+        let columns: Vec<String> = columns
             .iter()
-            .map(|col| format!("{}.{} AS {}", alias, col, col))
+            .map(|col| {
+                if let Some(alias) = &col.alias {
+                    format!("{}.{} AS {}_{}", col.table, col.column, alias, col.column)
+                } else {
+                    format!("{}.{}", col.table, col.column)
+                }
+            })
             .collect();
 
         self.query
-            .push_str(&format!("SELECT {}", formatted_columns.join(", ")));
+            .push_str(&format!("SELECT {}", columns.join(", ")));
         self
     }
 
-    pub fn from(mut self, table: &str) -> Self {
-        self.query.push_str(" FROM ");
-        self.query.push_str(table);
+    pub fn join(mut self, joins: &Vec<JoinClause>) -> Self {
+        for join in joins {
+            self.query.push_str(&format!(
+                " {} JOIN {} AS {} ON {}.{} = {}.{}",
+                join.join_type,
+                join.table,
+                join.alias,
+                join.from_alias,
+                join.from_col,
+                join.alias,
+                join.to_col
+            ));
+        }
+        self
+    }
+
+    pub fn from(mut self, table: &str, alias: &str) -> Self {
+        self.query
+            .push_str(&format!(" FROM {} AS {}", table, alias));
         self
     }
 

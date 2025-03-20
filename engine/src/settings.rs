@@ -3,7 +3,7 @@ use crate::{
     source::data_source::DataSource,
 };
 use async_trait::async_trait;
-use smql::statements::connection::DataFormat;
+use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -12,6 +12,7 @@ use tracing::info;
 pub trait MigrationSetting {
     async fn apply(
         &self,
+        plan: &MigrationPlan,
         context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>>;
 }
@@ -23,10 +24,11 @@ pub struct BatchSizeSetting(pub i64);
 impl MigrationSetting for InferSchemaSetting {
     async fn apply(
         &self,
+        plan: &MigrationPlan,
         context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let context = context.lock().await;
-        let metadata = match (&context.source, &context.source_data_format) {
+        let mut metadata = match (&context.source, &context.source_data_format) {
             (DataSource::Database(source), format)
                 if format.intersects(DataFormat::sql_databases()) =>
             {
@@ -39,6 +41,8 @@ impl MigrationSetting for InferSchemaSetting {
             (DataDestination::Database(destination), format)
                 if format.intersects(DataFormat::sql_databases()) =>
             {
+                // Set the metadata name to the target table name
+                metadata.name = plan.migration.target.clone();
                 destination.infer_schema(&metadata).await?;
             }
             _ => unimplemented!("Unsupported data destination"),
@@ -55,6 +59,7 @@ impl MigrationSetting for InferSchemaSetting {
 impl MigrationSetting for BatchSizeSetting {
     async fn apply(
         &self,
+        _plan: &MigrationPlan,
         context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let context = context.lock().await;

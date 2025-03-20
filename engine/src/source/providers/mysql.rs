@@ -43,9 +43,14 @@ impl DbDataSource for MySqlDataSource {
         batch_size: usize,
         offset: Option<usize>,
     ) -> Result<Vec<Box<dyn DataRecord + Send + Sync>>, Box<dyn std::error::Error>> {
-        let columns = self.metadata().columns.keys().cloned().collect();
+        let metadata = self.metadata();
+        let columns = metadata.collect_columns();
+        let joins = metadata.collect_joins();
+
         let request = FetchRowsRequest {
             table: self.table.clone(),
+            alias: self.table.clone(),
+            joins,
             columns,
             limit: batch_size,
             offset,

@@ -10,19 +10,13 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_connections() {
+    fn test_parse_migrate() {
         let input = r#"
             CONNECTIONS (
                 SOURCE MYSQL "mysql://user:password@localhost:3306/db",
                 DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
             );
-        "#;
-        assert_parses(input);
-    }
 
-    #[test]
-    fn test_parse_migrate() {
-        let input = r#"
             MIGRATE orders TO orders_collection
             WITH SETTINGS (
                 INFER_SCHEMA = TRUE,
@@ -35,6 +29,17 @@ mod tests {
     #[test]
     fn test_parse_map_with_functions() {
         let input = r#"
+            CONNECTIONS (
+                SOURCE MYSQL "mysql://user:password@localhost:3306/db",
+                DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
+            );
+
+            MIGRATE orders TO orders_collection
+            WITH SETTINGS (
+                INFER_SCHEMA = TRUE,
+                CREATE_TABLE = TRUE
+            );
+
             MAP (
                 COALESCE(products_a[id], products_b[id]) -> product_id,
                 CONCAT(products_a[name], " / ", products_b[name]) -> product_name,
@@ -47,6 +52,17 @@ mod tests {
     #[test]
     fn test_parse_filter() {
         let input = r#"
+            CONNECTIONS (
+                SOURCE MYSQL "mysql://user:password@localhost:3306/db",
+                DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
+            );
+
+            MIGRATE orders TO orders_collection
+            WITH SETTINGS (
+                INFER_SCHEMA = TRUE,
+                CREATE_TABLE = TRUE
+            );
+
             FILTER (
                 price > 100,
                 status = "paid"
@@ -58,6 +74,17 @@ mod tests {
     #[test]
     fn test_parse_aggregate() {
         let input = r#"
+            CONNECTIONS (
+                SOURCE MYSQL "mysql://user:password@localhost:3306/db",
+                DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
+            );
+
+            MIGRATE orders TO orders_collection
+            WITH SETTINGS (
+                INFER_SCHEMA = TRUE,
+                CREATE_TABLE = TRUE
+            );
+
             AGGREGATE (
                 SUM(price) -> total_price,
                 COUNT(*) -> order_count,
@@ -70,7 +97,16 @@ mod tests {
     #[test]
     fn test_parse_complex_migrate_with_multiple_sources() {
         let input = r#"
-            MIGRATE products_a, products_b TO unified_products;
+            CONNECTIONS (
+                SOURCE MYSQL "mysql://user:password@localhost:3306/db",
+                DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
+            );
+
+            MIGRATE orders TO orders_collection
+            WITH SETTINGS (
+                INFER_SCHEMA = TRUE,
+                CREATE_TABLE = TRUE
+            );
 
             MAP (
                 COALESCE(products_a[id], products_b[id]) -> product_id,
@@ -84,6 +120,17 @@ mod tests {
     #[test]
     fn test_parse_nested_function_calls() {
         let input = r#"
+            CONNECTIONS (
+                SOURCE MYSQL "mysql://user:password@localhost:3306/db",
+                DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
+            );
+
+            MIGRATE orders TO orders_collection
+            WITH SETTINGS (
+                INFER_SCHEMA = TRUE,
+                CREATE_TABLE = TRUE
+            );
+
             MAP (
                 ROUND(SUM(products_a[price]) * 1.2, 2) -> total_price_adjusted,
                 UPPER(CONCAT(products_a[name], " ", products_b[name])) -> full_product_name
@@ -152,6 +199,17 @@ mod tests {
     #[test]
     fn test_parse_complex_nested_expressions() {
         let input = r#"
+            CONNECTIONS (
+                SOURCE MYSQL "mysql://user:password@localhost:3306/db",
+                DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
+            );
+
+            MIGRATE orders TO orders_collection
+            WITH SETTINGS (
+                INFER_SCHEMA = TRUE,
+                CREATE_TABLE = TRUE
+            );
+
             MAP (
                 ROUND(AVG(COALESCE(products_a[price], products_b[price]) * 1.2), 2) -> adjusted_price
             );

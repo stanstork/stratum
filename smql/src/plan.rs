@@ -7,10 +7,10 @@ use crate::statements::{
 pub struct MigrationPlan {
     pub connections: Connection,
     pub migration: Migrate,
-    pub filter: Filter,
+    pub filter: Option<Filter>,
     pub mapping: Vec<Mapping>,
     pub aggregations: Vec<Aggregation>,
-    pub load: Load,
+    pub load: Option<Load>,
 }
 
 impl MigrationPlan {
@@ -36,10 +36,10 @@ impl MigrationPlan {
         MigrationPlan {
             connections: connections.expect("Connections statement is required"),
             migration: migration.expect("Migrate statement is required"),
-            filter: filter.expect("Filter statement is required"),
+            filter,
             mapping,
             aggregations,
-            load: load.expect("Load statement is required"),
+            load,
         }
     }
 }
