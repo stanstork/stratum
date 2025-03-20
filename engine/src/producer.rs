@@ -24,7 +24,7 @@ pub async fn spawn_producer(context: Arc<Mutex<MigrationContext>>) -> tokio::tas
                     info!("Fetched {} records", records.len());
                     for record in records {
                         if let Err(e) = buffer.store(record.serialize()) {
-                            info!("Failed to store record: {}", e);
+                            error!("Failed to store record: {}", e);
                             return;
                         }
                     }

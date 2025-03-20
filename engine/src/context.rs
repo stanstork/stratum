@@ -3,6 +3,7 @@ use crate::{
     state::MigrationState,
 };
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
+use sql_adapter::metadata::table::TableMetadata;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -35,6 +36,31 @@ impl MigrationContext {
             source_data_format,
             destination_data_format,
         }))
+    }
+
+    pub async fn get_source_metadata(&self) -> Result<TableMetadata, Box<dyn std::error::Error>> {
+        match (&self.source, &self.source_data_format) {
+            (DataSource::Database(source), format)
+                if format.intersects(DataFormat::sql_databases()) =>
+            {
+                source.get_metadata().await
+            }
+            _ => return Err("Unsupported data source format".into()),
+        }
+    }
+
+    pub async fn get_destination_metadata(
+        &self,
+        table: &str,
+    ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
+        match (&self.destination, self.destination_data_format) {
+            (DataDestination::Database(destination), format)
+                if format.intersects(DataFormat::sql_databases()) =>
+            {
+                destination.adapter().fetch_metadata(table).await
+            }
+            _ => unimplemented!("Unsupported data destination"),
+        }
     }
 
     pub async fn debug_state(&self) {

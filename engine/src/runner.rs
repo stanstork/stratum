@@ -93,25 +93,10 @@ async fn validate_destination(
     context: Arc<Mutex<MigrationContext>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let context = context.lock().await;
-    let source_metadata = match (&context.source, &context.source_data_format) {
-        (DataSource::Database(source), format)
-            if format.intersects(DataFormat::sql_databases()) =>
-        {
-            source.get_metadata().await?
-        }
-        _ => return Err("Unsupported data source format".into()),
-    };
-    let destination_metadata = match (&context.destination, context.destination_data_format) {
-        (DataDestination::Database(destination), format)
-            if format.intersects(DataFormat::sql_databases()) =>
-        {
-            destination
-                .adapter()
-                .fetch_metadata(&plan.migration.target)
-                .await?
-        }
-        _ => unimplemented!("Unsupported data destination"),
-    };
+    let source_metadata = context.get_source_metadata().await?;
+    let destination_metadata = context
+        .get_destination_metadata(&plan.migration.target)
+        .await?;
 
     let validator = SchemaValidator::new(&source_metadata, &destination_metadata);
 
