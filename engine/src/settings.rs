@@ -27,8 +27,18 @@ impl MigrationSetting for InferSchemaSetting {
         plan: &MigrationPlan,
         context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let context = context.lock().await;
-        let mut metadata = match (&context.source, &context.source_data_format) {
+        let (source, source_format, destination, dest_format, state) = {
+            let ctx = context.lock().await;
+            (
+                ctx.source.clone(),
+                ctx.source_data_format,
+                ctx.destination.clone(),
+                ctx.destination_data_format,
+                ctx.state.clone(),
+            )
+        };
+
+        let mut metadata = match (source, source_format) {
             (DataSource::Database(source), format)
                 if format.intersects(DataFormat::sql_databases()) =>
             {
@@ -37,18 +47,24 @@ impl MigrationSetting for InferSchemaSetting {
             _ => return Err("Unsupported data source format".into()),
         };
 
-        match (&context.destination, context.destination_data_format) {
+        match (&destination, dest_format) {
             (DataDestination::Database(destination), format)
                 if format.intersects(DataFormat::sql_databases()) =>
             {
                 // Set the metadata name to the target table name
                 metadata.name = plan.migration.target.clone();
-                destination.infer_schema(&metadata).await?;
+
+                let mut dest = destination.lock().await;
+                dest.infer_schema(&metadata).await?;
+                dest.set_metadata(metadata);
             }
-            _ => unimplemented!("Unsupported data destination"),
+            _ => return Err("Unsupported data destination format".into()),
         }
 
-        context.state.lock().await.infer_schema = true;
+        {
+            let mut state_guard = state.lock().await;
+            state_guard.infer_schema = true;
+        }
 
         info!("Infer schema setting applied");
         Ok(())

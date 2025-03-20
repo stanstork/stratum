@@ -1,14 +1,16 @@
 use crate::{
-    context::MigrationContext, destination::data_dest::DataDestination,
+    context::MigrationContext,
+    destination::data_dest::{self, DataDestination},
     record::deserialize_data_record,
 };
+use sql_adapter::metadata;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
 
 pub async fn spawn_consumer(context: Arc<Mutex<MigrationContext>>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let (buffer, _) = {
+        let (buffer, data_destination) = {
             let context_guard = context.lock().await;
             let buffer = Arc::clone(&context_guard.buffer);
             let data_destination = match &context_guard.destination {

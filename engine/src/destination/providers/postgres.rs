@@ -2,7 +2,7 @@ use crate::{destination::data_dest::DbDataDestination, record::DataRecord};
 use async_trait::async_trait;
 use sql_adapter::{
     adapter::DbAdapter,
-    metadata::table::TableMetadata,
+    metadata::{provider::MetadataProvider, table::TableMetadata},
     postgres::PgAdapter,
     query::builder::{ColumnInfo, ForeignKeyInfo, SqlQueryBuilder},
 };
@@ -10,12 +10,25 @@ use std::collections::HashSet;
 use tracing::{error, info};
 
 pub struct PgDestination {
+    metadata: Option<TableMetadata>,
+    table: String,
     adapter: PgAdapter,
 }
 
 impl PgDestination {
-    pub fn new(adapter: PgAdapter) -> Result<Self, Box<dyn std::error::Error>> {
-        Ok(PgDestination { adapter })
+    pub async fn new(adapter: PgAdapter, table: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let metadata = if adapter.table_exists(table).await? {
+            let boxed_adapter: Box<dyn DbAdapter + Send + Sync> = Box::new(adapter.clone());
+            Some(MetadataProvider::build_table_metadata(&boxed_adapter, table).await?)
+        } else {
+            None
+        };
+
+        Ok(PgDestination {
+            adapter,
+            metadata,
+            table: table.to_string(),
+        })
     }
 
     /// Checks if the table exists in the database
@@ -129,6 +142,14 @@ impl DbDataDestination for PgDestination {
 
     fn adapter(&self) -> Box<dyn DbAdapter + Send + Sync> {
         Box::new(self.adapter.clone())
+    }
+
+    fn set_metadata(&mut self, metadata: TableMetadata) {
+        self.metadata = Some(metadata);
+    }
+
+    fn metadata(&self) -> &TableMetadata {
+        self.metadata.as_ref().expect("Metadata not set")
     }
 }
 

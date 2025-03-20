@@ -57,7 +57,12 @@ impl MigrationContext {
             (DataDestination::Database(destination), format)
                 if format.intersects(DataFormat::sql_databases()) =>
             {
-                destination.adapter().fetch_metadata(table).await
+                destination
+                    .lock()
+                    .await
+                    .adapter()
+                    .fetch_metadata(table)
+                    .await
             }
             _ => unimplemented!("Unsupported data destination"),
         }

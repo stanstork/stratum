@@ -34,4 +34,12 @@ impl DbDataDestination for MySqlDestination {
     fn adapter(&self) -> Box<dyn DbAdapter + Send + Sync> {
         Box::new(self.adapter.clone())
     }
+
+    fn set_metadata(&mut self, _metadata: TableMetadata) {
+        todo!("Implement set_metadata")
+    }
+
+    fn metadata(&self) -> &TableMetadata {
+        todo!("Implement metadata")
+    }
 }
