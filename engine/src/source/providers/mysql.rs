@@ -18,15 +18,12 @@ impl MySqlDataSource {
         table: &str,
         adapter: MySqlAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let boxed_adapter: Box<dyn DbAdapter + Send + Sync> = Box::new(adapter.clone());
-        let metadata = MetadataProvider::build_table_metadata(&boxed_adapter, table).await?;
-
-        let source = MySqlDataSource {
+        let metadata = MetadataProvider::build_table_metadata(&adapter, table).await?;
+        Ok(MySqlDataSource {
             metadata,
             table: table.to_string(),
             adapter,
-        };
-        Ok(source)
+        })
     }
 
     pub fn metadata(&self) -> &TableMetadata {

@@ -1,7 +1,4 @@
-use crate::{
-    destination::data_dest::DbDataDestination,
-    record::{DataRecord, Record},
-};
+use crate::{destination::data_dest::DbDataDestination, record::Record};
 use async_trait::async_trait;
 use sql_adapter::{
     adapter::DbAdapter,
@@ -21,8 +18,7 @@ pub struct PgDestination {
 impl PgDestination {
     pub async fn new(adapter: PgAdapter, table: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let metadata = if adapter.table_exists(table).await? {
-            let boxed_adapter: Box<dyn DbAdapter + Send + Sync> = Box::new(adapter.clone());
-            Some(MetadataProvider::build_table_metadata(&boxed_adapter, table).await?)
+            Some(MetadataProvider::build_table_metadata(&adapter, table).await?)
         } else {
             None
         };
@@ -90,7 +86,7 @@ impl DbDataDestination for PgDestination {
 
             if let Err(err) = self.adapter.execute(&sql).await {
                 error!("Failed to execute query: {}\nError: {:?}", sql, err);
-                return Err(err.into());
+                return Err(err);
             }
         }
 
@@ -152,9 +148,9 @@ impl DbDataDestination for PgDestination {
 }
 
 impl PgDestination {
-    fn collect_ref_tables<'a>(
+    fn collect_ref_tables(
         &self,
-        table: &'a TableMetadata,
+        table: &TableMetadata,
         visited: &mut HashSet<String>,
         queries: &mut Vec<SqlQueryBuilder>,
     ) {

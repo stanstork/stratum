@@ -47,7 +47,7 @@ impl MigrationContext {
             {
                 source.get_metadata().await
             }
-            _ => return Err("Unsupported data source format".into()),
+            _ => Err("Unsupported data source format".into()),
         }
     }
 

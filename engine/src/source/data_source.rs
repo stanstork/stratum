@@ -39,7 +39,7 @@ pub async fn create_data_source(
     match data_format {
         DataFormat::MySql => {
             if let Adapter::MySql(adapter) = adapter {
-                let source = MySqlDataSource::new(&source, adapter).await?;
+                let source = MySqlDataSource::new(source, adapter).await?;
                 Ok(Arc::new(source))
             } else {
                 panic!("Invalid adapter type")

@@ -1,6 +1,5 @@
 pub mod adapter;
 pub mod buffer;
-pub mod config;
 pub mod consumer;
 pub mod context;
 pub mod destination;

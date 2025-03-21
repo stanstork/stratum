@@ -17,8 +17,8 @@ impl TableMetadata {
     pub fn collect_columns(&self) -> Vec<SelectColumn> {
         let mut columns: Vec<SelectColumn> = self
             .columns
-            .iter()
-            .map(|(col_name, _)| SelectColumn {
+            .keys()
+            .map(|col_name| SelectColumn {
                 table: self.name.clone(),
                 alias: Some(self.name.clone()),
                 column: col_name.clone(),
@@ -29,8 +29,8 @@ impl TableMetadata {
             if let Some(parent_metadata) = self.referenced_tables.get(&fk.referenced_table) {
                 let parent_columns = parent_metadata
                     .columns
-                    .iter()
-                    .map(|(col_name, _)| SelectColumn {
+                    .keys()
+                    .map(|col_name| SelectColumn {
                         table: fk.referenced_table.clone(),
                         alias: Some(fk.referenced_table.clone()),
                         column: col_name.clone(),

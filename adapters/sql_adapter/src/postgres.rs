@@ -47,14 +47,14 @@ impl DbAdapter for PgAdapter {
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
         let query = QueryLoader::table_metadata_query(DbType::Postgres)?.replace("{table}", table);
         let rows = sqlx::query(&query).fetch_all(&self.pool).await?;
-        let rows = rows.iter().map(|row| DbRow::PostgresRow(row)).collect();
+        let rows = rows.iter().map(DbRow::PostgresRow).collect();
 
         MetadataProvider::process_metadata_rows(table, &rows)
     }
 
     async fn fetch_rows(
         &self,
-        request: FetchRowsRequest,
+        _request: FetchRowsRequest,
     ) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
         todo!("Implement fetch_all for Postgres")
     }

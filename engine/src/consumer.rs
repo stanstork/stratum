@@ -30,7 +30,7 @@ pub async fn spawn_consumer(context: Arc<Mutex<MigrationContext>>) -> tokio::tas
                 let row_data = RowData::deserialize(record);
                 for table in ordered_meta.iter() {
                     let table_name = src_dst_name_map.get(&table.name).unwrap_or(&table.name);
-                    let columns = row_data.extract_table_columns(&table_name);
+                    let columns = row_data.extract_table_columns(table_name);
 
                     println!("Columns: {:#?}", columns);
                 }

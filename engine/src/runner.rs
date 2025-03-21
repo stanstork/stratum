@@ -54,12 +54,12 @@ async fn setup_connections(
     .await?;
 
     let data_source = match plan.connections.source.data_format {
-        DataFormat::MySql => DataSource::Database(create_data_source(&plan, source_adapter).await?),
+        DataFormat::MySql => DataSource::Database(create_data_source(plan, source_adapter).await?),
         _ => unimplemented!("Unsupported data source"),
     };
     let data_destination = match plan.connections.destination.data_format {
         DataFormat::Postgres => {
-            DataDestination::Database(create_data_destination(&plan, destination_adapter).await?)
+            DataDestination::Database(create_data_destination(plan, destination_adapter).await?)
         }
         _ => unimplemented!("Unsupported data destination"),
     };
@@ -98,7 +98,7 @@ async fn validate_destination(
     if context.state.lock().await.infer_schema {
         if let Err(err) = validator.validate(SchemaValidationMode::OneToOne) {
             error!("Schema validation failed: {:?}", err);
-            return Err(err.into());
+            return Err(err);
         } else {
             info!("Schema validation passed");
         }
@@ -107,9 +107,9 @@ async fn validate_destination(
     Ok(())
 }
 
-fn parse_settings(settings: &Vec<Setting>) -> Vec<Box<dyn MigrationSetting>> {
+fn parse_settings(settings: &[Setting]) -> Vec<Box<dyn MigrationSetting>> {
     settings
-        .into_iter()
+        .iter()
         .filter_map(
             |setting| match (setting.key.as_str(), setting.value.clone()) {
                 ("infer_schema", SettingValue::Boolean(true)) => {

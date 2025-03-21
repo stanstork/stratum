@@ -27,6 +27,12 @@ pub struct SelectColumn {
     pub alias: Option<String>,
 }
 
+impl Default for SqlQueryBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SqlQueryBuilder {
     pub fn new() -> Self {
         Self {
@@ -45,7 +51,7 @@ impl SqlQueryBuilder {
         self
     }
 
-    pub fn select(mut self, columns: &Vec<SelectColumn>) -> Self {
+    pub fn select(mut self, columns: &[SelectColumn]) -> Self {
         let columns: Vec<String> = columns
             .iter()
             .map(|col| {
@@ -99,8 +105,8 @@ impl SqlQueryBuilder {
     pub fn create_table(
         mut self,
         table: &str,
-        columns: &Vec<ColumnInfo>,
-        foreign_keys: &Vec<ForeignKeyInfo>,
+        columns: &[ColumnInfo],
+        foreign_keys: &[ForeignKeyInfo],
     ) -> Self {
         self.query
             .push_str(&format!("\nCREATE TABLE {} (\n", table));
@@ -134,7 +140,7 @@ impl SqlQueryBuilder {
 
         let all_defs = column_defs
             .into_iter()
-            .chain(foreign_key_defs.into_iter())
+            .chain(foreign_key_defs)
             .collect::<Vec<_>>()
             .join(",\n");
 

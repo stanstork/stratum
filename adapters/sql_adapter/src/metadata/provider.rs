@@ -8,11 +8,16 @@ use std::{
     pin::Pin,
 };
 
+// MetadataFuture is a type alias for a Future that returns a Result
+// containing the TableMetadata or an error
+pub type MetadataFuture<'a, T> =
+    Pin<Box<dyn Future<Output = Result<T, Box<dyn std::error::Error>>> + 'a>>;
+
 pub struct MetadataProvider;
 
 impl MetadataProvider {
     pub async fn build_table_metadata(
-        adapter: &Box<dyn DbAdapter + Send + Sync>,
+        adapter: &(dyn DbAdapter + Send + Sync),
         table: &str,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
         let mut graph = HashMap::new();
@@ -65,10 +70,10 @@ impl MetadataProvider {
 
     pub fn build_metadata_dep_graph<'a>(
         table_name: &'a str,
-        adapter: &'a Box<dyn DbAdapter + Send + Sync>,
+        adapter: &'a (dyn DbAdapter + Send + Sync),
         graph: &'a mut HashMap<String, TableMetadata>,
         visited: &'a mut HashSet<String>,
-    ) -> Pin<Box<dyn Future<Output = Result<TableMetadata, Box<dyn std::error::Error>>> + 'a>> {
+    ) -> MetadataFuture<'a, TableMetadata> {
         Box::pin(async move {
             if let Some(metadata) = graph.get(table_name) {
                 return Ok(metadata.clone());

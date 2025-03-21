@@ -53,7 +53,7 @@ impl DbAdapter for MySqlAdapter {
             .bind(table)
             .fetch_all(&self.pool)
             .await?;
-        let rows = rows.iter().map(|row| DbRow::MySqlRow(row)).collect();
+        let rows = rows.iter().map(DbRow::MySqlRow).collect();
 
         MetadataProvider::process_metadata_rows(table, &rows)
     }
