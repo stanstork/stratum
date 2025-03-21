@@ -1,27 +1,29 @@
-use crate::{
-    config::mapping::TableMapping,
-    database::{
-        managers::{base::DbManager, mysql::MySqlManager},
-        query,
-        row::{MySqlRowDataExt, RowData, RowDataExt},
-    },
-    metadata::table::TableMetadata,
-    source::datasource::DataSource,
-};
+use crate::{record::Record, source::data_source::DbDataSource};
 use async_trait::async_trait;
-use sqlx::Error;
+use sql_adapter::{
+    adapter::DbAdapter,
+    metadata::{provider::MetadataProvider, table::TableMetadata},
+    mysql::MySqlAdapter,
+    requests::FetchRowsRequest,
+};
 
 pub struct MySqlDataSource {
     metadata: TableMetadata,
-    manager: MySqlManager,
+    table: String,
+    adapter: MySqlAdapter,
 }
 
 impl MySqlDataSource {
-    pub async fn new(url: &str, mapping: TableMapping) -> Result<Self, Error> {
-        let manager = MySqlManager::connect(url).await?;
-        let metadata = TableMetadata::from_mapping(mapping, &manager).await?;
-
-        Ok(Self { metadata, manager })
+    pub async fn new(
+        table: &str,
+        adapter: MySqlAdapter,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let metadata = MetadataProvider::build_table_metadata(&adapter, table).await?;
+        Ok(MySqlDataSource {
+            metadata,
+            table: table.to_string(),
+            adapter,
+        })
     }
 
     pub fn metadata(&self) -> &TableMetadata {
@@ -30,27 +32,39 @@ impl MySqlDataSource {
 }
 
 #[async_trait]
-impl DataSource for MySqlDataSource {
-    async fn fetch_data(&self) -> Result<Vec<RowData>, Error> {
-        let mut results = Vec::new();
+impl DbDataSource for MySqlDataSource {
+    async fn fetch_data(
+        &self,
+        batch_size: usize,
+        offset: Option<usize>,
+    ) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
+        let metadata = self.metadata();
+        let columns = metadata.collect_columns();
+        let joins = metadata.collect_joins();
 
-        let mut query = query::QueryBuilder::new();
-        let columns = self
-            .metadata
-            .columns
+        let request = FetchRowsRequest {
+            table: self.table.clone(),
+            alias: self.table.clone(),
+            joins,
+            columns,
+            limit: batch_size,
+            offset,
+        };
+
+        let rows = self.adapter.fetch_rows(request).await?;
+        let records = rows
             .iter()
-            .map(|col| col.name.clone())
+            .map(|row| Record::RowData(row.clone()))
             .collect::<Vec<_>>();
+        Ok(records)
+    }
 
-        query.select(&columns).from(self.metadata.name.clone());
-        let query = query.build();
+    async fn get_metadata(&self) -> Result<TableMetadata, Box<dyn std::error::Error>> {
+        let metadata = self.metadata();
+        Ok(metadata.clone())
+    }
 
-        let rows = sqlx::query(&query.0).fetch_all(self.manager.pool()).await?;
-        for row in rows.iter() {
-            let row_data = MySqlRowDataExt::from_row(row);
-            results.push(row_data);
-        }
-
-        Ok(results)
+    fn table_name(&self) -> &str {
+        &self.table
     }
 }

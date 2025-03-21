@@ -1,0 +1,25 @@
+CONNECTIONS (
+    SOURCE MYSQL "mysql://user:password@localhost:3306/testdb",
+    DESTINATION POSTGRES "postgres://user:password@localhost:5432/testdb"
+);
+
+FILTER (
+    status = "active",
+    age > 18
+);
+
+MIGRATE orders TO orders
+WITH SETTINGS (
+    INFER_SCHEMA = TRUE,
+    CREATE_TABLE = TRUE,
+    BATCH_SIZE   = 10
+);
+
+LOAD users FROM users USING user_id;
+
+MAP (
+    id -> order_id,
+    users[user_id].email -> customer_email,
+    price * 1.2 -> price_with_tax,
+    status -> order_status
+);

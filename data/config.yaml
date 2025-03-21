@@ -2,13 +2,5 @@ source: "mysql://user:password@localhost:3306/testdb"
 destination: "postgres://user:password@localhost:5432/testdb"
 
 mappings:
-  - table: "products"
-    columns:
-      id: "id"
-      name: "full_name"
-      price: "price"
-    transform:
-      - function: "uppercase"
-        args: ["name"]
-      - function: "cast"
-        args: ["created_at", "timestamp"]
+  - table: "employees"
+    infer_schema: true # Auto-map all columns
