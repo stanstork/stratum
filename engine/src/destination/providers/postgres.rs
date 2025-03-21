@@ -11,7 +11,6 @@ use tracing::{error, info};
 
 pub struct PgDestination {
     metadata: Option<TableMetadata>,
-    table: String,
     adapter: PgAdapter,
 }
 
@@ -23,44 +22,12 @@ impl PgDestination {
             None
         };
 
-        Ok(PgDestination {
-            adapter,
-            metadata,
-            table: table.to_string(),
-        })
+        Ok(PgDestination { adapter, metadata })
     }
 
-    /// Checks if the table exists in the database
     pub async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
         self.adapter.table_exists(table).await.map_err(Into::into)
     }
-
-    // Maps row data into column names and values
-    // fn map_columns(&self, row: &Box<dyn DataRecord>) -> Result<Vec<(String, String)>, sqlx::Error> {
-    //     // let row = row
-    //     //     .as_any()
-    //     //     .downcast_ref::<RowData>()
-    //     //     .ok_or_else(|| sqlx::Error::Configuration("Invalid row data type".into()))?;
-
-    //     // let columns = row
-    //     //     .columns
-    //     //     .iter()
-    //     //     .map(|col| {
-    //     //         let name = self.column_mapping.get(&col.name).ok_or_else(|| {
-    //     //             sqlx::Error::Configuration(format!("Column '{}' not found", col.name).into())
-    //     //         })?;
-    //     //         let value = col.value.clone().ok_or_else(|| {
-    //     //             sqlx::Error::Configuration(
-    //     //                 format!("Null value for column '{}'", col.name).into(),
-    //     //             )
-    //     //         })?;
-
-    //     //         Ok((name.clone(), value.to_string()))
-    //     //     })
-    //     //     .collect::<Result<Vec<_>, sqlx::Error>>()?;
-    //     // Ok(columns)
-    //     todo!()
-    // }
 }
 
 #[async_trait]
@@ -94,43 +61,33 @@ impl DbDataDestination for PgDestination {
         Ok(())
     }
 
-    async fn validate_schema(
+    async fn write(
         &self,
         metadata: &TableMetadata,
+        record: Record,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        todo!("Implement schema validation")
-    }
+        let columns = match record {
+            Record::RowData(row) => row
+                .columns
+                .iter()
+                .map(|col| {
+                    let value = col
+                        .value
+                        .clone()
+                        .map_or("NULL".to_string(), |val| val.to_string());
+                    (col.name.clone(), value)
+                })
+                .collect::<Vec<(String, String)>>(),
+            _ => return Err("Invalid record type".into()),
+        };
 
-    async fn write(&self, data: Vec<Record>) -> Result<(), Box<dyn std::error::Error>> {
-        // self.ensure_table_exists().await?;
+        let query = SqlQueryBuilder::new()
+            .insert_into(&metadata.name, &columns)
+            .build();
 
-        // To simplify testing, we truncate the table before writing the data
-        // In a real-world scenario, you would likely want to append the data
-        // self.manager.truncate_table(&self.table).await?;
+        info!("Executing query: {}", query.0);
+        self.adapter.execute(&query.0).await?;
 
-        // for (i, row) in data.iter().enumerate() {
-        //     let columns = match self.map_columns(row) {
-        //         Ok(cols) => cols,
-        //         Err(e) => {
-        //             error!(
-        //                 "Failed to map columns for row {} in table '{}': {:?}",
-        //                 i, self.table, e
-        //             );
-        //             continue;
-        //         }
-        //     };
-
-        //     let query = SqlQueryBuilder::new()
-        //         .insert_into(&self.table, &columns)
-        //         .build();
-
-        //     if let Err(err) = self.manager.execute(&query.0).await {
-        //         error!(
-        //             "Error writing row {} to table '{}': {:?}",
-        //             i, self.table, err
-        //         );
-        //     }
-        // }
         Ok(())
     }
 

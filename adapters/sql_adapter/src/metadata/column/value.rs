@@ -57,7 +57,7 @@ impl fmt::Display for ColumnValue {
             ColumnValue::Uuid(v) => write!(f, "{}", v),
             ColumnValue::Bytes(v) => write!(f, "{:?}", v),
             ColumnValue::Date(v) => write!(f, "{}", v),
-            ColumnValue::Timestamp(v) => write!(f, "{}", v),
+            ColumnValue::Timestamp(v) => write!(f, "'{}'", v),
         }
     }
 }

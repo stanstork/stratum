@@ -13,12 +13,12 @@ pub enum DataDestination {
 
 #[async_trait]
 pub trait DbDataDestination: Send + Sync {
-    async fn write(&self, data: Vec<Record>) -> Result<(), Box<dyn std::error::Error>>;
-    async fn infer_schema(
+    async fn write(
         &self,
         metadata: &TableMetadata,
+        record: Record,
     ) -> Result<(), Box<dyn std::error::Error>>;
-    async fn validate_schema(
+    async fn infer_schema(
         &self,
         metadata: &TableMetadata,
     ) -> Result<(), Box<dyn std::error::Error>>;

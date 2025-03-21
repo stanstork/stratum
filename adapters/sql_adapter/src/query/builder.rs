@@ -90,9 +90,8 @@ impl SqlQueryBuilder {
         self
     }
 
-    pub fn insert_into(mut self, table: &str, columns: &[(&str, &str)]) -> Self {
-        let (cols, values): (Vec<&str>, Vec<&str>) = columns.iter().cloned().unzip();
-
+    pub fn insert_into(mut self, table: &str, columns: &[(String, String)]) -> Self {
+        let (cols, values): (Vec<String>, Vec<String>) = columns.iter().cloned().unzip();
         self.query.push_str(&format!(
             "INSERT INTO {} ({}) VALUES ({})",
             table,

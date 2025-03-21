@@ -11,6 +11,10 @@ pub struct RowData {
 }
 
 impl RowData {
+    pub fn new(columns: Vec<ColumnData>) -> Self {
+        RowData { columns }
+    }
+
     pub fn from_db_row(row: &DbRow) -> RowData {
         let columns = row
             .columns()
@@ -33,11 +37,16 @@ impl RowData {
         RowData { columns }
     }
 
-    pub fn extract_table_columns(&self, table_name: &str) -> Vec<&ColumnData> {
+    pub fn extract_table_columns(&self, table_name: &str) -> Vec<ColumnData> {
         let prefix = format!("{}_", table_name);
         self.columns
             .iter()
             .filter(|col| col.name.starts_with(&prefix))
+            .cloned()
+            .map(|mut col| {
+                col.name = col.name.replace(&prefix, "");
+                col
+            })
             .collect()
     }
 }
