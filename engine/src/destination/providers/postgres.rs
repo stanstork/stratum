@@ -1,4 +1,7 @@
-use crate::{destination::data_dest::DbDataDestination, record::DataRecord};
+use crate::{
+    destination::data_dest::DbDataDestination,
+    record::{DataRecord, Record},
+};
 use async_trait::async_trait;
 use sql_adapter::{
     adapter::DbAdapter,
@@ -36,38 +39,36 @@ impl PgDestination {
         self.adapter.table_exists(table).await.map_err(Into::into)
     }
 
-    /// Maps row data into column names and values
-    fn map_columns(&self, row: &Box<dyn DataRecord>) -> Result<Vec<(String, String)>, sqlx::Error> {
-        // let row = row
-        //     .as_any()
-        //     .downcast_ref::<RowData>()
-        //     .ok_or_else(|| sqlx::Error::Configuration("Invalid row data type".into()))?;
+    // Maps row data into column names and values
+    // fn map_columns(&self, row: &Box<dyn DataRecord>) -> Result<Vec<(String, String)>, sqlx::Error> {
+    //     // let row = row
+    //     //     .as_any()
+    //     //     .downcast_ref::<RowData>()
+    //     //     .ok_or_else(|| sqlx::Error::Configuration("Invalid row data type".into()))?;
 
-        // let columns = row
-        //     .columns
-        //     .iter()
-        //     .map(|col| {
-        //         let name = self.column_mapping.get(&col.name).ok_or_else(|| {
-        //             sqlx::Error::Configuration(format!("Column '{}' not found", col.name).into())
-        //         })?;
-        //         let value = col.value.clone().ok_or_else(|| {
-        //             sqlx::Error::Configuration(
-        //                 format!("Null value for column '{}'", col.name).into(),
-        //             )
-        //         })?;
+    //     // let columns = row
+    //     //     .columns
+    //     //     .iter()
+    //     //     .map(|col| {
+    //     //         let name = self.column_mapping.get(&col.name).ok_or_else(|| {
+    //     //             sqlx::Error::Configuration(format!("Column '{}' not found", col.name).into())
+    //     //         })?;
+    //     //         let value = col.value.clone().ok_or_else(|| {
+    //     //             sqlx::Error::Configuration(
+    //     //                 format!("Null value for column '{}'", col.name).into(),
+    //     //             )
+    //     //         })?;
 
-        //         Ok((name.clone(), value.to_string()))
-        //     })
-        //     .collect::<Result<Vec<_>, sqlx::Error>>()?;
-        // Ok(columns)
-        todo!()
-    }
+    //     //         Ok((name.clone(), value.to_string()))
+    //     //     })
+    //     //     .collect::<Result<Vec<_>, sqlx::Error>>()?;
+    //     // Ok(columns)
+    //     todo!()
+    // }
 }
 
 #[async_trait]
 impl DbDataDestination for PgDestination {
-    type Record = Box<dyn DataRecord + Send + Sync>;
-
     async fn infer_schema(
         &self,
         metadata: &TableMetadata,
@@ -104,10 +105,7 @@ impl DbDataDestination for PgDestination {
         todo!("Implement schema validation")
     }
 
-    async fn write(
-        &self,
-        data: Vec<Box<dyn DataRecord + Send + Sync>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    async fn write(&self, data: Vec<Record>) -> Result<(), Box<dyn std::error::Error>> {
         // self.ensure_table_exists().await?;
 
         // To simplify testing, we truncate the table before writing the data

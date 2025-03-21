@@ -1,5 +1,5 @@
 use super::{data_type::ColumnDataType, value::ColumnValue};
-use crate::row::row::DbRow;
+use crate::row::db_row::DbRow;
 use serde::{Deserialize, Serialize};
 
 const COL_ORDINAL_POSITION: &str = "ordinal_position";

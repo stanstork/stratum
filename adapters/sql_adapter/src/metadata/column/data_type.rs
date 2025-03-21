@@ -1,8 +1,7 @@
+use crate::row::db_row::DbRow;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
-use crate::row::row::DbRow;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum ColumnDataType {

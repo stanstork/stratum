@@ -1,4 +1,4 @@
-use crate::{destination::data_dest::DbDataDestination, record::DataRecord};
+use crate::{destination::data_dest::DbDataDestination, record::Record};
 use async_trait::async_trait;
 use sql_adapter::{adapter::DbAdapter, metadata::table::TableMetadata, mysql::MySqlAdapter};
 
@@ -8,12 +8,7 @@ pub struct MySqlDestination {
 
 #[async_trait]
 impl DbDataDestination for MySqlDestination {
-    type Record = Box<dyn DataRecord + Send + Sync>;
-
-    async fn write(
-        &self,
-        data: Vec<Box<dyn DataRecord + Send + Sync>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    async fn write(&self, data: Vec<Record>) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 

@@ -4,7 +4,7 @@ use crate::{
 };
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::metadata::table::TableMetadata;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::info;
 
@@ -15,6 +15,7 @@ pub struct MigrationContext {
     pub buffer: Arc<RecordBuffer>,
     pub source_data_format: DataFormat,
     pub destination_data_format: DataFormat,
+    pub src_dst_name_map: HashMap<String, String>,
 }
 
 impl MigrationContext {
@@ -35,6 +36,7 @@ impl MigrationContext {
             buffer,
             source_data_format,
             destination_data_format,
+            src_dst_name_map: HashMap::new(),
         }))
     }
 
@@ -66,6 +68,11 @@ impl MigrationContext {
             }
             _ => unimplemented!("Unsupported data destination"),
         }
+    }
+
+    pub fn set_dst_name(&mut self, src_name: &str, dst_name: &str) {
+        self.src_dst_name_map
+            .insert(src_name.to_string(), dst_name.to_string());
     }
 
     pub async fn debug_state(&self) {

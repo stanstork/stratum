@@ -1,5 +1,5 @@
 use super::data_type::ColumnDataType;
-use crate::row::row::DbRow;
+use crate::row::db_row::DbRow;
 use bigdecimal::ToPrimitive;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};

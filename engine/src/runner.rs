@@ -4,7 +4,6 @@ use crate::{
     context::MigrationContext,
     destination::data_dest::{create_data_destination, DataDestination},
     producer::spawn_producer,
-    record::register_data_record,
     settings::{BatchSizeSetting, InferSchemaSetting, MigrationSetting},
     source::data_source::{create_data_source, DataSource},
     validate::schema_validator::{SchemaValidationMode, SchemaValidator},
@@ -16,16 +15,12 @@ use smql::{
         setting::{Setting, SettingValue},
     },
 };
-use sql_adapter::row::row::RowData;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
 pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
     info!("Running migration");
-
-    // Register RowData type for deserialization
-    register_data_record::<RowData>("RowData").await;
 
     let (data_source, data_destination) = setup_connections(&plan).await?;
     let context = MigrationContext::init(data_source, data_destination, &plan);

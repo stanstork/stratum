@@ -1,4 +1,4 @@
-use crate::{record::DataRecord, source::data_source::DbDataSource};
+use crate::{record::Record, source::data_source::DbDataSource};
 use async_trait::async_trait;
 use sql_adapter::{
     adapter::DbAdapter,
@@ -36,13 +36,11 @@ impl MySqlDataSource {
 
 #[async_trait]
 impl DbDataSource for MySqlDataSource {
-    type Record = Box<dyn DataRecord + Send + Sync>;
-
     async fn fetch_data(
         &self,
         batch_size: usize,
         offset: Option<usize>,
-    ) -> Result<Vec<Box<dyn DataRecord + Send + Sync>>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
         let metadata = self.metadata();
         let columns = metadata.collect_columns();
         let joins = metadata.collect_joins();
@@ -58,15 +56,18 @@ impl DbDataSource for MySqlDataSource {
 
         let rows = self.adapter.fetch_rows(request).await?;
         let records = rows
-            .into_iter()
-            .map(|row| Box::new(row) as Box<dyn DataRecord + Send + Sync>)
-            .collect();
-
+            .iter()
+            .map(|row| Record::RowData(row.clone()))
+            .collect::<Vec<_>>();
         Ok(records)
     }
 
     async fn get_metadata(&self) -> Result<TableMetadata, Box<dyn std::error::Error>> {
         let metadata = self.metadata();
         Ok(metadata.clone())
+    }
+
+    fn table_name(&self) -> &str {
+        &self.table
     }
 }

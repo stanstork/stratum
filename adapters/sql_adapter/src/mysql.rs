@@ -4,10 +4,7 @@ use crate::{
     metadata::{provider::MetadataProvider, table::TableMetadata},
     query::{builder::SqlQueryBuilder, loader::QueryLoader},
     requests::FetchRowsRequest,
-    row::{
-        extract::RowExtractor,
-        row::{DbRow, RowData},
-    },
+    row::{db_row::DbRow, row_data::RowData},
 };
 use async_trait::async_trait;
 use sqlx::{MySql, Pool, Row};
@@ -76,7 +73,7 @@ impl DbAdapter for MySqlAdapter {
 
         Ok(rows
             .iter()
-            .map(|row| RowExtractor::from_row(&DbRow::MySqlRow(row)))
+            .map(|row| RowData::from_db_row(&DbRow::MySqlRow(row)))
             .collect())
     }
 }

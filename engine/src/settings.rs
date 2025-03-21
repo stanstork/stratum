@@ -27,14 +27,18 @@ impl MigrationSetting for InferSchemaSetting {
         plan: &MigrationPlan,
         context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let (source, source_format, destination, dest_format, state) = {
+        let (source, source_format, destination, dest_format, state, src_name) = {
             let ctx = context.lock().await;
+            let source = ctx.source.clone();
+            let src_name = source.source_name().to_owned();
+
             (
                 ctx.source.clone(),
                 ctx.source_data_format,
                 ctx.destination.clone(),
                 ctx.destination_data_format,
                 ctx.state.clone(),
+                src_name,
             )
         };
 
@@ -51,6 +55,13 @@ impl MigrationSetting for InferSchemaSetting {
             (DataDestination::Database(destination), format)
                 if format.intersects(DataFormat::sql_databases()) =>
             {
+                if src_name != plan.migration.target {
+                    context
+                        .lock()
+                        .await
+                        .set_dst_name(&plan.migration.target, &src_name);
+                }
+
                 // Set the metadata name to the target table name
                 metadata.name = plan.migration.target.clone();
 

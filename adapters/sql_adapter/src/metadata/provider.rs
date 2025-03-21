@@ -1,7 +1,7 @@
 use super::{
     column::metadata::ColumnMetadata, foreign_key::ForeignKeyMetadata, table::TableMetadata,
 };
-use crate::{adapter::DbAdapter, row::row::DbRow};
+use crate::{adapter::DbAdapter, row::db_row::DbRow};
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
@@ -112,5 +112,38 @@ impl MetadataProvider {
 
             Ok(metadata)
         })
+    }
+
+    pub fn resolve_insert_order(metadata: &TableMetadata) -> Vec<&TableMetadata> {
+        let mut visited = HashSet::new();
+        let mut order = Vec::new();
+
+        fn visit<'a>(
+            meta: &'a TableMetadata,
+            visited: &mut HashSet<&'a str>,
+            order: &mut Vec<&'a TableMetadata>,
+            referenced_tables: &'a HashMap<String, TableMetadata>,
+        ) {
+            if !visited.insert(&meta.name) {
+                return;
+            }
+
+            for fk in &meta.foreign_keys {
+                if let Some(ref_meta) = referenced_tables.get(&fk.referenced_table) {
+                    visit(ref_meta, visited, order, &ref_meta.referenced_tables);
+                }
+            }
+
+            order.push(meta);
+        }
+
+        visit(
+            metadata,
+            &mut visited,
+            &mut order,
+            &metadata.referenced_tables,
+        );
+
+        order
     }
 }

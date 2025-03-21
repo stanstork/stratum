@@ -1,12 +1,17 @@
-use super::row::{DbRow, RowData};
+use super::db_row::DbRow;
 use crate::metadata::column::{
     data_type::ColumnDataType,
     value::{ColumnData, ColumnValue},
 };
-pub struct RowExtractor;
+use serde::{Deserialize, Serialize};
 
-impl RowExtractor {
-    pub fn from_row(row: &DbRow) -> RowData {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RowData {
+    pub columns: Vec<ColumnData>,
+}
+
+impl RowData {
+    pub fn from_db_row(row: &DbRow) -> RowData {
         let columns = row
             .columns()
             .iter()
@@ -26,5 +31,13 @@ impl RowExtractor {
             .collect();
 
         RowData { columns }
+    }
+
+    pub fn extract_table_columns(&self, table_name: &str) -> Vec<&ColumnData> {
+        let prefix = format!("{}_", table_name);
+        self.columns
+            .iter()
+            .filter(|col| col.name.starts_with(&prefix))
+            .collect()
     }
 }

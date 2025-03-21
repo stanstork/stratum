@@ -1,6 +1,6 @@
 use crate::{
     db_type::DbType, metadata::table::TableMetadata, mysql, postgres, requests::FetchRowsRequest,
-    row::row::RowData,
+    row::row_data::RowData,
 };
 use async_trait::async_trait;
 

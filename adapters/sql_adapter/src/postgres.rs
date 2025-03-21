@@ -4,7 +4,7 @@ use crate::{
     metadata::{provider::MetadataProvider, table::TableMetadata},
     query::loader::QueryLoader,
     requests::FetchRowsRequest,
-    row::row::{DbRow, RowData},
+    row::{db_row::DbRow, row_data::RowData},
 };
 use async_trait::async_trait;
 use sqlx::{Pool, Postgres, Row};
