@@ -101,6 +101,24 @@ impl SqlQueryBuilder {
         self
     }
 
+    pub fn insert_batch(
+        mut self,
+        table: &str,
+        columns: Vec<String>,
+        values: Vec<Vec<String>>,
+    ) -> Self {
+        let query = format!("INSERT INTO {} ({}) VALUES\n", table, columns.join(", "));
+        let mut value_str = String::new();
+        for (i, value) in values.iter().enumerate() {
+            if i > 0 {
+                value_str.push_str(", ");
+            }
+            value_str.push_str(&format!("({})", value.join(", ")));
+        }
+        self.query.push_str(&format!("{}{};", query, value_str));
+        self
+    }
+
     pub fn create_table(
         mut self,
         table: &str,

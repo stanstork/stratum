@@ -1,6 +1,6 @@
 use crate::{
     adapter::get_adapter,
-    consumer::spawn_consumer,
+    consumer::Consumer,
     context::MigrationContext,
     destination::data_dest::{create_data_destination, DataDestination},
     producer::spawn_producer,
@@ -29,7 +29,7 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
     validate_destination(&plan, Arc::clone(&context)).await?;
 
     let producer = spawn_producer(Arc::clone(&context)).await;
-    let consumer = spawn_consumer(Arc::clone(&context)).await;
+    let consumer = Consumer::new(Arc::clone(&context)).await.spawn();
 
     // Wait for both producer and consumer to finish
     tokio::try_join!(producer, consumer)?;

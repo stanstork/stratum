@@ -91,6 +91,55 @@ impl DbDataDestination for PgDestination {
         Ok(())
     }
 
+    async fn write_batch(
+        &self,
+        metadata: &TableMetadata,
+        records: Vec<Record>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if records.is_empty() {
+            return Ok(());
+        }
+
+        let mut columns = Vec::new();
+        let mut values = Vec::new();
+
+        for record in records {
+            let row = match record {
+                Record::RowData(row) => row,
+                _ => return Err("Invalid record type".into()),
+            };
+
+            if columns.is_empty() {
+                columns = row.columns.iter().map(|col| col.name.clone()).collect();
+            }
+
+            let row_values = row
+                .columns
+                .iter()
+                .map(|col| {
+                    col.value
+                        .clone()
+                        .map_or("NULL".to_string(), |val| val.to_string())
+                })
+                .collect::<Vec<String>>();
+
+            values.push(row_values);
+        }
+
+        if columns.is_empty() {
+            return Err("No valid records found".into());
+        }
+
+        let query = SqlQueryBuilder::new()
+            .insert_batch(&metadata.name, columns, values)
+            .build();
+
+        info!("Executing query: {}", query.0);
+        self.adapter.execute(&query.0).await?;
+
+        Ok(())
+    }
+
     fn adapter(&self) -> Box<dyn DbAdapter + Send + Sync> {
         Box::new(self.adapter.clone())
     }

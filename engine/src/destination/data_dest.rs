@@ -18,6 +18,11 @@ pub trait DbDataDestination: Send + Sync {
         metadata: &TableMetadata,
         record: Record,
     ) -> Result<(), Box<dyn std::error::Error>>;
+    async fn write_batch(
+        &self,
+        metadata: &TableMetadata,
+        records: Vec<Record>,
+    ) -> Result<(), Box<dyn std::error::Error>>;
     async fn infer_schema(
         &self,
         metadata: &TableMetadata,
