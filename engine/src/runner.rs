@@ -1,5 +1,5 @@
 use crate::{
-    adapter::get_adapter,
+    adapter::{get_adapter, Adapter},
     consumer::Consumer,
     context::MigrationContext,
     destination::data_dest::{create_data_destination, DataDestination},
@@ -15,6 +15,7 @@ use smql::{
         setting::{Setting, SettingValue},
     },
 };
+use sql_adapter::metadata::{provider::MetadataProvider, table::TableMetadata};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
@@ -35,6 +36,26 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
     tokio::try_join!(producer, consumer)?;
 
     Ok(())
+}
+
+pub async fn load_src_metadata(
+    plan: &MigrationPlan,
+) -> Result<TableMetadata, Box<dyn std::error::Error>> {
+    let source_adapter = get_adapter(
+        plan.connections.source.data_format,
+        &plan.connections.source.con_str,
+    )
+    .await?;
+
+    match source_adapter {
+        Adapter::MySql(my_sql_adapter) => {
+            let source_table = plan.migration.source.first().unwrap();
+            let metadata =
+                MetadataProvider::build_table_metadata(&my_sql_adapter, &source_table).await?;
+            Ok(metadata)
+        }
+        Adapter::Postgres(_pg_adapter) => unimplemented!("Postgres metadata loading"),
+    }
 }
 
 async fn setup_connections(

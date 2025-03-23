@@ -1,6 +1,6 @@
 use super::{column::metadata::ColumnMetadata, foreign_key::ForeignKeyMetadata};
 use crate::{query::builder::SelectColumn, requests::JoinClause};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub struct TableMetadata {
@@ -60,5 +60,27 @@ impl TableMetadata {
                     })
             })
             .collect()
+    }
+
+    pub fn print_tables_tree(table: &TableMetadata, indent: usize, visited: &mut HashSet<String>) {
+        if visited.contains(&table.name) {
+            println!("{}- {} ", "  ".repeat(indent), table.name);
+            return;
+        }
+
+        visited.insert(table.name.clone());
+
+        println!("{}- {}", "  ".repeat(indent), table.name);
+
+        for (_, ref_table) in &table.referenced_tables {
+            Self::print_tables_tree(ref_table, indent + 1, visited);
+        }
+
+        if !table.referencing_tables.is_empty() {
+            println!("{}  Referenced by:", "  ".repeat(indent));
+            for (_, referencing_table) in &table.referencing_tables {
+                println!("{}  - {}", "  ".repeat(indent), referencing_table.name);
+            }
+        }
     }
 }

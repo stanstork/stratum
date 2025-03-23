@@ -53,7 +53,7 @@ impl Consumer {
                         .await;
                 }
                 None => {
-                    self.flush_all_batches(&mut batch_map, &ordered_meta).await;
+                    self.flush_all(&mut batch_map, &ordered_meta).await;
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 }
             }
@@ -82,11 +82,11 @@ impl Consumer {
         }
 
         if should_flush {
-            self.flush_all_batches(batch_map, ordered_meta).await;
+            self.flush_all(batch_map, ordered_meta).await;
         }
     }
 
-    async fn flush_all_batches(
+    async fn flush_all(
         &self,
         batch_map: &mut HashMap<String, Vec<Record>>,
         ordered_meta: &Vec<&TableMetadata>,

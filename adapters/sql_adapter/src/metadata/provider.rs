@@ -88,29 +88,28 @@ impl MetadataProvider {
 
             for fk in &metadata.foreign_keys {
                 let ref_table = &fk.referenced_table;
+                let ref_metadata =
+                    Self::build_metadata_dep_graph(ref_table, adapter, graph, visited).await?;
 
-                if !graph.contains_key(ref_table) {
-                    let ref_metadata =
-                        Self::build_metadata_dep_graph(ref_table, adapter, graph, visited).await?;
+                metadata
+                    .referenced_tables
+                    .insert(ref_table.clone(), ref_metadata.clone());
 
-                    metadata
-                        .referenced_tables
-                        .insert(ref_table.clone(), ref_metadata.clone());
-
-                    // **Bidirectional Relationship: Link referencing tables**
-                    graph
-                        .entry(ref_table.clone())
-                        .and_modify(|t| {
-                            t.referencing_tables
-                                .insert(table_name.to_string(), metadata.clone());
-                        })
-                        .or_insert_with(|| {
-                            let mut t = ref_metadata.clone();
-                            t.referencing_tables
-                                .insert(table_name.to_string(), metadata.clone());
-                            t
-                        });
-                }
+                // **Bidirectional Relationship: Link referencing tables**
+                graph
+                    .entry(ref_table.clone())
+                    .and_modify(|existing_table| {
+                        existing_table
+                            .referencing_tables
+                            .insert(table_name.to_string(), metadata.clone());
+                    })
+                    .or_insert_with(|| {
+                        let mut new_table = ref_metadata.clone();
+                        new_table
+                            .referencing_tables
+                            .insert(table_name.to_string(), metadata.clone());
+                        new_table
+                    });
             }
 
             graph.insert(table_name.to_string(), metadata.clone());

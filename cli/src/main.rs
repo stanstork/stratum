@@ -1,7 +1,10 @@
+use std::collections::HashSet;
+
 use clap::Parser;
 use commands::Commands;
 use engine::runner;
 use smql::parser::parse;
+use sql_adapter::metadata::table::TableMetadata;
 use tracing::Level;
 pub mod commands;
 
@@ -26,6 +29,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             runner::run(plan).await?;
         }
+        Commands::Source { command } => match command {
+            commands::SourceCommand::Info { config, verbose } => {
+                let source = read_migration_config(&config).expect("Failed to read config file");
+                let plan = parse(&source).expect("Failed to parse config file");
+                let metadata = runner::load_src_metadata(&plan).await?;
+
+                if verbose {
+                    println!("{:#?}", metadata);
+                } else {
+                    let mut visited = HashSet::new();
+                    TableMetadata::print_tables_tree(&metadata, 1, &mut visited);
+                }
+            }
+        },
     }
 
     Ok(())
