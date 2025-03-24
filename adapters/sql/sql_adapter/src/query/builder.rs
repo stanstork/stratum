@@ -147,12 +147,13 @@ impl SqlQueryBuilder {
             })
             .collect();
 
-        let pk_columns: Vec<String> = if composite_pk {
-            columns
+        let pk_columns = if composite_pk {
+            let pk_columns: Vec<String> = columns
                 .iter()
                 .filter(|c| c.is_primary_key)
                 .map(|c| c.name.clone())
-                .collect()
+                .collect();
+            vec![format!("\tPRIMARY KEY ({})", pk_columns.join(", "))]
         } else {
             vec![]
         };
@@ -180,13 +181,14 @@ impl SqlQueryBuilder {
         self
     }
 
-    pub fn add_foreign_keys(mut self, table: &str, foreign_keys: &[ForeignKeyInfo]) -> Self {
-        for fk in foreign_keys {
-            self.query.push_str(&format!(
-                "ALTER TABLE {} ADD FOREIGN KEY ({}) REFERENCES {}({});\n",
-                table, fk.column, fk.referenced_table, fk.referenced_column
-            ));
-        }
+    pub fn add_foreign_key(mut self, table: &str, foreign_keys: &ForeignKeyInfo) -> Self {
+        self.query.push_str(&format!(
+            "ALTER TABLE {} ADD FOREIGN KEY ({}) REFERENCES {}({});",
+            table,
+            foreign_keys.column,
+            foreign_keys.referenced_table,
+            foreign_keys.referenced_column
+        ));
         self
     }
 

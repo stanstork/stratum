@@ -1,7 +1,6 @@
 use crate::{destination::data_dest::DbDataDestination, record::Record};
 use async_trait::async_trait;
 use postgres::{data_type::ColumnDataTypeMapper, postgres::PgAdapter};
-use sql_adapter::metadata::column::data_type::ColumnDataType;
 use sql_adapter::{
     adapter::SqlAdapter,
     metadata::{provider::MetadataProvider, table::TableMetadata},
@@ -205,10 +204,12 @@ impl PgDestination {
 
             let foreign_keys = self.get_foreign_keys(table);
             if !foreign_keys.is_empty() {
-                let constraint_query = SqlQueryBuilder::new()
-                    .add_foreign_keys(&table.name, &foreign_keys)
-                    .build();
-                constraint_queries.insert(constraint_query.0);
+                for fk in foreign_keys {
+                    let query = SqlQueryBuilder::new()
+                        .add_foreign_key(&table.name, &fk)
+                        .build();
+                    constraint_queries.insert(query.0);
+                }
             }
         }
     }
