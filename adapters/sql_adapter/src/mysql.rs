@@ -1,7 +1,9 @@
 use crate::{
     adapter::DbAdapter,
     db_type::DbType,
-    metadata::{provider::MetadataProvider, table::TableMetadata},
+    metadata::{
+        column::metadata::COL_REFERENCING_TABLE, provider::MetadataProvider, table::TableMetadata,
+    },
     query::{builder::SqlQueryBuilder, loader::QueryLoader},
     requests::FetchRowsRequest,
     row::{db_row::DbRow, row_data::RowData},
@@ -56,6 +58,24 @@ impl DbAdapter for MySqlAdapter {
         let rows = rows.iter().map(DbRow::MySqlRow).collect();
 
         MetadataProvider::process_metadata_rows(table, &rows)
+    }
+
+    async fn fetch_referencing_tables(
+        &self,
+        table: &str,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        let query = QueryLoader::table_referencing_query(DbType::MySql)?;
+        let rows = sqlx::query(&query)
+            .bind(table)
+            .fetch_all(&self.pool)
+            .await?;
+
+        let tables = rows
+            .iter()
+            .map(|row| row.try_get::<String, _>(COL_REFERENCING_TABLE))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(tables)
     }
 
     async fn fetch_rows(

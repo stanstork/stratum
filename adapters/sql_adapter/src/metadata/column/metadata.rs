@@ -17,6 +17,8 @@ const COL_REFERENCED_COLUMN: &str = "referenced_column";
 const COL_ON_DELETE: &str = "on_delete";
 const COL_ON_UPDATE: &str = "on_update";
 
+pub const COL_REFERENCING_TABLE: &str = "referencing_table";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ColumnMetadata {
     pub ordinal: usize,

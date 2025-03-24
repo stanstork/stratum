@@ -13,6 +13,15 @@ impl QueryLoader {
         Self::load_query(file_path)
     }
 
+    pub fn table_referencing_query(db_type: DbType) -> Result<String, Box<dyn std::error::Error>> {
+        let file_path = match db_type {
+            DbType::Postgres => "queries/pg/table_referencing.sql",
+            DbType::MySql => "queries/mysql/table_referencing.sql",
+            _ => return Err("Unsupported database type".into()),
+        };
+        Self::load_query(file_path)
+    }
+
     pub fn table_exists_query(db_type: DbType) -> Result<String, Box<dyn std::error::Error>> {
         let file_path = match db_type {
             DbType::Postgres => "queries/pg/table_exists.sql",

@@ -52,6 +52,13 @@ impl DbAdapter for PgAdapter {
         MetadataProvider::process_metadata_rows(table, &rows)
     }
 
+    async fn fetch_referencing_tables(
+        &self,
+        table: &str,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        unimplemented!("Implement fetch_referencing_tables for Postgres")
+    }
+
     async fn fetch_rows(
         &self,
         _request: FetchRowsRequest,

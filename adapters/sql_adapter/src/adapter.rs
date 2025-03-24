@@ -14,10 +14,16 @@ pub trait DbAdapter {
     async fn truncate_table(&self, table: &str) -> Result<(), Box<dyn std::error::Error>>;
 
     async fn execute(&self, query: &str) -> Result<(), Box<dyn std::error::Error>>;
+
     async fn fetch_metadata(
         &self,
         table: &str,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>>;
+    async fn fetch_referencing_tables(
+        &self,
+        table: &str,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error>>;
+
     async fn fetch_rows(
         &self,
         request: FetchRowsRequest,

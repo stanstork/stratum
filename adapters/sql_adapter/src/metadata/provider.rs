@@ -98,17 +98,40 @@ impl MetadataProvider {
                 // **Bidirectional Relationship: Link referencing tables**
                 graph
                     .entry(ref_table.clone())
-                    .and_modify(|existing_table| {
-                        existing_table
-                            .referencing_tables
+                    .and_modify(|t| {
+                        t.referencing_tables
                             .insert(table_name.to_string(), metadata.clone());
                     })
                     .or_insert_with(|| {
-                        let mut new_table = ref_metadata.clone();
-                        new_table
-                            .referencing_tables
+                        let mut t = ref_metadata.clone();
+                        t.referencing_tables
                             .insert(table_name.to_string(), metadata.clone());
-                        new_table
+                        t
+                    });
+            }
+
+            let mut referencing_tables = adapter.fetch_referencing_tables(table_name).await?;
+
+            for ref_table in referencing_tables.drain(..) {
+                let ref_metadata =
+                    Self::build_metadata_dep_graph(&ref_table, adapter, graph, visited).await?;
+
+                metadata
+                    .referencing_tables
+                    .insert(ref_table.clone(), ref_metadata.clone());
+
+                // **Bidirectional Relationship: Link referenced tables**
+                graph
+                    .entry(ref_table.clone())
+                    .and_modify(|t| {
+                        t.referenced_tables
+                            .insert(table_name.to_string(), metadata.clone());
+                    })
+                    .or_insert_with(|| {
+                        let mut t = ref_metadata.clone();
+                        t.referenced_tables
+                            .insert(table_name.to_string(), metadata.clone());
+                        t
                     });
             }
 
