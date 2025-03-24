@@ -52,11 +52,12 @@ impl DbDataSource for MySqlDataSource {
         };
 
         let rows = self.adapter.fetch_rows(request).await?;
-        let records = rows
-            .iter()
-            .map(|row| Record::RowData(row.clone()))
-            .collect::<Vec<_>>();
-        Ok(records)
+        // let records = rows
+        //     .iter()
+        //     .map(|row| Record::RowData(row.clone()))
+        //     .collect::<Vec<_>>();
+        // Ok(records)
+        unimplemented!()
     }
 
     async fn get_metadata(&self) -> Result<TableMetadata, Box<dyn std::error::Error>> {

@@ -27,6 +27,7 @@ const QUERY_TABLE_EXISTS: &str = "queries/mysql/table_exists.sql";
 const QUERY_TRUNCATE_TABLE: &str = "queries/mysql/truncate_table.sql";
 const QUERY_TABLE_METADATA: &str = "queries/mysql/table_metadata.sql";
 const QUERY_TABLE_REFERENCING: &str = "queries/mysql/table_referencing.sql";
+const QUERY_COLUMN_TYPE: &str = "queries/mysql/column_type.sql";
 
 #[async_trait]
 impl SqlAdapter for MySqlAdapter {
@@ -108,11 +109,31 @@ impl SqlAdapter for MySqlAdapter {
             .limit(request.limit)
             .offset(request.offset.unwrap_or(0))
             .build();
-        let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
 
-        Ok(rows
-            .iter()
-            .map(|row| RowData::from_db_row(&DbRow::MySqlRow(row)))
-            .collect())
+        println!("Query: {}", query.0);
+
+        unimplemented!()
+
+        // let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
+        //
+        // Ok(rows
+        //     .iter()
+        //     .map(|row| RowData::from_db_row(&DbRow::MySqlRow(row)))
+        //     .collect())
+    }
+
+    async fn fetch_column_type(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let query = QueryLoader::load_query(QUERY_COLUMN_TYPE)?;
+        let row = sqlx::query(&query)
+            .bind(table)
+            .bind(column)
+            .fetch_one(&self.pool)
+            .await?;
+        let data_type = row.try_get::<String, _>("column_type")?;
+        Ok(data_type)
     }
 }

@@ -128,11 +128,13 @@ impl SqlQueryBuilder {
         self.query
             .push_str(&format!("\nCREATE TABLE {} (\n", table));
 
+        let composite_pk = columns.iter().filter(|c| c.is_primary_key).count() > 1;
+
         let column_defs: Vec<String> = columns
             .iter()
             .map(|col| {
                 let mut definition = format!("\t{} {}", col.name, col.data_type);
-                if col.is_primary_key {
+                if !composite_pk && col.is_primary_key {
                     definition.push_str(" PRIMARY KEY");
                 }
                 if !col.is_nullable {
@@ -144,6 +146,16 @@ impl SqlQueryBuilder {
                 definition
             })
             .collect();
+
+        let pk_columns: Vec<String> = if composite_pk {
+            columns
+                .iter()
+                .filter(|c| c.is_primary_key)
+                .map(|c| c.name.clone())
+                .collect()
+        } else {
+            vec![]
+        };
 
         let foreign_key_defs: Vec<String> = foreign_keys
             .iter()
@@ -157,6 +169,7 @@ impl SqlQueryBuilder {
 
         let all_defs = column_defs
             .into_iter()
+            .chain(pk_columns)
             .chain(foreign_key_defs)
             .collect::<Vec<_>>()
             .join(",\n");
@@ -164,6 +177,16 @@ impl SqlQueryBuilder {
         self.query.push_str(&all_defs);
         self.query.push_str("\n);\n");
 
+        self
+    }
+
+    pub fn add_foreign_keys(mut self, table: &str, foreign_keys: &[ForeignKeyInfo]) -> Self {
+        for fk in foreign_keys {
+            self.query.push_str(&format!(
+                "ALTER TABLE {} ADD FOREIGN KEY ({}) REFERENCES {}({});\n",
+                table, fk.column, fk.referenced_table, fk.referenced_column
+            ));
+        }
         self
     }
 

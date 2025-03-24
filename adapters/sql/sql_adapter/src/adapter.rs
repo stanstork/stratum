@@ -25,4 +25,10 @@ pub trait SqlAdapter {
         &self,
         request: FetchRowsRequest,
     ) -> Result<Vec<RowData>, Box<dyn std::error::Error>>;
+
+    async fn fetch_column_type(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> Result<String, Box<dyn std::error::Error>>;
 }

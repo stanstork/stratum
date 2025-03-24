@@ -27,6 +27,7 @@ const QUERY_TABLE_EXISTS: &str = "queries/pg/table_exists.sql";
 const QUERY_TRUNCATE_TABLE: &str = "queries/pg/truncate_table.sql";
 const QUERY_TABLE_METADATA: &str = "queries/pg/table_metadata.sql";
 const QUERY_TABLE_REFERENCING: &str = "queries/pg/table_referencing.sql";
+const QUERY_COLUMN_TYPE: &str = "queries/pg/column_type.sql";
 
 #[async_trait]
 impl SqlAdapter for PgAdapter {
@@ -96,5 +97,20 @@ impl SqlAdapter for PgAdapter {
         _request: FetchRowsRequest,
     ) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
         todo!("Implement fetch_all for Postgres")
+    }
+
+    async fn fetch_column_type(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let query = QueryLoader::load_query(QUERY_COLUMN_TYPE)?;
+        let row = sqlx::query(&query)
+            .bind(table)
+            .bind(column)
+            .fetch_one(&self.pool)
+            .await?;
+        let data_type = row.try_get::<String, _>("column_type")?;
+        Ok(data_type)
     }
 }

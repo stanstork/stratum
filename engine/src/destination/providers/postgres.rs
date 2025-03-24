@@ -1,6 +1,7 @@
 use crate::{destination::data_dest::DbDataDestination, record::Record};
 use async_trait::async_trait;
 use postgres::{data_type::ColumnDataTypeMapper, postgres::PgAdapter};
+use sql_adapter::metadata::column::data_type::ColumnDataType;
 use sql_adapter::{
     adapter::SqlAdapter,
     metadata::{provider::MetadataProvider, table::TableMetadata},
@@ -32,35 +33,6 @@ impl PgDestination {
 
 #[async_trait]
 impl DbDataDestination for PgDestination {
-    async fn infer_schema(
-        &self,
-        metadata: &TableMetadata,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if self.table_exists(&metadata.name).await? {
-            info!("Table '{}' already exists", metadata.name);
-            return Ok(());
-        }
-
-        let mut visited = HashSet::new();
-        let mut queries = Vec::new();
-
-        // Collect tables recursively and ensure correct creation order
-        self.collect_ref_tables(metadata, &mut visited, &mut queries);
-
-        for query in queries {
-            let sql = query.build().0;
-            info!("Executing query: {}", sql);
-
-            if let Err(err) = self.adapter.execute(&sql).await {
-                error!("Failed to execute query: {}\nError: {:?}", sql, err);
-                return Err(err);
-            }
-        }
-
-        info!("Schema inference completed");
-        Ok(())
-    }
-
     async fn write(
         &self,
         metadata: &TableMetadata,
@@ -140,6 +112,52 @@ impl DbDataDestination for PgDestination {
         Ok(())
     }
 
+    async fn infer_schema(
+        &self,
+        metadata: &TableMetadata,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.table_exists(&metadata.name).await? {
+            info!("Table '{}' already exists", metadata.name);
+            return Ok(());
+        }
+
+        let mut visited = HashSet::new();
+        let mut queries = Vec::new();
+        let mut constraint_queries = HashSet::new();
+
+        // Collect tables recursively and ensure correct creation order
+        self.collect_ref_tables(
+            metadata,
+            &mut visited,
+            &mut queries,
+            &mut constraint_queries,
+        );
+
+        for query in queries {
+            let sql = query.build().0;
+            info!("Executing query: {}", sql);
+
+            if let Err(err) = self.adapter.execute(&sql).await {
+                error!("Failed to execute query: {}\nError: {:?}", sql, err);
+                return Err(err);
+            }
+        }
+
+        // Add foreign key constraints
+        for query in constraint_queries {
+            let sql = query;
+            info!("Executing query: {}", sql);
+
+            if let Err(err) = self.adapter.execute(&sql).await {
+                error!("Failed to execute query: {}\nError: {:?}", sql, err);
+                return Err(err);
+            }
+        }
+
+        info!("Schema inference completed");
+        Ok(())
+    }
+
     fn adapter(&self) -> Box<dyn SqlAdapter + Send + Sync> {
         Box::new(self.adapter.clone())
     }
@@ -158,23 +176,41 @@ impl PgDestination {
         &self,
         table: &TableMetadata,
         visited: &mut HashSet<String>,
-        queries: &mut Vec<SqlQueryBuilder>,
+        table_queries: &mut Vec<SqlQueryBuilder>,
+        constraint_queries: &mut HashSet<String>,
     ) {
         if visited.contains(&table.name) {
             return;
         }
 
         for referenced_table in table.referenced_tables.values() {
-            self.collect_ref_tables(referenced_table, visited, queries);
+            self.collect_ref_tables(referenced_table, visited, table_queries, constraint_queries);
+        }
+
+        for referencing_table in table.referencing_tables.values() {
+            self.collect_ref_tables(
+                referencing_table,
+                visited,
+                table_queries,
+                constraint_queries,
+            );
         }
 
         let columns = self.get_columns(table);
-        let foreign_keys = self.get_foreign_keys(table);
-        let query_builder =
-            SqlQueryBuilder::new().create_table(&table.name, &columns, &foreign_keys);
+        let query_builder = SqlQueryBuilder::new().create_table(&table.name, &columns, &[]);
 
-        queries.push(query_builder);
-        visited.insert(table.name.clone());
+        if !visited.contains(&table.name) {
+            table_queries.push(query_builder);
+            visited.insert(table.name.clone());
+
+            let foreign_keys = self.get_foreign_keys(table);
+            if !foreign_keys.is_empty() {
+                let constraint_query = SqlQueryBuilder::new()
+                    .add_foreign_keys(&table.name, &foreign_keys)
+                    .build();
+                constraint_queries.insert(constraint_query.0);
+            }
+        }
     }
 
     fn get_columns(&self, metadata: &TableMetadata) -> Vec<ColumnInfo> {
