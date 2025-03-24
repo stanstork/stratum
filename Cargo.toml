@@ -1,4 +1,11 @@
 [workspace]
-members = ["adapters/sql_adapter", "cli", "engine", "smql"]
+members = [
+    "adapters/sql/mysql",
+    "adapters/sql/postgres",
+    "adapters/sql/sql_adapter",
+    "cli",
+    "engine",
+    "smql",
+]
 
 resolver = "2"

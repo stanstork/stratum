@@ -1,4 +1,3 @@
-use crate::row::db_row::DbRow;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -82,24 +81,6 @@ lazy_static! {
     };
 }
 
-impl ColumnDataType {
-    pub fn from_row(row: &DbRow) -> Self {
-        match row {
-            DbRow::MySqlRow(row) => Self::from_sqlx_row(*row),
-            DbRow::PostgresRow(row) => Self::from_sqlx_row(*row),
-        }
-    }
-
-    fn from_sqlx_row<'r, T: sqlx::Row>(row: &'r T) -> Self
-    where
-        String: sqlx::Decode<'r, T::Database> + sqlx::Type<T::Database>,
-        for<'q> &'q str: sqlx::ColumnIndex<T>,
-    {
-        let data_type_str: String = row.try_get("data_type").unwrap_or_default();
-        Self::try_from(data_type_str.as_str()).unwrap_or(Self::String)
-    }
-}
-
 impl TryFrom<&str> for ColumnDataType {
     type Error = String;
 
@@ -108,39 +89,5 @@ impl TryFrom<&str> for ColumnDataType {
             .get(s.to_uppercase().as_str())
             .copied()
             .ok_or_else(|| format!("Unknown column type: {}", s))
-    }
-}
-
-impl ColumnDataType {
-    pub fn to_pg_string(&self) -> String {
-        match self {
-            ColumnDataType::Decimal => "DECIMAL".to_string(),
-            ColumnDataType::Tiny => "SMALLINT".to_string(),
-            ColumnDataType::Short => "SMALLINT".to_string(),
-            ColumnDataType::Long => "INTEGER".to_string(),
-            ColumnDataType::Float => "REAL".to_string(),
-            ColumnDataType::Double => "DOUBLE PRECISION".to_string(),
-            ColumnDataType::Null => "NULL".to_string(),
-            ColumnDataType::Timestamp => "TIMESTAMP".to_string(),
-            ColumnDataType::LongLong => "BIGINT".to_string(),
-            ColumnDataType::Int24 => "INTEGER".to_string(),
-            ColumnDataType::Date => "DATE".to_string(),
-            ColumnDataType::Time => "TIME".to_string(),
-            ColumnDataType::Datetime => "TIMESTAMP".to_string(),
-            ColumnDataType::Year => "INTEGER".to_string(),
-            ColumnDataType::VarChar => "VARCHAR".to_string(),
-            ColumnDataType::Bit => "BIT".to_string(),
-            ColumnDataType::Json => "JSON".to_string(),
-            ColumnDataType::NewDecimal => "DECIMAL".to_string(),
-            ColumnDataType::Enum => "ENUM".to_string(),
-            ColumnDataType::Set => "SET".to_string(),
-            ColumnDataType::TinyBlob => "BYTEA".to_string(),
-            ColumnDataType::MediumBlob => "BYTEA".to_string(),
-            ColumnDataType::LongBlob => "BYTEA".to_string(),
-            ColumnDataType::Blob => "BYTEA".to_string(),
-            ColumnDataType::VarString => "VARCHAR".to_string(),
-            ColumnDataType::String => "TEXT".to_string(),
-            ColumnDataType::Geometry => "BYTEA".to_string(),
-        }
     }
 }

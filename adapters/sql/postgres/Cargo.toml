@@ -1,10 +1,10 @@
 [package]
-name = "sql_adapter"
+name = "postgres"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-smql = { path = "../../smql" }
+sql_adapter = { path = "../sql_adapter" }
 
 async-trait = "0.1.86"
 sqlx = { version = "0.8.3", features = [

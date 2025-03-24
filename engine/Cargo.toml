@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+mysql = { path = "../adapters/sql/mysql" }
+postgres = { path = "../adapters/sql/postgres" }
+sql_adapter = { path = "../adapters/sql/sql_adapter" }
+
 async-trait = "0.1.86"
 serde = "1.0.217"
 sqlx = { version = "0.8.3", features = [
@@ -24,7 +28,6 @@ uuid = { version = "1.13.1", features = ["serde", "v4"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 lazy_static = "1.5.0"
-sql_adapter = { path = "../adapters/sql_adapter" }
 smql = { path = "../smql" }
 sled = "0.34.7"
 bincode = "1.3.3"

@@ -1,5 +1,7 @@
+use mysql::mysql::MySqlAdapter;
+use postgres::postgres::PgAdapter;
 use smql::statements::connection::DataFormat;
-use sql_adapter::{adapter::DbAdapter, mysql::MySqlAdapter, postgres::PgAdapter};
+use sql_adapter::adapter::SqlAdapter;
 
 pub enum Adapter {
     MySql(MySqlAdapter),

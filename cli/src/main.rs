@@ -1,10 +1,9 @@
-use std::collections::HashSet;
-
 use clap::Parser;
 use commands::Commands;
 use engine::runner;
 use smql::parser::parse;
 use sql_adapter::metadata::table::TableMetadata;
+use std::collections::HashSet;
 use tracing::Level;
 pub mod commands;
 

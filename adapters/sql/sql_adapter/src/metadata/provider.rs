@@ -1,7 +1,7 @@
 use super::{
     column::metadata::ColumnMetadata, foreign_key::ForeignKeyMetadata, table::TableMetadata,
 };
-use crate::{adapter::DbAdapter, row::db_row::DbRow};
+use crate::adapter::SqlAdapter;
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
@@ -17,7 +17,7 @@ pub struct MetadataProvider;
 
 impl MetadataProvider {
     pub async fn build_table_metadata(
-        adapter: &(dyn DbAdapter + Send + Sync),
+        adapter: &(dyn SqlAdapter + Send + Sync),
         table: &str,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
         let mut graph = HashMap::new();
@@ -27,16 +27,10 @@ impl MetadataProvider {
         Ok(metadata)
     }
 
-    pub fn process_metadata_rows(
+    pub fn process_metadata_cols(
         table: &str,
-        rows: &Vec<DbRow>,
+        columns: HashMap<String, ColumnMetadata>,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
-        let columns: HashMap<String, ColumnMetadata> = rows
-            .iter()
-            .map(ColumnMetadata::from)
-            .map(|col| (col.name.clone(), col))
-            .collect();
-
         let primary_keys: Vec<String> = columns
             .values()
             .filter(|col| col.is_primary_key)
@@ -70,7 +64,7 @@ impl MetadataProvider {
 
     pub fn build_metadata_dep_graph<'a>(
         table_name: &'a str,
-        adapter: &'a (dyn DbAdapter + Send + Sync),
+        adapter: &'a (dyn SqlAdapter + Send + Sync),
         graph: &'a mut HashMap<String, TableMetadata>,
         visited: &'a mut HashSet<String>,
     ) -> MetadataFuture<'a, TableMetadata> {
@@ -134,7 +128,7 @@ impl MetadataProvider {
     fn fetch_forward_references<'a>(
         table_name: &'a str,
         metadata: &'a mut TableMetadata,
-        adapter: &'a (dyn DbAdapter + Send + Sync),
+        adapter: &'a (dyn SqlAdapter + Send + Sync),
         graph: &'a mut HashMap<String, TableMetadata>,
         visited: &'a mut HashSet<String>,
     ) -> MetadataFuture<'a, ()> {
@@ -168,7 +162,7 @@ impl MetadataProvider {
     fn fetch_backward_references<'a>(
         table_name: &'a str,
         metadata: &'a mut TableMetadata,
-        adapter: &'a (dyn DbAdapter + Send + Sync),
+        adapter: &'a (dyn SqlAdapter + Send + Sync),
         graph: &'a mut HashMap<String, TableMetadata>,
         visited: &'a mut HashSet<String>,
     ) -> MetadataFuture<'a, ()> {

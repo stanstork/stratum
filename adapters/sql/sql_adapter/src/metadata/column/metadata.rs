@@ -39,9 +39,8 @@ pub struct ColumnMetadata {
     pub on_update: Option<String>,
 }
 
-impl From<&DbRow<'_>> for ColumnMetadata {
-    fn from(row: &DbRow) -> Self {
-        let data_type = ColumnDataType::from_row(row);
+impl ColumnMetadata {
+    pub fn from_row(row: &DbRow, data_type: ColumnDataType) -> Self {
         Self {
             ordinal: row.try_get_i32(COL_ORDINAL_POSITION).unwrap_or(0) as usize,
             name: row.try_get_string(COL_COLUMN_NAME).unwrap_or_default(),

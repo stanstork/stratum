@@ -1,9 +1,9 @@
 use crate::{record::Record, source::data_source::DbDataSource};
 use async_trait::async_trait;
+use mysql::mysql::MySqlAdapter;
+use sql_adapter::adapter::SqlAdapter;
 use sql_adapter::{
-    adapter::DbAdapter,
     metadata::{provider::MetadataProvider, table::TableMetadata},
-    mysql::MySqlAdapter,
     requests::FetchRowsRequest,
 };
 

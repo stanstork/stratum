@@ -1,9 +1,9 @@
 use crate::{destination::data_dest::DbDataDestination, record::Record};
 use async_trait::async_trait;
+use postgres::{data_type::ColumnDataTypeMapper, postgres::PgAdapter};
 use sql_adapter::{
-    adapter::DbAdapter,
+    adapter::SqlAdapter,
     metadata::{provider::MetadataProvider, table::TableMetadata},
-    postgres::PgAdapter,
     query::builder::{ColumnInfo, ForeignKeyInfo, SqlQueryBuilder},
 };
 use std::collections::HashSet;
@@ -140,7 +140,7 @@ impl DbDataDestination for PgDestination {
         Ok(())
     }
 
-    fn adapter(&self) -> Box<dyn DbAdapter + Send + Sync> {
+    fn adapter(&self) -> Box<dyn SqlAdapter + Send + Sync> {
         Box::new(self.adapter.clone())
     }
 
