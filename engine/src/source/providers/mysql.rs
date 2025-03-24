@@ -39,7 +39,7 @@ impl DbDataSource for MySqlDataSource {
         offset: Option<usize>,
     ) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
         let metadata = self.metadata();
-        let columns = metadata.collect_columns();
+        let columns = metadata.collect_select_columns();
         let joins = metadata.collect_joins();
 
         let request = FetchRowsRequest {
@@ -67,5 +67,9 @@ impl DbDataSource for MySqlDataSource {
 
     fn table_name(&self) -> &str {
         &self.table
+    }
+
+    fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync) {
+        &self.adapter
     }
 }

@@ -133,7 +133,7 @@ impl SqlAdapter for MySqlAdapter {
             .bind(column)
             .fetch_one(&self.pool)
             .await?;
-        let data_type = row.try_get::<String, _>("column_type")?;
-        Ok(data_type)
+        let data_type = row.try_get::<Vec<u8>, _>("column_type")?;
+        String::from_utf8(data_type).map_err(|err| err.into())
     }
 }

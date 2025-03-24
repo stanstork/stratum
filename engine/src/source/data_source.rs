@@ -2,6 +2,7 @@ use super::providers::mysql::MySqlDataSource;
 use crate::{adapter::Adapter, record::Record};
 use async_trait::async_trait;
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
+use sql_adapter::adapter::SqlAdapter;
 use sql_adapter::metadata::table::TableMetadata;
 use std::sync::Arc;
 
@@ -27,6 +28,7 @@ pub trait DbDataSource: Send + Sync {
     ) -> Result<Vec<Record>, Box<dyn std::error::Error>>;
     async fn get_metadata(&self) -> Result<TableMetadata, Box<dyn std::error::Error>>;
     fn table_name(&self) -> &str;
+    fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync);
 }
 
 pub async fn create_data_source(

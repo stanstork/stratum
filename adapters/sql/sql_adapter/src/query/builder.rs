@@ -192,6 +192,15 @@ impl SqlQueryBuilder {
         self
     }
 
+    pub fn create_enum(mut self, name: &str, values: &Vec<String>) -> Self {
+        self.query.push_str(&format!(
+            "CREATE TYPE {} AS ENUM ('{}');",
+            name,
+            values.join("', '")
+        ));
+        self
+    }
+
     pub fn order_by(mut self, column: &str, direction: &str) -> Self {
         self.query
             .push_str(&format!(" ORDER BY {} {}", column, direction));

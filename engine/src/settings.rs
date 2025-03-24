@@ -1,9 +1,14 @@
+use crate::schema_plan::SchemaPlan;
 use crate::{
     context::MigrationContext, destination::data_dest::DataDestination,
     source::data_source::DataSource,
 };
 use async_trait::async_trait;
+use postgres::data_type::ColumnDataTypeMapper;
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
+use sql_adapter::metadata::column::data_type::ColumnDataType;
+use sql_adapter::metadata::column::metadata::ColumnMetadata;
+use sql_adapter::metadata::table::TableMetadata;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -42,11 +47,24 @@ impl MigrationSetting for InferSchemaSetting {
             )
         };
 
-        let mut metadata = match (source, source_format) {
+        let mut schema_plan = match (source, source_format) {
             (DataSource::Database(source), format)
                 if format.intersects(DataFormat::sql_databases()) =>
             {
-                source.get_metadata().await?
+                let metadata = source.get_metadata().await?;
+                let type_converter = |col: &ColumnMetadata| match &col.data_type {
+                    ColumnDataType::Enum => col.name.clone(),
+                    ColumnDataType::Set => "TEXT[]".to_string(),
+                    _ => ColumnDataType::to_pg_string(&col.data_type),
+                };
+
+                SchemaPlan::build(
+                    &*source,
+                    metadata,
+                    &type_converter,
+                    &TableMetadata::collect_enum_types,
+                )
+                .await?
             }
             _ => return Err("Unsupported data source format".into()),
         };
@@ -63,11 +81,12 @@ impl MigrationSetting for InferSchemaSetting {
                 }
 
                 // Set the metadata name to the target table name
-                metadata.name = plan.migration.target.clone();
+                schema_plan.metadata.name = plan.migration.target.clone();
 
                 let mut dest = destination.lock().await;
-                dest.infer_schema(&metadata).await?;
-                dest.set_metadata(metadata);
+
+                dest.infer_schema(&schema_plan).await?;
+                dest.set_metadata(schema_plan.metadata);
             }
             _ => return Err("Unsupported data destination format".into()),
         }

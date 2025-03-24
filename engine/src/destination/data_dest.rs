@@ -1,5 +1,5 @@
 use super::providers::postgres::PgDestination;
-use crate::{adapter::Adapter, record::Record};
+use crate::{adapter::Adapter, record::Record, schema_plan::SchemaPlan};
 use async_trait::async_trait;
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::{adapter::SqlAdapter, metadata::table::TableMetadata};
@@ -25,7 +25,7 @@ pub trait DbDataDestination: Send + Sync {
     ) -> Result<(), Box<dyn std::error::Error>>;
     async fn infer_schema(
         &self,
-        metadata: &TableMetadata,
+        schema_plan: &SchemaPlan,
     ) -> Result<(), Box<dyn std::error::Error>>;
 
     fn adapter(&self) -> Box<dyn SqlAdapter + Send + Sync>;

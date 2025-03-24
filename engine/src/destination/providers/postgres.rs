@@ -1,33 +1,17 @@
+use crate::schema_plan::SchemaPlan;
 use crate::{destination::data_dest::DbDataDestination, record::Record};
 use async_trait::async_trait;
-use postgres::{data_type::ColumnDataTypeMapper, postgres::PgAdapter};
+use postgres::postgres::PgAdapter;
 use sql_adapter::{
     adapter::SqlAdapter,
     metadata::{provider::MetadataProvider, table::TableMetadata},
-    query::builder::{ColumnInfo, ForeignKeyInfo, SqlQueryBuilder},
+    query::builder::SqlQueryBuilder,
 };
-use std::collections::HashSet;
 use tracing::{error, info};
 
 pub struct PgDestination {
     metadata: Option<TableMetadata>,
     adapter: PgAdapter,
-}
-
-impl PgDestination {
-    pub async fn new(adapter: PgAdapter, table: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let metadata = if adapter.table_exists(table).await? {
-            Some(MetadataProvider::build_table_metadata(&adapter, table).await?)
-        } else {
-            None
-        };
-
-        Ok(PgDestination { adapter, metadata })
-    }
-
-    pub async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        self.adapter.table_exists(table).await.map_err(Into::into)
-    }
 }
 
 #[async_trait]
@@ -113,42 +97,25 @@ impl DbDataDestination for PgDestination {
 
     async fn infer_schema(
         &self,
-        metadata: &TableMetadata,
+        schema_plan: &SchemaPlan,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if self.table_exists(&metadata.name).await? {
-            info!("Table '{}' already exists", metadata.name);
+        if self.table_exists(schema_plan.table_name()).await? {
+            info!("Table '{}' already exists", schema_plan.table_name());
             return Ok(());
         }
 
-        let mut visited = HashSet::new();
-        let mut queries = Vec::new();
-        let mut constraint_queries = HashSet::new();
-
-        // Collect tables recursively and ensure correct creation order
-        self.collect_ref_tables(
-            metadata,
-            &mut visited,
-            &mut queries,
-            &mut constraint_queries,
-        );
+        let queries = schema_plan
+            .enum_queries
+            .iter()
+            .chain(&schema_plan.create_table_queries)
+            .chain(&schema_plan.constraint_queries)
+            .map(|query| query.clone())
+            .collect::<Vec<String>>();
 
         for query in queries {
-            let sql = query.build().0;
-            info!("Executing query: {}", sql);
-
-            if let Err(err) = self.adapter.execute(&sql).await {
-                error!("Failed to execute query: {}\nError: {:?}", sql, err);
-                return Err(err);
-            }
-        }
-
-        // Add foreign key constraints
-        for query in constraint_queries {
-            let sql = query;
-            info!("Executing query: {}", sql);
-
-            if let Err(err) = self.adapter.execute(&sql).await {
-                error!("Failed to execute query: {}\nError: {:?}", sql, err);
+            info!("Executing query: {}", query);
+            if let Err(err) = self.adapter.execute(&query).await {
+                error!("Failed to execute query: {}\nError: {:?}", query, err);
                 return Err(err);
             }
         }
@@ -171,72 +138,16 @@ impl DbDataDestination for PgDestination {
 }
 
 impl PgDestination {
-    fn collect_ref_tables(
-        &self,
-        table: &TableMetadata,
-        visited: &mut HashSet<String>,
-        table_queries: &mut Vec<SqlQueryBuilder>,
-        constraint_queries: &mut HashSet<String>,
-    ) {
-        if visited.contains(&table.name) {
-            return;
-        }
+    pub async fn new(adapter: PgAdapter, table: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let metadata = match adapter.table_exists(table).await? {
+            true => Some(MetadataProvider::build_table_metadata(&adapter, table).await?),
+            false => None,
+        };
 
-        for referenced_table in table.referenced_tables.values() {
-            self.collect_ref_tables(referenced_table, visited, table_queries, constraint_queries);
-        }
-
-        for referencing_table in table.referencing_tables.values() {
-            self.collect_ref_tables(
-                referencing_table,
-                visited,
-                table_queries,
-                constraint_queries,
-            );
-        }
-
-        let columns = self.get_columns(table);
-        let query_builder = SqlQueryBuilder::new().create_table(&table.name, &columns, &[]);
-
-        if !visited.contains(&table.name) {
-            table_queries.push(query_builder);
-            visited.insert(table.name.clone());
-
-            let foreign_keys = self.get_foreign_keys(table);
-            if !foreign_keys.is_empty() {
-                for fk in foreign_keys {
-                    let query = SqlQueryBuilder::new()
-                        .add_foreign_key(&table.name, &fk)
-                        .build();
-                    constraint_queries.insert(query.0);
-                }
-            }
-        }
+        Ok(PgDestination { adapter, metadata })
     }
 
-    fn get_columns(&self, metadata: &TableMetadata) -> Vec<ColumnInfo> {
-        metadata
-            .columns
-            .iter()
-            .map(|(name, col)| ColumnInfo {
-                name: name.clone(),
-                data_type: col.data_type.to_pg_string(),
-                is_nullable: col.is_nullable,
-                is_primary_key: metadata.primary_keys.contains(name),
-                default: col.default_value.as_ref().map(ToString::to_string),
-            })
-            .collect::<Vec<_>>()
-    }
-
-    fn get_foreign_keys(&self, metadata: &TableMetadata) -> Vec<ForeignKeyInfo> {
-        metadata
-            .foreign_keys
-            .iter()
-            .map(|fk| ForeignKeyInfo {
-                column: fk.column.clone(),
-                referenced_table: fk.referenced_table.clone(),
-                referenced_column: fk.referenced_column.clone(),
-            })
-            .collect::<Vec<_>>()
+    pub async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        self.adapter.table_exists(table).await.map_err(Into::into)
     }
 }

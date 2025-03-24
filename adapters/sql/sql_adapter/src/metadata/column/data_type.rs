@@ -56,8 +56,8 @@ lazy_static! {
         m.insert("DATETIME", ColumnDataType::Datetime);
         m.insert("YEAR", ColumnDataType::Year);
         m.insert("BIT", ColumnDataType::Bit);
-        m.insert("ENUM", ColumnDataType::String); // TODO: Enum support
-        m.insert("SET", ColumnDataType::String); // TODO: Set support
+        m.insert("ENUM", ColumnDataType::Enum); // TODO: Enum support
+        m.insert("SET", ColumnDataType::Set); // TODO: Set support
         m.insert("DECIMAL", ColumnDataType::Decimal);
         m.insert("GEOMETRY", ColumnDataType::Geometry);
         m.insert("JSON", ColumnDataType::Json);

@@ -1,4 +1,6 @@
 use super::{column::metadata::ColumnMetadata, foreign_key::ForeignKeyMetadata};
+use crate::metadata::column::data_type::ColumnDataType;
+use crate::query::builder::{ColumnInfo, ForeignKeyInfo};
 use crate::{query::builder::SelectColumn, requests::JoinClause};
 use std::collections::{HashMap, HashSet};
 
@@ -14,7 +16,34 @@ pub struct TableMetadata {
 }
 
 impl TableMetadata {
-    pub fn collect_columns(&self) -> Vec<SelectColumn> {
+    pub fn to_column_definitions<F>(&self, type_converter: &F) -> Vec<ColumnInfo>
+    where
+        F: Fn(&ColumnMetadata) -> String,
+    {
+        self.columns
+            .iter()
+            .map(|(name, col)| ColumnInfo {
+                name: name.clone(),
+                data_type: type_converter(col),
+                is_nullable: col.is_nullable,
+                is_primary_key: self.primary_keys.contains(name),
+                default: col.default_value.as_ref().map(ToString::to_string),
+            })
+            .collect::<Vec<_>>()
+    }
+
+    pub fn to_fk_definitions(&self) -> Vec<ForeignKeyInfo> {
+        self.foreign_keys
+            .iter()
+            .map(|fk| ForeignKeyInfo {
+                column: fk.column.clone(),
+                referenced_table: fk.referenced_table.clone(),
+                referenced_column: fk.referenced_column.clone(),
+            })
+            .collect::<Vec<_>>()
+    }
+
+    pub fn collect_select_columns(&self) -> Vec<SelectColumn> {
         let mut columns: Vec<SelectColumn> = self
             .columns
             .keys()
@@ -59,6 +88,15 @@ impl TableMetadata {
                         join_type: "LEFT".to_string(),
                     })
             })
+            .collect()
+    }
+
+    pub fn collect_enum_types(table: &TableMetadata) -> Vec<&ColumnMetadata> {
+        table
+            .columns
+            .iter()
+            .filter(|(_name, col)| col.data_type == ColumnDataType::Enum)
+            .map(|(_name, col)| col)
             .collect()
     }
 

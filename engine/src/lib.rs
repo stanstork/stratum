@@ -6,6 +6,7 @@ pub mod destination;
 pub mod producer;
 pub mod record;
 pub mod runner;
+pub mod schema_plan;
 pub mod settings;
 pub mod source;
 pub mod state;
