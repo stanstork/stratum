@@ -86,54 +86,11 @@ impl MetadataProvider {
             let mut metadata = adapter.fetch_metadata(table_name).await?;
             graph.insert(table_name.to_string(), metadata.clone());
 
-            for fk in &metadata.foreign_keys {
-                let ref_table = &fk.referenced_table;
-                let ref_metadata =
-                    Self::build_metadata_dep_graph(ref_table, adapter, graph, visited).await?;
-
-                metadata
-                    .referenced_tables
-                    .insert(ref_table.clone(), ref_metadata.clone());
-
-                // **Bidirectional Relationship: Link referencing tables**
-                graph
-                    .entry(ref_table.clone())
-                    .and_modify(|t| {
-                        t.referencing_tables
-                            .insert(table_name.to_string(), metadata.clone());
-                    })
-                    .or_insert_with(|| {
-                        let mut t = ref_metadata.clone();
-                        t.referencing_tables
-                            .insert(table_name.to_string(), metadata.clone());
-                        t
-                    });
-            }
-
-            let mut referencing_tables = adapter.fetch_referencing_tables(table_name).await?;
-
-            for ref_table in referencing_tables.drain(..) {
-                let ref_metadata =
-                    Self::build_metadata_dep_graph(&ref_table, adapter, graph, visited).await?;
-
-                metadata
-                    .referencing_tables
-                    .insert(ref_table.clone(), ref_metadata.clone());
-
-                // **Bidirectional Relationship: Link referenced tables**
-                graph
-                    .entry(ref_table.clone())
-                    .and_modify(|t| {
-                        t.referenced_tables
-                            .insert(table_name.to_string(), metadata.clone());
-                    })
-                    .or_insert_with(|| {
-                        let mut t = ref_metadata.clone();
-                        t.referenced_tables
-                            .insert(table_name.to_string(), metadata.clone());
-                        t
-                    });
-            }
+            // Fetch forward and backward references
+            Self::fetch_forward_references(table_name, &mut metadata, adapter, graph, visited)
+                .await?;
+            Self::fetch_backward_references(table_name, &mut metadata, adapter, graph, visited)
+                .await?;
 
             graph.insert(table_name.to_string(), metadata.clone());
 
@@ -172,5 +129,74 @@ impl MetadataProvider {
         );
 
         order
+    }
+
+    fn fetch_forward_references<'a>(
+        table_name: &'a str,
+        metadata: &'a mut TableMetadata,
+        adapter: &'a (dyn DbAdapter + Send + Sync),
+        graph: &'a mut HashMap<String, TableMetadata>,
+        visited: &'a mut HashSet<String>,
+    ) -> MetadataFuture<'a, ()> {
+        Box::pin(async move {
+            for fk in &metadata.foreign_keys {
+                let ref_table = &fk.referenced_table;
+                let ref_metadata =
+                    Self::build_metadata_dep_graph(ref_table, adapter, graph, visited).await?;
+
+                metadata
+                    .referenced_tables
+                    .insert(ref_table.clone(), ref_metadata.clone());
+
+                graph
+                    .entry(ref_table.clone())
+                    .and_modify(|t| {
+                        t.referencing_tables
+                            .insert(table_name.to_string(), metadata.clone());
+                    })
+                    .or_insert_with(|| {
+                        let mut t = ref_metadata.clone();
+                        t.referencing_tables
+                            .insert(table_name.to_string(), metadata.clone());
+                        t
+                    });
+            }
+            Ok(())
+        })
+    }
+
+    fn fetch_backward_references<'a>(
+        table_name: &'a str,
+        metadata: &'a mut TableMetadata,
+        adapter: &'a (dyn DbAdapter + Send + Sync),
+        graph: &'a mut HashMap<String, TableMetadata>,
+        visited: &'a mut HashSet<String>,
+    ) -> MetadataFuture<'a, ()> {
+        Box::pin(async move {
+            let referencing_tables = adapter.fetch_referencing_tables(table_name).await?;
+
+            for ref_table in referencing_tables {
+                let ref_metadata =
+                    Self::build_metadata_dep_graph(&ref_table, adapter, graph, visited).await?;
+
+                metadata
+                    .referencing_tables
+                    .insert(ref_table.clone(), ref_metadata.clone());
+
+                graph
+                    .entry(ref_table.clone())
+                    .and_modify(|t| {
+                        t.referenced_tables
+                            .insert(table_name.to_string(), metadata.clone());
+                    })
+                    .or_insert_with(|| {
+                        let mut t = ref_metadata.clone();
+                        t.referenced_tables
+                            .insert(table_name.to_string(), metadata.clone());
+                        t
+                    });
+            }
+            Ok(())
+        })
     }
 }
