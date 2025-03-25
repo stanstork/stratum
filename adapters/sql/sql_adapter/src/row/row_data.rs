@@ -37,14 +37,14 @@ impl RowData {
         RowData { columns }
     }
 
-    pub fn extract_table_columns(&self, table_name: &str) -> Vec<ColumnData> {
+    pub fn extract_columns(&self, table_name: &str) -> Vec<ColumnData> {
         let prefix = format!("{}_", table_name);
         self.columns
             .iter()
             .filter(|col| col.name.starts_with(&prefix))
             .cloned()
             .map(|mut col| {
-                col.name = col.name.replace(&prefix, "");
+                col.name = col.name.replacen(&prefix, "", 1);
                 col
             })
             .collect()

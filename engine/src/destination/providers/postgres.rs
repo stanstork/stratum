@@ -54,41 +54,40 @@ impl DbDataDestination for PgDestination {
             return Ok(());
         }
 
-        let mut columns = Vec::new();
-        let mut values = Vec::new();
+        let mut column_names = Vec::new();
+        let mut all_values = Vec::new();
 
         for record in records {
             let row = match record {
                 Record::RowData(row) => row,
             };
 
-            if columns.is_empty() {
-                columns = row.columns.iter().map(|col| col.name.clone()).collect();
+            if column_names.is_empty() {
+                column_names = row.columns.iter().map(|col| col.name.clone()).collect();
             }
 
-            let row_values = row
+            let row_values: Vec<String> = row
                 .columns
                 .iter()
-                .map(|col| {
-                    col.value
-                        .clone()
-                        .map_or("NULL".to_string(), |val| val.to_string())
+                .map(|col| match &col.value {
+                    Some(val) => val.to_string(),
+                    None => "NULL".to_string(),
                 })
-                .collect::<Vec<String>>();
+                .collect();
 
-            values.push(row_values);
+            all_values.push(row_values);
         }
 
-        if columns.is_empty() {
-            return Err("No valid records found".into());
+        if column_names.is_empty() {
+            return Err("write_batch: No valid columns found in records".into());
         }
 
         let query = SqlQueryBuilder::new()
-            .insert_batch(&metadata.name, columns, values)
+            .insert_batch(&metadata.name, column_names, all_values)
             .build();
 
-        info!("Executing query: {}", query.0);
-        self.adapter.execute(&query.0).await?;
+        info!("Executing insert into `{}`: {}", metadata.name, query.0);
+        // self.adapter.execute(&query.0).await?;
 
         Ok(())
     }
