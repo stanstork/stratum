@@ -1,5 +1,5 @@
 use crate::{
-    buffer::RecordBuffer, destination::data_dest::DataDestination, source::data_source::DataSource,
+    buffer::SledBuffer, destination::data_dest::DataDestination, source::data_source::DataSource,
     state::MigrationState,
 };
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
@@ -12,7 +12,7 @@ pub struct MigrationContext {
     pub state: Arc<Mutex<MigrationState>>,
     pub source: DataSource,
     pub destination: DataDestination,
-    pub buffer: Arc<RecordBuffer>,
+    pub buffer: Arc<SledBuffer>,
     pub source_data_format: DataFormat,
     pub destination_data_format: DataFormat,
     pub src_dst_name_map: HashMap<String, String>,
@@ -25,7 +25,7 @@ impl MigrationContext {
         plan: &MigrationPlan,
     ) -> Arc<Mutex<MigrationContext>> {
         let state = Arc::new(Mutex::new(MigrationState::new()));
-        let buffer = Arc::new(RecordBuffer::new("migration_buffer"));
+        let buffer = Arc::new(SledBuffer::new("migration_buffer"));
         let source_data_format = plan.connections.source.data_format;
         let destination_data_format = plan.connections.destination.data_format;
 
@@ -45,7 +45,7 @@ impl MigrationContext {
             (DataSource::Database(source), format)
                 if format.intersects(DataFormat::sql_databases()) =>
             {
-                source.get_metadata().await
+                source.lock().await.get_metadata().await
             }
             _ => Err("Unsupported data source format".into()),
         }

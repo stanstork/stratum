@@ -38,26 +38,17 @@ impl DbDataSource for MySqlDataSource {
         batch_size: usize,
         offset: Option<usize>,
     ) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
-        let metadata = self.metadata();
-        let columns = metadata.collect_select_columns();
-        let joins = metadata.collect_joins();
+        let grouped_columns = self.metadata().collect_select_columns();
 
-        let request = FetchRowsRequest {
-            table: self.table.clone(),
-            alias: self.table.clone(),
-            joins,
-            columns,
-            limit: batch_size,
-            offset,
-        };
+        let mut records = Vec::new();
 
-        let rows = self.adapter.fetch_rows(request).await?;
-        // let records = rows
-        //     .iter()
-        //     .map(|row| Record::RowData(row.clone()))
-        //     .collect::<Vec<_>>();
-        // Ok(records)
-        unimplemented!()
+        for (table, columns) in grouped_columns {
+            let request = FetchRowsRequest::new(table, None, columns, vec![], batch_size, offset);
+            let rows = self.adapter.fetch_rows(request).await?;
+            records.extend(rows.into_iter().map(Record::RowData));
+        }
+
+        Ok(records)
     }
 
     async fn get_metadata(&self) -> Result<TableMetadata, Box<dyn std::error::Error>> {

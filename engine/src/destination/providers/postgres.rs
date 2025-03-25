@@ -1,4 +1,3 @@
-use crate::schema_plan::SchemaPlan;
 use crate::{destination::data_dest::DbDataDestination, record::Record};
 use async_trait::async_trait;
 use postgres::postgres::PgAdapter;
@@ -6,6 +5,7 @@ use sql_adapter::{
     adapter::SqlAdapter,
     metadata::{provider::MetadataProvider, table::TableMetadata},
     query::builder::SqlQueryBuilder,
+    schema_plan::SchemaPlan,
 };
 use tracing::{error, info};
 
@@ -33,7 +33,6 @@ impl DbDataDestination for PgDestination {
                     (col.name.clone(), value)
                 })
                 .collect::<Vec<(String, String)>>(),
-            _ => return Err("Invalid record type".into()),
         };
 
         let query = SqlQueryBuilder::new()
@@ -61,7 +60,6 @@ impl DbDataDestination for PgDestination {
         for record in records {
             let row = match record {
                 Record::RowData(row) => row,
-                _ => return Err("Invalid record type".into()),
             };
 
             if columns.is_empty() {
@@ -109,8 +107,7 @@ impl DbDataDestination for PgDestination {
             .iter()
             .chain(&schema_plan.create_table_queries)
             .chain(&schema_plan.constraint_queries)
-            .map(|query| query.clone())
-            .collect::<Vec<String>>();
+            .cloned();
 
         for query in queries {
             info!("Executing query: {}", query);

@@ -56,7 +56,7 @@ impl SqlQueryBuilder {
             .iter()
             .map(|col| {
                 if let Some(alias) = &col.alias {
-                    format!("{}.{} AS {}_{}", col.table, col.column, alias, col.column)
+                    format!("{}.{} AS {}", col.table, col.column, alias)
                 } else {
                     format!("{}.{}", col.table, col.column)
                 }
@@ -192,7 +192,7 @@ impl SqlQueryBuilder {
         self
     }
 
-    pub fn create_enum(mut self, name: &str, values: &Vec<String>) -> Self {
+    pub fn create_enum(mut self, name: &str, values: &[String]) -> Self {
         self.query.push_str(&format!(
             "CREATE TYPE {} AS ENUM ('{}');",
             name,

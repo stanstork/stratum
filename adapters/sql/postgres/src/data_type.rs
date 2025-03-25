@@ -16,7 +16,6 @@ impl ColumnDataTypeMapper for ColumnDataType {
     fn to_pg_string(&self) -> String {
         match self {
             ColumnDataType::Decimal => "DECIMAL".to_string(),
-            ColumnDataType::Tiny => "SMALLINT".to_string(),
             ColumnDataType::Short => "SMALLINT".to_string(),
             ColumnDataType::Long => "INTEGER".to_string(),
             ColumnDataType::Float => "REAL".to_string(),
@@ -25,9 +24,7 @@ impl ColumnDataTypeMapper for ColumnDataType {
             ColumnDataType::Timestamp => "TIMESTAMP".to_string(),
             ColumnDataType::LongLong => "BIGINT".to_string(),
             ColumnDataType::Int24 => "INTEGER".to_string(),
-            ColumnDataType::Date => "DATE".to_string(),
             ColumnDataType::Time => "TIME".to_string(),
-            ColumnDataType::Datetime => "TIMESTAMP".to_string(),
             ColumnDataType::Year => "INTEGER".to_string(),
             ColumnDataType::VarChar => "VARCHAR".to_string(),
             ColumnDataType::Bit => "BIT".to_string(),
@@ -42,6 +39,7 @@ impl ColumnDataTypeMapper for ColumnDataType {
             ColumnDataType::VarString => "VARCHAR".to_string(),
             ColumnDataType::String => "TEXT".to_string(),
             ColumnDataType::Geometry => "BYTEA".to_string(),
+            ColumnDataType::Boolean => "BOOLEAN".to_string(),
         }
     }
 }

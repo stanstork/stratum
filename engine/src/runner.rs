@@ -3,18 +3,12 @@ use crate::{
     consumer::Consumer,
     context::MigrationContext,
     destination::data_dest::{create_data_destination, DataDestination},
-    producer::spawn_producer,
-    settings::{BatchSizeSetting, InferSchemaSetting, MigrationSetting},
+    producer::Producer,
+    settings::parse_settings,
     source::data_source::{create_data_source, DataSource},
     validate::schema_validator::{SchemaValidationMode, SchemaValidator},
 };
-use smql::{
-    plan::MigrationPlan,
-    statements::{
-        connection::DataFormat,
-        setting::{Setting, SettingValue},
-    },
-};
+use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::metadata::{provider::MetadataProvider, table::TableMetadata};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -29,7 +23,7 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
     apply_settings(&plan, Arc::clone(&context)).await?;
     validate_destination(&plan, Arc::clone(&context)).await?;
 
-    let producer = spawn_producer(Arc::clone(&context)).await;
+    let producer = Producer::new(Arc::clone(&context)).await.spawn();
     let consumer = Consumer::new(Arc::clone(&context)).await.spawn();
 
     // Wait for both producer and consumer to finish
@@ -51,7 +45,7 @@ pub async fn load_src_metadata(
         Adapter::MySql(my_sql_adapter) => {
             let source_table = plan.migration.source.first().unwrap();
             let metadata =
-                MetadataProvider::build_table_metadata(&my_sql_adapter, &source_table).await?;
+                MetadataProvider::build_table_metadata(&my_sql_adapter, source_table).await?;
             Ok(metadata)
         }
         Adapter::Postgres(_pg_adapter) => unimplemented!("Postgres metadata loading"),
@@ -126,21 +120,4 @@ async fn validate_destination(
     }
 
     Ok(())
-}
-
-fn parse_settings(settings: &[Setting]) -> Vec<Box<dyn MigrationSetting>> {
-    settings
-        .iter()
-        .filter_map(
-            |setting| match (setting.key.as_str(), setting.value.clone()) {
-                ("infer_schema", SettingValue::Boolean(true)) => {
-                    Some(Box::new(InferSchemaSetting) as Box<dyn MigrationSetting>)
-                }
-                ("batch_size", SettingValue::Integer(size)) => {
-                    Some(Box::new(BatchSizeSetting(size)) as Box<dyn MigrationSetting>)
-                }
-                _ => None, // Ignore unknown settings
-            },
-        )
-        .collect()
 }

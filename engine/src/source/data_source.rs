@@ -5,16 +5,17 @@ use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::adapter::SqlAdapter;
 use sql_adapter::metadata::table::TableMetadata;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[derive(Clone)]
 pub enum DataSource {
-    Database(Arc<dyn DbDataSource>),
+    Database(Arc<Mutex<dyn DbDataSource>>),
 }
 
 impl DataSource {
-    pub fn source_name(&self) -> &str {
+    pub async fn source_name(&self) -> String {
         match self {
-            DataSource::Database(source) => source.table_name(),
+            DataSource::Database(source) => source.lock().await.table_name().to_string(),
         }
     }
 }
@@ -34,7 +35,7 @@ pub trait DbDataSource: Send + Sync {
 pub async fn create_data_source(
     plan: &MigrationPlan,
     adapter: Adapter,
-) -> Result<Arc<dyn DbDataSource>, Box<dyn std::error::Error>> {
+) -> Result<Arc<Mutex<dyn DbDataSource>>, Box<dyn std::error::Error>> {
     let source = plan.migration.source.first().unwrap();
     let data_format = plan.connections.source.data_format;
 
@@ -42,7 +43,7 @@ pub async fn create_data_source(
         DataFormat::MySql => {
             if let Adapter::MySql(adapter) = adapter {
                 let source = MySqlDataSource::new(source, adapter).await?;
-                Ok(Arc::new(source))
+                Ok(Arc::new(Mutex::new(source)))
             } else {
                 panic!("Invalid adapter type")
             }

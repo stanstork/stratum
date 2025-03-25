@@ -102,24 +102,22 @@ impl SqlAdapter for MySqlAdapter {
         &self,
         request: FetchRowsRequest,
     ) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
+        let alias = request.alias.as_deref().unwrap_or(&request.table);
         let query = SqlQueryBuilder::new()
             .select(&request.columns)
-            .from(&request.table, &request.table)
+            .from(&request.table, alias)
             .join(&request.joins)
             .limit(request.limit)
             .offset(request.offset.unwrap_or(0))
             .build();
 
-        println!("Query: {}", query.0);
+        let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
+        let result = rows
+            .into_iter()
+            .map(|row| RowData::from_db_row(&DbRow::MySqlRow(&row)))
+            .collect();
 
-        unimplemented!()
-
-        // let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
-        //
-        // Ok(rows
-        //     .iter()
-        //     .map(|row| RowData::from_db_row(&DbRow::MySqlRow(row)))
-        //     .collect())
+        Ok(result)
     }
 
     async fn fetch_column_type(

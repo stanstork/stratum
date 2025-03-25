@@ -1,5 +1,6 @@
 use sql_adapter::metadata::table::TableMetadata;
 use std::collections::HashSet;
+use tracing::error;
 
 pub struct SchemaValidator<'a> {
     source_metadata: &'a TableMetadata,
@@ -45,6 +46,7 @@ impl<'a> SchemaValidator<'a> {
                 self.destination_metadata.columns.get(source_column)
             {
                 if source_column_metadata.data_type != destination_column_metadata.data_type {
+                    error!("Trying to copy data from column {} with data type {} to column {} with data type {}", source_column, source_column_metadata.data_type, source_column, destination_column_metadata.data_type);
                     return Err("Source and destination column data type mismatch".into());
                 }
             } else {

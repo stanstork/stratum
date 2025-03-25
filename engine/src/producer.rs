@@ -1,41 +1,96 @@
-use crate::{context::MigrationContext, source::data_source::DataSource};
+use crate::{
+    buffer::SledBuffer,
+    context::MigrationContext,
+    source::data_source::{DataSource, DbDataSource},
+};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
-pub async fn spawn_producer(context: Arc<Mutex<MigrationContext>>) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut offset = 0;
-        let (buffer, data_source, batch_size) = {
-            let context_guard = context.lock().await;
-            let buffer = Arc::clone(&context_guard.buffer);
-            let data_source = match &context_guard.source {
-                DataSource::Database(db) => Arc::clone(db),
-            };
-            let batch_size = context_guard.state.lock().await.batch_size;
+pub struct Producer {
+    buffer: Arc<SledBuffer>,
+    data_source: Arc<Mutex<dyn DbDataSource>>,
+    batch_size: usize,
+}
 
-            (buffer, data_source, batch_size)
+impl Producer {
+    pub async fn new(context: Arc<Mutex<MigrationContext>>) -> Self {
+        let context_guard = context.lock().await;
+        let buffer = Arc::clone(&context_guard.buffer);
+        let data_source = match &context_guard.source {
+            DataSource::Database(db) => Arc::clone(db),
         };
+        let batch_size = context_guard.state.lock().await.batch_size;
+
+        Self {
+            buffer,
+            data_source,
+            batch_size,
+        }
+    }
+
+    pub fn spawn(self) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let batch_number = self.run().await;
+            info!(
+                "Producer finished after processing {} batches",
+                batch_number - 1
+            );
+        })
+    }
+
+    async fn run(self) -> usize {
+        let mut offset = self.buffer.read_last_offset();
+        let mut batch_number = 1;
 
         loop {
-            match data_source.fetch_data(batch_size, Some(offset)).await {
-                Ok(records) if records.is_empty() => break,
+            info!(
+                "Fetching batch #{batch_number} with offset {offset} and batch size {0}",
+                self.batch_size
+            );
+
+            match self
+                .data_source
+                .lock()
+                .await
+                .fetch_data(self.batch_size, Some(offset))
+                .await
+            {
+                Ok(records) if records.is_empty() => {
+                    info!("No more records to fetch. Terminating producer.");
+                    break;
+                }
                 Ok(records) => {
-                    info!("Fetched {} records", records.len());
+                    info!("Fetched {} records in batch #{batch_number}", records.len());
+
                     for record in records {
-                        if let Err(e) = buffer.store(record.serialize()) {
+                        if let Err(e) = self.buffer.store(record.serialize()) {
                             error!("Failed to store record: {}", e);
-                            return;
+                            return batch_number;
                         }
+                    }
+
+                    offset += self.batch_size;
+                    if let Err(e) = self.buffer.store_last_offset(offset) {
+                        error!(
+                            "Failed to persist last offset after batch #{batch_number}: {}",
+                            e
+                        );
+                        break;
                     }
                 }
                 Err(e) => {
-                    error!("Error fetching data: {}", e);
+                    error!(
+                        "Failed to fetch batch #{batch_number} at offset {}: {}",
+                        offset, e
+                    );
                     break;
                 }
             }
 
-            offset += batch_size;
+            batch_number += 1;
         }
-    })
+
+        batch_number
+    }
 }

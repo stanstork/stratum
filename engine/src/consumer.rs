@@ -1,5 +1,5 @@
 use crate::{
-    buffer::RecordBuffer,
+    buffer::SledBuffer,
     context::MigrationContext,
     destination::data_dest::{DataDestination, DbDataDestination},
     record::{DataRecord, Record},
@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info};
 
 pub struct Consumer {
-    buffer: Arc<RecordBuffer>,
+    buffer: Arc<SledBuffer>,
     data_destination: Arc<Mutex<dyn DbDataDestination>>,
     tbl_names_map: HashMap<String, String>,
     batch_size: usize,
@@ -42,22 +42,27 @@ impl Consumer {
     }
 
     async fn run(self) {
-        let metadata = self.data_destination.lock().await.metadata().clone();
-        let ordered_meta = MetadataProvider::resolve_insert_order(&metadata);
-        let mut batch_map = HashMap::new();
-
         loop {
-            match self.buffer.read_next() {
-                Some(record) => {
-                    self.process_record(record, &mut batch_map, &ordered_meta)
-                        .await;
-                }
-                None => {
-                    self.flush_all(&mut batch_map, &ordered_meta).await;
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                }
-            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            println!("Busy waiting");
         }
+
+        // let metadata = self.data_destination.lock().await.metadata().clone();
+        // let ordered_meta = MetadataProvider::resolve_insert_order(&metadata);
+        // let mut batch_map = HashMap::new();
+
+        // loop {
+        //     match self.buffer.read_next() {
+        //         Some(record) => {
+        //             self.process_record(record, &mut batch_map, &ordered_meta)
+        //                 .await;
+        //         }
+        //         None => {
+        //             self.flush_all(&mut batch_map, &ordered_meta).await;
+        //             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        //         }
+        //     }
+        // }
     }
 
     async fn process_record(
@@ -73,7 +78,7 @@ impl Consumer {
             let table_name = self.tbl_names_map.get(&table.name).unwrap_or(&table.name);
             let columns = row_data.extract_table_columns(table_name);
 
-            let batch = batch_map.entry(table_name.clone()).or_insert(Vec::new());
+            let batch = batch_map.entry(table_name.clone()).or_default();
             batch.push(Record::RowData(RowData::new(columns)));
 
             if batch.len() >= self.batch_size {

@@ -1,7 +1,5 @@
 use super::{
-    column::{data_type::ColumnDataType, metadata::ColumnMetadata},
-    foreign_key::ForeignKeyMetadata,
-    table::TableMetadata,
+    column::metadata::ColumnMetadata, foreign_key::ForeignKeyMetadata, table::TableMetadata,
 };
 use crate::{adapter::SqlAdapter, query::builder::SqlQueryBuilder};
 use std::{
@@ -155,7 +153,7 @@ impl MetadataProvider {
                 );
             }
 
-            let custom_columns = custom_type_extractor(&metadata);
+            let custom_columns = custom_type_extractor(metadata);
             custom_columns.iter().for_each(|c| {
                 enum_declarations.insert((metadata.name.to_string(), c.name.clone()));
             })

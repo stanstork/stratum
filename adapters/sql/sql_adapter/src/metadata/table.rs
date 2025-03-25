@@ -43,34 +43,43 @@ impl TableMetadata {
             .collect::<Vec<_>>()
     }
 
-    pub fn collect_select_columns(&self) -> Vec<SelectColumn> {
-        let mut columns: Vec<SelectColumn> = self
-            .columns
-            .keys()
-            .map(|col_name| SelectColumn {
-                table: self.name.clone(),
-                alias: Some(self.name.clone()),
-                column: col_name.clone(),
-            })
-            .collect();
+    pub fn collect_select_columns(&self) -> HashMap<String, Vec<SelectColumn>> {
+        fn collect_recursive(
+            metadata: &TableMetadata,
+            visited: &mut HashSet<String>,
+            grouped: &mut HashMap<String, Vec<SelectColumn>>,
+        ) {
+            if !visited.insert(metadata.name.clone()) {
+                return;
+            }
 
-        for fk in &self.foreign_keys {
-            if let Some(parent_metadata) = self.referenced_tables.get(&fk.referenced_table) {
-                let parent_columns = parent_metadata
-                    .columns
-                    .keys()
-                    .map(|col_name| SelectColumn {
-                        table: fk.referenced_table.clone(),
-                        alias: Some(fk.referenced_table.clone()),
-                        column: col_name.clone(),
-                    })
-                    .collect::<Vec<_>>();
+            let columns: Vec<SelectColumn> = metadata
+                .columns
+                .keys()
+                .map(|col_name| SelectColumn {
+                    table: metadata.name.clone(),
+                    alias: Some(format!("{}_{}", metadata.name, col_name)),
+                    column: col_name.clone(),
+                })
+                .collect();
 
-                columns.extend(parent_columns);
+            grouped.insert(metadata.name.clone(), columns);
+
+            for table in metadata.referenced_tables.values() {
+                collect_recursive(table, visited, grouped);
+            }
+
+            for table in metadata.referencing_tables.values() {
+                collect_recursive(table, visited, grouped);
             }
         }
 
-        columns
+        let mut visited = HashSet::new();
+        let mut grouped = HashMap::new();
+
+        collect_recursive(self, &mut visited, &mut grouped);
+
+        grouped
     }
 
     pub fn collect_joins(&self) -> Vec<JoinClause> {
@@ -110,14 +119,14 @@ impl TableMetadata {
 
         println!("{}- {}", "  ".repeat(indent), table.name);
 
-        for (_, ref_table) in &table.referenced_tables {
+        for ref_table in table.referenced_tables.values() {
             Self::print_tables_tree(ref_table, indent + 1, visited);
         }
 
         if !table.referencing_tables.is_empty() {
             println!("{}  Referenced by:", "  ".repeat(indent));
-            for (_, referencing_table) in &table.referencing_tables {
-                println!("{}  - {}", "  ".repeat(indent), referencing_table.name);
+            for ref_table in table.referencing_tables.values() {
+                println!("{}  - {}", "  ".repeat(indent), ref_table.name);
             }
         }
     }

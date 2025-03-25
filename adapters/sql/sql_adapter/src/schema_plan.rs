@@ -1,9 +1,7 @@
-use crate::source::data_source::DbDataSource;
-use sql_adapter::{
+use crate::{
+    adapter::SqlAdapter,
     metadata::{
-        column::{data_type::ColumnDataType, metadata::ColumnMetadata},
-        provider::MetadataProvider,
-        table::TableMetadata,
+        column::metadata::ColumnMetadata, provider::MetadataProvider, table::TableMetadata,
     },
     query::builder::SqlQueryBuilder,
 };
@@ -18,7 +16,7 @@ pub struct SchemaPlan {
 
 impl SchemaPlan {
     pub async fn build<F, T>(
-        source: &(dyn DbDataSource + Send + Sync),
+        adaper: &(dyn SqlAdapter + Send + Sync),
         metadata: TableMetadata,
         type_converter: &F,
         custom_type_extractor: &T,
@@ -32,9 +30,8 @@ impl SchemaPlan {
 
         let mut enum_queries = HashSet::new();
         for enum_declaration in enum_declarations {
-            let enum_type = source
-                .adapter()
-                .fetch_column_type(&*enum_declaration.0, &*enum_declaration.1)
+            let enum_type = adaper
+                .fetch_column_type(&enum_declaration.0, &enum_declaration.1)
                 .await?;
 
             enum_queries.insert(

@@ -1,14 +1,15 @@
-use crate::schema_plan::SchemaPlan;
 use crate::{
     context::MigrationContext, destination::data_dest::DataDestination,
     source::data_source::DataSource,
 };
 use async_trait::async_trait;
 use postgres::data_type::ColumnDataTypeMapper;
+use smql::statements::setting::{Setting, SettingValue};
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::metadata::column::data_type::ColumnDataType;
 use sql_adapter::metadata::column::metadata::ColumnMetadata;
 use sql_adapter::metadata::table::TableMetadata;
+use sql_adapter::schema_plan::SchemaPlan;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -35,7 +36,7 @@ impl MigrationSetting for InferSchemaSetting {
         let (source, source_format, destination, dest_format, state, src_name) = {
             let ctx = context.lock().await;
             let source = ctx.source.clone();
-            let src_name = source.source_name().to_owned();
+            let src_name = source.source_name().await.to_owned();
 
             (
                 ctx.source.clone(),
@@ -51,7 +52,7 @@ impl MigrationSetting for InferSchemaSetting {
             (DataSource::Database(source), format)
                 if format.intersects(DataFormat::sql_databases()) =>
             {
-                let metadata = source.get_metadata().await?;
+                let metadata = source.lock().await.get_metadata().await?;
                 let type_converter = |col: &ColumnMetadata| match &col.data_type {
                     ColumnDataType::Enum => col.name.clone(),
                     ColumnDataType::Set => "TEXT[]".to_string(),
@@ -59,7 +60,7 @@ impl MigrationSetting for InferSchemaSetting {
                 };
 
                 SchemaPlan::build(
-                    &*source,
+                    source.lock().await.adapter(),
                     metadata,
                     &type_converter,
                     &TableMetadata::collect_enum_types,
@@ -114,4 +115,21 @@ impl MigrationSetting for BatchSizeSetting {
         info!("Batch size setting applied");
         Ok(())
     }
+}
+
+pub fn parse_settings(settings: &[Setting]) -> Vec<Box<dyn MigrationSetting>> {
+    settings
+        .iter()
+        .filter_map(
+            |setting| match (setting.key.as_str(), setting.value.clone()) {
+                ("infer_schema", SettingValue::Boolean(true)) => {
+                    Some(Box::new(InferSchemaSetting) as Box<dyn MigrationSetting>)
+                }
+                ("batch_size", SettingValue::Integer(size)) => {
+                    Some(Box::new(BatchSizeSetting(size)) as Box<dyn MigrationSetting>)
+                }
+                _ => None, // Ignore unknown settings
+            },
+        )
+        .collect()
 }
