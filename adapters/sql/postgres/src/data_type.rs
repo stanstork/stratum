@@ -1,13 +1,15 @@
 use sql_adapter::metadata::column::data_type::ColumnDataType;
+use sql_adapter::metadata::column::metadata::ColumnMetadata;
 use sqlx::postgres::PgRow;
 use sqlx::Row;
 
-pub trait ColumnDataTypeMapper {
+pub trait PgColumnDataType {
     fn from_pg_row(row: &PgRow) -> ColumnDataType;
     fn to_pg_string(&self) -> String;
+    fn convert_pg_column_type(col: &ColumnMetadata) -> (String, Option<usize>);
 }
 
-impl ColumnDataTypeMapper for ColumnDataType {
+impl PgColumnDataType for ColumnDataType {
     fn from_pg_row(row: &PgRow) -> ColumnDataType {
         let data_type_str: String = row.try_get("data_type").unwrap_or_default();
         ColumnDataType::try_from(data_type_str.as_str()).unwrap_or(ColumnDataType::String)
@@ -42,6 +44,28 @@ impl ColumnDataTypeMapper for ColumnDataType {
             ColumnDataType::Boolean => "BOOLEAN".to_string(),
             ColumnDataType::ShortUnsigned => "SMALLINT".to_string(),
             ColumnDataType::IntUnsigned => "INTEGER".to_string(),
+            ColumnDataType::Bytea => "BYTEA".to_string(),
+            ColumnDataType::Array => "ARRAY".to_string(),
+            ColumnDataType::Char => "CHAR".to_string(),
         }
+    }
+
+    fn convert_pg_column_type(col: &ColumnMetadata) -> (String, Option<usize>) {
+        let data_type = match &col.data_type {
+            ColumnDataType::Enum => col.name.clone(),
+            ColumnDataType::Set => "TEXT[]".to_string(),
+            _ => ColumnDataType::to_pg_string(&col.data_type),
+        };
+
+        let type_len = if col.data_type == ColumnDataType::Enum {
+            None
+        } else {
+            match data_type.as_str() {
+                "BYTEA" | "TEXT[]" | "TEXT" => None,
+                _ => col.char_max_length,
+            }
+        };
+
+        (data_type, type_len)
     }
 }

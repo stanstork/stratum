@@ -1,4 +1,4 @@
-use sql_adapter::metadata::table::TableMetadata;
+use sql_adapter::metadata::{column::data_type::ColumnDataType, table::TableMetadata};
 use std::collections::{HashMap, HashSet};
 use tracing::error;
 
@@ -16,8 +16,8 @@ pub enum SchemaValidationMode<'a> {
 struct InvalidColumn {
     table: String,
     column: String,
-    source_type: String,
-    destination_type: Option<String>, // None if column is missing
+    source_type: ColumnDataType,
+    destination_type: Option<ColumnDataType>, // None if column is missing
 }
 
 impl<'a> SchemaValidator<'a> {
@@ -54,6 +54,7 @@ impl<'a> SchemaValidator<'a> {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let source_tables = self.source_metadata.collect_tables();
         let destination_tables = self.destination_metadata.collect_tables();
+
         let mut invalid_columns = Vec::new();
 
         if source_tables.len() != destination_tables.len() {
@@ -92,12 +93,15 @@ impl<'a> SchemaValidator<'a> {
             for (col_name, src_col_meta) in &source_table.columns {
                 match destination_table.columns.get(col_name) {
                     Some(dst_col_meta) => {
-                        if src_col_meta.data_type != dst_col_meta.data_type {
+                        if !src_col_meta
+                            .data_type
+                            .is_compatible(&dst_col_meta.data_type)
+                        {
                             invalid_columns.push(InvalidColumn {
                                 table: source_table.name.clone(),
                                 column: col_name.clone(),
-                                source_type: src_col_meta.data_type.to_string(),
-                                destination_type: Some(dst_col_meta.data_type.to_string()),
+                                source_type: src_col_meta.data_type,
+                                destination_type: Some(dst_col_meta.data_type),
                             });
                         }
                     }
@@ -105,7 +109,7 @@ impl<'a> SchemaValidator<'a> {
                         invalid_columns.push(InvalidColumn {
                             table: source_table.name.clone(),
                             column: col_name.clone(),
-                            source_type: src_col_meta.data_type.to_string(),
+                            source_type: src_col_meta.data_type,
                             destination_type: None,
                         });
                     }
@@ -119,7 +123,7 @@ impl<'a> SchemaValidator<'a> {
             for col in &invalid_columns {
                 match &col.destination_type {
                     Some(dest_type) => error!(
-                        "Column `{}` in table `{}` has mismatched types: source `{}`, destination `{}`",
+                        "Column `{}` in table `{}` has mismatched types: source `{:?}`, destination `{:?}`",
                         col.column, col.table, col.source_type, dest_type
                     ),
                     None => error!(

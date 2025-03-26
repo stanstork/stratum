@@ -79,16 +79,20 @@ impl TableMetadata {
 
     pub fn to_column_definitions<F>(&self, type_converter: &F) -> Vec<ColumnInfo>
     where
-        F: Fn(&ColumnMetadata) -> String,
+        F: Fn(&ColumnMetadata) -> (String, Option<usize>),
     {
         self.columns
             .iter()
-            .map(|(name, col)| ColumnInfo {
-                name: name.clone(),
-                data_type: type_converter(col),
-                is_nullable: col.is_nullable,
-                is_primary_key: self.primary_keys.contains(name),
-                default: col.default_value.as_ref().map(ToString::to_string),
+            .map(|(name, col)| {
+                let type_info = type_converter(col);
+                ColumnInfo {
+                    name: name.clone(),
+                    data_type: type_info.0,
+                    is_nullable: col.is_nullable,
+                    is_primary_key: self.primary_keys.contains(name),
+                    default: col.default_value.as_ref().map(ToString::to_string),
+                    char_max_length: type_info.1,
+                }
             })
             .collect::<Vec<_>>()
     }

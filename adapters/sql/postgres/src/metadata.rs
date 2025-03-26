@@ -1,4 +1,4 @@
-use crate::data_type::ColumnDataTypeMapper;
+use crate::data_type::PgColumnDataType;
 use sql_adapter::metadata::column::data_type::ColumnDataType;
 use sql_adapter::metadata::column::metadata::ColumnMetadata;
 use sql_adapter::row::db_row::DbRow;

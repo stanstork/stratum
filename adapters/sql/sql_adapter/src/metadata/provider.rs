@@ -101,7 +101,7 @@ impl MetadataProvider {
         custom_type_extractor: &T,
     ) -> (HashSet<String>, HashSet<String>, HashSet<(String, String)>)
     where
-        F: Fn(&ColumnMetadata) -> String,
+        F: Fn(&ColumnMetadata) -> (String, Option<usize>),
         T: Fn(&TableMetadata) -> Vec<&ColumnMetadata>,
     {
         fn visit<F, T>(
@@ -113,7 +113,7 @@ impl MetadataProvider {
             constraint_queries: &mut HashSet<String>,
             enum_declarations: &mut HashSet<(String, String)>,
         ) where
-            F: Fn(&ColumnMetadata) -> String,
+            F: Fn(&ColumnMetadata) -> (String, Option<usize>),
             T: Fn(&TableMetadata) -> Vec<&ColumnMetadata>,
         {
             if !visited.insert(metadata.name.clone()) {

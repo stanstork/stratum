@@ -16,7 +16,7 @@ use sql_adapter::{
 use sqlx::{Pool, Postgres, Row};
 use std::collections::HashMap;
 
-use crate::data_type::ColumnDataTypeMapper;
+use crate::data_type::PgColumnDataType;
 
 #[derive(Clone)]
 pub struct PgAdapter {

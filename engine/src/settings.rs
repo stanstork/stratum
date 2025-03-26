@@ -4,11 +4,10 @@ use crate::{
     source::data_source::DataSource,
 };
 use async_trait::async_trait;
-use postgres::data_type::ColumnDataTypeMapper;
+use postgres::data_type::PgColumnDataType;
 use smql::statements::setting::{Setting, SettingValue};
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::metadata::column::data_type::ColumnDataType;
-use sql_adapter::metadata::column::metadata::ColumnMetadata;
 use sql_adapter::metadata::provider::MetadataProvider;
 use sql_adapter::metadata::table::TableMetadata;
 use sql_adapter::schema_plan::SchemaPlan;
@@ -104,16 +103,10 @@ impl InferSchemaSetting {
                 if format.intersects(DataFormat::sql_databases()) =>
             {
                 let metadata = source.lock().await.get_metadata().await?;
-                let type_converter = |col: &ColumnMetadata| match &col.data_type {
-                    ColumnDataType::Enum => col.name.clone(),
-                    ColumnDataType::Set => "TEXT[]".to_string(),
-                    _ => ColumnDataType::to_pg_string(&col.data_type),
-                };
-
                 SchemaPlan::build(
                     source.lock().await.adapter(),
                     metadata,
-                    &type_converter,
+                    &ColumnDataType::convert_pg_column_type,
                     &TableMetadata::collect_enum_types,
                 )
                 .await

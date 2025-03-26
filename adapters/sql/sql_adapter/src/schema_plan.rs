@@ -22,7 +22,7 @@ impl SchemaPlan {
         custom_type_extractor: &T,
     ) -> Result<Self, Box<dyn std::error::Error>>
     where
-        F: Fn(&ColumnMetadata) -> String,
+        F: Fn(&ColumnMetadata) -> (String, Option<usize>),
         T: Fn(&TableMetadata) -> Vec<&ColumnMetadata>,
     {
         let (tbl_queries, const_queries, enum_declarations) =

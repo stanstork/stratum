@@ -28,9 +28,12 @@ pub enum ColumnDataType {
     MediumBlob,
     LongBlob,
     Blob,
+    Bytea,
     VarString,
     String,
     Geometry,
+    Array,
+    Char,
 }
 
 lazy_static! {
@@ -44,9 +47,9 @@ lazy_static! {
         m.insert("BIGINT UNSIGNED", ColumnDataType::LongLong);
         m.insert("TINYINT", ColumnDataType::Short);
         m.insert("SMALLINT", ColumnDataType::Short);
-        m.insert("INT", ColumnDataType::Long);
+        m.insert("INT", ColumnDataType::Int);
         m.insert("MEDIUMINT", ColumnDataType::Int);
-        m.insert("BIGINT", ColumnDataType::LongLong);
+        m.insert("BIGINT", ColumnDataType::Long);
         m.insert("FLOAT", ColumnDataType::Float);
         m.insert("DOUBLE", ColumnDataType::Double);
         m.insert("NULL", ColumnDataType::Null);
@@ -63,20 +66,23 @@ lazy_static! {
         m.insert("JSON", ColumnDataType::Json);
         m.insert("BINARY", ColumnDataType::String);
         m.insert("VARBINARY", ColumnDataType::VarString);
-        m.insert("CHAR", ColumnDataType::String);
+        m.insert("CHAR", ColumnDataType::Char);
         m.insert("VARCHAR", ColumnDataType::VarChar);
         m.insert("TINYBLOB", ColumnDataType::TinyBlob);
         m.insert("TINYTEXT", ColumnDataType::TinyBlob);
         m.insert("BLOB", ColumnDataType::Blob);
-        m.insert("TEXT", ColumnDataType::Blob);
+        m.insert("TEXT", ColumnDataType::String);
         m.insert("MEDIUMBLOB", ColumnDataType::MediumBlob);
         m.insert("MEDIUMTEXT", ColumnDataType::MediumBlob);
         m.insert("LONGBLOB", ColumnDataType::LongBlob);
         m.insert("LONGTEXT", ColumnDataType::LongBlob);
-        m.insert("INTEGER", ColumnDataType::Long);
+        m.insert("INTEGER", ColumnDataType::Int);
         m.insert("NUMERIC", ColumnDataType::Decimal);
         m.insert("TIMESTAMP WITH TIME ZONE", ColumnDataType::Timestamp);
         m.insert("TIMESTAMP WITHOUT TIME ZONE", ColumnDataType::Timestamp);
+        m.insert("BYTEA", ColumnDataType::Bytea);
+        m.insert("ARRAY", ColumnDataType::Array);
+        m.insert("CHARACTER", ColumnDataType::Char);
         m
     };
 }
@@ -103,7 +109,7 @@ impl fmt::Display for ColumnDataType {
             ColumnDataType::Null => write!(f, "NULL"),
             ColumnDataType::Timestamp => write!(f, "TIMESTAMP"),
             ColumnDataType::LongLong => write!(f, "BIGINT"),
-            ColumnDataType::Int => write!(f, "MEDIUMINT"),
+            ColumnDataType::Int => write!(f, "INT"),
             ColumnDataType::Time => write!(f, "TIME"),
             ColumnDataType::Year => write!(f, "YEAR"),
             ColumnDataType::VarChar => write!(f, "VARCHAR"),
@@ -122,6 +128,38 @@ impl fmt::Display for ColumnDataType {
             ColumnDataType::Boolean => write!(f, "BOOLEAN"),
             ColumnDataType::ShortUnsigned => write!(f, "SMALLINT UNSIGNED"),
             ColumnDataType::IntUnsigned => write!(f, "INT UNSIGNED"),
+            ColumnDataType::Bytea => write!(f, "BYTEA"),
+            ColumnDataType::Array => write!(f, "ARRAY"),
+            ColumnDataType::Char => write!(f, "CHAR"),
+        }
+    }
+}
+
+impl ColumnDataType {
+    // TODO: Handle enum types correctly, for now just treat them as strings
+    pub fn is_compatible(&self, other: &ColumnDataType) -> bool {
+        match (self, other) {
+            (ColumnDataType::Int, ColumnDataType::IntUnsigned)
+            | (ColumnDataType::IntUnsigned, ColumnDataType::Int)
+            | (ColumnDataType::Short, ColumnDataType::ShortUnsigned)
+            | (ColumnDataType::ShortUnsigned, ColumnDataType::Short)
+            | (ColumnDataType::Long, ColumnDataType::IntUnsigned)
+            | (ColumnDataType::IntUnsigned, ColumnDataType::Long)
+            | (ColumnDataType::LongLong, ColumnDataType::Long)
+            | (ColumnDataType::Long, ColumnDataType::LongLong) => true,
+            (ColumnDataType::String, ColumnDataType::VarChar)
+            | (ColumnDataType::VarChar, ColumnDataType::String) => true,
+            (ColumnDataType::Geometry, ColumnDataType::Bytea)
+            | (ColumnDataType::Bytea, ColumnDataType::Geometry) => true,
+            (ColumnDataType::Blob, ColumnDataType::Bytea)
+            | (ColumnDataType::Bytea, ColumnDataType::Blob) => true,
+            (ColumnDataType::Enum, ColumnDataType::String)
+            | (ColumnDataType::String, ColumnDataType::Enum) => true,
+            (ColumnDataType::Set, ColumnDataType::Array)
+            | (ColumnDataType::Array, ColumnDataType::Set) => true,
+            (ColumnDataType::Year, ColumnDataType::Int)
+            | (ColumnDataType::Int, ColumnDataType::Year) => true,
+            _ => self == other,
         }
     }
 }

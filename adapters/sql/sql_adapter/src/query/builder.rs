@@ -12,6 +12,7 @@ pub struct ColumnInfo {
     pub is_nullable: bool,
     pub is_primary_key: bool,
     pub default: Option<String>,
+    pub char_max_length: Option<usize>,
 }
 
 pub struct ForeignKeyInfo {
@@ -133,7 +134,17 @@ impl SqlQueryBuilder {
         let column_defs: Vec<String> = columns
             .iter()
             .map(|col| {
-                let mut definition = format!("\t{} {}", col.name, col.data_type);
+                let mut definition = col.name.clone();
+                if col.char_max_length.is_some() {
+                    definition.push_str(&format!(
+                        " {}({})",
+                        col.data_type,
+                        col.char_max_length.unwrap()
+                    ));
+                } else {
+                    definition.push_str(&format!(" {}", col.data_type));
+                }
+
                 if !composite_pk && col.is_primary_key {
                     definition.push_str(" PRIMARY KEY");
                 }

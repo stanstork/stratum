@@ -1,4 +1,4 @@
-use crate::data_type::ColumnDataTypeMapper;
+use crate::data_type::MySqlColumnDataType;
 use async_trait::async_trait;
 use sql_adapter::{
     adapter::SqlAdapter,
