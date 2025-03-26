@@ -46,7 +46,12 @@ impl DataRecord for RowData {
     }
 
     fn deserialize(data: Vec<u8>) -> Self {
-        bincode::deserialize(&data).expect("Failed to deserialize")
+        match bincode::deserialize::<RowData>(&data) {
+            Ok(data) => data,
+            Err(e) => {
+                panic!("Failed to deserialize: {:?}", e);
+            }
+        }
     }
 }
 

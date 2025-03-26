@@ -92,7 +92,7 @@ impl DbDataDestination for PgDestination {
             .build();
 
         info!("Executing insert into `{}`: {}", metadata.name, query.0);
-        // self.adapter.execute(&query.0).await?;
+        self.adapter.execute(&query.0).await?;
 
         Ok(())
     }

@@ -23,11 +23,11 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
     apply_settings(&plan, Arc::clone(&context)).await?;
     validate_destination(Arc::clone(&context)).await?;
 
-    // let producer = Producer::new(Arc::clone(&context)).await.spawn();
-    // let consumer = Consumer::new(Arc::clone(&context)).await.spawn();
+    let producer = Producer::new(Arc::clone(&context)).await.spawn();
+    let consumer = Consumer::new(Arc::clone(&context)).await.spawn();
 
-    // // Wait for both producer and consumer to finish
-    // tokio::try_join!(producer, consumer)?;
+    // Wait for both producer and consumer to finish
+    tokio::try_join!(producer, consumer)?;
 
     Ok(())
 }

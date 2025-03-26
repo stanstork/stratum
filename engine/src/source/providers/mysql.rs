@@ -45,7 +45,6 @@ impl DbDataSource for MySqlDataSource {
         for (table, columns) in grouped_columns {
             let request = FetchRowsRequest::new(table, None, columns, vec![], batch_size, offset);
             let rows = self.adapter.fetch_rows(request).await?;
-            println!("Rows: {:?}", rows);
             records.extend(rows.into_iter().map(Record::RowData));
         }
 

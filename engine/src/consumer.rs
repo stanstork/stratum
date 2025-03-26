@@ -112,7 +112,7 @@ impl Consumer {
                             table.name, elapsed
                         );
                     }
-                    Err(e) => error!("Failed to write batch for table {}: {:?}", table.name, e),
+                    Err(e) => panic!("Failed to write batch: {}", e),
                 }
             }
         }
