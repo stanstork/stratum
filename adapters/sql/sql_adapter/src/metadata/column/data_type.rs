@@ -6,6 +6,7 @@ use std::{collections::HashMap, fmt};
 pub enum ColumnDataType {
     Decimal,
     Short,
+    ShortUnsigned,
     Long,
     Float,
     Double,
@@ -13,7 +14,8 @@ pub enum ColumnDataType {
     Null,
     Timestamp,
     LongLong,
-    Int24,
+    Int,
+    IntUnsigned,
     Time,
     Year,
     VarChar,
@@ -35,15 +37,15 @@ lazy_static! {
     static ref COLUMN_TYPE_MAP: HashMap<&'static str, ColumnDataType> = {
         let mut m = HashMap::new();
         m.insert("BOOLEAN", ColumnDataType::Boolean);
-        m.insert("TINYINT UNSIGNED", ColumnDataType::Boolean);
-        m.insert("SMALLINT UNSIGNED", ColumnDataType::Short);
+        m.insert("TINYINT UNSIGNED", ColumnDataType::ShortUnsigned);
+        m.insert("SMALLINT UNSIGNED", ColumnDataType::ShortUnsigned);
         m.insert("INT UNSIGNED", ColumnDataType::Long);
-        m.insert("MEDIUMINT UNSIGNED", ColumnDataType::Int24);
+        m.insert("MEDIUMINT UNSIGNED", ColumnDataType::IntUnsigned);
         m.insert("BIGINT UNSIGNED", ColumnDataType::LongLong);
         m.insert("TINYINT", ColumnDataType::Short);
         m.insert("SMALLINT", ColumnDataType::Short);
         m.insert("INT", ColumnDataType::Long);
-        m.insert("MEDIUMINT", ColumnDataType::Int24);
+        m.insert("MEDIUMINT", ColumnDataType::Int);
         m.insert("BIGINT", ColumnDataType::LongLong);
         m.insert("FLOAT", ColumnDataType::Float);
         m.insert("DOUBLE", ColumnDataType::Double);
@@ -101,7 +103,7 @@ impl fmt::Display for ColumnDataType {
             ColumnDataType::Null => write!(f, "NULL"),
             ColumnDataType::Timestamp => write!(f, "TIMESTAMP"),
             ColumnDataType::LongLong => write!(f, "BIGINT"),
-            ColumnDataType::Int24 => write!(f, "MEDIUMINT"),
+            ColumnDataType::Int => write!(f, "MEDIUMINT"),
             ColumnDataType::Time => write!(f, "TIME"),
             ColumnDataType::Year => write!(f, "YEAR"),
             ColumnDataType::VarChar => write!(f, "VARCHAR"),
@@ -118,6 +120,8 @@ impl fmt::Display for ColumnDataType {
             ColumnDataType::String => write!(f, "STRING"),
             ColumnDataType::Geometry => write!(f, "GEOMETRY"),
             ColumnDataType::Boolean => write!(f, "BOOLEAN"),
+            ColumnDataType::ShortUnsigned => write!(f, "SMALLINT UNSIGNED"),
+            ColumnDataType::IntUnsigned => write!(f, "INT UNSIGNED"),
         }
     }
 }

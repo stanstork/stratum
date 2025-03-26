@@ -27,6 +27,13 @@ impl DbRow<'_> {
         }
     }
 
+    pub fn try_get_u64(&self, name: &str) -> Option<u64> {
+        match self {
+            DbRow::MySqlRow(row) => row.try_get::<u64, _>(name).ok(),
+            DbRow::PostgresRow(row) => row.try_get::<i64, _>(name).map(|v| v as u64).ok(),
+        }
+    }
+
     pub fn try_get_i64(&self, name: &str) -> Option<i64> {
         match self {
             DbRow::MySqlRow(row) => row.try_get::<i64, _>(name).ok(),

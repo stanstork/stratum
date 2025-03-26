@@ -1,3 +1,4 @@
+use crate::data_type::ColumnDataTypeMapper;
 use async_trait::async_trait;
 use sql_adapter::{
     adapter::SqlAdapter,
@@ -15,8 +16,6 @@ use sql_adapter::{
 };
 use sqlx::{MySql, Pool, Row};
 use std::collections::HashMap;
-
-use crate::data_type::ColumnDataTypeMapper;
 
 #[derive(Clone)]
 pub struct MySqlAdapter {
@@ -111,10 +110,12 @@ impl SqlAdapter for MySqlAdapter {
             .offset(request.offset.unwrap_or(0))
             .build();
 
+        println!("Executing query: {}", query.0);
+
         let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
         let result = rows
             .into_iter()
-            .map(|row| RowData::from_db_row(&DbRow::MySqlRow(&row)))
+            .map(|row| RowData::from_db_row(&request.table, &DbRow::MySqlRow(&row)))
             .collect();
 
         Ok(result)

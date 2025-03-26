@@ -53,18 +53,12 @@ impl MigrationContext {
 
     pub async fn get_destination_metadata(
         &self,
-        table: &str,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
         match (&self.destination, self.destination_data_format) {
             (DataDestination::Database(destination), format)
                 if format.intersects(DataFormat::sql_databases()) =>
             {
-                destination
-                    .lock()
-                    .await
-                    .adapter()
-                    .fetch_metadata(table)
-                    .await
+                Ok(destination.lock().await.metadata().clone())
             }
             _ => unimplemented!("Unsupported data destination"),
         }

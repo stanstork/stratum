@@ -1,3 +1,4 @@
+use crate::state::MigrationState;
 use crate::{
     context::MigrationContext, destination::data_dest::DataDestination,
     source::data_source::DataSource,
@@ -8,6 +9,7 @@ use smql::statements::setting::{Setting, SettingValue};
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::metadata::column::data_type::ColumnDataType;
 use sql_adapter::metadata::column::metadata::ColumnMetadata;
+use sql_adapter::metadata::provider::MetadataProvider;
 use sql_adapter::metadata::table::TableMetadata;
 use sql_adapter::schema_plan::SchemaPlan;
 use std::sync::Arc;
@@ -33,6 +35,40 @@ impl MigrationSetting for InferSchemaSetting {
         plan: &MigrationPlan,
         context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let (source, source_format, destination, dest_format, state, src_name) =
+            self.extract_context(context.clone()).await;
+
+        let mut schema_plan = self.build_schema_plan(source, source_format).await?;
+
+        self.process_destination(
+            destination,
+            dest_format,
+            &mut schema_plan,
+            plan,
+            context,
+            &src_name,
+        )
+        .await?;
+
+        state.lock().await.infer_schema = true;
+
+        info!("Infer schema setting applied");
+        Ok(())
+    }
+}
+
+impl InferSchemaSetting {
+    async fn extract_context(
+        &self,
+        context: Arc<Mutex<MigrationContext>>,
+    ) -> (
+        DataSource,
+        DataFormat,
+        DataDestination,
+        DataFormat,
+        Arc<Mutex<MigrationState>>,
+        String,
+    ) {
         let (source, source_format, destination, dest_format, state, src_name) = {
             let ctx = context.lock().await;
             let source = ctx.source.clone();
@@ -48,7 +84,22 @@ impl MigrationSetting for InferSchemaSetting {
             )
         };
 
-        let mut schema_plan = match (source, source_format) {
+        (
+            source,
+            source_format,
+            destination,
+            dest_format,
+            state,
+            src_name,
+        )
+    }
+
+    async fn build_schema_plan(
+        &self,
+        source: DataSource,
+        source_format: DataFormat,
+    ) -> Result<SchemaPlan, Box<dyn std::error::Error>> {
+        match (source, source_format) {
             (DataSource::Database(source), format)
                 if format.intersects(DataFormat::sql_databases()) =>
             {
@@ -65,11 +116,21 @@ impl MigrationSetting for InferSchemaSetting {
                     &type_converter,
                     &TableMetadata::collect_enum_types,
                 )
-                .await?
+                .await
             }
-            _ => return Err("Unsupported data source format".into()),
-        };
+            _ => Err("Unsupported data source format".into()),
+        }
+    }
 
+    async fn process_destination(
+        &self,
+        destination: DataDestination,
+        dest_format: DataFormat,
+        schema_plan: &mut SchemaPlan,
+        plan: &MigrationPlan,
+        context: Arc<Mutex<MigrationContext>>,
+        src_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         match (&destination, dest_format) {
             (DataDestination::Database(destination), format)
                 if format.intersects(DataFormat::sql_databases()) =>
@@ -84,20 +145,20 @@ impl MigrationSetting for InferSchemaSetting {
                 // Set the metadata name to the target table name
                 schema_plan.metadata.name = plan.migration.target.clone();
 
-                let mut dest = destination.lock().await;
+                let mut dest_guard = destination.lock().await;
+                dest_guard.infer_schema(&schema_plan).await?;
 
-                dest.infer_schema(&schema_plan).await?;
-                dest.set_metadata(schema_plan.metadata);
+                let dest_metadata = MetadataProvider::build_table_metadata(
+                    dest_guard.adapter(),
+                    &plan.migration.target,
+                )
+                .await?;
+
+                dest_guard.set_metadata(dest_metadata);
             }
             _ => return Err("Unsupported data destination format".into()),
         }
 
-        {
-            let mut state_guard = state.lock().await;
-            state_guard.infer_schema = true;
-        }
-
-        info!("Infer schema setting applied");
         Ok(())
     }
 }

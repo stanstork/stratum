@@ -28,7 +28,7 @@ pub trait DbDataDestination: Send + Sync {
         schema_plan: &SchemaPlan,
     ) -> Result<(), Box<dyn std::error::Error>>;
 
-    fn adapter(&self) -> Box<dyn SqlAdapter + Send + Sync>;
+    fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync);
     fn set_metadata(&mut self, metadata: TableMetadata);
     fn metadata(&self) -> &TableMetadata;
 }

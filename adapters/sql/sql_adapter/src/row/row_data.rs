@@ -7,15 +7,19 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RowData {
+    pub table_name: String,
     pub columns: Vec<ColumnData>,
 }
 
 impl RowData {
-    pub fn new(columns: Vec<ColumnData>) -> Self {
-        RowData { columns }
+    pub fn new(table_name: &str, columns: Vec<ColumnData>) -> Self {
+        RowData {
+            table_name: table_name.to_string(),
+            columns,
+        }
     }
 
-    pub fn from_db_row(row: &DbRow) -> RowData {
+    pub fn from_db_row(table_name: &str, row: &DbRow) -> RowData {
         let columns = row
             .columns()
             .iter()
@@ -34,19 +38,6 @@ impl RowData {
             })
             .collect();
 
-        RowData { columns }
-    }
-
-    pub fn extract_columns(&self, table_name: &str) -> Vec<ColumnData> {
-        let prefix = format!("{}_", table_name);
-        self.columns
-            .iter()
-            .filter(|col| col.name.starts_with(&prefix))
-            .cloned()
-            .map(|mut col| {
-                col.name = col.name.replacen(&prefix, "", 1);
-                col
-            })
-            .collect()
+        RowData::new(table_name, columns)
     }
 }

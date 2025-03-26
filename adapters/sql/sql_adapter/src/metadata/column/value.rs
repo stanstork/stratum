@@ -22,8 +22,11 @@ pub enum ColumnValue {
 impl ColumnValue {
     pub fn from_row(row: &DbRow, data_type: ColumnDataType, name: &str) -> Option<Self> {
         match data_type {
-            ColumnDataType::Int24 | ColumnDataType::Long => {
-                row.try_get_i32(name).map(|v| Self::Int(v as i64))
+            ColumnDataType::Int | ColumnDataType::Long | ColumnDataType::Short => {
+                row.try_get_i64(name).map(|v| Self::Int(v as i64))
+            }
+            ColumnDataType::IntUnsigned | ColumnDataType::ShortUnsigned => {
+                row.try_get_u64(name).map(|v| Self::Int(v as i64))
             }
             ColumnDataType::Float => row.try_get_f64(name).map(Self::Float),
             ColumnDataType::Decimal => row

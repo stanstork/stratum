@@ -63,7 +63,12 @@ impl DbDataDestination for PgDestination {
             };
 
             if column_names.is_empty() {
-                column_names = row.columns.iter().map(|col| col.name.clone()).collect();
+                let prefix = format!("{}_", metadata.name);
+                column_names = row
+                    .columns
+                    .iter()
+                    .map(|col| col.name.replacen(&prefix, "", 1))
+                    .collect();
             }
 
             let row_values: Vec<String> = row
@@ -120,8 +125,8 @@ impl DbDataDestination for PgDestination {
         Ok(())
     }
 
-    fn adapter(&self) -> Box<dyn SqlAdapter + Send + Sync> {
-        Box::new(self.adapter.clone())
+    fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync) {
+        &self.adapter
     }
 
     fn set_metadata(&mut self, metadata: TableMetadata) {

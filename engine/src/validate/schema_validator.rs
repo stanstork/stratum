@@ -1,5 +1,5 @@
 use sql_adapter::metadata::table::TableMetadata;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use tracing::error;
 
 pub struct SchemaValidator<'a> {
@@ -10,6 +10,14 @@ pub struct SchemaValidator<'a> {
 pub enum SchemaValidationMode<'a> {
     OneToOne,
     ContainsColumns(&'a [String]),
+}
+
+#[derive(Debug)]
+struct InvalidColumn {
+    table: String,
+    column: String,
+    source_type: String,
+    destination_type: Option<String>, // None if column is missing
 }
 
 impl<'a> SchemaValidator<'a> {
@@ -23,10 +31,14 @@ impl<'a> SchemaValidator<'a> {
         }
     }
 
-    pub fn validate(&self, mode: SchemaValidationMode) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn validate(
+        &self,
+        mode: SchemaValidationMode,
+        tbls_name_map: HashMap<String, String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         match mode {
             SchemaValidationMode::OneToOne => {
-                self.validate_one_to_one()?;
+                self.validate_one_to_one(tbls_name_map)?;
             }
             SchemaValidationMode::ContainsColumns(columns) => {
                 self.validate_contains_columns(columns)?;
@@ -36,25 +48,89 @@ impl<'a> SchemaValidator<'a> {
         Ok(())
     }
 
-    fn validate_one_to_one(&self) -> Result<(), Box<dyn std::error::Error>> {
-        if self.source_metadata.columns.len() != self.destination_metadata.columns.len() {
-            return Err("Source and destination column count mismatch".into());
+    fn validate_one_to_one(
+        &self,
+        tbls_name_map: HashMap<String, String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let source_tables = self.source_metadata.collect_tables();
+        let destination_tables = self.destination_metadata.collect_tables();
+        let mut invalid_columns = Vec::new();
+
+        if source_tables.len() != destination_tables.len() {
+            return Err(format!(
+                "Table count mismatch: source has {}, destination has {}",
+                source_tables.len(),
+                destination_tables.len()
+            )
+            .into());
         }
 
-        for (source_column, source_column_metadata) in &self.source_metadata.columns {
-            if let Some(destination_column_metadata) =
-                self.destination_metadata.columns.get(source_column)
-            {
-                if source_column_metadata.data_type != destination_column_metadata.data_type {
-                    error!("Trying to copy data from column {} with data type {} to column {} with data type {}", source_column, source_column_metadata.data_type, source_column, destination_column_metadata.data_type);
-                    return Err("Source and destination column data type mismatch".into());
+        for source_table in &source_tables {
+            let dest_table_name = tbls_name_map
+                .get(&source_table.name)
+                .unwrap_or(&source_table.name);
+
+            let destination_table = destination_tables
+                .iter()
+                .find(|t| t.name == *dest_table_name)
+                .ok_or_else(|| {
+                    let msg = format!("Destination table `{}` not found", dest_table_name);
+                    error!("{}", msg);
+                    msg
+                })?;
+
+            if source_table.columns.len() != destination_table.columns.len() {
+                return Err(format!(
+                    "Column count mismatch in table `{}`: source has {}, destination has {}",
+                    source_table.name,
+                    source_table.columns.len(),
+                    destination_table.columns.len()
+                )
+                .into());
+            }
+
+            for (col_name, src_col_meta) in &source_table.columns {
+                match destination_table.columns.get(col_name) {
+                    Some(dst_col_meta) => {
+                        if src_col_meta.data_type != dst_col_meta.data_type {
+                            invalid_columns.push(InvalidColumn {
+                                table: source_table.name.clone(),
+                                column: col_name.clone(),
+                                source_type: src_col_meta.data_type.to_string(),
+                                destination_type: Some(dst_col_meta.data_type.to_string()),
+                            });
+                        }
+                    }
+                    None => {
+                        invalid_columns.push(InvalidColumn {
+                            table: source_table.name.clone(),
+                            column: col_name.clone(),
+                            source_type: src_col_meta.data_type.to_string(),
+                            destination_type: None,
+                        });
+                    }
                 }
-            } else {
-                return Err("Destination column missing".into());
             }
         }
 
-        Ok(())
+        if invalid_columns.is_empty() {
+            Ok(())
+        } else {
+            for col in &invalid_columns {
+                match &col.destination_type {
+                    Some(dest_type) => error!(
+                        "Column `{}` in table `{}` has mismatched types: source `{}`, destination `{}`",
+                        col.column, col.table, col.source_type, dest_type
+                    ),
+                    None => error!(
+                        "Column `{}` in table `{}` is missing in destination (source type: `{}`)",
+                        col.column, col.table, col.source_type
+                    ),
+                }
+            }
+
+            Err(format!("Found {} invalid column(s)", invalid_columns.len()).into())
+        }
     }
 
     fn validate_contains_columns(

@@ -23,7 +23,7 @@ impl ColumnDataTypeMapper for ColumnDataType {
             ColumnDataType::Null => "NULL".to_string(),
             ColumnDataType::Timestamp => "TIMESTAMP".to_string(),
             ColumnDataType::LongLong => "BIGINT".to_string(),
-            ColumnDataType::Int24 => "INTEGER".to_string(),
+            ColumnDataType::Int => "INTEGER".to_string(),
             ColumnDataType::Time => "TIME".to_string(),
             ColumnDataType::Year => "INTEGER".to_string(),
             ColumnDataType::VarChar => "VARCHAR".to_string(),
@@ -40,6 +40,8 @@ impl ColumnDataTypeMapper for ColumnDataType {
             ColumnDataType::String => "TEXT".to_string(),
             ColumnDataType::Geometry => "BYTEA".to_string(),
             ColumnDataType::Boolean => "BOOLEAN".to_string(),
+            ColumnDataType::ShortUnsigned => "SMALLINT".to_string(),
+            ColumnDataType::IntUnsigned => "INTEGER".to_string(),
         }
     }
 }

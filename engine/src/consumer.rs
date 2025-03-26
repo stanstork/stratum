@@ -67,21 +67,15 @@ impl Consumer {
         tables: &Vec<TableMetadata>,
     ) {
         let row_data = RowData::deserialize(record);
-        let mut should_flush = false;
+        let table_name = self
+            .tbl_names_map
+            .get(&row_data.table_name)
+            .unwrap_or(&row_data.table_name);
 
-        for table in tables.iter() {
-            let table_name = self.tbl_names_map.get(&table.name).unwrap_or(&table.name);
-            let columns = row_data.extract_columns(table_name);
+        let batch = batch_map.entry(table_name.clone()).or_default();
+        batch.push(Record::RowData(row_data));
 
-            let batch = batch_map.entry(table_name.clone()).or_default();
-            batch.push(Record::RowData(RowData::new(columns)));
-
-            if batch.len() >= self.batch_size {
-                should_flush = true;
-            }
-        }
-
-        if should_flush {
+        if batch.len() >= self.batch_size {
             self.flush_all(batch_map, tables).await;
         }
     }
@@ -103,26 +97,23 @@ impl Consumer {
                 }
 
                 let start_time = Instant::now();
-                records.iter().for_each(|record| {
-                    record.debug();
-                });
 
-                // match self
-                //     .data_destination
-                //     .lock()
-                //     .await
-                //     .write_batch(table, records)
-                //     .await
-                // {
-                //     Ok(_) => {
-                //         let elapsed = start_time.elapsed().as_millis();
-                //         info!(
-                //             "Batch for table {} written successfully in {}ms",
-                //             table.name, elapsed
-                //         );
-                //     }
-                //     Err(e) => error!("Failed to write batch for table {}: {:?}", table.name, e),
-                // }
+                match self
+                    .data_destination
+                    .lock()
+                    .await
+                    .write_batch(table, records)
+                    .await
+                {
+                    Ok(_) => {
+                        let elapsed = start_time.elapsed().as_millis();
+                        info!(
+                            "Batch for table {} written successfully in {}ms",
+                            table.name, elapsed
+                        );
+                    }
+                    Err(e) => error!("Failed to write batch for table {}: {:?}", table.name, e),
+                }
             }
         }
     }

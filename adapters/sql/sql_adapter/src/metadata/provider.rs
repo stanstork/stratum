@@ -11,7 +11,7 @@ use std::{
 // MetadataFuture is a type alias for a Future that returns a Result
 // containing the TableMetadata or an error
 pub type MetadataFuture<'a, T> =
-    Pin<Box<dyn Future<Output = Result<T, Box<dyn std::error::Error>>> + 'a>>;
+    Pin<Box<dyn Future<Output = Result<T, Box<dyn std::error::Error>>> + Send + 'a>>;
 
 pub struct MetadataProvider;
 

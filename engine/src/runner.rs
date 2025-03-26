@@ -21,13 +21,13 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
     let context = MigrationContext::init(data_source, data_destination, &plan);
 
     apply_settings(&plan, Arc::clone(&context)).await?;
-    validate_destination(&plan, Arc::clone(&context)).await?;
+    validate_destination(Arc::clone(&context)).await?;
 
-    let producer = Producer::new(Arc::clone(&context)).await.spawn();
-    let consumer = Consumer::new(Arc::clone(&context)).await.spawn();
+    // let producer = Producer::new(Arc::clone(&context)).await.spawn();
+    // let consumer = Consumer::new(Arc::clone(&context)).await.spawn();
 
-    // Wait for both producer and consumer to finish
-    tokio::try_join!(producer, consumer)?;
+    // // Wait for both producer and consumer to finish
+    // tokio::try_join!(producer, consumer)?;
 
     Ok(())
 }
@@ -99,19 +99,17 @@ async fn apply_settings(
 }
 
 async fn validate_destination(
-    plan: &MigrationPlan,
     context: Arc<Mutex<MigrationContext>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let context = context.lock().await;
     let source_metadata = context.get_source_metadata().await?;
-    let destination_metadata = context
-        .get_destination_metadata(&plan.migration.target)
-        .await?;
+    let destination_metadata = context.get_destination_metadata().await?;
+    let tbls_name_map = context.src_dst_name_map.clone();
 
     let validator = SchemaValidator::new(&source_metadata, &destination_metadata);
 
     if context.state.lock().await.infer_schema {
-        if let Err(err) = validator.validate(SchemaValidationMode::OneToOne) {
+        if let Err(err) = validator.validate(SchemaValidationMode::OneToOne, tbls_name_map) {
             error!("Schema validation failed: {:?}", err);
             return Err(err);
         } else {
