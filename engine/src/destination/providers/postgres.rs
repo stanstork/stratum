@@ -56,6 +56,7 @@ impl DbDataDestination for PgDestination {
 
         let mut column_names = Vec::new();
         let mut all_values = Vec::new();
+        let prefix = format!("{}_", metadata.name);
 
         for record in records {
             let row = match record {
@@ -63,7 +64,6 @@ impl DbDataDestination for PgDestination {
             };
 
             if column_names.is_empty() {
-                let prefix = format!("{}_", metadata.name);
                 column_names = row
                     .columns
                     .iter()
@@ -71,12 +71,15 @@ impl DbDataDestination for PgDestination {
                     .collect();
             }
 
-            let row_values: Vec<String> = row
-                .columns
+            let row_values = column_names
                 .iter()
-                .map(|col| match &col.value {
-                    Some(val) => val.to_string(),
-                    None => "NULL".to_string(),
+                .map(|col_name| {
+                    let full_name = format!("{}_{}", metadata.name, col_name);
+                    row.columns
+                        .iter()
+                        .find(|col| col.name == full_name)
+                        .and_then(|col| col.value.clone())
+                        .map_or("NULL".to_string(), |val| val.to_string())
                 })
                 .collect();
 
@@ -122,6 +125,19 @@ impl DbDataDestination for PgDestination {
         }
 
         info!("Schema inference completed");
+        Ok(())
+    }
+
+    async fn toggle_trigger(
+        &self,
+        table: &str,
+        enable: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let query = SqlQueryBuilder::new().toggle_trigger(table, enable).build();
+
+        info!("Executing query: {}", query.0);
+        self.adapter.execute(&query.0).await?;
+
         Ok(())
     }
 

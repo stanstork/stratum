@@ -16,7 +16,7 @@ pub struct SchemaPlan {
 
 impl SchemaPlan {
     pub async fn build<F, T>(
-        adaper: &(dyn SqlAdapter + Send + Sync),
+        adapter: &(dyn SqlAdapter + Send + Sync),
         metadata: TableMetadata,
         type_converter: &F,
         custom_type_extractor: &T,
@@ -30,7 +30,7 @@ impl SchemaPlan {
 
         let mut enum_queries = HashSet::new();
         for enum_declaration in enum_declarations {
-            let enum_type = adaper
+            let enum_type = adapter
                 .fetch_column_type(&enum_declaration.0, &enum_declaration.1)
                 .await?;
 

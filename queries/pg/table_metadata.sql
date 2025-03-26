@@ -30,7 +30,7 @@ SELECT
   c.ordinal_position,
   c.column_name,
   c.data_type,
-  c.is_nullable = 'YES' AS is_nullable,
+  c.is_nullable,
   c.column_default IS NOT NULL AS has_default,
   c.column_default,
   c.character_maximum_length,

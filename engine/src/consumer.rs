@@ -7,7 +7,7 @@ use crate::{
 use sql_adapter::{metadata::table::TableMetadata, row::row_data::RowData};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::info;
 
 pub struct Consumer {
     buffer: Arc<SledBuffer>,
@@ -45,6 +45,16 @@ impl Consumer {
             .await
             .metadata()
             .collect_tables();
+
+        for table in tables.iter() {
+            self.data_destination
+                .lock()
+                .await
+                .toggle_trigger(&table.name, false)
+                .await
+                .unwrap();
+        }
+
         let mut batch_map = HashMap::new();
 
         loop {

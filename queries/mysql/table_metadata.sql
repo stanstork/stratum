@@ -33,7 +33,7 @@ SELECT
     c.ORDINAL_POSITION AS ordinal_position,
     c.COLUMN_NAME AS column_name,
     CAST(c.DATA_TYPE AS CHAR) AS data_type,
-    c.IS_NULLABLE = 'YES' AS is_nullable,
+    c.IS_NULLABLE AS is_nullable,
     c.COLUMN_DEFAULT IS NOT NULL AS has_default,
     c.COLUMN_DEFAULT AS default_value,
     c.CHARACTER_MAXIMUM_LENGTH AS character_maximum_length,

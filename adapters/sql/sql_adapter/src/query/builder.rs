@@ -212,6 +212,15 @@ impl SqlQueryBuilder {
         self
     }
 
+    pub fn toggle_trigger(mut self, table: &str, enabled: bool) -> Self {
+        self.query.push_str(&format!(
+            "ALTER TABLE {} {} TRIGGER ALL;",
+            table,
+            if enabled { "ENABLE" } else { "DISABLE" }
+        ));
+        self
+    }
+
     pub fn order_by(mut self, column: &str, direction: &str) -> Self {
         self.query
             .push_str(&format!(" ORDER BY {} {}", column, direction));

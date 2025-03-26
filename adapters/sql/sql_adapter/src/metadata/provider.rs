@@ -47,6 +47,7 @@ impl MetadataProvider {
                         column: col.name.clone(),
                         referenced_table: ref_table.clone(),
                         referenced_column: ref_column.clone(),
+                        nullable: col.is_nullable,
                     })
             })
             .collect();
