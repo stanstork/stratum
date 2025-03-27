@@ -30,7 +30,7 @@ impl TableMetadata {
                 .keys()
                 .map(|col_name| SelectColumn {
                     table: table.name.clone(),
-                    alias: Some(format!("{}_{}", table.name, col_name)),
+                    alias: Some(col_name.clone()),
                     column: col_name.clone(),
                     data_type: table.columns[col_name].data_type.to_string(),
                 })
@@ -129,6 +129,10 @@ impl TableMetadata {
                 println!("{}  - {}", "  ".repeat(indent), ref_table.name);
             }
         }
+    }
+
+    pub fn set_name(&mut self, name: &str) {
+        self.name = name.to_owned();
     }
 
     fn collect_recursive_tables(

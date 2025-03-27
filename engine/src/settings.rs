@@ -11,6 +11,7 @@ use sql_adapter::metadata::column::data_type::ColumnDataType;
 use sql_adapter::metadata::provider::MetadataProvider;
 use sql_adapter::metadata::table::TableMetadata;
 use sql_adapter::schema_plan::SchemaPlan;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -42,11 +43,21 @@ impl MigrationSetting for InferSchemaSetting {
         plan: &MigrationPlan,
         context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        // Set the destination table name if it differs from the source
+        if self.src_name != plan.migration.target {
+            context
+                .lock()
+                .await
+                .set_dst_name(&self.src_name, &plan.migration.target);
+        }
+
         if !self.destination_exists(plan).await? {
             info!("Destination table does not exist. Infer schema setting will be applied");
 
-            let mut schema_plan = self.infer_schema().await?;
-            self.apply_schema(plan, context, &mut schema_plan).await?;
+            let schema_plan = self
+                .infer_schema(context.lock().await.get_src_dest_name())
+                .await?;
+            self.apply_schema(&schema_plan).await?;
         }
 
         self.set_metadata(plan).await?;
@@ -77,7 +88,10 @@ impl InferSchemaSetting {
         }
     }
 
-    async fn infer_schema(&self) -> Result<SchemaPlan, Box<dyn std::error::Error>> {
+    async fn infer_schema(
+        &self,
+        tbls_name_map: &HashMap<String, String>,
+    ) -> Result<SchemaPlan, Box<dyn std::error::Error>> {
         if let (DataSource::Database(source), true) = (
             &self.source,
             self.source_format.intersects(DataFormat::sql_databases()),
@@ -95,6 +109,7 @@ impl InferSchemaSetting {
             SchemaPlan::build(
                 adapter,
                 metadata,
+                tbls_name_map,
                 &ColumnDataType::convert_pg_column_type,
                 &TableMetadata::enums,
             )
@@ -106,23 +121,12 @@ impl InferSchemaSetting {
 
     async fn apply_schema(
         &self,
-        plan: &MigrationPlan,
-        context: Arc<Mutex<MigrationContext>>,
-        schema_plan: &mut SchemaPlan,
+        schema_plan: &SchemaPlan,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if let (DataDestination::Database(destination), true) = (
             &self.destination,
             self.dest_format.intersects(DataFormat::sql_databases()),
         ) {
-            // Set the destination table name if it differs from the source
-            if self.src_name != plan.migration.target {
-                context
-                    .lock()
-                    .await
-                    .set_dst_name(&plan.migration.target, &self.src_name);
-                schema_plan.metadata.name = plan.migration.target.clone();
-            }
-
             destination.lock().await.infer_schema(schema_plan).await?;
             Ok(())
         } else {

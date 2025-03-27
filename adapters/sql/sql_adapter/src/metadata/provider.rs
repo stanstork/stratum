@@ -98,6 +98,7 @@ impl MetadataProvider {
 
     pub fn collect_schema_deps<F, T>(
         metadata: &TableMetadata,
+        tbl_names_map: &HashMap<String, String>,
         type_converter: &F,
         custom_type_extractor: &T,
     ) -> (HashSet<String>, HashSet<String>, HashSet<(String, String)>)
@@ -107,6 +108,7 @@ impl MetadataProvider {
     {
         fn visit<F, T>(
             metadata: &TableMetadata,
+            tbl_names_map: &HashMap<String, String>,
             type_converter: &F,
             custom_type_extractor: &T,
             visited: &mut HashSet<String>,
@@ -121,6 +123,8 @@ impl MetadataProvider {
                 return;
             }
 
+            let table_name = tbl_names_map.get(&metadata.name).unwrap_or(&metadata.name);
+
             metadata
                 .referenced_tables
                 .values()
@@ -128,6 +132,7 @@ impl MetadataProvider {
                 .for_each(|related_table| {
                     visit(
                         related_table,
+                        tbl_names_map,
                         type_converter,
                         custom_type_extractor,
                         visited,
@@ -140,15 +145,20 @@ impl MetadataProvider {
             let columns = metadata.columns_info(type_converter);
             table_queries.insert(
                 SqlQueryBuilder::new()
-                    .create_table(&metadata.name, &columns, &[])
+                    .create_table(table_name, &columns, &[])
                     .build()
                     .0,
             );
 
-            for fk in metadata.fk_definitions() {
+            for fk in metadata.fk_definitions().iter_mut() {
+                fk.referenced_table = tbl_names_map
+                    .get(&fk.referenced_table)
+                    .unwrap_or(&fk.referenced_table)
+                    .to_string();
+
                 constraint_queries.insert(
                     SqlQueryBuilder::new()
-                        .add_foreign_key(&metadata.name, &fk)
+                        .add_foreign_key(table_name, &fk)
                         .build()
                         .0,
                 );
@@ -156,7 +166,7 @@ impl MetadataProvider {
 
             let custom_columns = custom_type_extractor(metadata);
             custom_columns.iter().for_each(|c| {
-                enum_declarations.insert((metadata.name.to_string(), c.name.clone()));
+                enum_declarations.insert((table_name.clone(), c.name.clone()));
             })
         }
 
@@ -167,6 +177,7 @@ impl MetadataProvider {
 
         visit(
             metadata,
+            tbl_names_map,
             type_converter,
             custom_type_extractor,
             &mut visited,

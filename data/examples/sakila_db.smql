@@ -3,7 +3,7 @@ CONNECTIONS (
     DESTINATION POSTGRES "postgres://user:password@localhost:5432/testdb"
 );
 
-MIGRATE payment TO payment
+MIGRATE payment TO payment2
 WITH SETTINGS (
     INFER_SCHEMA = TRUE
 );

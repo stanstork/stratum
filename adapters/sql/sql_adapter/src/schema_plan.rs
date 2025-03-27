@@ -5,7 +5,7 @@ use crate::{
     },
     query::builder::SqlQueryBuilder,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub struct SchemaPlan {
     pub metadata: TableMetadata,
@@ -18,6 +18,7 @@ impl SchemaPlan {
     pub async fn build<F, T>(
         adapter: &(dyn SqlAdapter + Send + Sync),
         metadata: TableMetadata,
+        tbl_names_map: &HashMap<String, String>,
         type_converter: &F,
         custom_type_extractor: &T,
     ) -> Result<Self, Box<dyn std::error::Error>>
@@ -25,8 +26,12 @@ impl SchemaPlan {
         F: Fn(&ColumnMetadata) -> (String, Option<usize>),
         T: Fn(&TableMetadata) -> Vec<&ColumnMetadata>,
     {
-        let (tbl_queries, const_queries, enum_declarations) =
-            MetadataProvider::collect_schema_deps(&metadata, type_converter, custom_type_extractor);
+        let (tbl_queries, const_queries, enum_declarations) = MetadataProvider::collect_schema_deps(
+            &metadata,
+            tbl_names_map,
+            type_converter,
+            custom_type_extractor,
+        );
 
         let mut enum_queries = HashSet::new();
         for enum_declaration in enum_declarations {

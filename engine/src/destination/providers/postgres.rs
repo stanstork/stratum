@@ -70,10 +70,9 @@ impl DbDataDestination for PgDestination {
             let row_values = columns
                 .iter()
                 .map(|col| {
-                    let full_name = format!("{}_{}", metadata.name, col.name);
                     row.columns
                         .iter()
-                        .find(|col| col.name == full_name)
+                        .find(|rc| rc.name == col.name)
                         .and_then(|col| col.value.clone())
                         .map_or("NULL".to_string(), |val| val.to_string())
                 })
@@ -90,7 +89,7 @@ impl DbDataDestination for PgDestination {
             .insert_batch(&metadata.name, columns, all_values)
             .build();
 
-        info!("Executing insert into `{}`: {}", metadata.name, query.0);
+        info!("Executing insert into `{}`", metadata.name);
         self.adapter.execute(&query.0).await?;
 
         Ok(())

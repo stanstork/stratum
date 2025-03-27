@@ -69,6 +69,10 @@ impl MigrationContext {
             .insert(src_name.to_string(), dst_name.to_string());
     }
 
+    pub fn get_src_dest_name(&self) -> &HashMap<String, String> {
+        &self.src_dst_name_map
+    }
+
     pub async fn debug_state(&self) {
         let state = self.state.lock().await;
         info!("State: {:?}", state);
