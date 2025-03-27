@@ -39,7 +39,7 @@ pub enum ColumnDataType {
 lazy_static! {
     static ref COLUMN_TYPE_MAP: HashMap<&'static str, ColumnDataType> = {
         let mut m = HashMap::new();
-        m.insert("BOOLEAN", ColumnDataType::Boolean);
+        m.insert("BOOLEAN", ColumnDataType::Short);
         m.insert("TINYINT UNSIGNED", ColumnDataType::ShortUnsigned);
         m.insert("SMALLINT UNSIGNED", ColumnDataType::ShortUnsigned);
         m.insert("INT UNSIGNED", ColumnDataType::Long);

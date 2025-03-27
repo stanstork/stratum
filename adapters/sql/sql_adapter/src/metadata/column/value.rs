@@ -35,6 +35,7 @@ impl ColumnValue {
             ColumnDataType::String | ColumnDataType::VarChar | ColumnDataType::Char => {
                 row.try_get_string(name).map(Self::String)
             }
+            ColumnDataType::Boolean => row.try_get_bool(name).map(Self::Boolean),
             ColumnDataType::Json => row.try_get_json(name).map(Self::Json),
             ColumnDataType::Timestamp => row.try_get_timestamp(name).map(Self::Timestamp),
             ColumnDataType::Enum => row.try_get_string(name).map(Self::String),
