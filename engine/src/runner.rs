@@ -11,7 +11,7 @@ use crate::{
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::metadata::{provider::MetadataProvider, table::TableMetadata};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{watch, Mutex};
 use tracing::{error, info};
 
 pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
@@ -23,8 +23,14 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
     apply_settings(&plan, Arc::clone(&context)).await?;
     validate_destination(Arc::clone(&context)).await?;
 
-    let producer = Producer::new(Arc::clone(&context)).await.spawn();
-    let consumer = Consumer::new(Arc::clone(&context)).await.spawn();
+    let (shutdown_sender, shutdown_receiver) = watch::channel(false);
+
+    let producer = Producer::new(Arc::clone(&context), shutdown_sender)
+        .await
+        .spawn();
+    let consumer = Consumer::new(Arc::clone(&context), shutdown_receiver)
+        .await
+        .spawn();
 
     // Wait for both producer and consumer to finish
     tokio::try_join!(producer, consumer)?;
@@ -45,7 +51,8 @@ pub async fn load_src_metadata(
         Adapter::MySql(my_sql_adapter) => {
             let source_table = plan.migration.source.first().unwrap();
             let metadata =
-                MetadataProvider::build_table_metadata(&my_sql_adapter, source_table).await?;
+                MetadataProvider::build_metadata_with_dependencies(&my_sql_adapter, source_table)
+                    .await?;
             Ok(metadata)
         }
         Adapter::Postgres(_pg_adapter) => unimplemented!("Postgres metadata loading"),
@@ -88,7 +95,7 @@ async fn apply_settings(
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("Applying migration settings");
 
-    let settings = parse_settings(&plan.migration.settings);
+    let settings = parse_settings(&plan.migration.settings, &context).await;
     for setting in settings.iter() {
         setting.apply(plan, Arc::clone(&context)).await?;
     }

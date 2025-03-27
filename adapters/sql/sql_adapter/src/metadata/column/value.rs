@@ -25,7 +25,7 @@ impl ColumnValue {
             ColumnDataType::Int | ColumnDataType::Long | ColumnDataType::Short => {
                 row.try_get_i64(name).map(|v| Self::Int(v as i64))
             }
-            ColumnDataType::IntUnsigned | ColumnDataType::ShortUnsigned => {
+            ColumnDataType::IntUnsigned | ColumnDataType::ShortUnsigned | ColumnDataType::Year => {
                 row.try_get_u64(name).map(|v| Self::Int(v as i64))
             }
             ColumnDataType::Float => row.try_get_f64(name).map(Self::Float),
@@ -37,6 +37,12 @@ impl ColumnValue {
             }
             ColumnDataType::Json => row.try_get_json(name).map(Self::Json),
             ColumnDataType::Timestamp => row.try_get_timestamp(name).map(Self::Timestamp),
+            ColumnDataType::Enum => row.try_get_string(name).map(Self::String),
+            ColumnDataType::Bytea => row.try_get_bytes(name).map(Self::Bytes),
+            ColumnDataType::Blob
+            | ColumnDataType::TinyBlob
+            | ColumnDataType::MediumBlob
+            | ColumnDataType::LongBlob => row.try_get_bytes(name).map(Self::Bytes),
             _ => None,
         }
     }
@@ -58,7 +64,10 @@ impl fmt::Display for ColumnValue {
             ColumnValue::Boolean(v) => write!(f, "{}", v),
             ColumnValue::Json(v) => write!(f, "{}", v),
             ColumnValue::Uuid(v) => write!(f, "{}", v),
-            ColumnValue::Bytes(v) => write!(f, "{:?}", v),
+            ColumnValue::Bytes(v) => {
+                let hex = v.iter().map(|b| format!("{:02X}", b)).collect::<String>();
+                write!(f, "E'\\\\x{}'", hex)
+            }
             ColumnValue::Date(v) => write!(f, "{}", v),
             ColumnValue::Timestamp(v) => write!(f, "'{}'", v),
         }

@@ -1,4 +1,4 @@
-use crate::requests::JoinClause;
+use crate::{metadata::column::metadata::ColumnMetadata, requests::JoinClause};
 
 #[derive(Debug, Clone)]
 pub struct SqlQueryBuilder {
@@ -6,6 +6,7 @@ pub struct SqlQueryBuilder {
     pub params: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
 pub struct ColumnInfo {
     pub name: String,
     pub data_type: String,
@@ -26,6 +27,35 @@ pub struct SelectColumn {
     pub table: String,
     pub column: String,
     pub alias: Option<String>,
+    pub data_type: String,
+}
+
+impl ColumnInfo {
+    pub fn new(metadata: &ColumnMetadata) -> Self {
+        Self {
+            name: metadata.name.clone(),
+            data_type: metadata.data_type.to_string(),
+            is_nullable: metadata.is_nullable,
+            is_primary_key: metadata.is_primary_key,
+            default: metadata.default_value.as_ref().map(|v| v.to_string()),
+            char_max_length: metadata.char_max_length,
+        }
+    }
+
+    pub fn set_name(mut self, name: &str) -> Self {
+        self.name = name.to_owned();
+        self
+    }
+
+    pub fn is_array(&self) -> bool {
+        self.data_type.eq_ignore_ascii_case("ARRAY")
+    }
+}
+
+impl SelectColumn {
+    pub fn is_geometry(&self) -> bool {
+        self.data_type.eq_ignore_ascii_case("geometry")
+    }
 }
 
 impl Default for SqlQueryBuilder {
@@ -56,10 +86,16 @@ impl SqlQueryBuilder {
         let columns: Vec<String> = columns
             .iter()
             .map(|col| {
-                if let Some(alias) = &col.alias {
-                    format!("{}.{} AS {}", col.table, col.column, alias)
+                let column_expr = if col.is_geometry() {
+                    format!("ST_AsBinary({}.{})", col.table, col.column)
                 } else {
                     format!("{}.{}", col.table, col.column)
+                };
+
+                if let Some(alias) = &col.alias {
+                    format!("{} AS {}", column_expr, alias)
+                } else {
+                    column_expr
                 }
             })
             .collect();
@@ -105,18 +141,41 @@ impl SqlQueryBuilder {
     pub fn insert_batch(
         mut self,
         table: &str,
-        columns: Vec<String>,
+        columns: Vec<ColumnInfo>,
         values: Vec<Vec<String>>,
     ) -> Self {
-        let query = format!("INSERT INTO {} ({}) VALUES\n", table, columns.join(", "));
+        let column_names = columns
+            .iter()
+            .map(|c| c.name.clone())
+            .collect::<Vec<_>>()
+            .join(", ");
         let mut value_str = String::new();
-        for (i, value) in values.iter().enumerate() {
+
+        for (i, row) in values.iter().enumerate() {
             if i > 0 {
                 value_str.push_str(", ");
             }
-            value_str.push_str(&format!("({})", value.join(", ")));
+
+            let formatted_values: Vec<String> = row
+                .iter()
+                .zip(&columns)
+                .map(|(val, col)| {
+                    if col.is_array() {
+                        Self::format_array_literal(val)
+                    } else {
+                        val.clone()
+                    }
+                })
+                .collect();
+
+            value_str.push_str(&format!("({})", formatted_values.join(", ")));
         }
-        self.query.push_str(&format!("{}{};", query, value_str));
+
+        let query = format!(
+            "INSERT INTO {} ({}) VALUES\n{};",
+            table, column_names, value_str
+        );
+        self.query.push_str(&query);
         self
     }
 
@@ -244,5 +303,24 @@ impl SqlQueryBuilder {
 
     pub fn build(self) -> (String, Vec<String>) {
         (self.query, self.params)
+    }
+
+    fn format_array_literal(value: &str) -> String {
+        let trimmed = value
+            .trim_matches(&['[', ']'][..])
+            .trim_start_matches('\'')
+            .trim_end_matches('\'');
+
+        if trimmed.is_empty() {
+            return "'{}'".to_string();
+        }
+
+        let elements: Vec<String> = trimmed
+            .split(',')
+            .map(|s| s.trim().replace('"', r#"\""#))
+            .map(|e| format!(r#""{}""#, e))
+            .collect();
+
+        format!("'{{{}}}'", elements.join(","))
     }
 }

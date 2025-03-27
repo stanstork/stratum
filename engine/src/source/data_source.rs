@@ -27,7 +27,9 @@ pub trait DbDataSource: Send + Sync {
         batch_size: usize,
         offset: Option<usize>,
     ) -> Result<Vec<Record>, Box<dyn std::error::Error>>;
-    async fn get_metadata(&self) -> Result<TableMetadata, Box<dyn std::error::Error>>;
+
+    fn get_metadata(&self) -> &TableMetadata;
+    fn set_metadata(&mut self, metadata: TableMetadata);
     fn table_name(&self) -> &str;
     fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync);
 }

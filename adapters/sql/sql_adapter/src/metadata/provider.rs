@@ -16,7 +16,7 @@ pub type MetadataFuture<'a, T> =
 pub struct MetadataProvider;
 
 impl MetadataProvider {
-    pub async fn build_table_metadata(
+    pub async fn build_metadata_with_dependencies(
         adapter: &(dyn SqlAdapter + Send + Sync),
         table: &str,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
@@ -137,7 +137,7 @@ impl MetadataProvider {
                     );
                 });
 
-            let columns = metadata.to_column_definitions(type_converter);
+            let columns = metadata.columns_info(type_converter);
             table_queries.insert(
                 SqlQueryBuilder::new()
                     .create_table(&metadata.name, &columns, &[])
@@ -145,7 +145,7 @@ impl MetadataProvider {
                     .0,
             );
 
-            for fk in metadata.to_fk_definitions() {
+            for fk in metadata.fk_definitions() {
                 constraint_queries.insert(
                     SqlQueryBuilder::new()
                         .add_foreign_key(&metadata.name, &fk)

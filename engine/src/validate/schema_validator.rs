@@ -52,8 +52,8 @@ impl<'a> SchemaValidator<'a> {
         &self,
         tbls_name_map: HashMap<String, String>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let source_tables = self.source_metadata.collect_tables();
-        let destination_tables = self.destination_metadata.collect_tables();
+        let source_tables = self.source_metadata.tables();
+        let destination_tables = self.destination_metadata.tables();
 
         let mut invalid_columns = Vec::new();
 

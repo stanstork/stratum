@@ -3,8 +3,7 @@ CONNECTIONS (
     DESTINATION POSTGRES "postgres://user:password@localhost:5432/testdb"
 );
 
-MIGRATE language TO language
+MIGRATE address TO address
 WITH SETTINGS (
-    INFER_SCHEMA = FALSE,
-    CREATE_TABLE = TRUE
+    INFER_SCHEMA = TRUE
 );

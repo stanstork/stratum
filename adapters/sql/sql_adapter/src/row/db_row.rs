@@ -1,4 +1,6 @@
+use core::fmt;
 use sqlx::{Column, Row, TypeInfo};
+use std::fmt::Formatter;
 
 pub enum DbRow<'a> {
     MySqlRow(&'a sqlx::mysql::MySqlRow),
@@ -80,6 +82,22 @@ impl DbRow<'_> {
         match self {
             DbRow::MySqlRow(row) => row.try_get::<chrono::DateTime<chrono::Utc>, _>(name).ok(),
             DbRow::PostgresRow(row) => row.try_get::<chrono::DateTime<chrono::Utc>, _>(name).ok(),
+        }
+    }
+
+    pub fn try_get_bytes(&self, name: &str) -> Option<Vec<u8>> {
+        match self {
+            DbRow::MySqlRow(row) => row.try_get::<Vec<u8>, _>(name).ok(),
+            DbRow::PostgresRow(row) => row.try_get::<Vec<u8>, _>(name).ok(),
+        }
+    }
+}
+
+impl fmt::Debug for DbRow<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            DbRow::MySqlRow(row) => write!(f, "{:?}", row),
+            DbRow::PostgresRow(row) => write!(f, "{:?}", row),
         }
     }
 }

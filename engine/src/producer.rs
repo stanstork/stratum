@@ -4,17 +4,18 @@ use crate::{
     source::data_source::{DataSource, DbDataSource},
 };
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{watch, Mutex};
 use tracing::{error, info};
 
 pub struct Producer {
     buffer: Arc<SledBuffer>,
     data_source: Arc<Mutex<dyn DbDataSource>>,
     batch_size: usize,
+    shutdown_sender: watch::Sender<bool>,
 }
 
 impl Producer {
-    pub async fn new(context: Arc<Mutex<MigrationContext>>) -> Self {
+    pub async fn new(context: Arc<Mutex<MigrationContext>>, sender: watch::Sender<bool>) -> Self {
         let context_guard = context.lock().await;
         let buffer = Arc::clone(&context_guard.buffer);
         let data_source = match &context_guard.source {
@@ -26,6 +27,7 @@ impl Producer {
             buffer,
             data_source,
             batch_size,
+            shutdown_sender: sender,
         }
     }
 
@@ -40,7 +42,7 @@ impl Producer {
     }
 
     async fn run(self) -> usize {
-        let mut offset = self.buffer.read_last_offset();
+        let mut offset = 0; //self.buffer.read_last_offset();
         let mut batch_number = 1;
 
         loop {
@@ -90,6 +92,9 @@ impl Producer {
 
             batch_number += 1;
         }
+
+        // Notify the consumer to shutdown
+        self.shutdown_sender.send(true).unwrap();
 
         batch_number
     }

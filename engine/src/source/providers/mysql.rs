@@ -35,12 +35,13 @@ impl DbDataSource for MySqlDataSource {
         batch_size: usize,
         offset: Option<usize>,
     ) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
-        let grouped_columns = self.metadata().collect_select_columns();
+        let grouped_columns = self.metadata().select_columns();
 
         let mut records = Vec::new();
 
         for (table, columns) in grouped_columns {
-            let request = FetchRowsRequest::new(table, None, columns, vec![], batch_size, offset);
+            let request =
+                FetchRowsRequest::new(table.clone(), None, columns, vec![], batch_size, offset);
             let rows = self.adapter.fetch_rows(request).await?;
             records.extend(rows.into_iter().map(Record::RowData));
         }
@@ -48,9 +49,12 @@ impl DbDataSource for MySqlDataSource {
         Ok(records)
     }
 
-    async fn get_metadata(&self) -> Result<TableMetadata, Box<dyn std::error::Error>> {
-        let metadata = self.metadata();
-        Ok(metadata.clone())
+    fn get_metadata(&self) -> &TableMetadata {
+        &self.metadata
+    }
+
+    fn set_metadata(&mut self, metadata: TableMetadata) {
+        self.metadata = metadata;
     }
 
     fn table_name(&self) -> &str {

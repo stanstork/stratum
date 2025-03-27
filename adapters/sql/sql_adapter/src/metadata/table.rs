@@ -16,7 +16,7 @@ pub struct TableMetadata {
 }
 
 impl TableMetadata {
-    pub fn collect_select_columns(&self) -> HashMap<String, Vec<SelectColumn>> {
+    pub fn select_columns(&self) -> HashMap<String, Vec<SelectColumn>> {
         let mut visited = HashSet::new();
         let mut tables = Vec::new();
 
@@ -32,6 +32,7 @@ impl TableMetadata {
                     table: table.name.clone(),
                     alias: Some(format!("{}_{}", table.name, col_name)),
                     column: col_name.clone(),
+                    data_type: table.columns[col_name].data_type.to_string(),
                 })
                 .collect();
 
@@ -41,7 +42,7 @@ impl TableMetadata {
         grouped
     }
 
-    pub fn collect_joins(&self) -> Vec<JoinClause> {
+    pub fn joins(&self) -> Vec<JoinClause> {
         self.foreign_keys
             .iter()
             .filter_map(|fk| {
@@ -59,7 +60,7 @@ impl TableMetadata {
             .collect()
     }
 
-    pub fn collect_enum_types(table: &TableMetadata) -> Vec<&ColumnMetadata> {
+    pub fn enums(table: &TableMetadata) -> Vec<&ColumnMetadata> {
         table
             .columns
             .iter()
@@ -68,7 +69,7 @@ impl TableMetadata {
             .collect()
     }
 
-    pub fn collect_tables(&self) -> Vec<TableMetadata> {
+    pub fn tables(&self) -> Vec<TableMetadata> {
         let mut visited = HashSet::new();
         let mut tables = Vec::new();
 
@@ -77,7 +78,7 @@ impl TableMetadata {
         tables
     }
 
-    pub fn to_column_definitions<F>(&self, type_converter: &F) -> Vec<ColumnInfo>
+    pub fn columns_info<F>(&self, type_converter: &F) -> Vec<ColumnInfo>
     where
         F: Fn(&ColumnMetadata) -> (String, Option<usize>),
     {
@@ -97,7 +98,7 @@ impl TableMetadata {
             .collect::<Vec<_>>()
     }
 
-    pub fn to_fk_definitions(&self) -> Vec<ForeignKeyInfo> {
+    pub fn fk_definitions(&self) -> Vec<ForeignKeyInfo> {
         self.foreign_keys
             .iter()
             .map(|fk| ForeignKeyInfo {

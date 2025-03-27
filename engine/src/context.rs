@@ -45,7 +45,7 @@ impl MigrationContext {
             (DataSource::Database(source), format)
                 if format.intersects(DataFormat::sql_databases()) =>
             {
-                source.lock().await.get_metadata().await
+                Ok(source.lock().await.get_metadata().clone())
             }
             _ => Err("Unsupported data source format".into()),
         }

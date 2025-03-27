@@ -2,7 +2,9 @@ use crate::{destination::data_dest::DbDataDestination, record::Record};
 use async_trait::async_trait;
 use postgres::postgres::PgAdapter;
 use sql_adapter::{
-    adapter::SqlAdapter, metadata::table::TableMetadata, query::builder::SqlQueryBuilder,
+    adapter::SqlAdapter,
+    metadata::table::TableMetadata,
+    query::builder::{ColumnInfo, SqlQueryBuilder},
     schema_plan::SchemaPlan,
 };
 use tracing::{error, info};
@@ -52,27 +54,23 @@ impl DbDataDestination for PgDestination {
             return Ok(());
         }
 
-        let mut column_names = Vec::new();
+        let columns = metadata
+            .columns
+            .values()
+            .map(|col| ColumnInfo::new(col))
+            .collect::<Vec<_>>();
+
         let mut all_values = Vec::new();
-        let prefix = format!("{}_", metadata.name);
 
         for record in records {
             let row = match record {
                 Record::RowData(row) => row,
             };
 
-            if column_names.is_empty() {
-                column_names = row
-                    .columns
-                    .iter()
-                    .map(|col| col.name.replacen(&prefix, "", 1))
-                    .collect();
-            }
-
-            let row_values = column_names
+            let row_values = columns
                 .iter()
-                .map(|col_name| {
-                    let full_name = format!("{}_{}", metadata.name, col_name);
+                .map(|col| {
+                    let full_name = format!("{}_{}", metadata.name, col.name);
                     row.columns
                         .iter()
                         .find(|col| col.name == full_name)
@@ -84,12 +82,12 @@ impl DbDataDestination for PgDestination {
             all_values.push(row_values);
         }
 
-        if column_names.is_empty() {
+        if columns.is_empty() {
             return Err("write_batch: No valid columns found in records".into());
         }
 
         let query = SqlQueryBuilder::new()
-            .insert_batch(&metadata.name, column_names, all_values)
+            .insert_batch(&metadata.name, columns, all_values)
             .build();
 
         info!("Executing insert into `{}`: {}", metadata.name, query.0);
@@ -137,6 +135,10 @@ impl DbDataDestination for PgDestination {
         self.adapter.execute(&query.0).await?;
 
         Ok(())
+    }
+
+    async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        self.adapter.table_exists(table).await
     }
 
     fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync) {

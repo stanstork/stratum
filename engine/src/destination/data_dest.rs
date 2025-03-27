@@ -34,6 +34,8 @@ pub trait DbDataDestination: Send + Sync {
         enable: bool,
     ) -> Result<(), Box<dyn std::error::Error>>;
 
+    async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>>;
+
     fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync);
     fn set_metadata(&mut self, metadata: TableMetadata);
     fn metadata(&self) -> &TableMetadata;

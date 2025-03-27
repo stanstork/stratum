@@ -6,18 +6,22 @@ use crate::{
 };
 use sql_adapter::{metadata::table::TableMetadata, row::row_data::RowData};
 use std::{collections::HashMap, sync::Arc, time::Instant};
-use tokio::sync::Mutex;
-use tracing::info;
+use tokio::sync::{watch, Mutex};
+use tracing::{error, info};
 
 pub struct Consumer {
     buffer: Arc<SledBuffer>,
     data_destination: Arc<Mutex<dyn DbDataDestination>>,
     tbl_names_map: HashMap<String, String>,
     batch_size: usize,
+    shutdown_receiver: watch::Receiver<bool>,
 }
 
 impl Consumer {
-    pub async fn new(context: Arc<Mutex<MigrationContext>>) -> Self {
+    pub async fn new(
+        context: Arc<Mutex<MigrationContext>>,
+        receiver: watch::Receiver<bool>,
+    ) -> Self {
         let context_guard = context.lock().await;
         let buffer = Arc::clone(&context_guard.buffer);
         let data_destination = match &context_guard.destination {
@@ -31,6 +35,7 @@ impl Consumer {
             data_destination,
             tbl_names_map,
             batch_size,
+            shutdown_receiver: receiver,
         }
     }
 
@@ -39,21 +44,10 @@ impl Consumer {
     }
 
     async fn run(self) {
-        let tables = self
-            .data_destination
-            .lock()
-            .await
-            .metadata()
-            .collect_tables();
+        let tables = self.data_destination.lock().await.metadata().tables();
 
-        for table in tables.iter() {
-            self.data_destination
-                .lock()
-                .await
-                .toggle_trigger(&table.name, false)
-                .await
-                .unwrap();
-        }
+        info!("Disabling triggers for all tables");
+        self.toggle_trigger(&tables, false).await;
 
         let mut batch_map = HashMap::new();
 
@@ -64,10 +58,22 @@ impl Consumer {
                 }
                 None => {
                     self.flush_all(&mut batch_map, &tables).await;
+
+                    // If the shutdown signal is received, it means the producer has finished
+                    // processing all records and the consumer can safely exit if the buffer is empty
+                    if *self.shutdown_receiver.borrow() {
+                        break;
+                    }
+
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 }
             }
         }
+
+        info!("Enabling triggers for all tables");
+        self.toggle_trigger(&tables, true).await;
+
+        info!("Consumer finished");
     }
 
     async fn process_record(
@@ -124,6 +130,20 @@ impl Consumer {
                     }
                     Err(e) => panic!("Failed to write batch: {}", e),
                 }
+            }
+        }
+    }
+
+    async fn toggle_trigger(&self, tables: &Vec<TableMetadata>, enable: bool) {
+        for table in tables.iter() {
+            if let Err(e) = self
+                .data_destination
+                .lock()
+                .await
+                .toggle_trigger(&table.name, enable)
+                .await
+            {
+                error!("Failed to toggle trigger for table {}: {}", table.name, e);
             }
         }
     }

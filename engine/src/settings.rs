@@ -24,7 +24,15 @@ pub trait MigrationSetting {
     ) -> Result<(), Box<dyn std::error::Error>>;
 }
 
-pub struct InferSchemaSetting;
+pub struct InferSchemaSetting {
+    source: DataSource,
+    source_format: DataFormat,
+    destination: DataDestination,
+    dest_format: DataFormat,
+    state: Arc<Mutex<MigrationState>>,
+    src_name: String,
+}
+
 pub struct BatchSizeSetting(pub i64);
 
 #[async_trait]
@@ -34,22 +42,20 @@ impl MigrationSetting for InferSchemaSetting {
         plan: &MigrationPlan,
         context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let (source, source_format, destination, dest_format, state, src_name) =
-            self.extract_context(context.clone()).await;
+        if !self.destination_exists(plan).await? {
+            info!("Destination table does not exist. Infer schema setting will be applied");
 
-        let mut schema_plan = self.build_schema_plan(source, source_format).await?;
+            let mut schema_plan = self.infer_schema().await?;
+            self.apply_schema(plan, context, &mut schema_plan).await?;
+        }
 
-        self.process_destination(
-            destination,
-            dest_format,
-            &mut schema_plan,
-            plan,
-            context,
-            &src_name,
-        )
-        .await?;
+        self.set_metadata(plan).await?;
 
-        state.lock().await.infer_schema = true;
+        // Set the infer schema flag to global state
+        {
+            let mut state = self.state.lock().await;
+            state.infer_schema = true;
+        }
 
         info!("Infer schema setting applied");
         Ok(())
@@ -57,99 +63,109 @@ impl MigrationSetting for InferSchemaSetting {
 }
 
 impl InferSchemaSetting {
-    async fn extract_context(
-        &self,
-        context: Arc<Mutex<MigrationContext>>,
-    ) -> (
-        DataSource,
-        DataFormat,
-        DataDestination,
-        DataFormat,
-        Arc<Mutex<MigrationState>>,
-        String,
-    ) {
-        let (source, source_format, destination, dest_format, state, src_name) = {
-            let ctx = context.lock().await;
-            let source = ctx.source.clone();
-            let src_name = source.source_name().await.to_owned();
+    pub async fn new(context: &Arc<Mutex<MigrationContext>>) -> Self {
+        let ctx = context.lock().await;
+        let src_name = ctx.source.source_name().await.to_owned();
 
-            (
-                ctx.source.clone(),
-                ctx.source_data_format,
-                ctx.destination.clone(),
-                ctx.destination_data_format,
-                ctx.state.clone(),
-                src_name,
-            )
-        };
-
-        (
-            source,
-            source_format,
-            destination,
-            dest_format,
-            state,
+        InferSchemaSetting {
+            source: ctx.source.clone(),
+            source_format: ctx.source_data_format,
+            destination: ctx.destination.clone(),
+            dest_format: ctx.destination_data_format,
+            state: ctx.state.clone(),
             src_name,
-        )
-    }
-
-    async fn build_schema_plan(
-        &self,
-        source: DataSource,
-        source_format: DataFormat,
-    ) -> Result<SchemaPlan, Box<dyn std::error::Error>> {
-        match (source, source_format) {
-            (DataSource::Database(source), format)
-                if format.intersects(DataFormat::sql_databases()) =>
-            {
-                let metadata = source.lock().await.get_metadata().await?;
-                SchemaPlan::build(
-                    source.lock().await.adapter(),
-                    metadata,
-                    &ColumnDataType::convert_pg_column_type,
-                    &TableMetadata::collect_enum_types,
-                )
-                .await
-            }
-            _ => Err("Unsupported data source format".into()),
         }
     }
 
-    async fn process_destination(
+    async fn infer_schema(&self) -> Result<SchemaPlan, Box<dyn std::error::Error>> {
+        if let (DataSource::Database(source), true) = (
+            &self.source,
+            self.source_format.intersects(DataFormat::sql_databases()),
+        ) {
+            let source_guard = source.lock().await;
+            let adapter = source_guard.adapter();
+
+            // Build full metadata for the source
+            let metadata = MetadataProvider::build_metadata_with_dependencies(
+                adapter,
+                &source_guard.table_name(),
+            )
+            .await?;
+
+            SchemaPlan::build(
+                adapter,
+                metadata,
+                &ColumnDataType::convert_pg_column_type,
+                &TableMetadata::enums,
+            )
+            .await
+        } else {
+            Err("Unsupported data source format".into())
+        }
+    }
+
+    async fn apply_schema(
         &self,
-        destination: DataDestination,
-        dest_format: DataFormat,
-        schema_plan: &mut SchemaPlan,
         plan: &MigrationPlan,
         context: Arc<Mutex<MigrationContext>>,
-        src_name: &str,
+        schema_plan: &mut SchemaPlan,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        match (&destination, dest_format) {
-            (DataDestination::Database(destination), format)
-                if format.intersects(DataFormat::sql_databases()) =>
-            {
-                if src_name != plan.migration.target {
-                    context
-                        .lock()
-                        .await
-                        .set_dst_name(&plan.migration.target, &src_name);
-                }
-
-                // Set the metadata name to the target table name
+        if let (DataDestination::Database(destination), true) = (
+            &self.destination,
+            self.dest_format.intersects(DataFormat::sql_databases()),
+        ) {
+            // Set the destination table name if it differs from the source
+            if self.src_name != plan.migration.target {
+                context
+                    .lock()
+                    .await
+                    .set_dst_name(&plan.migration.target, &self.src_name);
                 schema_plan.metadata.name = plan.migration.target.clone();
+            }
 
-                let mut dest_guard = destination.lock().await;
-                dest_guard.infer_schema(&schema_plan).await?;
+            destination.lock().await.infer_schema(schema_plan).await?;
+            Ok(())
+        } else {
+            Err("Unsupported data destination format".into())
+        }
+    }
 
-                let dest_metadata = MetadataProvider::build_table_metadata(
+    async fn destination_exists(
+        &self,
+        plan: &MigrationPlan,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        match &self.destination {
+            DataDestination::Database(dest) => Ok(dest
+                .lock()
+                .await
+                .table_exists(&plan.migration.target)
+                .await?),
+        }
+    }
+
+    async fn set_metadata(&self, plan: &MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
+        match &self.source {
+            DataSource::Database(src) => {
+                let mut src_guard = src.lock().await;
+                let metadata = MetadataProvider::build_metadata_with_dependencies(
+                    src_guard.adapter(),
+                    &src_guard.table_name(),
+                )
+                .await?;
+                src_guard.set_metadata(metadata);
+            }
+        }
+
+        match &self.destination {
+            DataDestination::Database(dest) => {
+                let mut dest_guard = dest.lock().await;
+                let metadata = MetadataProvider::build_metadata_with_dependencies(
                     dest_guard.adapter(),
                     &plan.migration.target,
                 )
                 .await?;
-
-                dest_guard.set_metadata(dest_metadata);
+                dest_guard.set_metadata(metadata);
             }
-            _ => return Err("Unsupported data destination format".into()),
         }
 
         Ok(())
@@ -171,19 +187,23 @@ impl MigrationSetting for BatchSizeSetting {
     }
 }
 
-pub fn parse_settings(settings: &[Setting]) -> Vec<Box<dyn MigrationSetting>> {
-    settings
-        .iter()
-        .filter_map(
-            |setting| match (setting.key.as_str(), setting.value.clone()) {
-                ("infer_schema", SettingValue::Boolean(true)) => {
-                    Some(Box::new(InferSchemaSetting) as Box<dyn MigrationSetting>)
-                }
-                ("batch_size", SettingValue::Integer(size)) => {
-                    Some(Box::new(BatchSizeSetting(size)) as Box<dyn MigrationSetting>)
-                }
-                _ => None, // Ignore unknown settings
-            },
-        )
-        .collect()
+pub async fn parse_settings(
+    settings: &[Setting],
+    context: &Arc<Mutex<MigrationContext>>,
+) -> Vec<Box<dyn MigrationSetting>> {
+    let mut migration_settings = Vec::new();
+    for setting in settings {
+        match (setting.key.as_str(), setting.value.clone()) {
+            ("infer_schema", SettingValue::Boolean(true)) => {
+                migration_settings
+                    .push(Box::new(InferSchemaSetting::new(context).await)
+                        as Box<dyn MigrationSetting>)
+            }
+            ("batch_size", SettingValue::Integer(size)) => migration_settings
+                .push(Box::new(BatchSizeSetting(size)) as Box<dyn MigrationSetting>),
+            _ => (), // Ignore unknown settings
+        }
+    }
+
+    migration_settings
 }
