@@ -32,7 +32,7 @@ impl ColumnValue {
             ColumnDataType::Decimal => row
                 .try_get_bigdecimal(name)
                 .and_then(|v| v.to_f64().map(Self::Float)),
-            ColumnDataType::String | ColumnDataType::VarChar => {
+            ColumnDataType::String | ColumnDataType::VarChar | ColumnDataType::Char => {
                 row.try_get_string(name).map(Self::String)
             }
             ColumnDataType::Json => row.try_get_json(name).map(Self::Json),

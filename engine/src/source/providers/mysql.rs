@@ -2,10 +2,7 @@ use crate::{record::Record, source::data_source::DbDataSource};
 use async_trait::async_trait;
 use mysql::mysql::MySqlAdapter;
 use sql_adapter::adapter::SqlAdapter;
-use sql_adapter::{
-    metadata::{provider::MetadataProvider, table::TableMetadata},
-    requests::FetchRowsRequest,
-};
+use sql_adapter::{metadata::table::TableMetadata, requests::FetchRowsRequest};
 
 pub struct MySqlDataSource {
     metadata: TableMetadata,
@@ -18,7 +15,7 @@ impl MySqlDataSource {
         table: &str,
         adapter: MySqlAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let metadata = MetadataProvider::build_table_metadata(&adapter, table).await?;
+        let metadata = adapter.fetch_metadata(table).await?;
         Ok(MySqlDataSource {
             metadata,
             table: table.to_string(),

@@ -2,9 +2,7 @@ use crate::{destination::data_dest::DbDataDestination, record::Record};
 use async_trait::async_trait;
 use postgres::postgres::PgAdapter;
 use sql_adapter::{
-    adapter::SqlAdapter,
-    metadata::{provider::MetadataProvider, table::TableMetadata},
-    query::builder::SqlQueryBuilder,
+    adapter::SqlAdapter, metadata::table::TableMetadata, query::builder::SqlQueryBuilder,
     schema_plan::SchemaPlan,
 };
 use tracing::{error, info};
@@ -157,7 +155,7 @@ impl DbDataDestination for PgDestination {
 impl PgDestination {
     pub async fn new(adapter: PgAdapter, table: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let metadata = match adapter.table_exists(table).await? {
-            true => Some(MetadataProvider::build_table_metadata(&adapter, table).await?),
+            true => Some(adapter.fetch_metadata(table).await?),
             false => None,
         };
 
