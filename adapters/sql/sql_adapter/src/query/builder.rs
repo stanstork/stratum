@@ -1,61 +1,10 @@
-use crate::{metadata::column::metadata::ColumnMetadata, requests::JoinClause};
+use super::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField};
+use crate::requests::JoinClause;
 
 #[derive(Debug, Clone)]
 pub struct SqlQueryBuilder {
     pub query: String,
     pub params: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ColumnInfo {
-    pub name: String,
-    pub data_type: String,
-    pub is_nullable: bool,
-    pub is_primary_key: bool,
-    pub default: Option<String>,
-    pub char_max_length: Option<usize>,
-}
-
-pub struct ForeignKeyInfo {
-    pub column: String,
-    pub referenced_table: String,
-    pub referenced_column: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct SelectColumn {
-    pub table: String,
-    pub column: String,
-    pub alias: Option<String>,
-    pub data_type: String,
-}
-
-impl ColumnInfo {
-    pub fn new(metadata: &ColumnMetadata) -> Self {
-        Self {
-            name: metadata.name.clone(),
-            data_type: metadata.data_type.to_string(),
-            is_nullable: metadata.is_nullable,
-            is_primary_key: metadata.is_primary_key,
-            default: metadata.default_value.as_ref().map(|v| v.to_string()),
-            char_max_length: metadata.char_max_length,
-        }
-    }
-
-    pub fn set_name(mut self, name: &str) -> Self {
-        self.name = name.to_owned();
-        self
-    }
-
-    pub fn is_array(&self) -> bool {
-        self.data_type.eq_ignore_ascii_case("ARRAY")
-    }
-}
-
-impl SelectColumn {
-    pub fn is_geometry(&self) -> bool {
-        self.data_type.eq_ignore_ascii_case("geometry")
-    }
 }
 
 impl Default for SqlQueryBuilder {
@@ -82,8 +31,8 @@ impl SqlQueryBuilder {
         self
     }
 
-    pub fn select(mut self, columns: &[SelectColumn]) -> Self {
-        let columns: Vec<String> = columns
+    pub fn select(mut self, fields: &[SelectField]) -> Self {
+        let columns: Vec<String> = fields
             .iter()
             .map(|col| {
                 let column_expr = if col.is_geometry() {
@@ -141,7 +90,7 @@ impl SqlQueryBuilder {
     pub fn insert_batch(
         mut self,
         table: &str,
-        columns: Vec<ColumnInfo>,
+        columns: Vec<ColumnDef>,
         values: Vec<Vec<String>>,
     ) -> Self {
         let column_names = columns
@@ -182,8 +131,8 @@ impl SqlQueryBuilder {
     pub fn create_table(
         mut self,
         table: &str,
-        columns: &[ColumnInfo],
-        foreign_keys: &[ForeignKeyInfo],
+        columns: &[ColumnDef],
+        foreign_keys: &[ForeignKeyDef],
     ) -> Self {
         self.query
             .push_str(&format!("\nCREATE TABLE {} (\n", table));
@@ -251,7 +200,7 @@ impl SqlQueryBuilder {
         self
     }
 
-    pub fn add_foreign_key(mut self, table: &str, foreign_keys: &ForeignKeyInfo) -> Self {
+    pub fn add_foreign_key(mut self, table: &str, foreign_keys: &ForeignKeyDef) -> Self {
         self.query.push_str(&format!(
             "ALTER TABLE {} ADD FOREIGN KEY ({}) REFERENCES {}({});",
             table,

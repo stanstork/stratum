@@ -4,8 +4,8 @@ use postgres::postgres::PgAdapter;
 use sql_adapter::{
     adapter::SqlAdapter,
     metadata::table::TableMetadata,
-    query::builder::{ColumnInfo, SqlQueryBuilder},
-    schema_plan::SchemaPlan,
+    query::{builder::SqlQueryBuilder, column::ColumnDef},
+    schema::plan::SchemaPlan,
 };
 use tracing::{error, info};
 
@@ -57,7 +57,7 @@ impl DbDataDestination for PgDestination {
         let columns = metadata
             .columns
             .values()
-            .map(|col| ColumnInfo::new(col))
+            .map(|col| ColumnDef::new(col))
             .collect::<Vec<_>>();
 
         let mut all_values = Vec::new();
@@ -107,7 +107,7 @@ impl DbDataDestination for PgDestination {
         let queries = schema_plan
             .enum_queries
             .iter()
-            .chain(&schema_plan.create_table_queries)
+            .chain(&schema_plan.table_queries)
             .chain(&schema_plan.constraint_queries)
             .cloned();
 

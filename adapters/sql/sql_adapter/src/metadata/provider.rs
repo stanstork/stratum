@@ -1,7 +1,7 @@
 use super::{
     column::metadata::ColumnMetadata, foreign_key::ForeignKeyMetadata, table::TableMetadata,
 };
-use crate::{adapter::SqlAdapter, query::builder::SqlQueryBuilder};
+use crate::{adapter::SqlAdapter, query::builder::SqlQueryBuilder, schema::context::SchemaContext};
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
@@ -63,130 +63,13 @@ impl MetadataProvider {
         })
     }
 
-    pub fn resolve_insert_order(metadata: &TableMetadata) -> Vec<&TableMetadata> {
-        let mut visited = HashSet::new();
-        let mut order = Vec::new();
-
-        fn visit<'a>(
-            meta: &'a TableMetadata,
-            visited: &mut HashSet<&'a str>,
-            order: &mut Vec<&'a TableMetadata>,
-            referenced_tables: &'a HashMap<String, TableMetadata>,
-        ) {
-            if !visited.insert(&meta.name) {
-                return;
-            }
-
-            for fk in &meta.foreign_keys {
-                if let Some(ref_meta) = referenced_tables.get(&fk.referenced_table) {
-                    visit(ref_meta, visited, order, &ref_meta.referenced_tables);
-                }
-            }
-
-            order.push(meta);
-        }
-
-        visit(
-            metadata,
-            &mut visited,
-            &mut order,
-            &metadata.referenced_tables,
-        );
-
-        order
-    }
-
-    pub fn collect_schema_deps<F, T>(
-        metadata: &TableMetadata,
-        tbl_names_map: &HashMap<String, String>,
-        type_converter: &F,
-        custom_type_extractor: &T,
-    ) -> (HashSet<String>, HashSet<String>, HashSet<(String, String)>)
+    pub fn collect_schema_deps<F, T>(metadata: &TableMetadata, ctx: &mut SchemaContext<'_, F, T>)
     where
         F: Fn(&ColumnMetadata) -> (String, Option<usize>),
         T: Fn(&TableMetadata) -> Vec<&ColumnMetadata>,
     {
-        fn visit<F, T>(
-            metadata: &TableMetadata,
-            tbl_names_map: &HashMap<String, String>,
-            type_converter: &F,
-            custom_type_extractor: &T,
-            visited: &mut HashSet<String>,
-            table_queries: &mut HashSet<String>,
-            constraint_queries: &mut HashSet<String>,
-            enum_declarations: &mut HashSet<(String, String)>,
-        ) where
-            F: Fn(&ColumnMetadata) -> (String, Option<usize>),
-            T: Fn(&TableMetadata) -> Vec<&ColumnMetadata>,
-        {
-            if !visited.insert(metadata.name.clone()) {
-                return;
-            }
-
-            let table_name = tbl_names_map.get(&metadata.name).unwrap_or(&metadata.name);
-
-            metadata
-                .referenced_tables
-                .values()
-                .chain(metadata.referencing_tables.values())
-                .for_each(|related_table| {
-                    visit(
-                        related_table,
-                        tbl_names_map,
-                        type_converter,
-                        custom_type_extractor,
-                        visited,
-                        table_queries,
-                        constraint_queries,
-                        enum_declarations,
-                    );
-                });
-
-            let columns = metadata.columns_info(type_converter);
-            table_queries.insert(
-                SqlQueryBuilder::new()
-                    .create_table(table_name, &columns, &[])
-                    .build()
-                    .0,
-            );
-
-            for fk in metadata.fk_definitions().iter_mut() {
-                fk.referenced_table = tbl_names_map
-                    .get(&fk.referenced_table)
-                    .unwrap_or(&fk.referenced_table)
-                    .to_string();
-
-                constraint_queries.insert(
-                    SqlQueryBuilder::new()
-                        .add_foreign_key(table_name, &fk)
-                        .build()
-                        .0,
-                );
-            }
-
-            let custom_columns = custom_type_extractor(metadata);
-            custom_columns.iter().for_each(|c| {
-                enum_declarations.insert((table_name.clone(), c.name.clone()));
-            })
-        }
-
         let mut visited = HashSet::new();
-        let mut table_queries = HashSet::new();
-        let mut constraint_queries = HashSet::new();
-        let mut enum_declarations = HashSet::new();
-
-        visit(
-            metadata,
-            tbl_names_map,
-            type_converter,
-            custom_type_extractor,
-            &mut visited,
-            &mut table_queries,
-            &mut constraint_queries,
-            &mut enum_declarations,
-        );
-
-        (table_queries, constraint_queries, enum_declarations)
+        Self::visit_schema_deps(metadata, ctx, &mut visited);
     }
 
     fn build_metadata_dep_graph<'a>(
@@ -286,5 +169,47 @@ impl MetadataProvider {
             }
             Ok(())
         })
+    }
+
+    fn visit_schema_deps<F, T>(
+        metadata: &TableMetadata,
+        ctx: &mut SchemaContext<'_, F, T>,
+        visited: &mut HashSet<String>,
+    ) where
+        F: Fn(&ColumnMetadata) -> (String, Option<usize>),
+        T: Fn(&TableMetadata) -> Vec<&ColumnMetadata>,
+    {
+        if !visited.insert(metadata.name.clone()) {
+            return;
+        }
+
+        let table_name = ctx.table_name_map.resolve(&metadata.name);
+
+        metadata
+            .referenced_tables
+            .values()
+            .chain(metadata.referencing_tables.values())
+            .for_each(|related| {
+                Self::visit_schema_deps(related, ctx, visited);
+            });
+
+        let columns = metadata.columns_def(ctx.type_converter);
+        let create_sql = SqlQueryBuilder::new()
+            .create_table(&table_name, &columns, &[])
+            .build();
+        ctx.table_queries.insert(create_sql.0);
+
+        for fk in metadata.fk_defs().iter_mut() {
+            fk.referenced_table = ctx.table_name_map.resolve(&fk.referenced_table);
+            let constraint_sql = SqlQueryBuilder::new()
+                .add_foreign_key(&table_name, &fk)
+                .build();
+            ctx.constraint_queries.insert(constraint_sql.0);
+        }
+
+        for col in (ctx.type_extractor)(metadata) {
+            ctx.enum_declarations
+                .insert((table_name.clone(), col.name.clone()));
+        }
     }
 }

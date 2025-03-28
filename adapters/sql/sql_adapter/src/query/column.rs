@@ -1,0 +1,33 @@
+use crate::metadata::column::metadata::ColumnMetadata;
+
+#[derive(Debug, Clone)]
+pub struct ColumnDef {
+    pub name: String,
+    pub data_type: String,
+    pub is_nullable: bool,
+    pub is_primary_key: bool,
+    pub default: Option<String>,
+    pub char_max_length: Option<usize>,
+}
+
+impl ColumnDef {
+    pub fn new(metadata: &ColumnMetadata) -> Self {
+        Self {
+            name: metadata.name.clone(),
+            data_type: metadata.data_type.to_string(),
+            is_nullable: metadata.is_nullable,
+            is_primary_key: metadata.is_primary_key,
+            default: metadata.default_value.as_ref().map(|v| v.to_string()),
+            char_max_length: metadata.char_max_length,
+        }
+    }
+
+    pub fn set_name(mut self, name: &str) -> Self {
+        self.name = name.to_owned();
+        self
+    }
+
+    pub fn is_array(&self) -> bool {
+        self.data_type.eq_ignore_ascii_case("ARRAY")
+    }
+}

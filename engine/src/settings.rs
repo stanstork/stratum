@@ -10,7 +10,7 @@ use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::metadata::column::data_type::ColumnDataType;
 use sql_adapter::metadata::provider::MetadataProvider;
 use sql_adapter::metadata::table::TableMetadata;
-use sql_adapter::schema_plan::SchemaPlan;
+use sql_adapter::schema::plan::SchemaPlan;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -90,7 +90,7 @@ impl InferSchemaSetting {
 
     async fn infer_schema(
         &self,
-        tbls_name_map: &HashMap<String, String>,
+        table_name_map: &HashMap<String, String>,
     ) -> Result<SchemaPlan, Box<dyn std::error::Error>> {
         if let (DataSource::Database(source), true) = (
             &self.source,
@@ -109,7 +109,7 @@ impl InferSchemaSetting {
             SchemaPlan::build(
                 adapter,
                 metadata,
-                tbls_name_map,
+                table_name_map,
                 &ColumnDataType::convert_pg_column_type,
                 &TableMetadata::enums,
             )

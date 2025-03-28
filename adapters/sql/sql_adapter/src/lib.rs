@@ -4,4 +4,4 @@ pub mod metadata;
 pub mod query;
 pub mod requests;
 pub mod row;
-pub mod schema_plan;
+pub mod schema;

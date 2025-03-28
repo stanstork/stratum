@@ -35,7 +35,7 @@ impl DbDataSource for MySqlDataSource {
         batch_size: usize,
         offset: Option<usize>,
     ) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
-        let grouped_columns = self.metadata().select_columns();
+        let grouped_columns = self.metadata().select_fields();
 
         let mut records = Vec::new();
 

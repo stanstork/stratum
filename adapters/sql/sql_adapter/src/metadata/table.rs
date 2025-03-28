@@ -1,7 +1,9 @@
 use super::{column::metadata::ColumnMetadata, foreign_key::ForeignKeyMetadata};
-use crate::metadata::column::data_type::ColumnDataType;
-use crate::query::builder::{ColumnInfo, ForeignKeyInfo};
-use crate::{query::builder::SelectColumn, requests::JoinClause};
+use crate::{
+    metadata::column::data_type::ColumnDataType,
+    query::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField},
+    requests::JoinClause,
+};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -16,7 +18,7 @@ pub struct TableMetadata {
 }
 
 impl TableMetadata {
-    pub fn select_columns(&self) -> HashMap<String, Vec<SelectColumn>> {
+    pub fn select_fields(&self) -> HashMap<String, Vec<SelectField>> {
         let mut visited = HashSet::new();
         let mut tables = Vec::new();
 
@@ -25,10 +27,10 @@ impl TableMetadata {
         let mut grouped = HashMap::new();
 
         for table in tables {
-            let columns: Vec<SelectColumn> = table
+            let fields: Vec<SelectField> = table
                 .columns
                 .keys()
-                .map(|col_name| SelectColumn {
+                .map(|col_name| SelectField {
                     table: table.name.clone(),
                     alias: Some(col_name.clone()),
                     column: col_name.clone(),
@@ -36,7 +38,7 @@ impl TableMetadata {
                 })
                 .collect();
 
-            grouped.insert(table.name.clone(), columns);
+            grouped.insert(table.name.clone(), fields);
         }
 
         grouped
@@ -78,7 +80,7 @@ impl TableMetadata {
         tables
     }
 
-    pub fn columns_info<F>(&self, type_converter: &F) -> Vec<ColumnInfo>
+    pub fn columns_def<F>(&self, type_converter: &F) -> Vec<ColumnDef>
     where
         F: Fn(&ColumnMetadata) -> (String, Option<usize>),
     {
@@ -86,7 +88,7 @@ impl TableMetadata {
             .iter()
             .map(|(name, col)| {
                 let type_info = type_converter(col);
-                ColumnInfo {
+                ColumnDef {
                     name: name.clone(),
                     data_type: type_info.0,
                     is_nullable: col.is_nullable,
@@ -98,10 +100,10 @@ impl TableMetadata {
             .collect::<Vec<_>>()
     }
 
-    pub fn fk_definitions(&self) -> Vec<ForeignKeyInfo> {
+    pub fn fk_defs(&self) -> Vec<ForeignKeyDef> {
         self.foreign_keys
             .iter()
-            .map(|fk| ForeignKeyInfo {
+            .map(|fk| ForeignKeyDef {
                 column: fk.column.clone(),
                 referenced_table: fk.referenced_table.clone(),
                 referenced_column: fk.referenced_column.clone(),
