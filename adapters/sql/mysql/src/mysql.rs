@@ -76,7 +76,7 @@ impl SqlAdapter for MySqlAdapter {
             })
             .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
 
-        MetadataProvider::process_metadata_cols(table, columns)
+        MetadataProvider::build_table_metadata(table, columns)
     }
 
     async fn fetch_referencing_tables(

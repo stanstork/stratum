@@ -51,6 +51,7 @@ impl MigrationSetting for InferSchemaSetting {
                 .set_dst_name(&self.src_name, &plan.migration.target);
         }
 
+        // Apply the schema only if the destination table does not exist
         if !self.destination_exists(plan).await? {
             info!("Destination table does not exist. Infer schema setting will be applied");
 
@@ -82,7 +83,7 @@ impl InferSchemaSetting {
             source: ctx.source.clone(),
             source_format: ctx.source_data_format,
             destination: ctx.destination.clone(),
-            dest_format: ctx.destination_data_format,
+            dest_format: ctx.dest_data_format,
             state: ctx.state.clone(),
             src_name,
         }
@@ -96,21 +97,18 @@ impl InferSchemaSetting {
             &self.source,
             self.source_format.intersects(DataFormat::sql_databases()),
         ) {
-            let source_guard = source.lock().await;
-            let adapter = source_guard.adapter();
+            let src = source.lock().await;
+            let adapter = src.adapter();
 
             // Build full metadata for the source
-            let metadata = MetadataProvider::build_metadata_with_dependencies(
-                adapter,
-                &source_guard.table_name(),
-            )
-            .await?;
+            let metadata =
+                MetadataProvider::build_metadata_with_deps(adapter, &src.table_name()).await?;
 
             SchemaPlan::build(
                 adapter,
                 metadata,
                 table_name_map,
-                &ColumnDataType::convert_pg_column_type,
+                &ColumnDataType::to_pg_type,
                 &TableMetadata::enums,
             )
             .await
@@ -151,7 +149,7 @@ impl InferSchemaSetting {
         match &self.source {
             DataSource::Database(src) => {
                 let mut src_guard = src.lock().await;
-                let metadata = MetadataProvider::build_metadata_with_dependencies(
+                let metadata = MetadataProvider::build_metadata_with_deps(
                     src_guard.adapter(),
                     &src_guard.table_name(),
                 )
@@ -163,7 +161,7 @@ impl InferSchemaSetting {
         match &self.destination {
             DataDestination::Database(dest) => {
                 let mut dest_guard = dest.lock().await;
-                let metadata = MetadataProvider::build_metadata_with_dependencies(
+                let metadata = MetadataProvider::build_metadata_with_deps(
                     dest_guard.adapter(),
                     &plan.migration.target,
                 )

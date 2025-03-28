@@ -1,4 +1,4 @@
-use super::{column::metadata::ColumnMetadata, foreign_key::ForeignKeyMetadata};
+use super::{column::metadata::ColumnMetadata, fk::ForeignKeyMetadata};
 use crate::{
     metadata::column::data_type::ColumnDataType,
     query::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField},
@@ -84,20 +84,25 @@ impl TableMetadata {
     where
         F: Fn(&ColumnMetadata) -> (String, Option<usize>),
     {
-        self.columns
-            .iter()
+        // Sort columns by ordinal to ensure consistent order of columns
+        // in the output regardless of the order in which they were added to the HashMap
+        let mut columns = self.columns.iter().collect::<Vec<_>>();
+        columns.sort_by_key(|(_, col)| col.ordinal);
+
+        columns
+            .into_iter()
             .map(|(name, col)| {
-                let type_info = type_converter(col);
+                let (data_type, char_max_length) = type_converter(col);
                 ColumnDef {
                     name: name.clone(),
-                    data_type: type_info.0,
+                    data_type,
                     is_nullable: col.is_nullable,
                     is_primary_key: self.primary_keys.contains(name),
                     default: col.default_value.as_ref().map(ToString::to_string),
-                    char_max_length: type_info.1,
+                    char_max_length,
                 }
             })
-            .collect::<Vec<_>>()
+            .collect()
     }
 
     pub fn fk_defs(&self) -> Vec<ForeignKeyDef> {

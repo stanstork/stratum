@@ -1,6 +1,4 @@
-use super::{
-    column::metadata::ColumnMetadata, foreign_key::ForeignKeyMetadata, table::TableMetadata,
-};
+use super::{column::metadata::ColumnMetadata, fk::ForeignKeyMetadata, table::TableMetadata};
 use crate::{adapter::SqlAdapter, query::builder::SqlQueryBuilder, schema::context::SchemaContext};
 use std::{
     collections::{HashMap, HashSet},
@@ -16,7 +14,7 @@ pub type MetadataFuture<'a, T> =
 pub struct MetadataProvider;
 
 impl MetadataProvider {
-    pub async fn build_metadata_with_dependencies(
+    pub async fn build_metadata_with_deps(
         adapter: &(dyn SqlAdapter + Send + Sync),
         table: &str,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
@@ -27,7 +25,7 @@ impl MetadataProvider {
         Ok(metadata)
     }
 
-    pub fn process_metadata_cols(
+    pub fn build_table_metadata(
         table: &str,
         columns: HashMap<String, ColumnMetadata>,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {

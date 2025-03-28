@@ -51,8 +51,7 @@ pub async fn load_src_metadata(
         Adapter::MySql(my_sql_adapter) => {
             let source_table = plan.migration.source.first().unwrap();
             let metadata =
-                MetadataProvider::build_metadata_with_dependencies(&my_sql_adapter, source_table)
-                    .await?;
+                MetadataProvider::build_metadata_with_deps(&my_sql_adapter, source_table).await?;
             Ok(metadata)
         }
         Adapter::Postgres(_pg_adapter) => unimplemented!("Postgres metadata loading"),
@@ -110,7 +109,7 @@ async fn validate_destination(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let context = context.lock().await;
     let source_metadata = context.get_source_metadata().await?;
-    let destination_metadata = context.get_destination_metadata().await?;
+    let destination_metadata = context.get_dest_metadata().await?;
     let tbls_name_map = context.src_dst_name_map.clone();
 
     let validator = SchemaValidator::new(&source_metadata, &destination_metadata);

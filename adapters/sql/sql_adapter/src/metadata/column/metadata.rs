@@ -41,7 +41,7 @@ pub struct ColumnMetadata {
 impl ColumnMetadata {
     pub fn from_row(row: &DbRow, data_type: ColumnDataType) -> Self {
         Self {
-            ordinal: row.try_get_i32(COL_ORDINAL_POSITION).unwrap_or(0) as usize,
+            ordinal: row.try_get_u32(COL_ORDINAL_POSITION).unwrap_or(0) as usize,
             name: row.try_get_string(COL_COLUMN_NAME).unwrap_or_default(),
             data_type,
             is_nullable: row.try_get_string(COL_IS_NULLABLE).unwrap_or_default() == "YES",

@@ -29,6 +29,13 @@ impl DbRow<'_> {
         }
     }
 
+    pub fn try_get_u32(&self, name: &str) -> Option<u32> {
+        match self {
+            DbRow::MySqlRow(row) => row.try_get::<u32, _>(name).ok(),
+            DbRow::PostgresRow(row) => row.try_get::<i32, _>(name).map(|v| v as u32).ok(),
+        }
+    }
+
     pub fn try_get_u64(&self, name: &str) -> Option<u64> {
         match self {
             DbRow::MySqlRow(row) => row.try_get::<u64, _>(name).ok(),

@@ -14,7 +14,7 @@ pub struct MigrationContext {
     pub destination: DataDestination,
     pub buffer: Arc<SledBuffer>,
     pub source_data_format: DataFormat,
-    pub destination_data_format: DataFormat,
+    pub dest_data_format: DataFormat,
     pub src_dst_name_map: HashMap<String, String>,
 }
 
@@ -27,7 +27,7 @@ impl MigrationContext {
         let state = Arc::new(Mutex::new(MigrationState::new()));
         let buffer = Arc::new(SledBuffer::new("migration_buffer"));
         let source_data_format = plan.connections.source.data_format;
-        let destination_data_format = plan.connections.destination.data_format;
+        let dest_data_format = plan.connections.destination.data_format;
 
         Arc::new(Mutex::new(MigrationContext {
             state,
@@ -35,7 +35,7 @@ impl MigrationContext {
             destination,
             buffer,
             source_data_format,
-            destination_data_format,
+            dest_data_format,
             src_dst_name_map: HashMap::new(),
         }))
     }
@@ -51,10 +51,8 @@ impl MigrationContext {
         }
     }
 
-    pub async fn get_destination_metadata(
-        &self,
-    ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
-        match (&self.destination, self.destination_data_format) {
+    pub async fn get_dest_metadata(&self) -> Result<TableMetadata, Box<dyn std::error::Error>> {
+        match (&self.destination, self.dest_data_format) {
             (DataDestination::Database(destination), format)
                 if format.intersects(DataFormat::sql_databases()) =>
             {

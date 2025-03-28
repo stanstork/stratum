@@ -54,22 +54,3 @@ impl DataRecord for RowData {
         }
     }
 }
-
-// pub async fn register_data_record<T: DataRecord + DeserializeOwned + 'static>(type_name: &str)
-// where
-//     T: 'static,
-// {
-//     TYPE_REGISTRY
-//         .lock()
-//         .await
-//         .insert(type_name.to_string(), |data| {
-//             let deserialized: T = bincode::deserialize(&data).expect("Failed to deserialize");
-//             Box::new(deserialized)
-//         });
-// }
-
-// pub async fn deserialize_data_record(type_name: &str, data: Vec<u8>) -> BoxedDataRecord {
-//     let registry = TYPE_REGISTRY.lock().await;
-//     let deserializer = registry.get(type_name).expect("Type not found");
-//     deserializer(data)
-// }

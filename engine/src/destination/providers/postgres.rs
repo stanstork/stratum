@@ -60,30 +60,25 @@ impl DbDataDestination for PgDestination {
             .map(|col| ColumnDef::new(col))
             .collect::<Vec<_>>();
 
-        let mut all_values = Vec::new();
-
-        for record in records {
-            let row = match record {
-                Record::RowData(row) => row,
-            };
-
-            let row_values = columns
-                .iter()
-                .map(|col| {
-                    row.columns
-                        .iter()
-                        .find(|rc| rc.name == col.name)
-                        .and_then(|col| col.value.clone())
-                        .map_or("NULL".to_string(), |val| val.to_string())
-                })
-                .collect();
-
-            all_values.push(row_values);
-        }
-
         if columns.is_empty() {
             return Err("write_batch: No valid columns found in records".into());
         }
+
+        let all_values: Vec<Vec<String>> = records
+            .into_iter()
+            .map(|record| match record {
+                Record::RowData(row) => columns
+                    .iter()
+                    .map(|col| {
+                        row.columns
+                            .iter()
+                            .find(|rc| rc.name == col.name)
+                            .and_then(|rc| rc.value.clone())
+                            .map_or_else(|| "NULL".to_string(), |val| val.to_string())
+                    })
+                    .collect(),
+            })
+            .collect();
 
         let query = SqlQueryBuilder::new()
             .insert_batch(&metadata.name, columns, all_values)

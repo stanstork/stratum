@@ -6,7 +6,7 @@ use sqlx::Row;
 pub trait PgColumnDataType {
     fn from_pg_row(row: &PgRow) -> ColumnDataType;
     fn to_pg_string(&self) -> String;
-    fn convert_pg_column_type(col: &ColumnMetadata) -> (String, Option<usize>);
+    fn to_pg_type(col: &ColumnMetadata) -> (String, Option<usize>);
 }
 
 impl PgColumnDataType for ColumnDataType {
@@ -50,7 +50,7 @@ impl PgColumnDataType for ColumnDataType {
         }
     }
 
-    fn convert_pg_column_type(col: &ColumnMetadata) -> (String, Option<usize>) {
+    fn to_pg_type(col: &ColumnMetadata) -> (String, Option<usize>) {
         let data_type = match &col.data_type {
             ColumnDataType::Enum => col.name.clone(),
             ColumnDataType::Set => "TEXT[]".to_string(),

@@ -16,12 +16,12 @@ pub struct Producer {
 
 impl Producer {
     pub async fn new(context: Arc<Mutex<MigrationContext>>, sender: watch::Sender<bool>) -> Self {
-        let context_guard = context.lock().await;
-        let buffer = Arc::clone(&context_guard.buffer);
-        let data_source = match &context_guard.source {
+        let ctx = context.lock().await;
+        let buffer = Arc::clone(&ctx.buffer);
+        let data_source = match &ctx.source {
             DataSource::Database(db) => Arc::clone(db),
         };
-        let batch_size = context_guard.state.lock().await.batch_size;
+        let batch_size = ctx.state.lock().await.batch_size;
 
         Self {
             buffer,
@@ -42,7 +42,7 @@ impl Producer {
     }
 
     async fn run(self) -> usize {
-        let mut offset = 0; //self.buffer.read_last_offset();
+        let mut offset = self.buffer.read_last_offset();
         let mut batch_number = 1;
 
         loop {

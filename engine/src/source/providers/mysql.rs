@@ -15,9 +15,8 @@ impl MySqlDataSource {
         table: &str,
         adapter: MySqlAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let metadata = adapter.fetch_metadata(table).await?;
         Ok(MySqlDataSource {
-            metadata,
+            metadata: adapter.fetch_metadata(table).await?,
             table: table.to_string(),
             adapter,
         })
@@ -36,7 +35,6 @@ impl DbDataSource for MySqlDataSource {
         offset: Option<usize>,
     ) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
         let grouped_columns = self.metadata().select_fields();
-
         let mut records = Vec::new();
 
         for (table, columns) in grouped_columns {

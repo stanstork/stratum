@@ -7,14 +7,14 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RowData {
-    pub table_name: String,
+    pub table: String,
     pub columns: Vec<ColumnData>,
 }
 
 impl RowData {
     pub fn new(table_name: &str, columns: Vec<ColumnData>) -> Self {
         RowData {
-            table_name: table_name.to_string(),
+            table: table_name.to_string(),
             columns,
         }
     }

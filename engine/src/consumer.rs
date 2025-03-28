@@ -11,8 +11,8 @@ use tracing::{error, info};
 
 pub struct Consumer {
     buffer: Arc<SledBuffer>,
-    data_destination: Arc<Mutex<dyn DbDataDestination>>,
-    tbl_names_map: HashMap<String, String>,
+    data_dest: Arc<Mutex<dyn DbDataDestination>>,
+    table_name_map: HashMap<String, String>,
     batch_size: usize,
     shutdown_receiver: watch::Receiver<bool>,
 }
@@ -22,18 +22,18 @@ impl Consumer {
         context: Arc<Mutex<MigrationContext>>,
         receiver: watch::Receiver<bool>,
     ) -> Self {
-        let context_guard = context.lock().await;
-        let buffer = Arc::clone(&context_guard.buffer);
-        let data_destination = match &context_guard.destination {
+        let ctx = context.lock().await;
+        let buffer = Arc::clone(&ctx.buffer);
+        let data_dest = match &ctx.destination {
             DataDestination::Database(db) => Arc::clone(db),
         };
-        let tbl_names_map = context_guard.src_dst_name_map.clone();
-        let batch_size = context_guard.state.lock().await.batch_size;
+        let table_name_map = ctx.src_dst_name_map.clone();
+        let batch_size = ctx.state.lock().await.batch_size;
 
         Self {
             buffer,
-            data_destination,
-            tbl_names_map,
+            data_dest,
+            table_name_map,
             batch_size,
             shutdown_receiver: receiver,
         }
@@ -44,7 +44,7 @@ impl Consumer {
     }
 
     async fn run(self) {
-        let tables = self.data_destination.lock().await.metadata().tables();
+        let tables = self.data_dest.lock().await.metadata().tables();
 
         info!("Disabling triggers for all tables");
         self.toggle_trigger(&tables, false).await;
@@ -84,9 +84,9 @@ impl Consumer {
     ) {
         let row_data = RowData::deserialize(record);
         let table_name = self
-            .tbl_names_map
-            .get(&row_data.table_name)
-            .unwrap_or(&row_data.table_name);
+            .table_name_map
+            .get(&row_data.table)
+            .unwrap_or(&row_data.table);
 
         let batch = batch_map.entry(table_name.clone()).or_default();
         batch.push(Record::RowData(row_data));
@@ -104,7 +104,7 @@ impl Consumer {
         for table in tables.iter() {
             // Get the table name from the map or use the original name if no mapping is found
             // This is needed when the source and destination table names are different
-            let table_name = self.tbl_names_map.get(&table.name).unwrap_or(&table.name);
+            let table_name = self.table_name_map.get(&table.name).unwrap_or(&table.name);
 
             if let Some(records) = batch_map.remove(table_name) {
                 if records.is_empty() {
@@ -115,7 +115,7 @@ impl Consumer {
                 let start_time = Instant::now();
 
                 match self
-                    .data_destination
+                    .data_dest
                     .lock()
                     .await
                     .write_batch(table, records)
@@ -137,7 +137,7 @@ impl Consumer {
     async fn toggle_trigger(&self, tables: &Vec<TableMetadata>, enable: bool) {
         for table in tables.iter() {
             if let Err(e) = self
-                .data_destination
+                .data_dest
                 .lock()
                 .await
                 .toggle_trigger(&table.name, enable)
