@@ -1,5 +1,5 @@
 use super::{column::metadata::ColumnMetadata, fk::ForeignKeyMetadata, table::TableMetadata};
-use crate::{adapter::SqlAdapter, query::builder::SqlQueryBuilder, schema::context::SchemaContext};
+use crate::{adapter::SqlAdapter, schema::context::SchemaContext};
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
@@ -191,23 +191,11 @@ impl MetadataProvider {
                 Self::visit_schema_deps(related, ctx, visited);
             });
 
-        let columns = metadata.columns_def(ctx.type_converter);
-        let create_sql = SqlQueryBuilder::new()
-            .create_table(&table_name, &columns, &[])
-            .build();
-        ctx.table_queries.insert(create_sql.0);
-
-        for fk in metadata.fk_defs().iter_mut() {
-            fk.referenced_table = ctx.table_name_map.resolve(&fk.referenced_table);
-            let constraint_sql = SqlQueryBuilder::new()
-                .add_foreign_key(&table_name, &fk)
-                .build();
-            ctx.constraint_queries.insert(constraint_sql.0);
-        }
+        ctx.add_column_defs(&table_name, metadata.column_defs(ctx.type_converter));
+        ctx.add_fk_defs(&table_name, metadata.fk_defs());
 
         for col in (ctx.type_extractor)(metadata) {
-            ctx.enum_declarations
-                .insert((table_name.clone(), col.name.clone()));
+            ctx.add_enum_def(&table_name, &col.name);
         }
     }
 }

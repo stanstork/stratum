@@ -5,7 +5,7 @@ use sql_adapter::{
     adapter::SqlAdapter,
     metadata::table::TableMetadata,
     query::{builder::SqlQueryBuilder, column::ColumnDef},
-    schema::plan::SchemaPlan,
+    schema::{mapping::NameMap, plan::SchemaPlan},
 };
 use tracing::{error, info};
 
@@ -19,6 +19,7 @@ impl DbDataDestination for PgDestination {
     async fn write(
         &self,
         metadata: &TableMetadata,
+        column_name_map: &NameMap,
         record: Record,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let columns = match record {
@@ -30,7 +31,8 @@ impl DbDataDestination for PgDestination {
                         .value
                         .clone()
                         .map_or("NULL".to_string(), |val| val.to_string());
-                    (col.name.clone(), value)
+                    let col_name = column_name_map.resolve(&col.name);
+                    (col_name, value)
                 })
                 .collect::<Vec<(String, String)>>(),
         };
@@ -48,6 +50,7 @@ impl DbDataDestination for PgDestination {
     async fn write_batch(
         &self,
         metadata: &TableMetadata,
+        column_name_map: &NameMap,
         records: Vec<Record>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if records.is_empty() {
@@ -57,7 +60,7 @@ impl DbDataDestination for PgDestination {
         let columns = metadata
             .columns
             .values()
-            .map(|col| ColumnDef::new(col))
+            .map(ColumnDef::new)
             .collect::<Vec<_>>();
 
         if columns.is_empty() {
@@ -66,17 +69,20 @@ impl DbDataDestination for PgDestination {
 
         let all_values: Vec<Vec<String>> = records
             .into_iter()
-            .map(|record| match record {
-                Record::RowData(row) => columns
-                    .iter()
-                    .map(|col| {
-                        row.columns
-                            .iter()
-                            .find(|rc| rc.name == col.name)
-                            .and_then(|rc| rc.value.clone())
-                            .map_or_else(|| "NULL".to_string(), |val| val.to_string())
-                    })
-                    .collect(),
+            .filter_map(|record| match record {
+                Record::RowData(row) => Some(
+                    columns
+                        .iter()
+                        .map(|col| {
+                            let col_name = column_name_map.reverse_resolve(&col.name);
+                            row.columns
+                                .iter()
+                                .find(|rc| rc.name.eq_ignore_ascii_case(&col_name))
+                                .and_then(|rc| rc.value.clone())
+                                .map_or_else(|| "NULL".to_string(), |val| val.to_string())
+                        })
+                        .collect(),
+                ),
             })
             .collect();
 

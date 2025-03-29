@@ -12,6 +12,7 @@ pub enum ColumnDataType {
     Double,
     Boolean,
     Null,
+    Date,
     Timestamp,
     LongLong,
     Int,
@@ -54,7 +55,7 @@ lazy_static! {
         m.insert("DOUBLE", ColumnDataType::Double);
         m.insert("NULL", ColumnDataType::Null);
         m.insert("TIMESTAMP", ColumnDataType::Timestamp);
-        m.insert("DATE", ColumnDataType::Timestamp);
+        m.insert("DATE", ColumnDataType::Date);
         m.insert("TIME", ColumnDataType::Time);
         m.insert("DATETIME", ColumnDataType::Timestamp);
         m.insert("YEAR", ColumnDataType::Year);
@@ -131,6 +132,7 @@ impl fmt::Display for ColumnDataType {
             ColumnDataType::Bytea => write!(f, "BYTEA"),
             ColumnDataType::Array => write!(f, "ARRAY"),
             ColumnDataType::Char => write!(f, "CHAR"),
+            ColumnDataType::Date => write!(f, "DATE"),
         }
     }
 }
@@ -159,6 +161,10 @@ impl ColumnDataType {
             | (ColumnDataType::Array, ColumnDataType::Set) => true,
             (ColumnDataType::Year, ColumnDataType::Int)
             | (ColumnDataType::Int, ColumnDataType::Year) => true,
+            (ColumnDataType::MediumBlob, ColumnDataType::Bytea)
+            | (ColumnDataType::Bytea, ColumnDataType::MediumBlob) => true,
+            (ColumnDataType::Date, ColumnDataType::Timestamp)
+            | (ColumnDataType::Timestamp, ColumnDataType::Date) => true,
             _ => self == other,
         }
     }

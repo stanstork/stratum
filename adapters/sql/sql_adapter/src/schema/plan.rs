@@ -1,12 +1,13 @@
-use super::context::{SchemaContext, TableNameMap};
+use super::{context::SchemaContext, mapping::NameMap};
 use crate::{
     adapter::SqlAdapter,
     metadata::{
         column::metadata::ColumnMetadata, provider::MetadataProvider, table::TableMetadata,
     },
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
+#[derive(Clone, Debug)]
 pub struct SchemaPlan {
     pub metadata: TableMetadata,
     pub table_queries: HashSet<String>,
@@ -18,7 +19,8 @@ impl SchemaPlan {
     pub async fn build<F, T>(
         adapter: &(dyn SqlAdapter + Send + Sync),
         metadata: TableMetadata,
-        table_name_map: &HashMap<String, String>,
+        table_name_map: NameMap,
+        column_name_map: NameMap,
         type_converter: &F,
         type_extractor: &T,
     ) -> Result<Self, Box<dyn std::error::Error>>
@@ -29,7 +31,8 @@ impl SchemaPlan {
         let mut ctx = SchemaContext::new(
             type_converter,
             type_extractor,
-            TableNameMap::new(table_name_map),
+            table_name_map,
+            column_name_map,
         );
 
         MetadataProvider::collect_schema_deps(&metadata, &mut ctx);
@@ -37,7 +40,7 @@ impl SchemaPlan {
         Ok(SchemaPlan {
             metadata,
             table_queries: ctx.table_queries(),
-            constraint_queries: ctx.constraint_queries(),
+            constraint_queries: ctx.fk_queries(),
             enum_queries: ctx.enum_queries(adapter).await.unwrap_or_default(),
         })
     }

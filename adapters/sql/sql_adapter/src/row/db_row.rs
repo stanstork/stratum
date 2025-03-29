@@ -92,6 +92,13 @@ impl DbRow<'_> {
         }
     }
 
+    pub fn try_get_date(&self, name: &str) -> Option<chrono::NaiveDate> {
+        match self {
+            DbRow::MySqlRow(row) => row.try_get::<chrono::NaiveDate, _>(name).ok(),
+            DbRow::PostgresRow(row) => row.try_get::<chrono::NaiveDate, _>(name).ok(),
+        }
+    }
+
     pub fn try_get_bytes(&self, name: &str) -> Option<Vec<u8>> {
         match self {
             DbRow::MySqlRow(row) => row.try_get::<Vec<u8>, _>(name).ok(),

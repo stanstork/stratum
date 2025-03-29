@@ -1,5 +1,5 @@
 CONNECTIONS (
-    SOURCE MYSQL "mysql://user:password@localhost:3306/testdb",
+    SOURCE MYSQL "mysql://office_user:qwerty123@localhost:3306/classicmodels",
     DESTINATION POSTGRES "postgres://user:password@localhost:5432/testdb"
 );
 
@@ -8,14 +8,12 @@ FILTER (
     age >= 18
 );
 
-MIGRATE orders TO orders_collection
+MIGRATE employees TO employees
 WITH SETTINGS (
-    INFER_SCHEMA = TRUE,
-    CREATE_TABLE = TRUE
+    INFER_SCHEMA = TRUE
 );
 
 MAP (
-    name -> full_name,
-    age + 1 -> next_year_age,
-    UPPER(name) -> name_upper
+    employeeNumber -> id,
+    reportsTo -> manger_id
 );

@@ -4,7 +4,9 @@ use crate::{
     destination::data_dest::{DataDestination, DbDataDestination},
     record::{DataRecord, Record},
 };
-use sql_adapter::{metadata::table::TableMetadata, row::row_data::RowData};
+use sql_adapter::{
+    metadata::table::TableMetadata, row::row_data::RowData, schema::mapping::NameMap,
+};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::sync::{watch, Mutex};
 use tracing::{error, info};
@@ -12,7 +14,8 @@ use tracing::{error, info};
 pub struct Consumer {
     buffer: Arc<SledBuffer>,
     data_dest: Arc<Mutex<dyn DbDataDestination>>,
-    table_name_map: HashMap<String, String>,
+    table_name_map: NameMap,
+    column_name_map: NameMap,
     batch_size: usize,
     shutdown_receiver: watch::Receiver<bool>,
 }
@@ -27,13 +30,15 @@ impl Consumer {
         let data_dest = match &ctx.destination {
             DataDestination::Database(db) => Arc::clone(db),
         };
-        let table_name_map = ctx.src_dst_name_map.clone();
+        let table_name_map = NameMap::new(ctx.name_mapping.clone());
+        let column_name_map = NameMap::new(ctx.field_mapping.clone());
         let batch_size = ctx.state.lock().await.batch_size;
 
         Self {
             buffer,
             data_dest,
             table_name_map,
+            column_name_map,
             batch_size,
             shutdown_receiver: receiver,
         }
@@ -83,10 +88,7 @@ impl Consumer {
         tables: &Vec<TableMetadata>,
     ) {
         let row_data = RowData::deserialize(record);
-        let table_name = self
-            .table_name_map
-            .get(&row_data.table)
-            .unwrap_or(&row_data.table);
+        let table_name = self.table_name_map.resolve(&row_data.table);
 
         let batch = batch_map.entry(table_name.clone()).or_default();
         batch.push(Record::RowData(row_data));
@@ -104,9 +106,9 @@ impl Consumer {
         for table in tables.iter() {
             // Get the table name from the map or use the original name if no mapping is found
             // This is needed when the source and destination table names are different
-            let table_name = self.table_name_map.get(&table.name).unwrap_or(&table.name);
+            let table_name = self.table_name_map.resolve(&table.name);
 
-            if let Some(records) = batch_map.remove(table_name) {
+            if let Some(records) = batch_map.remove(&table_name) {
                 if records.is_empty() {
                     // Skip empty batch
                     return;
@@ -118,7 +120,7 @@ impl Consumer {
                     .data_dest
                     .lock()
                     .await
-                    .write_batch(table, records)
+                    .write_batch(table, &self.column_name_map, records)
                     .await
                 {
                     Ok(_) => {

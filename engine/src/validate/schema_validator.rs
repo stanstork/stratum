@@ -1,5 +1,8 @@
-use sql_adapter::metadata::{column::data_type::ColumnDataType, table::TableMetadata};
-use std::collections::{HashMap, HashSet};
+use sql_adapter::{
+    metadata::{column::data_type::ColumnDataType, table::TableMetadata},
+    schema::mapping::NameMap,
+};
+use std::collections::HashSet;
 use tracing::error;
 
 pub struct SchemaValidator<'a> {
@@ -34,11 +37,12 @@ impl<'a> SchemaValidator<'a> {
     pub fn validate(
         &self,
         mode: SchemaValidationMode,
-        tbls_name_map: HashMap<String, String>,
+        table_mapping: NameMap,
+        column_mapping: NameMap,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match mode {
             SchemaValidationMode::OneToOne => {
-                self.validate_one_to_one(tbls_name_map)?;
+                self.validate_one_to_one(table_mapping, column_mapping)?;
             }
             SchemaValidationMode::ContainsColumns(columns) => {
                 self.validate_contains_columns(columns)?;
@@ -50,7 +54,8 @@ impl<'a> SchemaValidator<'a> {
 
     fn validate_one_to_one(
         &self,
-        tbls_name_map: HashMap<String, String>,
+        table_mapping: NameMap,
+        column_mapping: NameMap,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let source_tables = self.source_metadata.tables();
         let destination_tables = self.destination_metadata.tables();
@@ -67,10 +72,7 @@ impl<'a> SchemaValidator<'a> {
         }
 
         for source_table in &source_tables {
-            let dest_table_name = tbls_name_map
-                .get(&source_table.name)
-                .unwrap_or(&source_table.name);
-
+            let dest_table_name = table_mapping.resolve(&source_table.name);
             let destination_table = destination_tables
                 .iter()
                 .find(|t| t.name == *dest_table_name)
@@ -91,7 +93,8 @@ impl<'a> SchemaValidator<'a> {
             }
 
             for (col_name, src_col_meta) in &source_table.columns {
-                match destination_table.columns.get(col_name) {
+                let mapped_col_name = column_mapping.resolve(col_name).to_ascii_lowercase();
+                match destination_table.columns.get(&mapped_col_name) {
                     Some(dst_col_meta) => {
                         if !src_col_meta
                             .data_type
@@ -99,7 +102,7 @@ impl<'a> SchemaValidator<'a> {
                         {
                             invalid_columns.push(InvalidColumn {
                                 table: source_table.name.clone(),
-                                column: col_name.clone(),
+                                column: mapped_col_name.clone(),
                                 source_type: src_col_meta.data_type,
                                 destination_type: Some(dst_col_meta.data_type),
                             });
@@ -108,7 +111,7 @@ impl<'a> SchemaValidator<'a> {
                     None => {
                         invalid_columns.push(InvalidColumn {
                             table: source_table.name.clone(),
-                            column: col_name.clone(),
+                            column: mapped_col_name.clone(),
                             source_type: src_col_meta.data_type,
                             destination_type: None,
                         });

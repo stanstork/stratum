@@ -1,6 +1,6 @@
 use crate::{
-    buffer::SledBuffer, destination::data_dest::DataDestination, source::data_source::DataSource,
-    state::MigrationState,
+    buffer::SledBuffer, destination::data_dest::DataDestination, mapping::field::FieldMapping,
+    source::data_source::DataSource, state::MigrationState,
 };
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::metadata::table::TableMetadata;
@@ -15,7 +15,8 @@ pub struct MigrationContext {
     pub buffer: Arc<SledBuffer>,
     pub source_data_format: DataFormat,
     pub dest_data_format: DataFormat,
-    pub src_dst_name_map: HashMap<String, String>,
+    pub name_mapping: HashMap<String, String>,
+    pub field_mapping: HashMap<String, String>,
 }
 
 impl MigrationContext {
@@ -29,6 +30,9 @@ impl MigrationContext {
         let source_data_format = plan.connections.source.data_format;
         let dest_data_format = plan.connections.destination.data_format;
 
+        let field_mapping = FieldMapping::extract_field_map(&plan.mapping);
+        let name_mapping = FieldMapping::extract_name_map(&plan.migration);
+
         Arc::new(Mutex::new(MigrationContext {
             state,
             source,
@@ -36,7 +40,8 @@ impl MigrationContext {
             buffer,
             source_data_format,
             dest_data_format,
-            src_dst_name_map: HashMap::new(),
+            name_mapping,
+            field_mapping,
         }))
     }
 
@@ -60,15 +65,6 @@ impl MigrationContext {
             }
             _ => unimplemented!("Unsupported data destination"),
         }
-    }
-
-    pub fn set_dst_name(&mut self, src_name: &str, dst_name: &str) {
-        self.src_dst_name_map
-            .insert(src_name.to_string(), dst_name.to_string());
-    }
-
-    pub fn get_src_dest_name(&self) -> &HashMap<String, String> {
-        &self.src_dst_name_map
     }
 
     pub async fn debug_state(&self) {

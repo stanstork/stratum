@@ -47,6 +47,7 @@ impl PgColumnDataType for ColumnDataType {
             ColumnDataType::Bytea => "BYTEA".to_string(),
             ColumnDataType::Array => "ARRAY".to_string(),
             ColumnDataType::Char => "CHAR".to_string(),
+            ColumnDataType::Date => "DATE".to_string(),
         }
     }
 

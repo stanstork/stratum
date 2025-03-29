@@ -1,10 +1,12 @@
+use super::mapping::NameMap;
 use crate::{
     adapter::SqlAdapter,
     metadata::{column::metadata::ColumnMetadata, table::TableMetadata},
-    query::builder::SqlQueryBuilder,
+    query::{builder::SqlQueryBuilder, column::ColumnDef, fk::ForeignKeyDef},
 };
 use std::collections::{HashMap, HashSet};
 
+#[derive(Clone, Debug)]
 pub struct SchemaContext<'a, F, T>
 where
     F: Fn(&ColumnMetadata) -> (String, Option<usize>),
@@ -12,11 +14,13 @@ where
 {
     pub type_converter: &'a F,
     pub type_extractor: &'a T,
-    pub table_name_map: TableNameMap<'a>,
 
-    pub table_queries: HashSet<String>,
-    pub constraint_queries: HashSet<String>,
-    pub enum_declarations: HashSet<(String, String)>,
+    pub column_name_map: NameMap,
+    pub table_name_map: NameMap,
+
+    pub column_defs: HashMap<String, Vec<ColumnDef>>,
+    pub enum_defs: HashSet<(String, String)>,
+    pub fk_defs: HashMap<String, Vec<ForeignKeyDef>>,
 }
 
 impl<'a, F, T> SchemaContext<'a, F, T>
@@ -27,26 +31,61 @@ where
     pub fn new(
         type_converter: &'a F,
         type_extractor: &'a T,
-        table_name_map: TableNameMap<'a>,
+        table_name_map: NameMap,
+        column_name_map: NameMap,
     ) -> Self {
         Self {
             type_converter,
             type_extractor,
             table_name_map,
-            table_queries: HashSet::new(),
-            constraint_queries: HashSet::new(),
-            enum_declarations: HashSet::new(),
+            column_name_map,
+            column_defs: HashMap::new(),
+            enum_defs: HashSet::new(),
+            fk_defs: HashMap::new(),
         }
     }
 
     pub fn table_queries(&self) -> HashSet<String> {
-        self.table_queries.iter().map(|sql| sql.clone()).collect()
+        self.column_defs
+            .iter()
+            .map(|(table, columns)| {
+                let resolved_table = self.table_name_map.resolve(table);
+                let resolved_columns = columns
+                    .iter()
+                    .map(|col| ColumnDef {
+                        name: self.column_name_map.resolve(&col.name),
+                        ..col.clone()
+                    })
+                    .collect::<Vec<_>>();
+
+                SqlQueryBuilder::new()
+                    .create_table(&resolved_table, &resolved_columns, &[])
+                    .build()
+                    .0
+            })
+            .collect()
     }
 
-    pub fn constraint_queries(&self) -> HashSet<String> {
-        self.constraint_queries
+    pub fn fk_queries(&self) -> HashSet<String> {
+        self.fk_defs
             .iter()
-            .map(|sql| sql.clone())
+            .flat_map(|(table, fks)| {
+                let resolved_table = self.table_name_map.resolve(table);
+
+                fks.iter().map(move |fk| {
+                    let resolved_fk = ForeignKeyDef {
+                        referenced_table: self.table_name_map.resolve(&fk.referenced_table),
+                        referenced_column: self.column_name_map.resolve(&fk.referenced_column),
+                        column: self.column_name_map.resolve(&fk.column),
+                        ..fk.clone()
+                    };
+
+                    SqlQueryBuilder::new()
+                        .add_foreign_key(&resolved_table, &resolved_fk)
+                        .build()
+                        .0
+                })
+            })
             .collect()
     }
 
@@ -54,18 +93,40 @@ where
         &self,
         adapter: &(dyn SqlAdapter + Send + Sync),
     ) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
-        let mut enum_queries = HashSet::new();
-        for enum_declaration in self.enum_declarations.iter() {
-            let enum_type = adapter
-                .fetch_column_type(&enum_declaration.0, &enum_declaration.1)
-                .await?;
+        let mut queries = HashSet::new();
+
+        for (table, column) in &self.enum_defs {
+            let enum_type = adapter.fetch_column_type(table, column).await?;
+            let variants = Self::parse_enum(&enum_type);
 
             let enum_sql = SqlQueryBuilder::new()
-                .create_enum(&enum_declaration.1, &Self::parse_enum(&enum_type))
-                .build();
-            enum_queries.insert(enum_sql.0);
+                .create_enum(column, &variants)
+                .build()
+                .0;
+
+            queries.insert(enum_sql);
         }
-        Ok(enum_queries)
+
+        Ok(queries)
+    }
+
+    pub fn add_column_defs(&mut self, table_name: &str, column_defs: Vec<ColumnDef>) {
+        self.column_defs
+            .entry(table_name.to_string())
+            .or_insert_with(Vec::new)
+            .extend(column_defs);
+    }
+
+    pub fn add_enum_def(&mut self, table_name: &str, column_name: &str) {
+        self.enum_defs
+            .insert((table_name.to_string(), column_name.to_string()));
+    }
+
+    pub fn add_fk_defs(&mut self, table_name: &str, fk_defs: Vec<ForeignKeyDef>) {
+        self.fk_defs
+            .entry(table_name.to_string())
+            .or_insert_with(Vec::new)
+            .extend(fk_defs);
     }
 
     fn parse_enum(raw: &str) -> Vec<String> {
@@ -76,22 +137,5 @@ where
             .split(',')
             .map(|s| s.trim().trim_matches('\'').to_string())
             .collect()
-    }
-}
-
-pub struct TableNameMap<'a> {
-    map: &'a HashMap<String, String>,
-}
-
-impl<'a> TableNameMap<'a> {
-    pub fn new(map: &'a HashMap<String, String>) -> Self {
-        Self { map }
-    }
-
-    pub fn resolve(&self, name: &str) -> String {
-        self.map
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| name.to_string())
     }
 }

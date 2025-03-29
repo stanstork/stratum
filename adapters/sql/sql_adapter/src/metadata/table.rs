@@ -80,7 +80,7 @@ impl TableMetadata {
         tables
     }
 
-    pub fn columns_def<F>(&self, type_converter: &F) -> Vec<ColumnDef>
+    pub fn column_defs<F>(&self, type_converter: &F) -> Vec<ColumnDef>
     where
         F: Fn(&ColumnMetadata) -> (String, Option<usize>),
     {

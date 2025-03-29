@@ -38,6 +38,7 @@ impl ColumnValue {
             ColumnDataType::Boolean => row.try_get_bool(name).map(Self::Boolean),
             ColumnDataType::Json => row.try_get_json(name).map(Self::Json),
             ColumnDataType::Timestamp => row.try_get_timestamp(name).map(Self::Timestamp),
+            ColumnDataType::Date => row.try_get_date(name).map(Self::Date),
             ColumnDataType::Enum => row.try_get_string(name).map(Self::String),
             ColumnDataType::Bytea => row.try_get_bytes(name).map(Self::Bytes),
             ColumnDataType::Blob
@@ -61,7 +62,7 @@ impl fmt::Display for ColumnValue {
         match self {
             ColumnValue::Int(v) => write!(f, "{}", v),
             ColumnValue::Float(v) => write!(f, "{:.15}", v),
-            ColumnValue::String(v) => write!(f, "'{}'", v),
+            ColumnValue::String(v) => write!(f, "'{}'", v.replace("'", "''")),
             ColumnValue::Boolean(v) => write!(f, "{}", v),
             ColumnValue::Json(v) => write!(f, "{}", v),
             ColumnValue::Uuid(v) => write!(f, "{}", v),
@@ -69,7 +70,7 @@ impl fmt::Display for ColumnValue {
                 let hex = v.iter().map(|b| format!("{:02X}", b)).collect::<String>();
                 write!(f, "E'\\\\x{}'", hex)
             }
-            ColumnValue::Date(v) => write!(f, "{}", v),
+            ColumnValue::Date(v) => write!(f, "'{}'", v),
             ColumnValue::Timestamp(v) => write!(f, "'{}'", v),
         }
     }

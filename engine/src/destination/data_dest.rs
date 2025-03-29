@@ -2,7 +2,11 @@ use super::providers::postgres::PgDestination;
 use crate::{adapter::Adapter, record::Record};
 use async_trait::async_trait;
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
-use sql_adapter::{adapter::SqlAdapter, metadata::table::TableMetadata, schema::plan::SchemaPlan};
+use sql_adapter::{
+    adapter::SqlAdapter,
+    metadata::table::TableMetadata,
+    schema::{mapping::NameMap, plan::SchemaPlan},
+};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -16,11 +20,13 @@ pub trait DbDataDestination: Send + Sync {
     async fn write(
         &self,
         metadata: &TableMetadata,
+        column_name_map: &NameMap,
         record: Record,
     ) -> Result<(), Box<dyn std::error::Error>>;
     async fn write_batch(
         &self,
         metadata: &TableMetadata,
+        column_name_map: &NameMap,
         records: Vec<Record>,
     ) -> Result<(), Box<dyn std::error::Error>>;
     async fn infer_schema(

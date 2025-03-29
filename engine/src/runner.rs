@@ -3,13 +3,17 @@ use crate::{
     consumer::Consumer,
     context::MigrationContext,
     destination::data_dest::{create_data_destination, DataDestination},
+    mapping::field::FieldMapping,
     producer::Producer,
     settings::parse_settings,
     source::data_source::{create_data_source, DataSource},
     validate::schema_validator::{SchemaValidationMode, SchemaValidator},
 };
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
-use sql_adapter::metadata::{provider::MetadataProvider, table::TableMetadata};
+use sql_adapter::{
+    metadata::{provider::MetadataProvider, table::TableMetadata},
+    schema::mapping::NameMap,
+};
 use std::sync::Arc;
 use tokio::sync::{watch, Mutex};
 use tracing::{error, info};
@@ -21,7 +25,7 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
     let context = MigrationContext::init(data_source, data_destination, &plan);
 
     apply_settings(&plan, Arc::clone(&context)).await?;
-    validate_destination(Arc::clone(&context)).await?;
+    validate_destination(&plan, Arc::clone(&context)).await?;
 
     let (shutdown_sender, shutdown_receiver) = watch::channel(false);
 
@@ -105,17 +109,22 @@ async fn apply_settings(
 }
 
 async fn validate_destination(
+    plan: &MigrationPlan,
     context: Arc<Mutex<MigrationContext>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let context = context.lock().await;
     let source_metadata = context.get_source_metadata().await?;
     let destination_metadata = context.get_dest_metadata().await?;
-    let tbls_name_map = context.src_dst_name_map.clone();
+    let tbls_name_map = context.name_mapping.clone();
 
     let validator = SchemaValidator::new(&source_metadata, &destination_metadata);
 
     if context.state.lock().await.infer_schema {
-        if let Err(err) = validator.validate(SchemaValidationMode::OneToOne, tbls_name_map) {
+        let col_mapping = NameMap::new(FieldMapping::extract_field_map(&plan.mapping));
+        let table_mapping = NameMap::new(tbls_name_map.clone());
+        if let Err(err) =
+            validator.validate(SchemaValidationMode::OneToOne, table_mapping, col_mapping)
+        {
             error!("Schema validation failed: {:?}", err);
             return Err(err);
         } else {

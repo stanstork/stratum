@@ -1,3 +1,4 @@
+use crate::mapping::field::FieldMapping;
 use crate::state::MigrationState;
 use crate::{
     context::MigrationContext, destination::data_dest::DataDestination,
@@ -10,8 +11,8 @@ use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::metadata::column::data_type::ColumnDataType;
 use sql_adapter::metadata::provider::MetadataProvider;
 use sql_adapter::metadata::table::TableMetadata;
+use sql_adapter::schema::mapping::NameMap;
 use sql_adapter::schema::plan::SchemaPlan;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -31,7 +32,6 @@ pub struct InferSchemaSetting {
     destination: DataDestination,
     dest_format: DataFormat,
     state: Arc<Mutex<MigrationState>>,
-    src_name: String,
 }
 
 pub struct BatchSizeSetting(pub i64);
@@ -43,21 +43,16 @@ impl MigrationSetting for InferSchemaSetting {
         plan: &MigrationPlan,
         context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // Set the destination table name if it differs from the source
-        if self.src_name != plan.migration.target {
-            context
-                .lock()
-                .await
-                .set_dst_name(&self.src_name, &plan.migration.target);
-        }
-
         // Apply the schema only if the destination table does not exist
         if !self.destination_exists(plan).await? {
             info!("Destination table does not exist. Infer schema setting will be applied");
 
-            let schema_plan = self
-                .infer_schema(context.lock().await.get_src_dest_name())
-                .await?;
+            let cx = context.lock().await;
+
+            let col_mapping = NameMap::new(FieldMapping::extract_field_map(&plan.mapping));
+            let table_mapping = NameMap::new(cx.name_mapping.clone());
+            let schema_plan = self.infer_schema(table_mapping, col_mapping).await?;
+
             self.apply_schema(&schema_plan).await?;
         }
 
@@ -77,21 +72,19 @@ impl MigrationSetting for InferSchemaSetting {
 impl InferSchemaSetting {
     pub async fn new(context: &Arc<Mutex<MigrationContext>>) -> Self {
         let ctx = context.lock().await;
-        let src_name = ctx.source.source_name().await.to_owned();
-
         InferSchemaSetting {
             source: ctx.source.clone(),
             source_format: ctx.source_data_format,
             destination: ctx.destination.clone(),
             dest_format: ctx.dest_data_format,
             state: ctx.state.clone(),
-            src_name,
         }
     }
 
     async fn infer_schema(
         &self,
-        table_name_map: &HashMap<String, String>,
+        table_name_map: NameMap,
+        column_name_map: NameMap,
     ) -> Result<SchemaPlan, Box<dyn std::error::Error>> {
         if let (DataSource::Database(source), true) = (
             &self.source,
@@ -108,6 +101,7 @@ impl InferSchemaSetting {
                 adapter,
                 metadata,
                 table_name_map,
+                column_name_map,
                 &ColumnDataType::to_pg_type,
                 &TableMetadata::enums,
             )
