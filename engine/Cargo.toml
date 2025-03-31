@@ -7,6 +7,7 @@ edition = "2021"
 mysql = { path = "../adapters/sql/mysql" }
 postgres = { path = "../adapters/sql/postgres" }
 sql_adapter = { path = "../adapters/sql/sql_adapter" }
+common = { path = "../common" }
 
 async-trait = "0.1.86"
 serde = "1.0.217"

@@ -2,6 +2,7 @@ use crate::{
     buffer::SledBuffer,
     context::MigrationContext,
     source::data_source::{DataSource, DbDataSource},
+    transform::{mapping::ColumnMapper, pipeline::TransformPipeline},
 };
 use std::sync::Arc;
 use tokio::sync::{watch, Mutex};
@@ -10,8 +11,9 @@ use tracing::{error, info};
 pub struct Producer {
     buffer: Arc<SledBuffer>,
     data_source: Arc<Mutex<dyn DbDataSource>>,
-    batch_size: usize,
+    pipeline: TransformPipeline,
     shutdown_sender: watch::Sender<bool>,
+    batch_size: usize,
 }
 
 impl Producer {
@@ -21,6 +23,15 @@ impl Producer {
         let data_source = match &ctx.source {
             DataSource::Database(db) => Arc::clone(db),
         };
+
+        let mut pipeline = TransformPipeline::new();
+
+        // Add column name mapping if present
+        if !ctx.field_mapping.is_empty() {
+            let column_mapper = ColumnMapper::new(ctx.field_mapping.clone());
+            pipeline = pipeline.add_transform(column_mapper);
+        }
+
         let batch_size = ctx.state.lock().await.batch_size;
 
         Self {
@@ -28,6 +39,7 @@ impl Producer {
             data_source,
             batch_size,
             shutdown_sender: sender,
+            pipeline,
         }
     }
 
@@ -66,7 +78,11 @@ impl Producer {
                     info!("Fetched {} records in batch #{batch_number}", records.len());
 
                     for record in records {
-                        if let Err(e) = self.buffer.store(record.serialize()) {
+                        // Apply the transformation pipeline to each record
+                        let transformed_record = self.pipeline.apply(&record);
+
+                        // Store the transformed record in the buffer
+                        if let Err(e) = self.buffer.store(transformed_record.serialize()) {
                             error!("Failed to store record: {}", e);
                             return batch_number;
                         }

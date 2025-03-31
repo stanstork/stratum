@@ -1,10 +1,11 @@
 use crate::{
-    buffer::SledBuffer, destination::data_dest::DataDestination, mapping::field::FieldMapping,
-    source::data_source::DataSource, state::MigrationState,
+    buffer::SledBuffer, destination::data_dest::DataDestination, source::data_source::DataSource,
+    state::MigrationState,
 };
+use common::{field::FieldMapping, name_map::NameMap};
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::metadata::table::TableMetadata;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
 
@@ -15,8 +16,8 @@ pub struct MigrationContext {
     pub buffer: Arc<SledBuffer>,
     pub source_data_format: DataFormat,
     pub dest_data_format: DataFormat,
-    pub name_mapping: HashMap<String, String>,
-    pub field_mapping: HashMap<String, String>,
+    pub name_mapping: NameMap,
+    pub field_mapping: NameMap,
 }
 
 impl MigrationContext {

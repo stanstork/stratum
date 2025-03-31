@@ -1,17 +1,16 @@
-use crate::mapping::field::FieldMapping;
 use crate::state::MigrationState;
 use crate::{
     context::MigrationContext, destination::data_dest::DataDestination,
     source::data_source::DataSource,
 };
 use async_trait::async_trait;
+use common::name_map::NameMap;
 use postgres::data_type::PgColumnDataType;
 use smql::statements::setting::{Setting, SettingValue};
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::metadata::column::data_type::ColumnDataType;
 use sql_adapter::metadata::provider::MetadataProvider;
 use sql_adapter::metadata::table::TableMetadata;
-use sql_adapter::schema::mapping::NameMap;
 use sql_adapter::schema::plan::SchemaPlan;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -49,8 +48,8 @@ impl MigrationSetting for InferSchemaSetting {
 
             let cx = context.lock().await;
 
-            let col_mapping = NameMap::new(FieldMapping::extract_field_map(&plan.mapping));
-            let table_mapping = NameMap::new(cx.name_mapping.clone());
+            let col_mapping = cx.field_mapping.clone();
+            let table_mapping = cx.name_mapping.clone();
             let schema_plan = self.infer_schema(table_mapping, col_mapping).await?;
 
             self.apply_schema(&schema_plan).await?;

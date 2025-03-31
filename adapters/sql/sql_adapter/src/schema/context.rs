@@ -1,4 +1,5 @@
-use super::mapping::NameMap;
+use common::name_map::NameMap;
+
 use crate::{
     adapter::SqlAdapter,
     metadata::{column::metadata::ColumnMetadata, table::TableMetadata},

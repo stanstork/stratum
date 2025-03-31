@@ -8,7 +8,7 @@ FILTER (
     age >= 18
 );
 
-MIGRATE employees TO employees
+MIGRATE employees TO employees2
 WITH SETTINGS (
     INFER_SCHEMA = TRUE
 );

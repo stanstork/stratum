@@ -3,17 +3,14 @@ use crate::{
     consumer::Consumer,
     context::MigrationContext,
     destination::data_dest::{create_data_destination, DataDestination},
-    mapping::field::FieldMapping,
     producer::Producer,
     settings::parse_settings,
     source::data_source::{create_data_source, DataSource},
     validate::schema_validator::{SchemaValidationMode, SchemaValidator},
 };
+use common::field::FieldMapping;
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
-use sql_adapter::{
-    metadata::{provider::MetadataProvider, table::TableMetadata},
-    schema::mapping::NameMap,
-};
+use sql_adapter::metadata::{provider::MetadataProvider, table::TableMetadata};
 use std::sync::Arc;
 use tokio::sync::{watch, Mutex};
 use tracing::{error, info};
@@ -120,8 +117,8 @@ async fn validate_destination(
     let validator = SchemaValidator::new(&source_metadata, &destination_metadata);
 
     if context.state.lock().await.infer_schema {
-        let col_mapping = NameMap::new(FieldMapping::extract_field_map(&plan.mapping));
-        let table_mapping = NameMap::new(tbls_name_map.clone());
+        let col_mapping = FieldMapping::extract_field_map(&plan.mapping);
+        let table_mapping = tbls_name_map.clone();
         if let Err(err) =
             validator.validate(SchemaValidationMode::OneToOne, table_mapping, col_mapping)
         {

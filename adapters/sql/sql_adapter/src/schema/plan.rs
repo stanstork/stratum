@@ -1,4 +1,6 @@
-use super::{context::SchemaContext, mapping::NameMap};
+use common::name_map::NameMap;
+
+use super::context::SchemaContext;
 use crate::{
     adapter::SqlAdapter,
     metadata::{

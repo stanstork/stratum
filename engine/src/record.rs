@@ -1,6 +1,7 @@
 use bincode;
 use sql_adapter::row::row_data::RowData;
 
+#[derive(Debug, Clone)]
 pub enum Record {
     RowData(RowData),
 }

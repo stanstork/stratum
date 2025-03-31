@@ -4,9 +4,8 @@ use crate::{
     destination::data_dest::{DataDestination, DbDataDestination},
     record::{DataRecord, Record},
 };
-use sql_adapter::{
-    metadata::table::TableMetadata, row::row_data::RowData, schema::mapping::NameMap,
-};
+use common::name_map::NameMap;
+use sql_adapter::{metadata::table::TableMetadata, row::row_data::RowData};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::sync::{watch, Mutex};
 use tracing::{error, info};
@@ -15,7 +14,6 @@ pub struct Consumer {
     buffer: Arc<SledBuffer>,
     data_dest: Arc<Mutex<dyn DbDataDestination>>,
     table_name_map: NameMap,
-    column_name_map: NameMap,
     batch_size: usize,
     shutdown_receiver: watch::Receiver<bool>,
 }
@@ -30,15 +28,13 @@ impl Consumer {
         let data_dest = match &ctx.destination {
             DataDestination::Database(db) => Arc::clone(db),
         };
-        let table_name_map = NameMap::new(ctx.name_mapping.clone());
-        let column_name_map = NameMap::new(ctx.field_mapping.clone());
+        let table_name_map = ctx.name_mapping.clone();
         let batch_size = ctx.state.lock().await.batch_size;
 
         Self {
             buffer,
             data_dest,
             table_name_map,
-            column_name_map,
             batch_size,
             shutdown_receiver: receiver,
         }
@@ -120,7 +116,7 @@ impl Consumer {
                     .data_dest
                     .lock()
                     .await
-                    .write_batch(table, &self.column_name_map, records)
+                    .write_batch(table, records)
                     .await
                 {
                     Ok(_) => {

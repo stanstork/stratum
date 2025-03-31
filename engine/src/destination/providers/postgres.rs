@@ -1,11 +1,12 @@
 use crate::{destination::data_dest::DbDataDestination, record::Record};
 use async_trait::async_trait;
+use common::name_map::NameMap;
 use postgres::postgres::PgAdapter;
 use sql_adapter::{
     adapter::SqlAdapter,
     metadata::table::TableMetadata,
     query::{builder::SqlQueryBuilder, column::ColumnDef},
-    schema::{mapping::NameMap, plan::SchemaPlan},
+    schema::plan::SchemaPlan,
 };
 use tracing::{error, info};
 
@@ -50,7 +51,6 @@ impl DbDataDestination for PgDestination {
     async fn write_batch(
         &self,
         metadata: &TableMetadata,
-        column_name_map: &NameMap,
         records: Vec<Record>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if records.is_empty() {
@@ -74,10 +74,9 @@ impl DbDataDestination for PgDestination {
                     columns
                         .iter()
                         .map(|col| {
-                            let col_name = column_name_map.reverse_resolve(&col.name);
                             row.columns
                                 .iter()
-                                .find(|rc| rc.name.eq_ignore_ascii_case(&col_name))
+                                .find(|rc| rc.name.eq_ignore_ascii_case(&col.name))
                                 .and_then(|rc| rc.value.clone())
                                 .map_or_else(|| "NULL".to_string(), |val| val.to_string())
                         })

@@ -181,8 +181,6 @@ impl MetadataProvider {
             return;
         }
 
-        let table_name = ctx.table_name_map.resolve(&metadata.name);
-
         metadata
             .referenced_tables
             .values()
@@ -191,11 +189,11 @@ impl MetadataProvider {
                 Self::visit_schema_deps(related, ctx, visited);
             });
 
-        ctx.add_column_defs(&table_name, metadata.column_defs(ctx.type_converter));
-        ctx.add_fk_defs(&table_name, metadata.fk_defs());
+        ctx.add_column_defs(&metadata.name, metadata.column_defs(ctx.type_converter));
+        ctx.add_fk_defs(&metadata.name, metadata.fk_defs());
 
         for col in (ctx.type_extractor)(metadata) {
-            ctx.add_enum_def(&table_name, &col.name);
+            ctx.add_enum_def(&metadata.name, &col.name);
         }
     }
 }

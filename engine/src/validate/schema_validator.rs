@@ -1,7 +1,5 @@
-use sql_adapter::{
-    metadata::{column::data_type::ColumnDataType, table::TableMetadata},
-    schema::mapping::NameMap,
-};
+use common::name_map::NameMap;
+use sql_adapter::metadata::{column::data_type::ColumnDataType, table::TableMetadata};
 use std::collections::HashSet;
 use tracing::error;
 

@@ -39,4 +39,8 @@ impl NameMap {
             .cloned()
             .unwrap_or_else(|| name.to_string())
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.forward.is_empty() && self.reverse.is_empty()
+    }
 }
