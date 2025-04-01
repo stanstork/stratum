@@ -4,7 +4,7 @@ use crate::{
     destination::data_dest::{DataDestination, DbDataDestination},
     record::{DataRecord, Record},
 };
-use common::name_map::NameMap;
+use common::mapping::NameMap;
 use sql_adapter::{metadata::table::TableMetadata, row::row_data::RowData};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::sync::{watch, Mutex};
@@ -45,6 +45,10 @@ impl Consumer {
     }
 
     async fn run(self) {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
         let tables = self.data_dest.lock().await.metadata().tables();
 
         info!("Disabling triggers for all tables");

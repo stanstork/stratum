@@ -41,9 +41,11 @@ mod tests {
             );
 
             MAP (
-                COALESCE(products_a[id], products_b[id]) -> product_id,
-                CONCAT(products_a[name], " / ", products_b[name]) -> product_name,
-                ROUND(products_a[price] * 1.2, 2) -> price_with_tax
+                orders_collection (
+                    COALESCE(products_a[id], products_b[id]) -> product_id,
+                    CONCAT(products_a[name], " / ", products_b[name]) -> product_name,
+                    ROUND(products_a[price] * 1.2, 2) -> price_with_tax
+                )
             );
         "#;
         assert_parses(input);
@@ -109,9 +111,11 @@ mod tests {
             );
 
             MAP (
-                COALESCE(products_a[id], products_b[id]) -> product_id,
-                COALESCE(products_a[name], products_b[name]) -> product_name,
-                COALESCE(products_a[price], products_b[price]) -> product_price
+                orders_collection (
+                    COALESCE(products_a[id], products_b[id]) -> product_id,
+                    COALESCE(products_a[name], products_b[name]) -> product_name,
+                    COALESCE(products_a[price], products_b[price]) -> product_price
+                )
             );
         "#;
         assert_parses(input);
@@ -132,8 +136,10 @@ mod tests {
             );
 
             MAP (
-                ROUND(SUM(products_a[price]) * 1.2, 2) -> total_price_adjusted,
-                UPPER(CONCAT(products_a[name], " ", products_b[name])) -> full_product_name
+                orders_collection (
+                    ROUND(SUM(products_a[price]) * 1.2, 2) -> total_price_adjusted,
+                    UPPER(CONCAT(products_a[name], " ", products_b[name])) -> full_product_name
+                )
             );
         "#;
         assert_parses(input);
@@ -162,10 +168,12 @@ mod tests {
             LOAD orders FROM order_table USING order_id;
 
             MAP (
-                COALESCE(users[id], orders[user_id]) -> customer_id,
-                CONCAT(users[first_name], " ", users[last_name]) -> full_name,
-                ROUND(users[balance] * 1.05, 2) -> adjusted_balance,
-                orders[status] -> order_status
+                customers(
+                    COALESCE(users[id], orders[user_id]) -> customer_id,
+                    CONCAT(users[first_name], " ", users[last_name]) -> full_name,
+                    ROUND(users[balance] * 1.05, 2) -> adjusted_balance,
+                    orders[status] -> order_status
+                )
             );
 
             AGGREGATE (
@@ -189,8 +197,10 @@ mod tests {
                 filter (  age   >= 18  ,   status =  "active"   );
 
                 map ( 
-                    Coalesce(Users[id], Orders[user_id]) -> CustomerId,
-                    ROUND( Users[balance] * 1.1 , 2 ) -> adjusted_balance
+                    customers (
+                        Coalesce(Users[id], Orders[user_id]) -> CustomerId,
+                        ROUND( Users[balance] * 1.1 , 2 ) -> adjusted_balance
+                    )
                 );
         "#;
         assert_parses(input);
@@ -211,7 +221,9 @@ mod tests {
             );
 
             MAP (
-                ROUND(AVG(COALESCE(products_a[price], products_b[price]) * 1.2), 2) -> adjusted_price
+                orders_collection (
+                    ROUND(AVG(COALESCE(products_a[price], products_b[price]) * 1.2), 2) -> adjusted_price
+                )
             );
         "#;
         assert_parses(input);
@@ -233,14 +245,43 @@ mod tests {
             );
 
             MAP (
-                orders[id] -> transaction_id,
-                orders[user_id] -> customer_id,
-                orders[total] * 1.1 -> total_with_tax
+                transactions (
+                    orders[id] -> transaction_id,
+                    orders[user_id] -> customer_id,
+                    orders[total] * 1.1 -> total_with_tax
+                )
             );
 
             AGGREGATE (
                 SUM(orders[total]) -> total_revenue,
                 COUNT(orders[id]) -> order_count
+            );
+        "#;
+        assert_parses(input);
+    }
+
+    #[test]
+    fn test_parse_multiple_maps() {
+        let input = r#"
+            CONNECTIONS (
+                SOURCE MYSQL "mysql://user:password@localhost:3306/db",
+                DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
+            );
+
+            MIGRATE orders TO orders_collection
+            WITH SETTINGS (
+                INFER_SCHEMA = TRUE,
+                CREATE_TABLE = TRUE
+            );
+
+            MAP (
+                orders_collection (
+                    prod_id -> product_id,
+                    CONCAT(products_a[name], " / ", products_b[name]) -> product_name
+                ),
+                users (
+                    CONCAT(users_a[first_name], " ", users_b[last_name]) -> full_name
+                )
             );
         "#;
         assert_parses(input);

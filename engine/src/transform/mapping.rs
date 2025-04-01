@@ -1,14 +1,14 @@
 use super::pipeline::Transform;
 use crate::record::Record;
-use common::name_map::NameMap;
+use common::mapping::NamespaceMap;
 
 pub struct ColumnMapper {
-    name_map: NameMap,
+    ns_map: NamespaceMap,
 }
 
 impl ColumnMapper {
-    pub fn new(name_map: NameMap) -> Self {
-        Self { name_map }
+    pub fn new(ns_map: NamespaceMap) -> Self {
+        Self { ns_map }
     }
 }
 
@@ -17,8 +17,9 @@ impl Transform for ColumnMapper {
         match record {
             Record::RowData(row) => {
                 let mut new_row = row.clone();
+                let table = new_row.table.clone();
                 for column in &mut new_row.columns {
-                    column.name = self.name_map.resolve(&column.name);
+                    column.name = self.ns_map.resolve(&table, &column.name);
                 }
                 Record::RowData(new_row)
             }

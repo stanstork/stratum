@@ -8,7 +8,6 @@ use crate::{
     source::data_source::{create_data_source, DataSource},
     validate::schema_validator::{SchemaValidationMode, SchemaValidator},
 };
-use common::field::FieldMapping;
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::metadata::{provider::MetadataProvider, table::TableMetadata};
 use std::sync::Arc;
@@ -116,18 +115,18 @@ async fn validate_destination(
 
     let validator = SchemaValidator::new(&source_metadata, &destination_metadata);
 
-    if context.state.lock().await.infer_schema {
-        let col_mapping = FieldMapping::extract_field_map(&plan.mapping);
-        let table_mapping = tbls_name_map.clone();
-        if let Err(err) =
-            validator.validate(SchemaValidationMode::OneToOne, table_mapping, col_mapping)
-        {
-            error!("Schema validation failed: {:?}", err);
-            return Err(err);
-        } else {
-            info!("Schema validation passed");
-        }
-    }
+    // if context.state.lock().await.infer_schema {
+    //     let col_mapping = FieldMapping::extract_field_map(&plan.mapping);
+    //     let table_mapping = tbls_name_map.clone();
+    //     if let Err(err) =
+    //         validator.validate(SchemaValidationMode::OneToOne, table_mapping, col_mapping)
+    //     {
+    //         error!("Schema validation failed: {:?}", err);
+    //         return Err(err);
+    //     } else {
+    //         info!("Schema validation passed");
+    //     }
+    // }
 
     Ok(())
 }

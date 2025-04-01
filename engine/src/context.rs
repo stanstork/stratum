@@ -2,7 +2,7 @@ use crate::{
     buffer::SledBuffer, destination::data_dest::DataDestination, source::data_source::DataSource,
     state::MigrationState,
 };
-use common::{field::FieldMapping, name_map::NameMap};
+use common::mapping::{FieldMapping, NameMap, NamespaceMap};
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::metadata::table::TableMetadata;
 use std::sync::Arc;
@@ -17,7 +17,7 @@ pub struct MigrationContext {
     pub source_data_format: DataFormat,
     pub dest_data_format: DataFormat,
     pub name_mapping: NameMap,
-    pub field_mapping: NameMap,
+    pub field_mapping: NamespaceMap,
 }
 
 impl MigrationContext {

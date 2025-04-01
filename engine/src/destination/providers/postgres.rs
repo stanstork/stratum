@@ -1,6 +1,6 @@
 use crate::{destination::data_dest::DbDataDestination, record::Record};
 use async_trait::async_trait;
-use common::name_map::NameMap;
+use common::mapping::NameMap;
 use postgres::postgres::PgAdapter;
 use sql_adapter::{
     adapter::SqlAdapter,

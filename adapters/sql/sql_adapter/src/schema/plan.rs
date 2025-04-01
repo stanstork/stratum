@@ -1,5 +1,3 @@
-use common::name_map::NameMap;
-
 use super::context::SchemaContext;
 use crate::{
     adapter::SqlAdapter,
@@ -7,6 +5,7 @@ use crate::{
         column::metadata::ColumnMetadata, provider::MetadataProvider, table::TableMetadata,
     },
 };
+use common::mapping::{NameMap, NamespaceMap};
 use std::collections::HashSet;
 
 #[derive(Clone, Debug)]
@@ -22,7 +21,7 @@ impl SchemaPlan {
         adapter: &(dyn SqlAdapter + Send + Sync),
         metadata: TableMetadata,
         table_name_map: NameMap,
-        column_name_map: NameMap,
+        column_name_map: NamespaceMap,
         type_converter: &F,
         type_extractor: &T,
     ) -> Result<Self, Box<dyn std::error::Error>>

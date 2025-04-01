@@ -102,8 +102,14 @@ load = {
 
 map = {
     ^"MAP" ~ WHITESPACE* ~ "("
-    ~ mapping ~ ("," ~ WHITESPACE* ~ mapping)* 
+    ~ table_mapping ~ ("," ~ WHITESPACE* ~ table_mapping)* 
     ~ WHITESPACE* ~ ")" ~ WHITESPACE* ~ ";"
+}
+
+table_mapping = {
+    ident ~ WHITESPACE* ~ "("
+    ~ mapping ~ ("," ~ WHITESPACE* ~ mapping)* 
+    ~ WHITESPACE* ~ ")"
 }
 
 mapping = { expression ~ WHITESPACE* ~ "->" ~ WHITESPACE* ~ ident }

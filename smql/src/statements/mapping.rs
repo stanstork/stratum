@@ -8,6 +8,12 @@ use pest::iterators::Pair;
 // ─────────────────────────────────────────────────────────────
 #[derive(Debug)]
 pub struct Map {
+    pub mappings: Vec<NamespaceMapping>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NamespaceMapping {
+    pub namespace: String,
     pub mappings: Vec<Mapping>,
 }
 
@@ -25,13 +31,36 @@ pub enum Mapping {
 
 impl StatementParser for Map {
     fn parse(pair: Pair<Rule>) -> Self {
-        let mappings = pair
+        let table_mappings = pair
             .into_inner()
+            .filter(|p| p.as_rule() == Rule::table_mapping)
+            .map(NamespaceMapping::parse)
+            .collect();
+
+        Map {
+            mappings: table_mappings,
+        }
+    }
+}
+
+impl StatementParser for NamespaceMapping {
+    fn parse(pair: Pair<Rule>) -> Self {
+        let mut inner = pair.into_inner();
+        let table = inner
+            .next()
+            .expect("Expected table name")
+            .as_str()
+            .to_string();
+
+        let mappings = inner
             .filter(|p| p.as_rule() == Rule::mapping)
             .map(Mapping::parse)
             .collect();
 
-        Map { mappings }
+        NamespaceMapping {
+            namespace: table,
+            mappings,
+        }
     }
 }
 

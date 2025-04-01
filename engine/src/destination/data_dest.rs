@@ -1,7 +1,7 @@
 use super::providers::postgres::PgDestination;
 use crate::{adapter::Adapter, record::Record};
 use async_trait::async_trait;
-use common::name_map::NameMap;
+use common::mapping::NameMap;
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::{adapter::SqlAdapter, metadata::table::TableMetadata, schema::plan::SchemaPlan};
 use std::sync::Arc;

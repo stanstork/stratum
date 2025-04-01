@@ -1,10 +1,9 @@
-use common::name_map::NameMap;
-
 use crate::{
     adapter::SqlAdapter,
     metadata::{column::metadata::ColumnMetadata, table::TableMetadata},
     query::{builder::SqlQueryBuilder, column::ColumnDef, fk::ForeignKeyDef},
 };
+use common::mapping::{NameMap, NamespaceMap};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug)]
@@ -16,7 +15,7 @@ where
     pub type_converter: &'a F,
     pub type_extractor: &'a T,
 
-    pub column_name_map: NameMap,
+    pub column_name_map: NamespaceMap,
     pub table_name_map: NameMap,
 
     pub column_defs: HashMap<String, Vec<ColumnDef>>,
@@ -33,7 +32,7 @@ where
         type_converter: &'a F,
         type_extractor: &'a T,
         table_name_map: NameMap,
-        column_name_map: NameMap,
+        column_name_map: NamespaceMap,
     ) -> Self {
         Self {
             type_converter,
@@ -54,7 +53,7 @@ where
                 let resolved_columns = columns
                     .iter()
                     .map(|col| ColumnDef {
-                        name: self.column_name_map.resolve(&col.name),
+                        name: self.column_name_map.resolve(&resolved_table, &col.name),
                         ..col.clone()
                     })
                     .collect::<Vec<_>>();
@@ -72,12 +71,16 @@ where
             .iter()
             .flat_map(|(table, fks)| {
                 let resolved_table = self.table_name_map.resolve(table);
-
                 fks.iter().map(move |fk| {
+                    let ref_table = self.table_name_map.resolve(&fk.referenced_table);
+                    let ref_column = self
+                        .column_name_map
+                        .resolve(&ref_table, &fk.referenced_column);
+
                     let resolved_fk = ForeignKeyDef {
-                        referenced_table: self.table_name_map.resolve(&fk.referenced_table),
-                        referenced_column: self.column_name_map.resolve(&fk.referenced_column),
-                        column: self.column_name_map.resolve(&fk.column),
+                        referenced_table: ref_table,
+                        referenced_column: ref_column,
+                        column: self.column_name_map.resolve(&resolved_table, &fk.column),
                         ..fk.clone()
                     };
 

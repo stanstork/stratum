@@ -1,4 +1,4 @@
-use common::name_map::NameMap;
+use common::mapping::NameMap;
 use sql_adapter::metadata::{column::data_type::ColumnDataType, table::TableMetadata};
 use std::collections::HashSet;
 use tracing::error;

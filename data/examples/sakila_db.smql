@@ -3,7 +3,17 @@ CONNECTIONS (
     DESTINATION POSTGRES "postgres://user:password@localhost:5432/testdb"
 );
 
-MIGRATE payment TO payment2
+MIGRATE payment TO payment
 WITH SETTINGS (
     INFER_SCHEMA = TRUE
+);
+
+MAP (
+    actor (
+        actor_id -> id
+    ),
+    film (
+        length -> duration,
+        language_id -> lang_id
+    )
 );

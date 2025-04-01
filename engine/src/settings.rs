@@ -4,7 +4,7 @@ use crate::{
     source::data_source::DataSource,
 };
 use async_trait::async_trait;
-use common::name_map::NameMap;
+use common::mapping::{NameMap, NamespaceMap};
 use postgres::data_type::PgColumnDataType;
 use smql::statements::setting::{Setting, SettingValue};
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
@@ -83,7 +83,7 @@ impl InferSchemaSetting {
     async fn infer_schema(
         &self,
         table_name_map: NameMap,
-        column_name_map: NameMap,
+        column_name_map: NamespaceMap,
     ) -> Result<SchemaPlan, Box<dyn std::error::Error>> {
         if let (DataSource::Database(source), true) = (
             &self.source,
