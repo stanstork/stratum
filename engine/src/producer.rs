@@ -20,7 +20,7 @@ impl Producer {
     pub async fn new(context: Arc<Mutex<MigrationContext>>, sender: watch::Sender<bool>) -> Self {
         let ctx = context.lock().await;
         let buffer = Arc::clone(&ctx.buffer);
-        let data_source = match &ctx.sources {
+        let data_source = match &ctx.source {
             DataSource::Database(db) => Arc::clone(db),
         };
 

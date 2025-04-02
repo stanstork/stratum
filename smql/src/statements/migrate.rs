@@ -59,3 +59,16 @@ impl StatementParser for Migrate {
         Migrate { sources, target }
     }
 }
+
+impl MigrateBlock {
+    pub fn targets(&self) -> Vec<String> {
+        self.migrations.iter().map(|m| m.target.clone()).collect()
+    }
+
+    pub fn sources(&self) -> Vec<String> {
+        self.migrations
+            .iter()
+            .flat_map(|m| m.sources.clone())
+            .collect()
+    }
+}

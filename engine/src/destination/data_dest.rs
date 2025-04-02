@@ -3,7 +3,7 @@ use crate::{adapter::Adapter, record::Record};
 use async_trait::async_trait;
 use smql::statements::connection::DataFormat;
 use sql_adapter::{adapter::SqlAdapter, metadata::table::TableMetadata, schema::plan::SchemaPlan};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
@@ -50,5 +50,11 @@ pub trait DbDataDestination: Send + Sync {
         enable: bool,
     ) -> Result<(), Box<dyn std::error::Error>>;
     async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>>;
+
+    fn get_metadata(&self, table: &str) -> &TableMetadata;
+    fn set_metadata(&mut self, metadata: HashMap<String, TableMetadata>);
+
+    fn get_tables(&self) -> Vec<TableMetadata>;
+
     fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync);
 }

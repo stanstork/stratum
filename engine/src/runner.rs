@@ -2,17 +2,16 @@ use crate::{
     adapter::{get_adapter, Adapter},
     consumer::Consumer,
     context::MigrationContext,
-    destination::data_dest::{create_data_destination, DataDestination},
+    destination::data_dest::DataDestination,
     producer::Producer,
     settings::parse_settings,
-    source::data_source::{create_data_source, DataSource},
-    validate::schema_validator::{SchemaValidationMode, SchemaValidator},
+    source::data_source::DataSource,
 };
-use smql::{plan::MigrationPlan, statements::connection::DataFormat};
+use smql::plan::MigrationPlan;
 use sql_adapter::metadata::{provider::MetadataProvider, table::TableMetadata};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{watch, Mutex};
-use tracing::{error, info};
+use tracing::info;
 
 pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
     info!("Running migration");
@@ -41,25 +40,17 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
 
 pub async fn load_src_metadata(
     plan: &MigrationPlan,
-) -> Result<Vec<TableMetadata>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<String, TableMetadata>, Box<dyn std::error::Error>> {
     let source_adapter = get_adapter(
         plan.connections.source.data_format,
         &plan.connections.source.con_str,
     )
     .await?;
-    let mut metadata = Vec::new();
 
     match source_adapter {
         Adapter::MySql(my_sql_adapter) => {
-            for migration in plan.migration.migrations.iter() {
-                let metadata_entry = MetadataProvider::build_metadata(
-                    &my_sql_adapter,
-                    migration.sources.first().unwrap(),
-                )
-                .await?;
-                metadata.push(metadata_entry);
-            }
-
+            let tables = plan.migration.sources();
+            let metadata = MetadataProvider::build_metadata_graph(&my_sql_adapter, &tables).await?;
             Ok(metadata)
         }
         Adapter::Postgres(_pg_adapter) => unimplemented!("Postgres metadata loading"),
@@ -73,12 +64,8 @@ async fn create_source(plan: &MigrationPlan) -> Result<DataSource, Box<dyn std::
     )
     .await?;
 
-    match plan.connections.source.data_format {
-        DataFormat::MySql => Ok(DataSource::Database(
-            create_data_source(plan, adapter).await?,
-        )),
-        _ => unimplemented!("Unsupported data source"),
-    }
+    let data_source = DataSource::from_adapter(plan.connections.source.data_format, adapter)?;
+    Ok(data_source)
 }
 
 async fn create_destination(
@@ -90,13 +77,11 @@ async fn create_destination(
     )
     .await?;
 
-    match plan.connections.destination.data_format {
-        DataFormat::Postgres => Ok(DataDestination::Database(
-            create_data_destination(plan, adapter).await?,
-        )),
-        _ => unimplemented!("Unsupported data destination"),
-    }
+    let data_destination =
+        DataDestination::from_adapter(plan.connections.destination.data_format, adapter)?;
+    Ok(data_destination)
 }
+
 async fn apply_settings(
     plan: &MigrationPlan,
     context: Arc<Mutex<MigrationContext>>,

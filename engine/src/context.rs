@@ -90,7 +90,7 @@ impl MigrationContext {
             (DataDestination::Database(db), format)
                 if format.intersects(DataFormat::sql_databases()) =>
             {
-                Ok(db.lock().await.metadata(destination_name).clone())
+                Ok(db.lock().await.get_metadata(destination_name).clone())
             }
             _ => Err("Unsupported data destination format".into()),
         }

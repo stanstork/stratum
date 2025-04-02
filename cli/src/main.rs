@@ -38,7 +38,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("{:#?}", metadata);
                 } else {
                     let mut visited = HashSet::new();
-                    TableMetadata::print_tables_tree(&metadata, 1, &mut visited);
+                    for m in metadata.values() {
+                        TableMetadata::print_tables_tree(m, 1, &mut visited);
+                    }
                 }
             }
         },

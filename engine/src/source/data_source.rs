@@ -2,8 +2,8 @@ use super::providers::mysql::MySqlDataSource;
 use crate::{adapter::Adapter, record::Record};
 use async_trait::async_trait;
 use smql::statements::connection::DataFormat;
-use sql_adapter::adapter::SqlAdapter;
-use std::sync::Arc;
+use sql_adapter::{adapter::SqlAdapter, metadata::table::TableMetadata};
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
@@ -37,9 +37,12 @@ impl DataSource {
 pub trait DbDataSource: Send + Sync {
     async fn fetch_data(
         &self,
-        table: &str,
         batch_size: usize,
         offset: Option<usize>,
     ) -> Result<Vec<Record>, Box<dyn std::error::Error>>;
+
+    fn get_metadata(&self, table: &str) -> &TableMetadata;
+    fn set_metadata(&mut self, metadata: HashMap<String, TableMetadata>);
+
     fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync);
 }

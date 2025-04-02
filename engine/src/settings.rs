@@ -31,8 +31,8 @@ pub struct InferSchemaSetting {
     source_format: DataFormat,
     destination: DataDestination,
     dest_format: DataFormat,
-    table_mapping: NameMap,
-    column_mapping: NamespaceMap,
+    table_name_map: NameMap,
+    column_name_map: NamespaceMap,
     state: Arc<Mutex<MigrationState>>,
 }
 
@@ -43,22 +43,13 @@ impl MigrationSetting for InferSchemaSetting {
     async fn apply(
         &self,
         plan: &MigrationPlan,
-        context: Arc<Mutex<MigrationContext>>,
+        _context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // Apply the schema only if the destination table does not exist
-        if !self.destination_exists(plan).await? {
-            info!("Destination table does not exist. Infer schema setting will be applied");
+        self.apply_schema(plan).await?;
 
-            let cx = context.lock().await;
-
-            let col_mapping = cx.field_name_map.clone();
-            let table_mapping = cx.entity_name_map.clone();
-            let schema_plan = self.infer_schema(table_mapping, col_mapping).await?;
-
-            self.apply_schema(&schema_plan).await?;
-        }
-
-        self.set_metadata(plan).await?;
+        self.set_source_metadata(&plan.migration.sources()).await?;
+        self.set_destination_metadata(&plan.migration.targets())
+            .await?;
 
         // Set the infer schema flag to global state
         {
@@ -79,8 +70,8 @@ impl InferSchemaSetting {
             source_format: ctx.source_format,
             destination: ctx.destination.clone(),
             dest_format: ctx.destination_format,
-            table_mapping: ctx.entity_name_map.clone(),
-            column_mapping: ctx.field_name_map.clone(),
+            table_name_map: ctx.entity_name_map.clone(),
+            column_name_map: ctx.field_name_map.clone(),
             state: ctx.state.clone(),
         }
     }
@@ -107,6 +98,12 @@ impl InferSchemaSetting {
         Ok(())
     }
 
+    async fn destination_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        match &self.destination {
+            DataDestination::Database(dest) => Ok(dest.lock().await.table_exists(table).await?),
+        }
+    }
+
     async fn infer_schema(
         &self,
         tables: &Vec<String>,
@@ -123,9 +120,9 @@ impl InferSchemaSetting {
 
             SchemaPlan::build(
                 adapter,
-                metadata,
-                self.table_mapping.clone(),
-                self.column_mapping.clone(),
+                metadata_graph,
+                self.table_name_map.clone(),
+                self.column_name_map.clone(),
                 &ColumnDataType::to_pg_type,
                 &TableMetadata::enums,
             )
@@ -135,33 +132,30 @@ impl InferSchemaSetting {
         }
     }
 
-    async fn destination_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        match &self.destination {
-            DataDestination::Database(dest) => Ok(dest.lock().await.table_exists(table).await?),
+    pub async fn set_source_metadata(
+        &self,
+        source_tables: &[String],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if let DataSource::Database(src) = &self.source {
+            let mut src_guard = src.lock().await;
+            let metadata =
+                MetadataProvider::build_metadata_graph(src_guard.adapter(), source_tables).await?;
+            src_guard.set_metadata(metadata);
         }
+        Ok(())
     }
 
-    async fn set_metadata(&self, plan: &MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
-        match &self.source {
-            DataSource::Database(src) => {
-                let mut src_guard = src.lock().await;
-                let metadata =
-                    MetadataProvider::build_metadata(src_guard.adapter(), &src_guard.table_name())
-                        .await?;
-                src_guard.set_metadata(metadata);
-            }
+    pub async fn set_destination_metadata(
+        &self,
+        destination_tables: &[String],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if let DataDestination::Database(dest) = &self.destination {
+            let mut dest_guard = dest.lock().await;
+            let metadata =
+                MetadataProvider::build_metadata_graph(dest_guard.adapter(), destination_tables)
+                    .await?;
+            dest_guard.set_metadata(metadata);
         }
-
-        match &self.destination {
-            DataDestination::Database(dest) => {
-                let mut dest_guard = dest.lock().await;
-                let metadata =
-                    MetadataProvider::build_metadata(dest_guard.adapter(), &plan.migration.target)
-                        .await?;
-                dest_guard.set_metadata(metadata);
-            }
-        }
-
         Ok(())
     }
 }

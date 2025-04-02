@@ -5,7 +5,7 @@ use sql_adapter::{
     adapter::SqlAdapter,
     metadata::table::TableMetadata,
     query::{builder::SqlQueryBuilder, column::ColumnDef},
-    schema::{manager::SchemaManager, plan::SchemaPlan},
+    schema::plan::SchemaPlan,
 };
 use std::collections::HashMap;
 use tracing::{error, info};
@@ -77,11 +77,6 @@ impl DbDataDestination for PgDestination {
         &self,
         schema_plan: &SchemaPlan,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if self.table_exists(schema_plan.table_name()).await? {
-            info!("Table '{}' already exists", schema_plan.table_name());
-            return Ok(());
-        }
-
         let queries = schema_plan
             .enum_queries
             .iter()
@@ -118,19 +113,21 @@ impl DbDataDestination for PgDestination {
         self.adapter.table_exists(table).await
     }
 
-    fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync) {
-        &self.adapter
-    }
-}
-
-impl SchemaManager for PgDestination {
     fn get_metadata(&self, table: &str) -> &TableMetadata {
         self.metadata
             .get(table)
             .unwrap_or_else(|| panic!("Metadata for table {} not found", table))
     }
 
-    fn set_metadata(&mut self, table: &str, metadata: TableMetadata) {
-        self.metadata.insert(table.to_string(), metadata);
+    fn set_metadata(&mut self, metadata: HashMap<String, TableMetadata>) {
+        self.metadata = metadata;
+    }
+
+    fn get_tables(&self) -> Vec<TableMetadata> {
+        self.metadata.values().cloned().collect()
+    }
+
+    fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync) {
+        &self.adapter
     }
 }

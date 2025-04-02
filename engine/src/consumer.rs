@@ -25,7 +25,7 @@ impl Consumer {
     ) -> Self {
         let ctx = context.lock().await;
         let buffer = Arc::clone(&ctx.buffer);
-        let data_dest = match &ctx.destinations {
+        let data_dest = match &ctx.destination {
             DataDestination::Database(db) => Arc::clone(db),
         };
         let table_name_map = ctx.entity_name_map.clone();
@@ -45,11 +45,7 @@ impl Consumer {
     }
 
     async fn run(self) {
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-
-        let tables = self.data_dest.lock().await.metadata().tables();
+        let tables = self.data_dest.lock().await.get_tables();
 
         info!("Disabling triggers for all tables");
         self.toggle_trigger(&tables, false).await;
