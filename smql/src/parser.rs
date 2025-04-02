@@ -2,7 +2,7 @@ use crate::{
     plan::MigrationPlan,
     statements::{
         aggregate::Aggregate, connection::Connection, filter::Filter, load::Load, mapping::Map,
-        migrate::Migrate, statement::Statement,
+        migrate::MigrateBlock, statement::Statement,
     },
 };
 use pest::{iterators::Pair, Parser};
@@ -24,7 +24,7 @@ pub fn parse(source: &str) -> Result<MigrationPlan, Box<dyn std::error::Error>> 
     for pair in pairs {
         let statement = match pair.as_rule() {
             Rule::connections => Statement::Connections(Connection::parse(pair)),
-            Rule::migrate => Statement::Migrate(Migrate::parse(pair)),
+            Rule::migrate => Statement::Migrate(MigrateBlock::parse(pair)),
             Rule::filter => Statement::Filter(Filter::parse(pair)),
             Rule::load => Statement::Load(Load::parse(pair)),
             Rule::map => Statement::Map(Map::parse(pair)),

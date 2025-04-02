@@ -14,18 +14,22 @@ pub type MetadataFuture<'a, T> =
 pub struct MetadataProvider;
 
 impl MetadataProvider {
-    pub async fn build_metadata_with_deps(
+    /// Builds a metadata graph for all root tables and their dependencies.
+    pub async fn build_metadata_graph(
         adapter: &(dyn SqlAdapter + Send + Sync),
-        table: &str,
-    ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
+        tables: &[String],
+    ) -> Result<HashMap<String, TableMetadata>, Box<dyn std::error::Error>> {
         let mut graph = HashMap::new();
         let mut visited = HashSet::new();
-        let metadata =
-            Self::build_metadata_dep_graph(table, adapter, &mut graph, &mut visited).await?;
-        Ok(metadata)
+
+        for table in tables {
+            Self::build_metadata_graph_recursive(table, adapter, &mut graph, &mut visited).await?;
+        }
+
+        Ok(graph)
     }
 
-    pub fn build_table_metadata(
+    pub fn construct_table_metadata(
         table: &str,
         columns: HashMap<String, ColumnMetadata>,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
@@ -70,7 +74,7 @@ impl MetadataProvider {
         Self::visit_schema_deps(metadata, ctx, &mut visited);
     }
 
-    fn build_metadata_dep_graph<'a>(
+    fn build_metadata_graph_recursive<'a>(
         table_name: &'a str,
         adapter: &'a (dyn SqlAdapter + Send + Sync),
         graph: &'a mut HashMap<String, TableMetadata>,
@@ -111,7 +115,8 @@ impl MetadataProvider {
             for fk in &metadata.foreign_keys {
                 let ref_table = &fk.referenced_table;
                 let ref_metadata =
-                    Self::build_metadata_dep_graph(ref_table, adapter, graph, visited).await?;
+                    Self::build_metadata_graph_recursive(ref_table, adapter, graph, visited)
+                        .await?;
 
                 metadata
                     .referenced_tables
@@ -146,7 +151,8 @@ impl MetadataProvider {
 
             for ref_table in referencing_tables {
                 let ref_metadata =
-                    Self::build_metadata_dep_graph(&ref_table, adapter, graph, visited).await?;
+                    Self::build_metadata_graph_recursive(&ref_table, adapter, graph, visited)
+                        .await?;
 
                 metadata
                     .referencing_tables

@@ -8,6 +8,7 @@ use common::mapping::{NameMap, NamespaceMap};
 use postgres::data_type::PgColumnDataType;
 use smql::statements::setting::{Setting, SettingValue};
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
+use sql_adapter::adapter::SqlAdapter;
 use sql_adapter::metadata::column::data_type::ColumnDataType;
 use sql_adapter::metadata::provider::MetadataProvider;
 use sql_adapter::metadata::table::TableMetadata;
@@ -30,6 +31,8 @@ pub struct InferSchemaSetting {
     source_format: DataFormat,
     destination: DataDestination,
     dest_format: DataFormat,
+    table_mapping: NameMap,
+    column_mapping: NamespaceMap,
     state: Arc<Mutex<MigrationState>>,
 }
 
@@ -48,8 +51,8 @@ impl MigrationSetting for InferSchemaSetting {
 
             let cx = context.lock().await;
 
-            let col_mapping = cx.field_mapping.clone();
-            let table_mapping = cx.name_mapping.clone();
+            let col_mapping = cx.field_name_map.clone();
+            let table_mapping = cx.entity_name_map.clone();
             let schema_plan = self.infer_schema(table_mapping, col_mapping).await?;
 
             self.apply_schema(&schema_plan).await?;
@@ -73,34 +76,56 @@ impl InferSchemaSetting {
         let ctx = context.lock().await;
         InferSchemaSetting {
             source: ctx.source.clone(),
-            source_format: ctx.source_data_format,
+            source_format: ctx.source_format,
             destination: ctx.destination.clone(),
-            dest_format: ctx.dest_data_format,
+            dest_format: ctx.destination_format,
+            table_mapping: ctx.entity_name_map.clone(),
+            column_mapping: ctx.field_name_map.clone(),
             state: ctx.state.clone(),
         }
     }
 
+    async fn apply_schema(&self, plan: &MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
+        for migration in plan.migration.migrations.iter() {
+            if !self.destination_exists(&migration.target).await? {
+                info!("Destination table does not exist. Infer schema setting will be applied");
+
+                let schema_plan = self.infer_schema(&migration.sources).await?;
+
+                if let (DataDestination::Database(destination), true) = (
+                    &self.destination,
+                    self.dest_format.intersects(DataFormat::sql_databases()),
+                ) {
+                    destination.lock().await.infer_schema(&schema_plan).await?;
+                    return Ok(());
+                } else {
+                    return Err("Unsupported data destination format".into());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     async fn infer_schema(
         &self,
-        table_name_map: NameMap,
-        column_name_map: NamespaceMap,
+        tables: &Vec<String>,
     ) -> Result<SchemaPlan, Box<dyn std::error::Error>> {
         if let (DataSource::Database(source), true) = (
             &self.source,
             self.source_format.intersects(DataFormat::sql_databases()),
         ) {
-            let src = source.lock().await;
-            let adapter = src.adapter();
+            let source = source.lock().await;
+            let adapter: &(dyn SqlAdapter + Send + Sync) = source.adapter();
 
             // Build full metadata for the source
-            let metadata =
-                MetadataProvider::build_metadata_with_deps(adapter, &src.table_name()).await?;
+            let metadata_graph = MetadataProvider::build_metadata_graph(adapter, &tables).await?;
 
             SchemaPlan::build(
                 adapter,
                 metadata,
-                table_name_map,
-                column_name_map,
+                self.table_mapping.clone(),
+                self.column_mapping.clone(),
                 &ColumnDataType::to_pg_type,
                 &TableMetadata::enums,
             )
@@ -110,31 +135,9 @@ impl InferSchemaSetting {
         }
     }
 
-    async fn apply_schema(
-        &self,
-        schema_plan: &SchemaPlan,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if let (DataDestination::Database(destination), true) = (
-            &self.destination,
-            self.dest_format.intersects(DataFormat::sql_databases()),
-        ) {
-            destination.lock().await.infer_schema(schema_plan).await?;
-            Ok(())
-        } else {
-            Err("Unsupported data destination format".into())
-        }
-    }
-
-    async fn destination_exists(
-        &self,
-        plan: &MigrationPlan,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    async fn destination_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
         match &self.destination {
-            DataDestination::Database(dest) => Ok(dest
-                .lock()
-                .await
-                .table_exists(&plan.migration.target)
-                .await?),
+            DataDestination::Database(dest) => Ok(dest.lock().await.table_exists(table).await?),
         }
     }
 
@@ -142,11 +145,9 @@ impl InferSchemaSetting {
         match &self.source {
             DataSource::Database(src) => {
                 let mut src_guard = src.lock().await;
-                let metadata = MetadataProvider::build_metadata_with_deps(
-                    src_guard.adapter(),
-                    &src_guard.table_name(),
-                )
-                .await?;
+                let metadata =
+                    MetadataProvider::build_metadata(src_guard.adapter(), &src_guard.table_name())
+                        .await?;
                 src_guard.set_metadata(metadata);
             }
         }
@@ -154,11 +155,9 @@ impl InferSchemaSetting {
         match &self.destination {
             DataDestination::Database(dest) => {
                 let mut dest_guard = dest.lock().await;
-                let metadata = MetadataProvider::build_metadata_with_deps(
-                    dest_guard.adapter(),
-                    &plan.migration.target,
-                )
-                .await?;
+                let metadata =
+                    MetadataProvider::build_metadata(dest_guard.adapter(), &plan.migration.target)
+                        .await?;
                 dest_guard.set_metadata(metadata);
             }
         }

@@ -57,10 +57,14 @@ connection_pair = {
 // ==============================
 
 migrate = {
-    ^"MIGRATE" ~ WHITESPACE* ~ ident ~ ("," ~ WHITESPACE* ~ ident)*
-    ~ WHITESPACE* ~ ^"TO" ~ WHITESPACE* ~ ident
-    ~ WHITESPACE* ~ migrate_settings?
-    ~ WHITESPACE* ~ ";"
+    ^"MIGRATE" ~ WHITESPACE* ~ "("
+    ~ WHITESPACE* ~ migrate_pair ~ ("," ~ WHITESPACE* ~ migrate_pair)* ~ WHITESPACE* ~ ")"
+    ~ (WHITESPACE* ~ migrate_settings)? ~ WHITESPACE* ~ ";"
+}
+
+migrate_pair = {
+    (ident | "[" ~ WHITESPACE* ~ ident ~ ("," ~ WHITESPACE* ~ ident)* ~ WHITESPACE* ~ "]")
+    ~ WHITESPACE* ~ "->" ~ WHITESPACE* ~ ident
 }
 
 migrate_settings = {

@@ -1,53 +1,31 @@
 use crate::{destination::data_dest::DbDataDestination, record::Record};
 use async_trait::async_trait;
-use common::mapping::NameMap;
 use postgres::postgres::PgAdapter;
 use sql_adapter::{
     adapter::SqlAdapter,
     metadata::table::TableMetadata,
     query::{builder::SqlQueryBuilder, column::ColumnDef},
-    schema::plan::SchemaPlan,
+    schema::{manager::SchemaManager, plan::SchemaPlan},
 };
+use std::collections::HashMap;
 use tracing::{error, info};
 
 pub struct PgDestination {
-    metadata: Option<TableMetadata>,
+    metadata: HashMap<String, TableMetadata>,
     adapter: PgAdapter,
+}
+
+impl PgDestination {
+    pub fn new(adapter: PgAdapter) -> Self {
+        Self {
+            metadata: HashMap::new(),
+            adapter,
+        }
+    }
 }
 
 #[async_trait]
 impl DbDataDestination for PgDestination {
-    async fn write(
-        &self,
-        metadata: &TableMetadata,
-        column_name_map: &NameMap,
-        record: Record,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let columns = match record {
-            Record::RowData(row) => row
-                .columns
-                .iter()
-                .map(|col| {
-                    let value = col
-                        .value
-                        .clone()
-                        .map_or("NULL".to_string(), |val| val.to_string());
-                    let col_name = column_name_map.resolve(&col.name);
-                    (col_name, value)
-                })
-                .collect::<Vec<(String, String)>>(),
-        };
-
-        let query = SqlQueryBuilder::new()
-            .insert_into(&metadata.name, &columns)
-            .build();
-
-        info!("Executing query: {}", query.0);
-        self.adapter.execute(&query.0).await?;
-
-        Ok(())
-    }
-
     async fn write_batch(
         &self,
         metadata: &TableMetadata,
@@ -143,27 +121,16 @@ impl DbDataDestination for PgDestination {
     fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync) {
         &self.adapter
     }
-
-    fn set_metadata(&mut self, metadata: TableMetadata) {
-        self.metadata = Some(metadata);
-    }
-
-    fn metadata(&self) -> &TableMetadata {
-        self.metadata.as_ref().expect("Metadata not set")
-    }
 }
 
-impl PgDestination {
-    pub async fn new(adapter: PgAdapter, table: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let metadata = match adapter.table_exists(table).await? {
-            true => Some(adapter.fetch_metadata(table).await?),
-            false => None,
-        };
-
-        Ok(PgDestination { adapter, metadata })
+impl SchemaManager for PgDestination {
+    fn get_metadata(&self, table: &str) -> &TableMetadata {
+        self.metadata
+            .get(table)
+            .unwrap_or_else(|| panic!("Metadata for table {} not found", table))
     }
 
-    pub async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        self.adapter.table_exists(table).await.map_err(Into::into)
+    fn set_metadata(&mut self, table: &str, metadata: TableMetadata) {
+        self.metadata.insert(table.to_string(), metadata);
     }
 }

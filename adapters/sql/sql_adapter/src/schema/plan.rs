@@ -6,11 +6,11 @@ use crate::{
     },
 };
 use common::mapping::{NameMap, NamespaceMap};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug)]
 pub struct SchemaPlan {
-    pub metadata: TableMetadata,
+    pub metadata_graph: HashMap<String, TableMetadata>,
     pub table_queries: HashSet<String>,
     pub constraint_queries: HashSet<String>,
     pub enum_queries: HashSet<String>,
@@ -19,7 +19,7 @@ pub struct SchemaPlan {
 impl SchemaPlan {
     pub async fn build<F, T>(
         adapter: &(dyn SqlAdapter + Send + Sync),
-        metadata: TableMetadata,
+        metadata_graph: HashMap<String, TableMetadata>,
         table_name_map: NameMap,
         column_name_map: NamespaceMap,
         type_converter: &F,
@@ -36,17 +36,15 @@ impl SchemaPlan {
             column_name_map,
         );
 
-        MetadataProvider::collect_schema_deps(&metadata, &mut ctx);
+        for metadata in metadata_graph.values() {
+            MetadataProvider::collect_schema_deps(&metadata, &mut ctx);
+        }
 
         Ok(SchemaPlan {
-            metadata,
+            metadata_graph,
             table_queries: ctx.table_queries(),
             constraint_queries: ctx.fk_queries(),
             enum_queries: ctx.enum_queries(adapter).await.unwrap_or_default(),
         })
-    }
-
-    pub fn table_name(&self) -> &str {
-        &self.metadata.name
     }
 }

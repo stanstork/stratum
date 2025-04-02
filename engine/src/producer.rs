@@ -20,15 +20,15 @@ impl Producer {
     pub async fn new(context: Arc<Mutex<MigrationContext>>, sender: watch::Sender<bool>) -> Self {
         let ctx = context.lock().await;
         let buffer = Arc::clone(&ctx.buffer);
-        let data_source = match &ctx.source {
+        let data_source = match &ctx.sources {
             DataSource::Database(db) => Arc::clone(db),
         };
 
         let mut pipeline = TransformPipeline::new();
 
         // Add column name mapping if present
-        if !ctx.field_mapping.is_empty() {
-            let column_mapper = ColumnMapper::new(ctx.field_mapping.clone());
+        if !ctx.field_name_map.is_empty() {
+            let column_mapper = ColumnMapper::new(ctx.field_name_map.clone());
             pipeline = pipeline.add_transform(column_mapper);
         }
 

@@ -1,12 +1,12 @@
 use crate::statements::{
     aggregate::Aggregation, connection::Connection, filter::Filter, load::Load,
-    mapping::NamespaceMapping, migrate::Migrate, statement::Statement,
+    mapping::NamespaceMapping, migrate::MigrateBlock, statement::Statement,
 };
 
 #[derive(Debug, Clone)]
 pub struct MigrationPlan {
     pub connections: Connection,
-    pub migration: Migrate,
+    pub migration: MigrateBlock,
     pub filter: Option<Filter>,
     pub mapping: Vec<NamespaceMapping>,
     pub aggregations: Vec<Aggregation>,

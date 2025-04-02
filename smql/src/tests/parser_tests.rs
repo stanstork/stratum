@@ -17,7 +17,9 @@ mod tests {
                 DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
             );
 
-            MIGRATE orders TO orders_collection
+            MIGRATE (
+                orders -> orders_collection
+            )
             WITH SETTINGS (
                 INFER_SCHEMA = TRUE,
                 CREATE_TABLE = TRUE
@@ -34,7 +36,9 @@ mod tests {
                 DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
             );
 
-            MIGRATE orders TO orders_collection
+            MIGRATE (
+                orders -> orders_collection
+            )
             WITH SETTINGS (
                 INFER_SCHEMA = TRUE,
                 CREATE_TABLE = TRUE
@@ -59,7 +63,9 @@ mod tests {
                 DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
             );
 
-            MIGRATE orders TO orders_collection
+            MIGRATE (
+                orders -> orders_collection
+            )
             WITH SETTINGS (
                 INFER_SCHEMA = TRUE,
                 CREATE_TABLE = TRUE
@@ -81,7 +87,9 @@ mod tests {
                 DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
             );
 
-            MIGRATE orders TO orders_collection
+            MIGRATE (
+                orders -> orders_collection
+            )
             WITH SETTINGS (
                 INFER_SCHEMA = TRUE,
                 CREATE_TABLE = TRUE
@@ -104,7 +112,9 @@ mod tests {
                 DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
             );
 
-            MIGRATE orders TO orders_collection
+            MIGRATE (
+                orders -> orders_collection
+            )
             WITH SETTINGS (
                 INFER_SCHEMA = TRUE,
                 CREATE_TABLE = TRUE
@@ -129,7 +139,9 @@ mod tests {
                 DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
             );
 
-            MIGRATE orders TO orders_collection
+            MIGRATE (
+                orders -> orders_collection
+            )
             WITH SETTINGS (
                 INFER_SCHEMA = TRUE,
                 CREATE_TABLE = TRUE
@@ -153,7 +165,10 @@ mod tests {
                 DESTINATION POSTGRES "postgres://user:password@dest_db"
             );
 
-            MIGRATE users TO customers
+            MIGRATE (
+                users -> customers,
+                orders -> order_table
+            )
             WITH SETTINGS (
                 INFER_SCHEMA = TRUE,
                 CREATE_TABLE = TRUE,
@@ -192,7 +207,7 @@ mod tests {
                     destination postgres "postgres://user:pass@db"
                 );
 
-                migrate   Orders   TO customers   WITH SETTINGS ( infer_schema = true   );
+                migrate   (orders -> orders_collection)   WITH SETTINGS ( infer_schema = true   );
                 
                 filter (  age   >= 18  ,   status =  "active"   );
 
@@ -214,7 +229,9 @@ mod tests {
                 DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
             );
 
-            MIGRATE orders TO orders_collection
+            MIGRATE (
+                orders -> orders_collection
+            )
             WITH SETTINGS (
                 INFER_SCHEMA = TRUE,
                 CREATE_TABLE = TRUE
@@ -237,7 +254,10 @@ mod tests {
                 DESTINATION POSTGRES "postgres://dest_db"
             );
 
-            MIGRATE orders TO transactions;
+            MIGRATE (
+                orders -> transactions,
+                users -> customers
+            );
 
             FILTER (
                 status = "shipped",
@@ -268,7 +288,9 @@ mod tests {
                 DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
             );
 
-            MIGRATE orders TO orders_collection
+            MIGRATE (
+                orders -> orders_collection
+            )
             WITH SETTINGS (
                 INFER_SCHEMA = TRUE,
                 CREATE_TABLE = TRUE

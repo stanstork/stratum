@@ -25,10 +25,10 @@ impl Consumer {
     ) -> Self {
         let ctx = context.lock().await;
         let buffer = Arc::clone(&ctx.buffer);
-        let data_dest = match &ctx.destination {
+        let data_dest = match &ctx.destinations {
             DataDestination::Database(db) => Arc::clone(db),
         };
-        let table_name_map = ctx.name_mapping.clone();
+        let table_name_map = ctx.entity_name_map.clone();
         let batch_size = ctx.state.lock().await.batch_size;
 
         Self {

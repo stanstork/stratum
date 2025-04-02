@@ -1,19 +1,22 @@
 CONNECTIONS (
-    SOURCE MYSQL "mysql://office_user:qwerty123@localhost:3306/classicmodels",
+    SOURCE MYSQL "mysql://user:password@localhost:3306/testdb",
     DESTINATION POSTGRES "postgres://user:password@localhost:5432/testdb"
 );
 
-FILTER (
-    status = "active",
-    age >= 18
-);
-
-MIGRATE employees TO employees2
+MIGRATE (
+    invoices -> statement,
+    orders -> orders,
+    products -> goods
+)
 WITH SETTINGS (
     INFER_SCHEMA = TRUE
 );
 
 MAP (
-    employeeNumber -> id,
-    reportsTo -> manger_id
+    products (
+        id -> product_id
+    ),
+    orders (
+        total -> ammount
+    )
 );
