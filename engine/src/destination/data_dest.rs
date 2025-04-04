@@ -42,7 +42,7 @@ pub trait DbDataDestination: Send + Sync {
     ) -> Result<(), Box<dyn std::error::Error>>;
     async fn infer_schema(
         &self,
-        schema_plan: &SchemaPlan,
+        schema_plan: &SchemaPlan<'_>,
     ) -> Result<(), Box<dyn std::error::Error>>;
     async fn toggle_trigger(
         &self,
@@ -56,5 +56,5 @@ pub trait DbDataDestination: Send + Sync {
 
     fn get_tables(&self) -> Vec<TableMetadata>;
 
-    fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync);
+    fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)>;
 }

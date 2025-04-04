@@ -4,6 +4,7 @@ use mysql::mysql::MySqlAdapter;
 use sql_adapter::adapter::SqlAdapter;
 use sql_adapter::{metadata::table::TableMetadata, requests::FetchRowsRequest};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub struct MySqlDataSource {
     metadata: HashMap<String, TableMetadata>,
@@ -49,7 +50,7 @@ impl DbDataSource for MySqlDataSource {
         self.metadata = metadata;
     }
 
-    fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync) {
-        &self.adapter
+    fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)> {
+        Arc::new(self.adapter.clone())
     }
 }

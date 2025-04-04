@@ -1,5 +1,5 @@
 use super::{column::metadata::ColumnMetadata, fk::ForeignKeyMetadata, table::TableMetadata};
-use crate::{adapter::SqlAdapter, schema::context::SchemaContext};
+use crate::{adapter::SqlAdapter, schema::plan::SchemaPlan};
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
@@ -65,13 +65,9 @@ impl MetadataProvider {
         })
     }
 
-    pub fn collect_schema_deps<F, T>(metadata: &TableMetadata, ctx: &mut SchemaContext<'_, F, T>)
-    where
-        F: Fn(&ColumnMetadata) -> (String, Option<usize>),
-        T: Fn(&TableMetadata) -> Vec<&ColumnMetadata>,
-    {
+    pub fn collect_schema_deps(metadata: &TableMetadata, plan: &mut SchemaPlan) {
         let mut visited = HashSet::new();
-        Self::visit_schema_deps(metadata, ctx, &mut visited);
+        Self::visit_schema_deps(metadata, plan, &mut visited);
     }
 
     fn build_metadata_graph_recursive<'a>(
@@ -175,14 +171,11 @@ impl MetadataProvider {
         })
     }
 
-    fn visit_schema_deps<F, T>(
+    fn visit_schema_deps(
         metadata: &TableMetadata,
-        ctx: &mut SchemaContext<'_, F, T>,
+        plan: &mut SchemaPlan<'_>,
         visited: &mut HashSet<String>,
-    ) where
-        F: Fn(&ColumnMetadata) -> (String, Option<usize>),
-        T: Fn(&TableMetadata) -> Vec<&ColumnMetadata>,
-    {
+    ) {
         if !visited.insert(metadata.name.clone()) {
             return;
         }
@@ -192,14 +185,14 @@ impl MetadataProvider {
             .values()
             .chain(metadata.referencing_tables.values())
             .for_each(|related| {
-                Self::visit_schema_deps(related, ctx, visited);
+                Self::visit_schema_deps(related, plan, visited);
             });
 
-        ctx.add_column_defs(&metadata.name, metadata.column_defs(ctx.type_converter));
-        ctx.add_fk_defs(&metadata.name, metadata.fk_defs());
+        plan.add_column_defs(&metadata.name, metadata.column_defs(plan.type_converter()));
+        plan.add_fk_defs(&metadata.name, metadata.fk_defs());
 
-        for col in (ctx.type_extractor)(metadata) {
-            ctx.add_enum_def(&metadata.name, &col.name);
+        for col in (plan.type_extractor())(metadata) {
+            plan.add_enum_def(&metadata.name, &col.name);
         }
     }
 }

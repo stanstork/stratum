@@ -44,5 +44,5 @@ pub trait DbDataSource: Send + Sync {
     fn get_metadata(&self, table: &str) -> &TableMetadata;
     fn set_metadata(&mut self, metadata: HashMap<String, TableMetadata>);
 
-    fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync);
+    fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)>;
 }

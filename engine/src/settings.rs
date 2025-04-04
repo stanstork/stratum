@@ -10,6 +10,7 @@ use smql::statements::setting::{Setting, SettingValue};
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::adapter::SqlAdapter;
 use sql_adapter::metadata::column::data_type::ColumnDataType;
+use sql_adapter::metadata::column::metadata::ColumnMetadata;
 use sql_adapter::metadata::provider::MetadataProvider;
 use sql_adapter::metadata::table::TableMetadata;
 use sql_adapter::schema::plan::SchemaPlan;
@@ -77,25 +78,28 @@ impl InferSchemaSetting {
     }
 
     async fn apply_schema(&self, plan: &MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
+        let type_converter = |meta: &ColumnMetadata| ColumnDataType::to_pg_type(meta);
+        let type_extractor = |meta: &TableMetadata| TableMetadata::enums(meta);
+
+        let source_adapter = self.source_adapter().await?;
+
+        let mut schema_plan = SchemaPlan::new(
+            source_adapter,
+            &type_converter,
+            &type_extractor,
+            self.table_name_map.clone(),
+            self.column_name_map.clone(),
+        );
+
         for migration in plan.migration.migrations.iter() {
             if !self.destination_exists(&migration.target).await? {
                 info!("Destination table does not exist. Infer schema setting will be applied");
-
-                let schema_plan = self.infer_schema(&migration.sources).await?;
-
-                if let (DataDestination::Database(destination), true) = (
-                    &self.destination,
-                    self.dest_format.intersects(DataFormat::sql_databases()),
-                ) {
-                    destination.lock().await.infer_schema(&schema_plan).await?;
-                    return Ok(());
-                } else {
-                    return Err("Unsupported data destination format".into());
-                }
+                self.infer_schema(&migration.sources, &mut schema_plan)
+                    .await?;
             }
         }
 
-        Ok(())
+        self.apply_to_destination(schema_plan).await
     }
 
     async fn destination_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
@@ -107,28 +111,45 @@ impl InferSchemaSetting {
     async fn infer_schema(
         &self,
         tables: &Vec<String>,
-    ) -> Result<SchemaPlan, Box<dyn std::error::Error>> {
-        if let (DataSource::Database(source), true) = (
+        schema_plan: &mut SchemaPlan<'_>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if let (DataSource::Database(_source), true) = (
             &self.source,
             self.source_format.intersects(DataFormat::sql_databases()),
         ) {
-            let source = source.lock().await;
-            let adapter: &(dyn SqlAdapter + Send + Sync) = source.adapter();
+            let adapter = self.source_adapter().await?;
 
             // Build full metadata for the source
-            let metadata_graph = MetadataProvider::build_metadata_graph(adapter, &tables).await?;
+            let metadata_graph = MetadataProvider::build_metadata_graph(&*adapter, &tables).await?;
+            for metadata in metadata_graph.values() {
+                let table_name = metadata.name.clone();
 
-            SchemaPlan::build(
-                adapter,
-                metadata_graph,
-                self.table_name_map.clone(),
-                self.column_name_map.clone(),
-                &ColumnDataType::to_pg_type,
-                &TableMetadata::enums,
-            )
-            .await
+                if schema_plan.metadata_exists(&table_name) {
+                    continue;
+                }
+
+                MetadataProvider::collect_schema_deps(&metadata, schema_plan);
+                schema_plan.add_metadata(&table_name, metadata.clone());
+            }
+            Ok(())
         } else {
             Err("Unsupported data source format".into())
+        }
+    }
+
+    async fn apply_to_destination(
+        &self,
+        schema_plan: SchemaPlan<'_>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match (
+            &self.destination,
+            self.dest_format.intersects(DataFormat::sql_databases()),
+        ) {
+            (DataDestination::Database(destination), true) => {
+                destination.lock().await.infer_schema(&schema_plan).await?;
+                Ok(())
+            }
+            _ => Err("Unsupported data destination format".into()),
         }
     }
 
@@ -139,7 +160,8 @@ impl InferSchemaSetting {
         if let DataSource::Database(src) = &self.source {
             let mut src_guard = src.lock().await;
             let metadata =
-                MetadataProvider::build_metadata_graph(src_guard.adapter(), source_tables).await?;
+                MetadataProvider::build_metadata_graph(src_guard.adapter().as_ref(), source_tables)
+                    .await?;
             src_guard.set_metadata(metadata);
         }
         Ok(())
@@ -151,12 +173,22 @@ impl InferSchemaSetting {
     ) -> Result<(), Box<dyn std::error::Error>> {
         if let DataDestination::Database(dest) = &self.destination {
             let mut dest_guard = dest.lock().await;
-            let metadata =
-                MetadataProvider::build_metadata_graph(dest_guard.adapter(), destination_tables)
-                    .await?;
+            let metadata = MetadataProvider::build_metadata_graph(
+                dest_guard.adapter().as_ref(),
+                destination_tables,
+            )
+            .await?;
             dest_guard.set_metadata(metadata);
         }
         Ok(())
+    }
+
+    async fn source_adapter(
+        &self,
+    ) -> Result<Arc<dyn SqlAdapter + Send + Sync>, Box<dyn std::error::Error>> {
+        match &self.source {
+            DataSource::Database(source) => Ok(source.lock().await.adapter()),
+        }
     }
 }
 

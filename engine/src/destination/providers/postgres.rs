@@ -3,11 +3,11 @@ use async_trait::async_trait;
 use postgres::postgres::PgAdapter;
 use sql_adapter::{
     adapter::SqlAdapter,
-    metadata::table::TableMetadata,
+    metadata::table::{self, TableMetadata},
     query::{builder::SqlQueryBuilder, column::ColumnDef},
     schema::plan::SchemaPlan,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use tracing::{error, info};
 
 pub struct PgDestination {
@@ -75,16 +75,19 @@ impl DbDataDestination for PgDestination {
 
     async fn infer_schema(
         &self,
-        schema_plan: &SchemaPlan,
+        schema_plan: &SchemaPlan<'_>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let queries = schema_plan
-            .enum_queries
+        let enum_queries = schema_plan.enum_queries().await?;
+        let table_queries = schema_plan.table_queries();
+        let fk_queries = schema_plan.fk_queries();
+
+        let all_queries = enum_queries
             .iter()
-            .chain(&schema_plan.table_queries)
-            .chain(&schema_plan.constraint_queries)
+            .chain(&table_queries)
+            .chain(&fk_queries)
             .cloned();
 
-        for query in queries {
+        for query in all_queries {
             info!("Executing query: {}", query);
             if let Err(err) = self.adapter.execute(&query).await {
                 error!("Failed to execute query: {}\nError: {:?}", query, err);
@@ -127,7 +130,7 @@ impl DbDataDestination for PgDestination {
         self.metadata.values().cloned().collect()
     }
 
-    fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync) {
-        &self.adapter
+    fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)> {
+        Arc::new(self.adapter.clone())
     }
 }
