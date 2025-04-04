@@ -44,14 +44,18 @@ impl StatementParser for MigrateBlock {
 
 impl StatementParser for Migrate {
     fn parse(pair: Pair<Rule>) -> Self {
-        let mut inner = pair.into_inner();
-        let migrate_pairs = inner
-            .next()
-            .expect("Expected source list")
-            .into_inner()
-            .filter(|e| e.as_rule() == Rule::ident)
-            .map(|e| e.as_str().to_string())
-            .collect::<Vec<String>>();
+        let inner = pair.into_inner();
+
+        let mut migrate_pairs = vec![];
+        for inner_pair in inner {
+            match inner_pair.as_rule() {
+                Rule::ident => {
+                    let source = inner_pair.as_str().to_string();
+                    migrate_pairs.push(source);
+                }
+                _ => {}
+            }
+        }
 
         let sources = migrate_pairs[..migrate_pairs.len() - 1].to_vec();
         let target = migrate_pairs.last().expect("Expected target").to_string();
