@@ -71,7 +71,7 @@ impl SqlAdapter for PgAdapter {
             })
             .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
 
-        MetadataProvider::build_table_metadata(table, columns)
+        MetadataProvider::construct_table_metadata(table, columns)
     }
 
     async fn fetch_referencing_tables(

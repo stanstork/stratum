@@ -1,53 +1,31 @@
 use crate::{destination::data_dest::DbDataDestination, record::Record};
 use async_trait::async_trait;
-use common::mapping::NameMap;
 use postgres::postgres::PgAdapter;
 use sql_adapter::{
     adapter::SqlAdapter,
-    metadata::table::TableMetadata,
+    metadata::table::{self, TableMetadata},
     query::{builder::SqlQueryBuilder, column::ColumnDef},
     schema::plan::SchemaPlan,
 };
+use std::{collections::HashMap, sync::Arc};
 use tracing::{error, info};
 
 pub struct PgDestination {
-    metadata: Option<TableMetadata>,
+    metadata: HashMap<String, TableMetadata>,
     adapter: PgAdapter,
+}
+
+impl PgDestination {
+    pub fn new(adapter: PgAdapter) -> Self {
+        Self {
+            metadata: HashMap::new(),
+            adapter,
+        }
+    }
 }
 
 #[async_trait]
 impl DbDataDestination for PgDestination {
-    async fn write(
-        &self,
-        metadata: &TableMetadata,
-        column_name_map: &NameMap,
-        record: Record,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let columns = match record {
-            Record::RowData(row) => row
-                .columns
-                .iter()
-                .map(|col| {
-                    let value = col
-                        .value
-                        .clone()
-                        .map_or("NULL".to_string(), |val| val.to_string());
-                    let col_name = column_name_map.resolve(&col.name);
-                    (col_name, value)
-                })
-                .collect::<Vec<(String, String)>>(),
-        };
-
-        let query = SqlQueryBuilder::new()
-            .insert_into(&metadata.name, &columns)
-            .build();
-
-        info!("Executing query: {}", query.0);
-        self.adapter.execute(&query.0).await?;
-
-        Ok(())
-    }
-
     async fn write_batch(
         &self,
         metadata: &TableMetadata,
@@ -97,21 +75,19 @@ impl DbDataDestination for PgDestination {
 
     async fn infer_schema(
         &self,
-        schema_plan: &SchemaPlan,
+        schema_plan: &SchemaPlan<'_>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if self.table_exists(schema_plan.table_name()).await? {
-            info!("Table '{}' already exists", schema_plan.table_name());
-            return Ok(());
-        }
+        let enum_queries = schema_plan.enum_queries().await?;
+        let table_queries = schema_plan.table_queries();
+        let fk_queries = schema_plan.fk_queries();
 
-        let queries = schema_plan
-            .enum_queries
+        let all_queries = enum_queries
             .iter()
-            .chain(&schema_plan.table_queries)
-            .chain(&schema_plan.constraint_queries)
+            .chain(&table_queries)
+            .chain(&fk_queries)
             .cloned();
 
-        for query in queries {
+        for query in all_queries {
             info!("Executing query: {}", query);
             if let Err(err) = self.adapter.execute(&query).await {
                 error!("Failed to execute query: {}\nError: {:?}", query, err);
@@ -140,30 +116,21 @@ impl DbDataDestination for PgDestination {
         self.adapter.table_exists(table).await
     }
 
-    fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync) {
-        &self.adapter
+    fn get_metadata(&self, table: &str) -> &TableMetadata {
+        self.metadata
+            .get(table)
+            .unwrap_or_else(|| panic!("Metadata for table {} not found", table))
     }
 
-    fn set_metadata(&mut self, metadata: TableMetadata) {
-        self.metadata = Some(metadata);
+    fn set_metadata(&mut self, metadata: HashMap<String, TableMetadata>) {
+        self.metadata = metadata;
     }
 
-    fn metadata(&self) -> &TableMetadata {
-        self.metadata.as_ref().expect("Metadata not set")
-    }
-}
-
-impl PgDestination {
-    pub async fn new(adapter: PgAdapter, table: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let metadata = match adapter.table_exists(table).await? {
-            true => Some(adapter.fetch_metadata(table).await?),
-            false => None,
-        };
-
-        Ok(PgDestination { adapter, metadata })
+    fn get_tables(&self) -> Vec<TableMetadata> {
+        self.metadata.values().cloned().collect()
     }
 
-    pub async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        self.adapter.table_exists(table).await.map_err(Into::into)
+    fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)> {
+        Arc::new(self.adapter.clone())
     }
 }

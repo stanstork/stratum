@@ -1,5 +1,5 @@
 use super::{column::metadata::ColumnMetadata, fk::ForeignKeyMetadata, table::TableMetadata};
-use crate::{adapter::SqlAdapter, schema::context::SchemaContext};
+use crate::{adapter::SqlAdapter, schema::plan::SchemaPlan};
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
@@ -14,18 +14,22 @@ pub type MetadataFuture<'a, T> =
 pub struct MetadataProvider;
 
 impl MetadataProvider {
-    pub async fn build_metadata_with_deps(
+    /// Builds a metadata graph for all root tables and their dependencies.
+    pub async fn build_metadata_graph(
         adapter: &(dyn SqlAdapter + Send + Sync),
-        table: &str,
-    ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
+        tables: &[String],
+    ) -> Result<HashMap<String, TableMetadata>, Box<dyn std::error::Error>> {
         let mut graph = HashMap::new();
         let mut visited = HashSet::new();
-        let metadata =
-            Self::build_metadata_dep_graph(table, adapter, &mut graph, &mut visited).await?;
-        Ok(metadata)
+
+        for table in tables {
+            Self::build_metadata_graph_recursive(table, adapter, &mut graph, &mut visited).await?;
+        }
+
+        Ok(graph)
     }
 
-    pub fn build_table_metadata(
+    pub fn construct_table_metadata(
         table: &str,
         columns: HashMap<String, ColumnMetadata>,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
@@ -61,16 +65,12 @@ impl MetadataProvider {
         })
     }
 
-    pub fn collect_schema_deps<F, T>(metadata: &TableMetadata, ctx: &mut SchemaContext<'_, F, T>)
-    where
-        F: Fn(&ColumnMetadata) -> (String, Option<usize>),
-        T: Fn(&TableMetadata) -> Vec<&ColumnMetadata>,
-    {
+    pub fn collect_schema_deps(metadata: &TableMetadata, plan: &mut SchemaPlan) {
         let mut visited = HashSet::new();
-        Self::visit_schema_deps(metadata, ctx, &mut visited);
+        Self::visit_schema_deps(metadata, plan, &mut visited);
     }
 
-    fn build_metadata_dep_graph<'a>(
+    fn build_metadata_graph_recursive<'a>(
         table_name: &'a str,
         adapter: &'a (dyn SqlAdapter + Send + Sync),
         graph: &'a mut HashMap<String, TableMetadata>,
@@ -111,7 +111,8 @@ impl MetadataProvider {
             for fk in &metadata.foreign_keys {
                 let ref_table = &fk.referenced_table;
                 let ref_metadata =
-                    Self::build_metadata_dep_graph(ref_table, adapter, graph, visited).await?;
+                    Self::build_metadata_graph_recursive(ref_table, adapter, graph, visited)
+                        .await?;
 
                 metadata
                     .referenced_tables
@@ -146,7 +147,8 @@ impl MetadataProvider {
 
             for ref_table in referencing_tables {
                 let ref_metadata =
-                    Self::build_metadata_dep_graph(&ref_table, adapter, graph, visited).await?;
+                    Self::build_metadata_graph_recursive(&ref_table, adapter, graph, visited)
+                        .await?;
 
                 metadata
                     .referencing_tables
@@ -169,14 +171,11 @@ impl MetadataProvider {
         })
     }
 
-    fn visit_schema_deps<F, T>(
+    fn visit_schema_deps(
         metadata: &TableMetadata,
-        ctx: &mut SchemaContext<'_, F, T>,
+        plan: &mut SchemaPlan<'_>,
         visited: &mut HashSet<String>,
-    ) where
-        F: Fn(&ColumnMetadata) -> (String, Option<usize>),
-        T: Fn(&TableMetadata) -> Vec<&ColumnMetadata>,
-    {
+    ) {
         if !visited.insert(metadata.name.clone()) {
             return;
         }
@@ -186,14 +185,14 @@ impl MetadataProvider {
             .values()
             .chain(metadata.referencing_tables.values())
             .for_each(|related| {
-                Self::visit_schema_deps(related, ctx, visited);
+                Self::visit_schema_deps(related, plan, visited);
             });
 
-        ctx.add_column_defs(&metadata.name, metadata.column_defs(ctx.type_converter));
-        ctx.add_fk_defs(&metadata.name, metadata.fk_defs());
+        plan.add_column_defs(&metadata.name, metadata.column_defs(plan.type_converter()));
+        plan.add_fk_defs(&metadata.name, metadata.fk_defs());
 
-        for col in (ctx.type_extractor)(metadata) {
-            ctx.add_enum_def(&metadata.name, &col.name);
+        for col in (plan.type_extractor())(metadata) {
+            plan.add_enum_def(&metadata.name, &col.name);
         }
     }
 }

@@ -1,10 +1,9 @@
 use super::providers::postgres::PgDestination;
 use crate::{adapter::Adapter, record::Record};
 use async_trait::async_trait;
-use common::mapping::NameMap;
-use smql::{plan::MigrationPlan, statements::connection::DataFormat};
+use smql::statements::connection::DataFormat;
 use sql_adapter::{adapter::SqlAdapter, metadata::table::TableMetadata, schema::plan::SchemaPlan};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
@@ -12,14 +11,30 @@ pub enum DataDestination {
     Database(Arc<Mutex<dyn DbDataDestination>>),
 }
 
+impl DataDestination {
+    pub fn from_adapter(
+        format: DataFormat,
+        adapter: Adapter,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        match format {
+            DataFormat::Postgres => match adapter {
+                Adapter::Postgres(adapter) => {
+                    let destination = PgDestination::new(adapter);
+                    Ok(DataDestination::Database(Arc::new(Mutex::new(destination))))
+                }
+                _ => Err("Expected Postgres adapter, but got a different type".into()),
+            },
+            DataFormat::MySql => {
+                // Add once implemented
+                Err("MySql data destination is not implemented yet".into())
+            }
+            other => Err(format!("Unsupported data source format: {:?}", other).into()),
+        }
+    }
+}
+
 #[async_trait]
 pub trait DbDataDestination: Send + Sync {
-    async fn write(
-        &self,
-        metadata: &TableMetadata,
-        column_name_map: &NameMap,
-        record: Record,
-    ) -> Result<(), Box<dyn std::error::Error>>;
     async fn write_batch(
         &self,
         metadata: &TableMetadata,
@@ -27,38 +42,19 @@ pub trait DbDataDestination: Send + Sync {
     ) -> Result<(), Box<dyn std::error::Error>>;
     async fn infer_schema(
         &self,
-        schema_plan: &SchemaPlan,
+        schema_plan: &SchemaPlan<'_>,
     ) -> Result<(), Box<dyn std::error::Error>>;
-
     async fn toggle_trigger(
         &self,
         table: &str,
         enable: bool,
     ) -> Result<(), Box<dyn std::error::Error>>;
-
     async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>>;
 
-    fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync);
-    fn set_metadata(&mut self, metadata: TableMetadata);
-    fn metadata(&self) -> &TableMetadata;
-}
+    fn get_metadata(&self, table: &str) -> &TableMetadata;
+    fn set_metadata(&mut self, metadata: HashMap<String, TableMetadata>);
 
-pub async fn create_data_destination(
-    plan: &MigrationPlan,
-    adapter: Adapter,
-) -> Result<Arc<Mutex<dyn DbDataDestination>>, Box<dyn std::error::Error>> {
-    let data_format = plan.connections.destination.data_format;
+    fn get_tables(&self) -> Vec<TableMetadata>;
 
-    match data_format {
-        DataFormat::Postgres => {
-            if let Adapter::Postgres(adapter) = adapter {
-                let destination = PgDestination::new(adapter, &plan.migration.target).await?;
-                Ok(Arc::new(Mutex::new(destination)))
-            } else {
-                panic!("Invalid adapter type")
-            }
-        }
-        DataFormat::MySql => unimplemented!("MySql data destination not implemented"),
-        _ => unimplemented!("Unsupported data destination"),
-    }
+    fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)>;
 }

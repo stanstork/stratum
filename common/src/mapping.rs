@@ -1,7 +1,7 @@
 use smql::statements::{
     expr::Expression,
     mapping::{Mapping, NamespaceMapping},
-    migrate::Migrate,
+    migrate::MigrateBlock,
 };
 use std::collections::HashMap;
 
@@ -111,13 +111,16 @@ impl FieldMapping {
         ns_map
     }
 
-    pub fn extract_name_map(migrate: &Migrate) -> NameMap {
+    pub fn extract_name_map(migrate: &MigrateBlock) -> NameMap {
         let mut name_map = HashMap::new();
 
-        let source = migrate.source.first().unwrap();
-        let target = migrate.target.clone();
+        for migration in migrate.migrations.iter() {
+            let source = migration.sources.first().unwrap().clone();
+            let target = migration.target.clone();
 
-        name_map.insert(source.clone(), target.clone());
+            name_map.insert(source.to_ascii_lowercase(), target.to_ascii_lowercase());
+        }
+
         NameMap::new(name_map)
     }
 }

@@ -27,8 +27,8 @@ impl Producer {
         let mut pipeline = TransformPipeline::new();
 
         // Add column name mapping if present
-        if !ctx.field_mapping.is_empty() {
-            let column_mapper = ColumnMapper::new(ctx.field_mapping.clone());
+        if !ctx.field_name_map.is_empty() {
+            let column_mapper = ColumnMapper::new(ctx.field_name_map.clone());
             pipeline = pipeline.add_transform(column_mapper);
         }
 

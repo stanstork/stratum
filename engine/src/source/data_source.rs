@@ -1,10 +1,9 @@
 use super::providers::mysql::MySqlDataSource;
 use crate::{adapter::Adapter, record::Record};
 use async_trait::async_trait;
-use smql::{plan::MigrationPlan, statements::connection::DataFormat};
-use sql_adapter::adapter::SqlAdapter;
-use sql_adapter::metadata::table::TableMetadata;
-use std::sync::Arc;
+use smql::statements::connection::DataFormat;
+use sql_adapter::{adapter::SqlAdapter, metadata::table::TableMetadata};
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
@@ -13,9 +12,23 @@ pub enum DataSource {
 }
 
 impl DataSource {
-    pub async fn source_name(&self) -> String {
-        match self {
-            DataSource::Database(source) => source.lock().await.table_name().to_string(),
+    pub fn from_adapter(
+        format: DataFormat,
+        adapter: Adapter,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        match format {
+            DataFormat::MySql => match adapter {
+                Adapter::MySql(mysql_adapter) => {
+                    let source = MySqlDataSource::new(mysql_adapter);
+                    Ok(DataSource::Database(Arc::new(Mutex::new(source))))
+                }
+                _ => Err("Expected MySql adapter, but got a different type".into()),
+            },
+            DataFormat::Postgres => {
+                // Add once implemented
+                Err("Postgres data source is not implemented yet".into())
+            }
+            other => Err(format!("Unsupported data source format: {:?}", other).into()),
         }
     }
 }
@@ -28,29 +41,8 @@ pub trait DbDataSource: Send + Sync {
         offset: Option<usize>,
     ) -> Result<Vec<Record>, Box<dyn std::error::Error>>;
 
-    fn get_metadata(&self) -> &TableMetadata;
-    fn set_metadata(&mut self, metadata: TableMetadata);
-    fn table_name(&self) -> &str;
-    fn adapter(&self) -> &(dyn SqlAdapter + Send + Sync);
-}
+    fn get_metadata(&self, table: &str) -> &TableMetadata;
+    fn set_metadata(&mut self, metadata: HashMap<String, TableMetadata>);
 
-pub async fn create_data_source(
-    plan: &MigrationPlan,
-    adapter: Adapter,
-) -> Result<Arc<Mutex<dyn DbDataSource>>, Box<dyn std::error::Error>> {
-    let source = plan.migration.source.first().unwrap();
-    let data_format = plan.connections.source.data_format;
-
-    match data_format {
-        DataFormat::MySql => {
-            if let Adapter::MySql(adapter) = adapter {
-                let source = MySqlDataSource::new(source, adapter).await?;
-                Ok(Arc::new(Mutex::new(source)))
-            } else {
-                panic!("Invalid adapter type")
-            }
-        }
-        DataFormat::Postgres => unimplemented!("Postgres data source not implemented"),
-        _ => unimplemented!("Unsupported data source"),
-    }
+    fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)>;
 }
