@@ -1,4 +1,3 @@
-use bincode;
 use sql_adapter::row::row_data::RowData;
 
 #[derive(Debug, Clone)]
@@ -43,15 +42,14 @@ impl DataRecord for RowData {
     }
 
     fn serialize(&self) -> Vec<u8> {
-        bincode::serialize(self).unwrap()
+        serde_json::to_vec(self).unwrap_or_else(|_| {
+            panic!("Failed to serialize: {:?}", self);
+        })
     }
 
     fn deserialize(data: Vec<u8>) -> Self {
-        match bincode::deserialize::<RowData>(&data) {
-            Ok(data) => data,
-            Err(e) => {
-                panic!("Failed to deserialize: {:?}", e);
-            }
-        }
+        serde_json::from_slice(&data).unwrap_or_else(|_| {
+            panic!("Failed to deserialize: {:?}", data);
+        })
     }
 }

@@ -114,6 +114,13 @@ impl TableMetadata {
             .collect::<Vec<_>>()
     }
 
+    pub fn columns(&self) -> Vec<ColumnMetadata> {
+        self.columns
+            .iter()
+            .map(|(_name, col)| col.clone())
+            .collect()
+    }
+
     pub fn print_tables_tree(table: &TableMetadata, indent: usize, visited: &mut HashSet<String>) {
         if visited.contains(&table.name) {
             println!("{}- {} ", "  ".repeat(indent), table.name);

@@ -13,8 +13,9 @@ WITH SETTINGS (
 );
 
 MAP (
-    products (
-        id -> product_id
+    goods (
+        id -> product_id,
+        price * 1.2 -> price_with_tax
     ),
     orders (
         total -> ammount

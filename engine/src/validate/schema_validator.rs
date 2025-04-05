@@ -1,4 +1,4 @@
-use common::mapping::NameMap;
+use common::mapping::FieldNameMap;
 use sql_adapter::metadata::{column::data_type::ColumnDataType, table::TableMetadata};
 use std::collections::HashSet;
 use tracing::error;
@@ -35,8 +35,8 @@ impl<'a> SchemaValidator<'a> {
     pub fn validate(
         &self,
         mode: SchemaValidationMode,
-        table_mapping: NameMap,
-        column_mapping: NameMap,
+        table_mapping: FieldNameMap,
+        column_mapping: FieldNameMap,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match mode {
             SchemaValidationMode::OneToOne => {
@@ -52,8 +52,8 @@ impl<'a> SchemaValidator<'a> {
 
     fn validate_one_to_one(
         &self,
-        table_mapping: NameMap,
-        column_mapping: NameMap,
+        table_mapping: FieldNameMap,
+        column_mapping: FieldNameMap,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let source_tables = self.source_metadata.tables();
         let destination_tables = self.destination_metadata.tables();

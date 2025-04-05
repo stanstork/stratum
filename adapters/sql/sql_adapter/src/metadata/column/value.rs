@@ -54,7 +54,6 @@ impl ColumnValue {
 pub struct ColumnData {
     pub name: String,
     pub value: Option<ColumnValue>,
-    pub type_info: ColumnDataType,
 }
 
 impl fmt::Display for ColumnValue {
@@ -64,7 +63,10 @@ impl fmt::Display for ColumnValue {
             ColumnValue::Float(v) => write!(f, "{:.15}", v),
             ColumnValue::String(v) => write!(f, "'{}'", v.replace("'", "''")),
             ColumnValue::Boolean(v) => write!(f, "{}", v),
-            ColumnValue::Json(v) => write!(f, "{}", v),
+            ColumnValue::Json(v) => {
+                let json_str = v.to_string().replace('\'', "''");
+                write!(f, "'{}'", json_str)
+            }
             ColumnValue::Uuid(v) => write!(f, "{}", v),
             ColumnValue::Bytes(v) => {
                 let hex = v.iter().map(|b| format!("{:02X}", b)).collect::<String>();
