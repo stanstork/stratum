@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use postgres::postgres::PgAdapter;
 use sql_adapter::{
     adapter::SqlAdapter,
-    metadata::table::{self, TableMetadata},
+    metadata::table::TableMetadata,
     query::{builder::SqlQueryBuilder, column::ColumnDef},
     schema::plan::SchemaPlan,
 };

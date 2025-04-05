@@ -1,40 +1,53 @@
 use smql::statements::{
     expr::Expression,
-    mapping::{Mapping, NamespaceMapping},
+    mapping::{Mapping, ScopeMapping},
     migrate::MigrateBlock,
 };
 use std::collections::HashMap;
 
+use crate::computed::ComputedField;
+
 #[derive(Clone, Debug)]
-pub struct NamespaceMap {
-    pub namespaces: HashMap<String, NameMap>,
+pub struct ScopedNameMap {
+    pub scopes: HashMap<String, FieldNameMap>,
+    pub computed: HashMap<String, Vec<ComputedField>>,
 }
 
 #[derive(Clone, Debug)]
-pub struct NameMap {
+pub struct FieldNameMap {
     forward: HashMap<String, String>, // old_name → new_name
     reverse: HashMap<String, String>, // new_name → old_name
 }
 
 pub struct FieldMapping;
 
-impl NamespaceMap {
+impl ScopedNameMap {
     pub fn new() -> Self {
         Self {
-            namespaces: HashMap::new(),
+            scopes: HashMap::new(),
+            computed: HashMap::new(),
         }
     }
 
-    pub fn add_namespace(&mut self, namespace: String, map: NameMap) {
-        self.namespaces.insert(namespace, map);
+    pub fn add_mapping(&mut self, scope: &str, map: HashMap<String, String>) {
+        self.scopes
+            .insert(scope.to_string(), FieldNameMap::new(map));
     }
 
-    pub fn get_namespace(&self, namespace: &str) -> Option<&NameMap> {
-        self.namespaces.get(namespace)
+    pub fn add_computed(&mut self, scope: &str, computed: Vec<ComputedField>) {
+        self.computed.insert(scope.to_string(), computed);
     }
 
-    pub fn resolve(&self, namespace: &str, name: &str) -> String {
-        if let Some(name_map) = self.namespaces.get(namespace) {
+    pub fn get_scope(&self, scope: &str) -> Option<&FieldNameMap> {
+        self.scopes.get(scope)
+    }
+
+    pub fn get_computed(&self, scope: &str) -> Option<&Vec<ComputedField>> {
+        self.computed.get(scope)
+    }
+
+    pub fn resolve(&self, scope: &str, name: &str) -> String {
+        if let Some(name_map) = self.scopes.get(scope) {
             name_map.resolve(name)
         } else {
             name.to_string()
@@ -42,11 +55,11 @@ impl NamespaceMap {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.namespaces.is_empty()
+        self.scopes.is_empty()
     }
 }
 
-impl NameMap {
+impl FieldNameMap {
     pub fn new(map: HashMap<String, String>) -> Self {
         let mut forward = HashMap::new();
         let mut reverse = HashMap::new();
@@ -86,32 +99,38 @@ impl NameMap {
 }
 
 impl FieldMapping {
-    pub fn extract_field_map(mappings: &Vec<NamespaceMapping>) -> NamespaceMap {
-        let mut ns_map = NamespaceMap::new();
-        for namespace in mappings {
+    pub fn extract_field_map(mappings: &Vec<ScopeMapping>) -> ScopedNameMap {
+        let mut scope_map = ScopedNameMap::new();
+        for scopes in mappings {
+            let scope = scopes.scope.clone();
             let mut field_map = HashMap::new();
-            for mapping in &namespace.mappings {
+            let mut computed_fields = Vec::new();
+
+            for mapping in &scopes.mappings {
                 match mapping {
-                    Mapping::ColumnToColumn { source, target } => {
-                        field_map.insert(source.clone(), target.clone());
-                    }
                     Mapping::ExpressionToColumn { expression, target } => {
-                        if let Expression::Identifier(column) = expression {
-                            field_map.insert(column.clone(), target.clone());
-                        } else {
-                            // Handle other expression types
-                            // For now, we just ignore them
+                        match expression {
+                            Expression::Identifier(column) => {
+                                field_map.insert(column.clone(), target.clone());
+                            }
+                            Expression::Arithmetic { .. } => {
+                                computed_fields.push(ComputedField::new(target, expression));
+                            }
+                            _ => {} // Handle other expression types
                         }
                     }
                     _ => {} // Skip other types of mappings
                 }
             }
-            ns_map.add_namespace(namespace.namespace.clone(), NameMap::new(field_map));
+
+            // Add the field map and computed fields to the scope map
+            scope_map.add_mapping(&scope, field_map);
+            scope_map.add_computed(&scope, computed_fields);
         }
-        ns_map
+        scope_map
     }
 
-    pub fn extract_name_map(migrate: &MigrateBlock) -> NameMap {
+    pub fn extract_name_map(migrate: &MigrateBlock) -> FieldNameMap {
         let mut name_map = HashMap::new();
 
         for migration in migrate.migrations.iter() {
@@ -121,6 +140,6 @@ impl FieldMapping {
             name_map.insert(source.to_ascii_lowercase(), target.to_ascii_lowercase());
         }
 
-        NameMap::new(name_map)
+        FieldNameMap::new(name_map)
     }
 }

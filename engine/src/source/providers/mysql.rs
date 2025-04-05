@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use mysql::mysql::MySqlAdapter;
 use sql_adapter::adapter::SqlAdapter;
 use sql_adapter::{metadata::table::TableMetadata, requests::FetchRowsRequest};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub struct MySqlDataSource {
@@ -28,15 +28,23 @@ impl DbDataSource for MySqlDataSource {
         offset: Option<usize>,
     ) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
         let mut records = Vec::new();
+        let mut processed_tables = HashSet::new();
+
         for table in self.metadata.keys() {
             let grouped_fields = self.get_metadata(table).select_fields();
             for (table, fields) in grouped_fields {
+                if processed_tables.contains(&table) {
+                    continue;
+                }
+                processed_tables.insert(table.clone());
+
                 let request =
                     FetchRowsRequest::new(table.clone(), None, fields, vec![], batch_size, offset);
                 let rows = self.adapter.fetch_rows(request).await?;
                 records.extend(rows.into_iter().map(Record::RowData));
             }
         }
+
         Ok(records)
     }
 

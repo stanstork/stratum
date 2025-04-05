@@ -4,7 +4,7 @@ use crate::{
     source::data_source::DataSource,
 };
 use async_trait::async_trait;
-use common::mapping::{NameMap, NamespaceMap};
+use common::mapping::{FieldNameMap, ScopedNameMap};
 use postgres::data_type::PgColumnDataType;
 use smql::statements::setting::{Setting, SettingValue};
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
@@ -32,8 +32,8 @@ pub struct InferSchemaSetting {
     source_format: DataFormat,
     destination: DataDestination,
     dest_format: DataFormat,
-    table_name_map: NameMap,
-    column_name_map: NamespaceMap,
+    table_name_map: FieldNameMap,
+    column_name_map: ScopedNameMap,
     state: Arc<Mutex<MigrationState>>,
 }
 

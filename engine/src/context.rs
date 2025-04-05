@@ -2,7 +2,7 @@ use crate::{
     buffer::SledBuffer, destination::data_dest::DataDestination, source::data_source::DataSource,
     state::MigrationState,
 };
-use common::mapping::{FieldMapping, NameMap, NamespaceMap};
+use common::mapping::{FieldMapping, FieldNameMap, ScopedNameMap};
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::metadata::table::TableMetadata;
 use std::sync::Arc;
@@ -34,12 +34,12 @@ pub struct MigrationContext {
     /// Maps source entity names to destination entity names
     ///
     /// Typically used for renaming tables or collections.
-    pub entity_name_map: NameMap,
+    pub entity_name_map: FieldNameMap,
 
     /// Maps source field names to destination field names
     ///
     /// Typically used for renaming columns or attributes.
-    pub field_name_map: NamespaceMap,
+    pub field_name_map: ScopedNameMap,
 }
 
 impl MigrationContext {

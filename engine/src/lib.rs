@@ -3,6 +3,7 @@ pub mod buffer;
 pub mod consumer;
 pub mod context;
 pub mod destination;
+pub mod expr;
 pub mod producer;
 pub mod record;
 pub mod runner;

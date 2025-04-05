@@ -176,7 +176,7 @@ impl MetadataProvider {
         plan: &mut SchemaPlan<'_>,
         visited: &mut HashSet<String>,
     ) {
-        if !visited.insert(metadata.name.clone()) {
+        if !visited.insert(metadata.name.clone()) || plan.metadata_exists(&metadata.name) {
             return;
         }
 

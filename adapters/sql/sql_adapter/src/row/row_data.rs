@@ -33,7 +33,6 @@ impl RowData {
                 ColumnData {
                     name: column.to_string(),
                     value: ColumnValue::from_row(row, column_type, column),
-                    type_info: column_type,
                 }
             })
             .collect();

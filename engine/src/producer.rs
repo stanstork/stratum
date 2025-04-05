@@ -2,7 +2,11 @@ use crate::{
     buffer::SledBuffer,
     context::MigrationContext,
     source::data_source::{DataSource, DbDataSource},
-    transform::{mapping::ColumnMapper, pipeline::TransformPipeline},
+    transform::{
+        computed::ComputedTransform,
+        mapping::{ColumnMapper, TableMapper},
+        pipeline::{TransformPipeline, TransformPipelineExt},
+    },
 };
 use std::sync::Arc;
 use tokio::sync::{watch, Mutex};
@@ -26,11 +30,16 @@ impl Producer {
 
         let mut pipeline = TransformPipeline::new();
 
-        // Add column name mapping if present
-        if !ctx.field_name_map.is_empty() {
-            let column_mapper = ColumnMapper::new(ctx.field_name_map.clone());
-            pipeline = pipeline.add_transform(column_mapper);
-        }
+        pipeline = pipeline
+            .add_if(!ctx.entity_name_map.is_empty(), || {
+                TableMapper::new(ctx.entity_name_map.clone())
+            })
+            .add_if(!ctx.field_name_map.is_empty(), || {
+                ColumnMapper::new(ctx.field_name_map.clone())
+            })
+            .add_if(!ctx.field_name_map.computed.is_empty(), || {
+                ComputedTransform::new(ctx.field_name_map.computed.clone())
+            });
 
         let batch_size = ctx.state.lock().await.batch_size;
 
@@ -77,7 +86,7 @@ impl Producer {
                 Ok(records) => {
                     info!("Fetched {} records in batch #{batch_number}", records.len());
 
-                    for record in records {
+                    for record in records.iter() {
                         // Apply the transformation pipeline to each record
                         let transformed_record = self.pipeline.apply(&record);
 

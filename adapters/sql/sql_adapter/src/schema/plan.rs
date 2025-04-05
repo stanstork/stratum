@@ -3,11 +3,13 @@ use crate::{
     metadata::{column::metadata::ColumnMetadata, table::TableMetadata},
     query::{builder::SqlQueryBuilder, column::ColumnDef, fk::ForeignKeyDef},
 };
-use common::mapping::{NameMap, NamespaceMap};
+use common::mapping::{FieldNameMap, ScopedNameMap};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
+
+use super::types::TypeInferencer;
 
 /// A function that converts a source database type to a target database type,
 /// returning the target type name and optional size (e.g., MySQL `blob` → PostgreSQL `bytea`).
@@ -29,10 +31,10 @@ pub struct SchemaPlan<'a> {
     type_extractor: &'a TypeExtractor,
 
     /// Custom column name mapping provided by the user (e.g., source → target column names).
-    column_name_map: NamespaceMap,
+    column_name_map: ScopedNameMap,
 
     /// Custom table name mapping provided by the user (e.g., source → target table names).
-    table_name_map: NameMap,
+    table_name_map: FieldNameMap,
 
     /// Metadata graph containing all source tables and their relationships
     /// (both referencing and referenced dependencies).
@@ -53,8 +55,8 @@ impl<'a> SchemaPlan<'a> {
         source_adapter: Arc<(dyn SqlAdapter + Send + Sync)>,
         type_converter: &'a TypeConverter,
         type_extractor: &'a TypeExtractor,
-        table_name_map: NameMap,
-        column_name_map: NamespaceMap,
+        table_name_map: FieldNameMap,
+        column_name_map: ScopedNameMap,
     ) -> Self {
         Self {
             source_adapter,
@@ -74,13 +76,9 @@ impl<'a> SchemaPlan<'a> {
             .iter()
             .map(|(table, columns)| {
                 let resolved_table = self.table_name_map.resolve(table);
-                let resolved_columns = columns
-                    .iter()
-                    .map(|col| ColumnDef {
-                        name: self.column_name_map.resolve(&resolved_table, &col.name),
-                        ..col.clone()
-                    })
-                    .collect::<Vec<_>>();
+
+                let mut resolved_columns = self.resolve_column_definitions(table, columns);
+                resolved_columns.extend(self.computed_column_definitions(&table));
 
                 SqlQueryBuilder::new()
                     .create_table(&resolved_table, &resolved_columns, &[])
@@ -163,6 +161,56 @@ impl<'a> SchemaPlan<'a> {
 
     pub fn type_extractor(&self) -> &TypeExtractor {
         self.type_extractor
+    }
+
+    fn resolve_column_definitions(&self, table: &str, columns: &[ColumnDef]) -> Vec<ColumnDef> {
+        let resolved_table = self.table_name_map.resolve(table);
+        columns
+            .iter()
+            .map(|col| ColumnDef {
+                name: self.column_name_map.resolve(&resolved_table, &col.name),
+                ..col.clone()
+            })
+            .collect()
+    }
+
+    fn computed_column_definitions(&self, table: &str) -> Vec<ColumnDef> {
+        let mut defs = Vec::new();
+
+        let resolved_table = self.table_name_map.resolve(table);
+        let computed_fields = match self.column_name_map.get_computed(&resolved_table) {
+            Some(fields) => fields,
+            None => return defs,
+        };
+
+        let metadata = match self.metadata_graph.get(table) {
+            Some(m) => m,
+            None => {
+                eprintln!("Missing metadata for table: {}", table);
+                return defs;
+            }
+        };
+
+        for computed in computed_fields {
+            let column_name = &computed.name;
+            if let Some(inferred_type) = computed.expression.infer_type(&metadata.columns()) {
+                defs.push(ColumnDef {
+                    name: column_name.clone(),
+                    is_nullable: true, // Assuming computed fields are nullable
+                    default: None,
+                    data_type: inferred_type.to_string(),
+                    is_primary_key: false,
+                    char_max_length: None,
+                });
+            } else {
+                eprintln!(
+                    "Warning: Could not infer type for computed field `{}` in table `{}`",
+                    column_name, table
+                );
+            }
+        }
+
+        defs
     }
 
     fn parse_enum(raw: &str) -> Vec<String> {
