@@ -9,13 +9,16 @@ MIGRATE (
     products -> goods
 )
 WITH SETTINGS (
-    INFER_SCHEMA = TRUE
+    INFER_SCHEMA = FALSE,
+    CREATE_MISSING_COLUMNS = TRUE
 );
 
 MAP (
     goods (
         id -> product_id,
-        price * 1.2 -> price_with_tax
+        price * 1.2 -> price_with_tax,
+        name -> prod_name,
+        stock / 2 -> half_stock
     ),
     orders (
         total -> ammount

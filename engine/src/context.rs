@@ -2,7 +2,7 @@ use crate::{
     buffer::SledBuffer, destination::data_dest::DataDestination, source::data_source::DataSource,
     state::MigrationState,
 };
-use common::mapping::{FieldMapping, FieldNameMap, ScopedNameMap};
+use common::mapping::{FieldNameMap, ScopedNameMap};
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::metadata::table::TableMetadata;
 use std::sync::Arc;
@@ -53,8 +53,8 @@ impl MigrationContext {
         let source_format = plan.connections.source.data_format;
         let destination_format = plan.connections.destination.data_format;
 
-        let entity_name_map = FieldMapping::extract_name_map(&plan.migration);
-        let field_name_map = FieldMapping::extract_field_map(&plan.mapping);
+        let entity_name_map = FieldNameMap::extract_name_map(&plan.migration);
+        let field_name_map = FieldNameMap::extract_field_map(&plan.mapping);
 
         Arc::new(Mutex::new(MigrationContext {
             state,
