@@ -1,7 +1,10 @@
 use super::MigrationSetting;
 use crate::{
-    context::MigrationContext, destination::data_dest::DataDestination,
-    source::data_source::DataSource, state::MigrationState,
+    context::MigrationContext,
+    destination::data_dest::DataDestination,
+    settings::{set_destination_metadata, set_source_metadata},
+    source::data_source::DataSource,
+    state::MigrationState,
 };
 use async_trait::async_trait;
 use common::mapping::{FieldNameMap, ScopedNameMap};
@@ -35,13 +38,12 @@ impl MigrationSetting for InferSchemaSetting {
     async fn apply(
         &self,
         plan: &MigrationPlan,
-        _context: Arc<Mutex<MigrationContext>>,
+        context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.apply_schema(plan).await?;
 
-        self.set_source_metadata(&plan.migration.sources()).await?;
-        self.set_destination_metadata(&plan.migration.targets())
-            .await?;
+        set_source_metadata(&context, &plan.migration.sources()).await?;
+        set_destination_metadata(&context, &plan.migration.targets()).await?;
 
         // Set the infer schema flag to global state
         {
@@ -142,36 +144,6 @@ impl InferSchemaSetting {
             }
             _ => Err("Unsupported data destination format".into()),
         }
-    }
-
-    pub async fn set_source_metadata(
-        &self,
-        source_tables: &[String],
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if let DataSource::Database(src) = &self.source {
-            let mut src_guard = src.lock().await;
-            let metadata =
-                MetadataProvider::build_metadata_graph(src_guard.adapter().as_ref(), source_tables)
-                    .await?;
-            src_guard.set_metadata(metadata);
-        }
-        Ok(())
-    }
-
-    pub async fn set_destination_metadata(
-        &self,
-        destination_tables: &[String],
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if let DataDestination::Database(dest) = &self.destination {
-            let mut dest_guard = dest.lock().await;
-            let metadata = MetadataProvider::build_metadata_graph(
-                dest_guard.adapter().as_ref(),
-                destination_tables,
-            )
-            .await?;
-            dest_guard.set_metadata(metadata);
-        }
-        Ok(())
     }
 
     async fn source_adapter(

@@ -116,6 +116,19 @@ impl DbDataDestination for PgDestination {
         self.adapter.table_exists(table).await
     }
 
+    async fn add_column(
+        &self,
+        table: &str,
+        column: &ColumnDef,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let query = SqlQueryBuilder::new().add_column(table, column).build();
+
+        info!("Executing query: {}", query.0);
+        self.adapter.execute(&query.0).await?;
+
+        Ok(())
+    }
+
     fn get_metadata(&self, table: &str) -> &TableMetadata {
         self.metadata
             .get(table)

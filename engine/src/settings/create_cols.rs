@@ -1,5 +1,5 @@
 use super::MigrationSetting;
-use crate::context::MigrationContext;
+use crate::{context::MigrationContext, destination::data_dest::DataDestination};
 use async_trait::async_trait;
 use postgres::data_type::PgColumnDataType;
 use smql::plan::MigrationPlan;
@@ -8,7 +8,7 @@ use sql_adapter::{
         column::{data_type::ColumnDataType, metadata::ColumnMetadata},
         table::TableMetadata,
     },
-    query::{builder::SqlQueryBuilder, column::ColumnDef},
+    query::column::ColumnDef,
     schema::types::TypeInferencer,
 };
 use std::sync::Arc;
@@ -37,8 +37,8 @@ impl MigrationSetting for CreateMissingColumnsSetting {
             let src_name = context.entity_name_map.reverse_resolve(&dest_name);
             let src_metadata = context.source.fetch_metadata(&src_name).await?;
 
-            Self::add_columns(&context, &dest_name, &src_metadata, &dest_metadata)?;
-            Self::add_computed_columns(&context, &dest_name, &src_metadata, &dest_metadata)?;
+            Self::add_columns(&context, &dest_name, &src_metadata, &dest_metadata).await?;
+            Self::add_computed_columns(&context, &dest_name, &src_metadata, &dest_metadata).await?;
         }
 
         let mut state = context.state.lock().await;
@@ -48,7 +48,7 @@ impl MigrationSetting for CreateMissingColumnsSetting {
 }
 
 impl CreateMissingColumnsSetting {
-    fn add_columns(
+    async fn add_columns(
         context: &MigrationContext,
         table: &str,
         source_metadata: &TableMetadata,
@@ -66,15 +66,14 @@ impl CreateMissingColumnsSetting {
                 if dest_metadata.get_column(&dest_col).is_none() {
                     let col_def =
                         ColumnDef::with_type_convertor(&dest_col, &type_converter, source_col_meta);
-                    let sql = SqlQueryBuilder::new().add_column(table, &col_def).build().0;
-                    println!("SQL to add column: {}", sql);
+                    Self::add_column(context, table, &col_def).await?;
                 }
             }
         }
         Ok(())
     }
 
-    fn add_computed_columns(
+    async fn add_computed_columns(
         context: &MigrationContext,
         table: &str,
         source_metadata: &TableMetadata,
@@ -90,8 +89,7 @@ impl CreateMissingColumnsSetting {
                     if let Some(col_type) = col_type {
                         let col_def =
                             ColumnDef::from_computed(&computed_col.name, &col_type.to_string());
-                        let sql = SqlQueryBuilder::new().add_column(table, &col_def).build().0;
-                        println!("SQL to add computed column: {}", sql);
+                        Self::add_column(context, table, &col_def).await?;
                     } else {
                         return Err(format!(
                             "Failed to infer type for computed column {}",
@@ -103,5 +101,20 @@ impl CreateMissingColumnsSetting {
             }
         }
         Ok(())
+    }
+
+    async fn add_column(
+        context: &MigrationContext,
+        table: &str,
+        column: &ColumnDef,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match &context.destination {
+            DataDestination::Database(db) => {
+                let db = db.lock().await;
+                db.add_column(table, column).await?;
+                Ok(())
+            }
+            _ => Err("Unsupported data destination format".into()),
+        }
     }
 }
