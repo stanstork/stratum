@@ -1,31 +1,27 @@
-use crate::state::MigrationState;
+use super::MigrationSetting;
 use crate::{
-    context::MigrationContext, destination::data_dest::DataDestination,
+    context::MigrationContext,
+    destination::data_dest::DataDestination,
+    settings::{set_destination_metadata, set_source_metadata},
     source::data_source::DataSource,
+    state::MigrationState,
 };
 use async_trait::async_trait;
 use common::mapping::{FieldNameMap, ScopedNameMap};
 use postgres::data_type::PgColumnDataType;
-use smql::statements::setting::{Setting, SettingValue};
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
-use sql_adapter::adapter::SqlAdapter;
-use sql_adapter::metadata::column::data_type::ColumnDataType;
-use sql_adapter::metadata::column::metadata::ColumnMetadata;
-use sql_adapter::metadata::provider::MetadataProvider;
-use sql_adapter::metadata::table::TableMetadata;
-use sql_adapter::schema::plan::SchemaPlan;
+use sql_adapter::{
+    adapter::SqlAdapter,
+    metadata::{
+        column::{data_type::ColumnDataType, metadata::ColumnMetadata},
+        provider::MetadataProvider,
+        table::TableMetadata,
+    },
+    schema::plan::SchemaPlan,
+};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
-
-#[async_trait]
-pub trait MigrationSetting {
-    async fn apply(
-        &self,
-        plan: &MigrationPlan,
-        context: Arc<Mutex<MigrationContext>>,
-    ) -> Result<(), Box<dyn std::error::Error>>;
-}
 
 pub struct InferSchemaSetting {
     source: DataSource,
@@ -37,20 +33,17 @@ pub struct InferSchemaSetting {
     state: Arc<Mutex<MigrationState>>,
 }
 
-pub struct BatchSizeSetting(pub i64);
-
 #[async_trait]
 impl MigrationSetting for InferSchemaSetting {
     async fn apply(
         &self,
         plan: &MigrationPlan,
-        _context: Arc<Mutex<MigrationContext>>,
+        context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.apply_schema(plan).await?;
 
-        self.set_source_metadata(&plan.migration.sources()).await?;
-        self.set_destination_metadata(&plan.migration.targets())
-            .await?;
+        set_source_metadata(&context, &plan.migration.sources()).await?;
+        set_destination_metadata(&context, &plan.migration.targets()).await?;
 
         // Set the infer schema flag to global state
         {
@@ -153,36 +146,6 @@ impl InferSchemaSetting {
         }
     }
 
-    pub async fn set_source_metadata(
-        &self,
-        source_tables: &[String],
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if let DataSource::Database(src) = &self.source {
-            let mut src_guard = src.lock().await;
-            let metadata =
-                MetadataProvider::build_metadata_graph(src_guard.adapter().as_ref(), source_tables)
-                    .await?;
-            src_guard.set_metadata(metadata);
-        }
-        Ok(())
-    }
-
-    pub async fn set_destination_metadata(
-        &self,
-        destination_tables: &[String],
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if let DataDestination::Database(dest) = &self.destination {
-            let mut dest_guard = dest.lock().await;
-            let metadata = MetadataProvider::build_metadata_graph(
-                dest_guard.adapter().as_ref(),
-                destination_tables,
-            )
-            .await?;
-            dest_guard.set_metadata(metadata);
-        }
-        Ok(())
-    }
-
     async fn source_adapter(
         &self,
     ) -> Result<Arc<dyn SqlAdapter + Send + Sync>, Box<dyn std::error::Error>> {
@@ -190,40 +153,4 @@ impl InferSchemaSetting {
             DataSource::Database(source) => Ok(source.lock().await.adapter()),
         }
     }
-}
-
-#[async_trait]
-impl MigrationSetting for BatchSizeSetting {
-    async fn apply(
-        &self,
-        _plan: &MigrationPlan,
-        context: Arc<Mutex<MigrationContext>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let context = context.lock().await;
-        let mut state = context.state.lock().await;
-        state.batch_size = self.0 as usize;
-        info!("Batch size setting applied");
-        Ok(())
-    }
-}
-
-pub async fn parse_settings(
-    settings: &[Setting],
-    context: &Arc<Mutex<MigrationContext>>,
-) -> Vec<Box<dyn MigrationSetting>> {
-    let mut migration_settings = Vec::new();
-    for setting in settings {
-        match (setting.key.as_str(), setting.value.clone()) {
-            ("infer_schema", SettingValue::Boolean(true)) => {
-                migration_settings
-                    .push(Box::new(InferSchemaSetting::new(context).await)
-                        as Box<dyn MigrationSetting>)
-            }
-            ("batch_size", SettingValue::Integer(size)) => migration_settings
-                .push(Box::new(BatchSizeSetting(size)) as Box<dyn MigrationSetting>),
-            _ => (), // Ignore unknown settings
-        }
-    }
-
-    migration_settings
 }

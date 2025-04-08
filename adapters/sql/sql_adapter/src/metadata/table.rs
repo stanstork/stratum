@@ -147,6 +147,10 @@ impl TableMetadata {
         self.name = name.to_owned();
     }
 
+    pub fn get_column(&self, name: &str) -> Option<&ColumnMetadata> {
+        self.columns.get(name)
+    }
+
     fn collect_recursive_tables(
         metadata: &TableMetadata,
         visited: &mut HashSet<String>,

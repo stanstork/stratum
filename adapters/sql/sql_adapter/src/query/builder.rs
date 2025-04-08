@@ -229,6 +229,27 @@ impl SqlQueryBuilder {
         self
     }
 
+    pub fn add_column(mut self, table: &str, column: &ColumnDef) -> Self {
+        let mut query = format!("ALTER TABLE {} ADD COLUMN {} ", table, column.name);
+        if column.char_max_length.is_some() {
+            query.push_str(&format!(
+                "{}({})",
+                column.data_type,
+                column.char_max_length.unwrap()
+            ));
+        } else {
+            query.push_str(&format!("{}", column.data_type));
+        }
+        if !column.is_nullable {
+            query.push_str(" NOT NULL");
+        }
+        if let Some(default_val) = &column.default {
+            query.push_str(&format!(" DEFAULT {}", default_val));
+        }
+        self.query.push_str(&query);
+        self
+    }
+
     pub fn order_by(mut self, column: &str, direction: &str) -> Self {
         self.query
             .push_str(&format!(" ORDER BY {} {}", column, direction));

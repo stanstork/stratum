@@ -4,7 +4,7 @@ use crate::{
     context::MigrationContext,
     destination::data_dest::DataDestination,
     producer::Producer,
-    settings::parse_settings,
+    settings::{parse_settings, set_destination_metadata, set_source_metadata},
     source::data_source::DataSource,
 };
 use smql::plan::MigrationPlan;
@@ -22,6 +22,7 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
 
     apply_settings(&plan, Arc::clone(&context)).await?;
     // validate_destination(&plan, Arc::clone(&context)).await?;
+    set_metadata(&context, &plan).await?;
 
     let (shutdown_sender, shutdown_receiver) = watch::channel(false);
 
@@ -94,6 +95,19 @@ async fn apply_settings(
     }
 
     context.lock().await.debug_state().await;
+
+    Ok(())
+}
+
+async fn set_metadata(
+    context: &Arc<Mutex<MigrationContext>>,
+    plan: &MigrationPlan,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source_tables = plan.migration.sources();
+    let destination_tables = plan.migration.targets();
+
+    set_source_metadata(context, &source_tables).await?;
+    set_destination_metadata(context, &destination_tables).await?;
 
     Ok(())
 }

@@ -31,6 +31,19 @@ impl DataSource {
             other => Err(format!("Unsupported data source format: {:?}", other).into()),
         }
     }
+
+    pub async fn fetch_metadata(
+        &self,
+        table: &str,
+    ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
+        match self {
+            DataSource::Database(db) => {
+                let db = db.lock().await.adapter();
+                let metadata = db.fetch_metadata(table).await?;
+                Ok(metadata)
+            }
+        }
+    }
 }
 
 #[async_trait]

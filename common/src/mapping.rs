@@ -19,8 +19,6 @@ pub struct FieldNameMap {
     reverse: HashMap<String, String>, // new_name → old_name
 }
 
-pub struct FieldMapping;
-
 impl ScopedNameMap {
     pub fn new() -> Self {
         Self {
@@ -96,9 +94,7 @@ impl FieldNameMap {
     pub fn is_empty(&self) -> bool {
         self.forward.is_empty() && self.reverse.is_empty()
     }
-}
 
-impl FieldMapping {
     pub fn extract_field_map(mappings: &Vec<ScopeMapping>) -> ScopedNameMap {
         let mut scope_map = ScopedNameMap::new();
         for scopes in mappings {
@@ -141,5 +137,9 @@ impl FieldMapping {
         }
 
         FieldNameMap::new(name_map)
+    }
+
+    pub fn forward_map(&self) -> HashMap<String, String> {
+        self.forward.clone()
     }
 }
