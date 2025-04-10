@@ -3,8 +3,9 @@ use crate::{
     consumer::Consumer,
     context::MigrationContext,
     destination::data_dest::DataDestination,
+    metadata::{set_destination_metadata, set_source_metadata},
     producer::Producer,
-    settings::{parse_settings, set_destination_metadata, set_source_metadata},
+    settings::parse_settings,
     source::data_source::DataSource,
 };
 use smql::plan::MigrationPlan;

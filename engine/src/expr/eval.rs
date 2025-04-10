@@ -29,7 +29,15 @@ impl Evaluator for Expression {
             } => {
                 let left_val = left.evaluate(row)?;
                 let right_val = right.evaluate(row)?;
-                apply_arithmetic(&left_val, &right_val, operator)
+                eval_arithmetic(&left_val, &right_val, operator)
+            }
+
+            Expression::FunctionCall { name, arguments } => {
+                let evaluated_args: Vec<ColumnValue> = arguments
+                    .iter()
+                    .map(|arg| arg.evaluate(row))
+                    .collect::<Option<Vec<_>>>()?;
+                eval_function(name, &evaluated_args)
             }
 
             _ => {
@@ -40,7 +48,7 @@ impl Evaluator for Expression {
     }
 }
 
-fn apply_arithmetic(left: &ColumnValue, right: &ColumnValue, op: &Operator) -> Option<ColumnValue> {
+fn eval_arithmetic(left: &ColumnValue, right: &ColumnValue, op: &Operator) -> Option<ColumnValue> {
     use ColumnValue::*;
 
     let as_float = |v: &ColumnValue| match v {
@@ -71,5 +79,44 @@ fn apply_arithmetic(left: &ColumnValue, right: &ColumnValue, op: &Operator) -> O
         }
 
         _ => None,
+    }
+}
+
+fn eval_function(name: &str, args: &Vec<ColumnValue>) -> Option<ColumnValue> {
+    match name.to_ascii_lowercase().as_str() {
+        "lower" => match args.get(0)? {
+            ColumnValue::String(s) => Some(ColumnValue::String(s.to_lowercase())),
+            _ => None,
+        },
+        "upper" => match args.get(0)? {
+            ColumnValue::String(s) => Some(ColumnValue::String(s.to_uppercase())),
+            _ => None,
+        },
+        "concat" => {
+            let concatenated = args
+                .iter()
+                .map(|arg| match arg {
+                    ColumnValue::String(s) => s
+                        .trim_start_matches('\"')
+                        .trim_end_matches('\"')
+                        .to_string(),
+                    ColumnValue::Int(i) => i.to_string(),
+                    ColumnValue::Float(f) => f.to_string(),
+                    ColumnValue::Boolean(b) => b.to_string(),
+                    ColumnValue::Uuid(u) => u.to_string(),
+                    ColumnValue::Date(d) => d.to_string(),
+                    ColumnValue::Timestamp(t) => t.to_rfc3339(),
+                    ColumnValue::Bytes(b) => String::from_utf8_lossy(b).to_string(),
+                    ColumnValue::Json(v) => v.to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join("");
+            Some(ColumnValue::String(concatenated))
+        }
+
+        _ => {
+            eprintln!("Unsupported function: {}", name);
+            None
+        }
     }
 }

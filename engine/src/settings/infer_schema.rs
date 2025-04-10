@@ -2,7 +2,7 @@ use super::MigrationSetting;
 use crate::{
     context::MigrationContext,
     destination::data_dest::DataDestination,
-    settings::{set_destination_metadata, set_source_metadata},
+    metadata::{set_destination_metadata, set_source_metadata},
     source::data_source::DataSource,
     state::MigrationState,
 };

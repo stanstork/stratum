@@ -193,6 +193,10 @@ impl<'a> SchemaPlan<'a> {
 
         for computed in computed_fields {
             let column_name = &computed.name;
+            if metadata.get_column(column_name).is_some() {
+                continue;
+            }
+
             if let Some(inferred_type) = computed.expression.infer_type(&metadata.columns()) {
                 defs.push(ColumnDef {
                     name: column_name.clone(),
