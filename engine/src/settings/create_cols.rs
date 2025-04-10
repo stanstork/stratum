@@ -1,5 +1,9 @@
 use super::MigrationSetting;
-use crate::{context::MigrationContext, destination::data_dest::DataDestination};
+use crate::{
+    context::MigrationContext,
+    destination::data_dest::DataDestination,
+    metadata::{fetch_dest_metadata, fetch_source_metadata},
+};
 use async_trait::async_trait;
 use postgres::data_type::PgColumnDataType;
 use smql::plan::MigrationPlan;
@@ -32,10 +36,10 @@ impl MigrationSetting for CreateMissingColumnsSetting {
         let context = context.lock().await;
         for destination in plan.migration.targets() {
             let dest_name = destination.clone();
-            let dest_metadata = context.destination.fetch_metadata(&dest_name).await?;
+            let dest_metadata = fetch_dest_metadata(&context.destination, &dest_name).await?;
 
             let src_name = context.entity_name_map.reverse_resolve(&dest_name);
-            let src_metadata = context.source.fetch_metadata(&src_name).await?;
+            let src_metadata = fetch_source_metadata(&context.source, &src_name).await?;
 
             Self::add_columns(&context, &dest_name, &src_metadata, &dest_metadata).await?;
             Self::add_computed_columns(&context, &dest_name, &src_metadata, &dest_metadata).await?;

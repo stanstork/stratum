@@ -112,6 +112,9 @@ impl FieldNameMap {
                             Expression::Arithmetic { .. } => {
                                 computed_fields.push(ComputedField::new(target, expression));
                             }
+                            Expression::FunctionCall { .. } => {
+                                computed_fields.push(ComputedField::new(target, expression));
+                            }
                             _ => {} // Handle other expression types
                         }
                     }

@@ -26,6 +26,14 @@ impl TypeInferencer for Expression {
                 Some(get_numeric_type(lt, rt))
             }
 
+            Expression::FunctionCall { name, arguments: _ } => {
+                match name.to_ascii_lowercase().as_str() {
+                    "lower" | "upper" => Some(ColumnDataType::VarChar),
+                    "concat" => Some(ColumnDataType::VarChar),
+                    _ => None,
+                }
+            }
+
             _ => {
                 eprintln!("Unsupported expression type for type inference: {:?}", self);
                 None
