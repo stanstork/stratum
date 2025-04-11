@@ -94,11 +94,14 @@ condition = { ident ~ WHITESPACE* ~ comparator ~ WHITESPACE* ~ (string | decimal
 // ==============================
 
 load = {
-    ^"LOAD" ~ WHITESPACE* ~ ident // Lookup name
-    ~ WHITESPACE* ~ ^"FROM" ~ WHITESPACE* ~ ident  // Table name
-    ~ WHITESPACE* ~ ^"USING" ~ WHITESPACE* ~ ident  // Key column
+    ^"LOAD" ~ WHITESPACE* ~ ident
+    ~ WHITESPACE* ~ ^"FROM" ~ WHITESPACE* ~ ^"TABLE" ~ WHITESPACE* ~ ident
+    ~ WHITESPACE* ~ ^"JOIN" ~ WHITESPACE* ~ ident
+    ~ "(" ~ WHITESPACE* ~ load_mapping ~ (WHITESPACE* ~ "," ~ WHITESPACE* ~ load_mapping)* ~ WHITESPACE* ~ ")"
     ~ WHITESPACE* ~ ";"
 }
+
+load_mapping = { ident ~ WHITESPACE* ~ "->" ~ WHITESPACE* ~ ident }
 
 // ==============================
 //         MAP
