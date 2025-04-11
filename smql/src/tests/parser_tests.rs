@@ -180,7 +180,11 @@ mod tests {
                 status = "active"
             );
 
-            LOAD orders FROM order_table USING order_id;
+            LOAD customers FROM TABLE customers
+            JOIN orders (
+                id -> customer_id,
+                product_id -> product_id
+            );
 
             MAP (
                 customers(
