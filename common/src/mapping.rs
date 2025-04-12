@@ -1,51 +1,49 @@
+use crate::computed::ComputedField;
 use smql::statements::{
     expr::Expression,
-    mapping::{Mapping, ScopeMapping},
+    mapping::{EntityMapping, Mapping},
     migrate::MigrateBlock,
 };
 use std::collections::HashMap;
 
-use crate::computed::ComputedField;
-
 #[derive(Clone, Debug)]
-pub struct ScopedNameMap {
-    pub scopes: HashMap<String, FieldNameMap>,
+pub struct EntityFieldsMap {
+    pub entities: HashMap<String, NameMap>,
     pub computed: HashMap<String, Vec<ComputedField>>,
 }
 
 #[derive(Clone, Debug)]
-pub struct FieldNameMap {
+pub struct NameMap {
     forward: HashMap<String, String>, // old_name → new_name
     reverse: HashMap<String, String>, // new_name → old_name
 }
 
-impl ScopedNameMap {
+impl EntityFieldsMap {
     pub fn new() -> Self {
         Self {
-            scopes: HashMap::new(),
+            entities: HashMap::new(),
             computed: HashMap::new(),
         }
     }
 
-    pub fn add_mapping(&mut self, scope: &str, map: HashMap<String, String>) {
-        self.scopes
-            .insert(scope.to_string(), FieldNameMap::new(map));
+    pub fn add_mapping(&mut self, entity: &str, map: HashMap<String, String>) {
+        self.entities.insert(entity.to_string(), NameMap::new(map));
     }
 
-    pub fn add_computed(&mut self, scope: &str, computed: Vec<ComputedField>) {
-        self.computed.insert(scope.to_string(), computed);
+    pub fn add_computed(&mut self, entity: &str, computed: Vec<ComputedField>) {
+        self.computed.insert(entity.to_string(), computed);
     }
 
-    pub fn get_scope(&self, scope: &str) -> Option<&FieldNameMap> {
-        self.scopes.get(scope)
+    pub fn get_entity(&self, entity: &str) -> Option<&NameMap> {
+        self.entities.get(entity)
     }
 
-    pub fn get_computed(&self, scope: &str) -> Option<&Vec<ComputedField>> {
-        self.computed.get(scope)
+    pub fn get_computed(&self, entity: &str) -> Option<&Vec<ComputedField>> {
+        self.computed.get(entity)
     }
 
-    pub fn resolve(&self, scope: &str, name: &str) -> String {
-        if let Some(name_map) = self.scopes.get(scope) {
+    pub fn resolve(&self, entity: &str, name: &str) -> String {
+        if let Some(name_map) = self.entities.get(entity) {
             name_map.resolve(name)
         } else {
             name.to_string()
@@ -53,11 +51,15 @@ impl ScopedNameMap {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.scopes.is_empty()
+        self.entities.is_empty()
+    }
+
+    pub fn contains(&self, entity: &str) -> bool {
+        self.entities.contains_key(entity)
     }
 }
 
-impl FieldNameMap {
+impl NameMap {
     pub fn new(map: HashMap<String, String>) -> Self {
         let mut forward = HashMap::new();
         let mut reverse = HashMap::new();
@@ -95,14 +97,14 @@ impl FieldNameMap {
         self.forward.is_empty() && self.reverse.is_empty()
     }
 
-    pub fn extract_field_map(mappings: &Vec<ScopeMapping>) -> ScopedNameMap {
-        let mut scope_map = ScopedNameMap::new();
-        for scopes in mappings {
-            let scope = scopes.scope.clone();
+    pub fn extract_field_map(mappings: &Vec<EntityMapping>) -> EntityFieldsMap {
+        let mut entity_map = EntityFieldsMap::new();
+        for entities in mappings {
+            let entity = entities.entity.clone();
             let mut field_map = HashMap::new();
             let mut computed_fields = Vec::new();
 
-            for mapping in &scopes.mappings {
+            for mapping in &entities.mappings {
                 match mapping {
                     Mapping::ExpressionToColumn { expression, target } => {
                         match expression {
@@ -115,6 +117,10 @@ impl FieldNameMap {
                             Expression::FunctionCall { .. } => {
                                 computed_fields.push(ComputedField::new(target, expression));
                             }
+                            Expression::Lookup { table, key, field } => {
+                                println!("Lookup: table: {}, key: {}", table, key);
+                                // Handle lookup expressions
+                            }
                             _ => {} // Handle other expression types
                         }
                     }
@@ -122,14 +128,14 @@ impl FieldNameMap {
                 }
             }
 
-            // Add the field map and computed fields to the scope map
-            scope_map.add_mapping(&scope, field_map);
-            scope_map.add_computed(&scope, computed_fields);
+            // Add the field map and computed fields to the entity map
+            entity_map.add_mapping(&entity, field_map);
+            entity_map.add_computed(&entity, computed_fields);
         }
-        scope_map
+        entity_map
     }
 
-    pub fn extract_name_map(migrate: &MigrateBlock) -> FieldNameMap {
+    pub fn extract_name_map(migrate: &MigrateBlock) -> NameMap {
         let mut name_map = HashMap::new();
 
         for migration in migrate.migrations.iter() {
@@ -139,10 +145,14 @@ impl FieldNameMap {
             name_map.insert(source.to_ascii_lowercase(), target.to_ascii_lowercase());
         }
 
-        FieldNameMap::new(name_map)
+        NameMap::new(name_map)
     }
 
     pub fn forward_map(&self) -> HashMap<String, String> {
         self.forward.clone()
+    }
+
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.forward.contains_key(key)
     }
 }

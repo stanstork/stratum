@@ -1,6 +1,6 @@
 use crate::statements::{
     aggregate::Aggregation, connection::Connection, filter::Filter, load::Load,
-    mapping::ScopeMapping, migrate::MigrateBlock, statement::Statement,
+    mapping::EntityMapping, migrate::MigrateBlock, statement::Statement,
 };
 
 #[derive(Debug, Clone)]
@@ -8,7 +8,7 @@ pub struct MigrationPlan {
     pub connections: Connection,
     pub migration: MigrateBlock,
     pub filter: Option<Filter>,
-    pub mapping: Vec<ScopeMapping>,
+    pub mapping: Vec<EntityMapping>,
     pub aggregations: Vec<Aggregation>,
     pub load: Option<Load>,
 }

@@ -33,6 +33,8 @@ impl MigrationSetting for CreateMissingColumnsSetting {
         plan: &MigrationPlan,
         context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        println!("Applying CreateMissingColumnsSetting");
+
         let context = context.lock().await;
         for destination in plan.migration.targets() {
             let dest_name = destination.clone();
@@ -58,7 +60,7 @@ impl CreateMissingColumnsSetting {
         source_metadata: &TableMetadata,
         dest_metadata: &TableMetadata,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(columns) = context.field_name_map.get_scope(table) {
+        if let Some(columns) = context.field_name_map.get_entity(table) {
             for (source_col, dest_col) in columns.forward_map() {
                 let source_col_meta = source_metadata
                     .get_column(&source_col)

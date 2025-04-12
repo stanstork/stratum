@@ -1,5 +1,5 @@
 use super::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField};
-use crate::requests::JoinClause;
+use crate::join::{JoinClause, JoinType};
 
 #[derive(Debug, Clone)]
 pub struct SqlQueryBuilder {
@@ -56,16 +56,29 @@ impl SqlQueryBuilder {
 
     pub fn join(mut self, joins: &Vec<JoinClause>) -> Self {
         for join in joins {
+            let join_type = match join.join_type {
+                JoinType::Inner => "INNER",
+                JoinType::Left => "LEFT",
+                JoinType::Right => "RIGHT",
+                JoinType::Full => "FULL",
+            };
             self.query.push_str(&format!(
-                " {} JOIN {} AS {} ON {}.{} = {}.{}",
-                join.join_type,
-                join.table,
-                join.alias,
-                join.from_alias,
-                join.from_col,
-                join.alias,
-                join.to_col
+                " {} JOIN {} AS {} ON ",
+                join_type, join.right.table, join.right.alias
             ));
+
+            let conditions: Vec<String> = join
+                .conditions
+                .iter()
+                .map(|cond| {
+                    format!(
+                        "{}.{} = {}.{}",
+                        join.left.alias, cond.left.column, join.right.alias, cond.right.column
+                    )
+                })
+                .collect();
+
+            self.query.push_str(&conditions.join(" AND "));
         }
         self
     }

@@ -23,7 +23,6 @@ impl StatementParser for Load {
 
         let mut mappings = Vec::new();
 
-        // Now all remaining children are `load_mapping` rules
         for mapping_pair in inner {
             if mapping_pair.as_rule() == Rule::load_mapping {
                 let mut parts = mapping_pair.into_inner();

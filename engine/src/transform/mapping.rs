@@ -1,23 +1,23 @@
 use super::pipeline::Transform;
 use crate::record::Record;
-use common::mapping::{FieldNameMap, ScopedNameMap};
+use common::mapping::{EntityFieldsMap, NameMap};
 
 pub struct ColumnMapper {
-    ns_map: ScopedNameMap,
+    ns_map: EntityFieldsMap,
 }
 
 pub struct TableMapper {
-    name_map: FieldNameMap,
+    name_map: NameMap,
 }
 
 impl ColumnMapper {
-    pub fn new(ns_map: ScopedNameMap) -> Self {
+    pub fn new(ns_map: EntityFieldsMap) -> Self {
         Self { ns_map }
     }
 }
 
 impl TableMapper {
-    pub fn new(name_map: FieldNameMap) -> Self {
+    pub fn new(name_map: NameMap) -> Self {
         Self { name_map }
     }
 }

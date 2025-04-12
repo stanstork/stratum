@@ -3,7 +3,7 @@ use crate::{
     metadata::{column::metadata::ColumnMetadata, table::TableMetadata},
     query::{builder::SqlQueryBuilder, column::ColumnDef, fk::ForeignKeyDef},
 };
-use common::mapping::{FieldNameMap, ScopedNameMap};
+use common::mapping::{EntityFieldsMap, NameMap};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -31,10 +31,10 @@ pub struct SchemaPlan<'a> {
     type_extractor: &'a TypeExtractor,
 
     /// Custom column name mapping provided by the user (e.g., source → target column names).
-    column_name_map: ScopedNameMap,
+    column_name_map: EntityFieldsMap,
 
     /// Custom table name mapping provided by the user (e.g., source → target table names).
-    table_name_map: FieldNameMap,
+    table_name_map: NameMap,
 
     /// Metadata graph containing all source tables and their relationships
     /// (both referencing and referenced dependencies).
@@ -55,8 +55,8 @@ impl<'a> SchemaPlan<'a> {
         source_adapter: Arc<(dyn SqlAdapter + Send + Sync)>,
         type_converter: &'a TypeConverter,
         type_extractor: &'a TypeExtractor,
-        table_name_map: FieldNameMap,
-        column_name_map: ScopedNameMap,
+        table_name_map: NameMap,
+        column_name_map: EntityFieldsMap,
     ) -> Self {
         Self {
             source_adapter,
@@ -145,6 +145,13 @@ impl<'a> SchemaPlan<'a> {
 
     pub fn add_fk_defs(&mut self, table_name: &str, fk_defs: Vec<ForeignKeyDef>) {
         self.fk_definitions.insert(table_name.to_string(), fk_defs);
+    }
+
+    pub fn add_fk_def(&mut self, table_name: &str, fk_def: ForeignKeyDef) {
+        self.fk_definitions
+            .entry(table_name.to_string())
+            .or_insert_with(Vec::new)
+            .push(fk_def);
     }
 
     pub fn add_metadata(&mut self, table_name: &str, metadata: TableMetadata) {

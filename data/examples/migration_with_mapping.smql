@@ -4,23 +4,22 @@ CONNECTIONS (
 );
 
 MIGRATE (
-    invoices -> statement,
-    orders -> orders,
-    products -> goods
+    orders -> orders_flat
 )
 WITH SETTINGS (
-    INFER_SCHEMA = TRUE,
-    CREATE_MISSING_COLUMNS = TRUE
+    INFER_SCHEMA = FALSE,
+    CREATE_MISSING_COLUMNS = TRUE,
+    CREATE_MISSING_TABLES = TRUE
+);
+
+LOAD u FROM TABLE users
+JOIN orders (
+    id -> user_id
 );
 
 MAP (
-    goods (
-        id -> product_id,
-        price * 1.2 -> price_with_tax,
-        UPPER(name) -> name,
-        CONCAT(name, " ", "2") -> name_c
-    ),
     orders (
-        total -> ammount
+        u[name] -> user_name,
+        u[email] -> user_email
     )
 );

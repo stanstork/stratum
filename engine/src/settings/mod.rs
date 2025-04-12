@@ -1,6 +1,7 @@
 use crate::context::MigrationContext;
 use async_trait::async_trait;
 use batch_size::BatchSizeSetting;
+use create_tables::CreateMissingTablesSetting;
 use infer_schema::InferSchemaSetting;
 use smql::{
     plan::MigrationPlan,
@@ -11,6 +12,7 @@ use tokio::sync::Mutex;
 
 pub mod batch_size;
 pub mod create_cols;
+pub mod create_tables;
 pub mod infer_schema;
 
 #[async_trait]
@@ -38,6 +40,9 @@ pub async fn parse_settings(
                 .push(Box::new(BatchSizeSetting(size)) as Box<dyn MigrationSetting>),
             ("create_missing_columns", SettingValue::Boolean(true)) => migration_settings
                 .push(Box::new(create_cols::CreateMissingColumnsSetting::new())
+                    as Box<dyn MigrationSetting>),
+            ("create_missing_tables", SettingValue::Boolean(true)) => migration_settings
+                .push(Box::new(CreateMissingTablesSetting::new(context).await)
                     as Box<dyn MigrationSetting>),
             _ => (), // Ignore unknown settings
         }

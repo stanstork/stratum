@@ -40,6 +40,13 @@ impl Evaluator for Expression {
                 eval_function(name, &evaluated_args)
             }
 
+            Expression::Lookup { table, key, field } => {
+                println!("Lookup table: {}, key: {}", table, key);
+                // Implement lookup logic here
+                // For now, just return None
+                None
+            }
+
             _ => {
                 eprintln!("Unsupported expression type: {:?}", self);
                 None

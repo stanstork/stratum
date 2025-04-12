@@ -2,9 +2,15 @@ use crate::{
     buffer::SledBuffer, destination::data_dest::DataDestination, source::data_source::DataSource,
     state::MigrationState,
 };
-use common::mapping::{FieldNameMap, ScopedNameMap};
-use smql::{plan::MigrationPlan, statements::connection::DataFormat};
-use sql_adapter::metadata::table::TableMetadata;
+use common::mapping::{EntityFieldsMap, NameMap};
+use smql::{
+    plan::MigrationPlan,
+    statements::{connection::DataFormat, load::Load},
+};
+use sql_adapter::{
+    join::{self, JoinClause},
+    metadata::table::TableMetadata,
+};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -34,12 +40,17 @@ pub struct MigrationContext {
     /// Maps source entity names to destination entity names
     ///
     /// Typically used for renaming tables or collections.
-    pub entity_name_map: FieldNameMap,
+    pub entity_name_map: NameMap,
 
     /// Maps source field names to destination field names
     ///
     /// Typically used for renaming columns or attributes.
-    pub field_name_map: ScopedNameMap,
+    pub field_name_map: EntityFieldsMap,
+
+    /// Load operation to be performed during migration
+    ///
+    /// Typically used to join tables.
+    pub load: Option<Load>,
 }
 
 impl MigrationContext {
@@ -53,8 +64,13 @@ impl MigrationContext {
         let source_format = plan.connections.source.data_format;
         let destination_format = plan.connections.destination.data_format;
 
-        let entity_name_map = FieldNameMap::extract_name_map(&plan.migration);
-        let field_name_map = FieldNameMap::extract_field_map(&plan.mapping);
+        let entity_name_map = NameMap::extract_name_map(&plan.migration);
+        let field_name_map = NameMap::extract_field_map(&plan.mapping);
+        let join = JoinClause::from_load(&plan.load.clone().unwrap());
+
+        println!("Computed field name map: {:?}", field_name_map);
+
+        println!("Join Clause: {:?}", join);
 
         Arc::new(Mutex::new(MigrationContext {
             state,
@@ -65,6 +81,7 @@ impl MigrationContext {
             destination_format,
             entity_name_map,
             field_name_map,
+            load: plan.load.clone(),
         }))
     }
 
