@@ -25,8 +25,6 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
     // validate_destination(&plan, Arc::clone(&context)).await?;
     set_metadata(&context, &plan).await?;
 
-    unimplemented!();
-
     let (shutdown_sender, shutdown_receiver) = watch::channel(false);
 
     let producer = Producer::new(Arc::clone(&context), shutdown_sender)

@@ -1,8 +1,10 @@
 use crate::computed::ComputedField;
-use smql::statements::{
-    expr::Expression,
-    mapping::{EntityMapping, Mapping},
-    migrate::MigrateBlock,
+use smql::{
+    plan::MigrationPlan,
+    statements::{
+        expr::Expression,
+        mapping::{EntityMapping, Mapping},
+    },
 };
 use std::collections::HashMap;
 
@@ -117,9 +119,8 @@ impl NameMap {
                             Expression::FunctionCall { .. } => {
                                 computed_fields.push(ComputedField::new(target, expression));
                             }
-                            Expression::Lookup { table, key, field } => {
-                                println!("Lookup: table: {}, key: {}", table, key);
-                                // Handle lookup expressions
+                            Expression::Lookup { .. } => {
+                                computed_fields.push(ComputedField::new(target, expression));
                             }
                             _ => {} // Handle other expression types
                         }
@@ -135,14 +136,21 @@ impl NameMap {
         entity_map
     }
 
-    pub fn extract_name_map(migrate: &MigrateBlock) -> NameMap {
+    pub fn extract_name_map(plan: &MigrationPlan) -> NameMap {
         let mut name_map = HashMap::new();
 
-        for migration in migrate.migrations.iter() {
+        for migration in plan.migration.migrations.iter() {
             let source = migration.sources.first().unwrap().clone();
             let target = migration.target.clone();
 
             name_map.insert(source.to_ascii_lowercase(), target.to_ascii_lowercase());
+        }
+
+        if let Some(ref load) = plan.load {
+            name_map.insert(
+                load.name.to_ascii_lowercase(),
+                load.source.to_ascii_lowercase(),
+            );
         }
 
         NameMap::new(name_map)

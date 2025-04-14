@@ -38,8 +38,14 @@ impl DbDataSource for MySqlDataSource {
                 }
                 processed_tables.insert(table.clone());
 
-                let request =
-                    FetchRowsRequest::new(table.clone(), None, fields, vec![], batch_size, offset);
+                let request = FetchRowsRequest::new(
+                    table.clone(),
+                    Some(table.clone()),
+                    fields,
+                    vec![],
+                    batch_size,
+                    offset,
+                );
                 let rows = self.adapter.fetch_rows(request).await?;
                 records.extend(rows.into_iter().map(Record::RowData));
             }

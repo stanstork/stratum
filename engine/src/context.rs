@@ -7,10 +7,7 @@ use smql::{
     plan::MigrationPlan,
     statements::{connection::DataFormat, load::Load},
 };
-use sql_adapter::{
-    join::{self, JoinClause},
-    metadata::table::TableMetadata,
-};
+use sql_adapter::metadata::table::TableMetadata;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -47,9 +44,6 @@ pub struct MigrationContext {
     /// Typically used for renaming columns or attributes.
     pub field_name_map: EntityFieldsMap,
 
-    /// Load operation to be performed during migration
-    ///
-    /// Typically used to join tables.
     pub load: Option<Load>,
 }
 
@@ -64,13 +58,10 @@ impl MigrationContext {
         let source_format = plan.connections.source.data_format;
         let destination_format = plan.connections.destination.data_format;
 
-        let entity_name_map = NameMap::extract_name_map(&plan.migration);
+        let entity_name_map = NameMap::extract_name_map(plan);
         let field_name_map = NameMap::extract_field_map(&plan.mapping);
-        let join = JoinClause::from_load(&plan.load.clone().unwrap());
 
-        println!("Computed field name map: {:?}", field_name_map);
-
-        println!("Join Clause: {:?}", join);
+        println!("Entity Name Map: {:?}", entity_name_map);
 
         Arc::new(Mutex::new(MigrationContext {
             state,

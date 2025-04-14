@@ -6,7 +6,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use postgres::data_type::PgColumnDataType;
-use smql::plan::MigrationPlan;
+use smql::{plan::MigrationPlan, statements::expr::Expression};
 use sql_adapter::{
     metadata::{
         column::{data_type::ColumnDataType, metadata::ColumnMetadata},
@@ -33,8 +33,6 @@ impl MigrationSetting for CreateMissingColumnsSetting {
         plan: &MigrationPlan,
         context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        println!("Applying CreateMissingColumnsSetting");
-
         let context = context.lock().await;
         for destination in plan.migration.targets() {
             let dest_name = destination.clone();
@@ -89,9 +87,20 @@ impl CreateMissingColumnsSetting {
             for computed_col in computed.iter() {
                 if dest_metadata.get_column(&computed_col.name).is_none() {
                     // Add the computed column to the destination table
-                    let col_type = computed_col
-                        .expression
-                        .infer_type(&source_metadata.columns());
+                    let col_type = match &computed_col.expression {
+                        Expression::Lookup { table, .. } => {
+                            let table_name = context.entity_name_map.resolve(&table);
+                            let source_metadata =
+                                fetch_source_metadata(&context.source, &table_name).await?;
+                            computed_col
+                                .expression
+                                .infer_type(&source_metadata.columns())
+                        }
+                        _ => computed_col
+                            .expression
+                            .infer_type(&source_metadata.columns()),
+                    };
+
                     if let Some(col_type) = col_type {
                         let col_def =
                             ColumnDef::from_computed(&computed_col.name, &col_type.to_string());

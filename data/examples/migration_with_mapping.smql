@@ -18,7 +18,7 @@ JOIN orders (
 );
 
 MAP (
-    orders (
+    orders_flat (
         u[name] -> user_name,
         u[email] -> user_email
     )

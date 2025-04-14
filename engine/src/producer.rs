@@ -63,7 +63,7 @@ impl Producer {
     }
 
     async fn run(self) -> usize {
-        let mut offset = self.buffer.read_last_offset();
+        let mut offset = 0; //self.buffer.read_last_offset();
         let mut batch_number = 1;
 
         loop {
