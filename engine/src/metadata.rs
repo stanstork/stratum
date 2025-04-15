@@ -3,7 +3,7 @@ use crate::{
     source::data_source::DataSource,
 };
 use sql_adapter::metadata::{provider::MetadataProvider, table::TableMetadata};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
 pub async fn fetch_dest_metadata(
@@ -37,13 +37,26 @@ pub async fn set_source_metadata(
     source_tables: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let context = context.lock().await;
-    if let DataSource::Database(src) = &context.source {
+    let state = context.state.lock().await;
+
+    if let DataSource::Database(src) = &context.source.data_source {
         let mut src_guard = src.lock().await;
-        let metadata =
+
+        let metadata = if state.infer_schema {
             MetadataProvider::build_metadata_graph(src_guard.adapter().as_ref(), source_tables)
-                .await?;
+                .await?
+        } else {
+            let mut metadata = HashMap::new();
+            for table in source_tables {
+                let table_metadata = src_guard.adapter().fetch_metadata(table).await?;
+                metadata.insert(table.clone(), table_metadata);
+            }
+            metadata
+        };
+
         src_guard.set_metadata(metadata);
     }
+
     Ok(())
 }
 

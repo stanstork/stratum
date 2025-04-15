@@ -1,5 +1,7 @@
 use crate::{
-    buffer::SledBuffer, destination::data_dest::DataDestination, source::data_source::DataSource,
+    buffer::SledBuffer,
+    destination::data_dest::DataDestination,
+    source::{data_source::DataSource, source::Source},
     state::MigrationState,
 };
 use common::mapping::{EntityFieldsMap, NameMap};
@@ -17,7 +19,7 @@ pub struct MigrationContext {
     pub state: Arc<Mutex<MigrationState>>,
 
     /// Input data source (e.g., databases, files)
-    pub source: DataSource,
+    pub source: Source,
 
     /// Output data destination (e.g., databases, files)
     pub destination: DataDestination,
@@ -49,7 +51,7 @@ pub struct MigrationContext {
 
 impl MigrationContext {
     pub fn init(
-        source: DataSource,
+        source: Source,
         destination: DataDestination,
         plan: &MigrationPlan,
     ) -> Arc<Mutex<MigrationContext>> {
@@ -80,7 +82,7 @@ impl MigrationContext {
         &self,
         source_name: &str,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
-        match (&self.source, &self.source_format) {
+        match (&self.source.data_source, &self.source_format) {
             (DataSource::Database(db), format)
                 if format.intersects(DataFormat::sql_databases()) =>
             {

@@ -2,6 +2,7 @@ use crate::{record::Record, source::data_source::DbDataSource};
 use async_trait::async_trait;
 use mysql::mysql::MySqlAdapter;
 use sql_adapter::adapter::SqlAdapter;
+use sql_adapter::join::{self, JoinClause};
 use sql_adapter::{metadata::table::TableMetadata, requests::FetchRowsRequest};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -25,27 +26,29 @@ impl DbDataSource for MySqlDataSource {
     async fn fetch_data(
         &self,
         batch_size: usize,
+        join: Option<JoinClause>,
         offset: Option<usize>,
     ) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
         let mut records = Vec::new();
         let mut processed_tables = HashSet::new();
+        let joins = join.map_or_else(Vec::new, |j| vec![j]);
 
         for table in self.metadata.keys() {
             let grouped_fields = self.get_metadata(table).select_fields();
-            for (table, fields) in grouped_fields {
-                if processed_tables.contains(&table) {
+            for (tbl, fields) in grouped_fields {
+                if !processed_tables.insert(tbl.clone()) {
                     continue;
                 }
-                processed_tables.insert(table.clone());
 
                 let request = FetchRowsRequest::new(
-                    table.clone(),
-                    Some(table.clone()),
+                    tbl.clone(),
+                    Some(tbl.clone()),
                     fields,
-                    vec![],
+                    joins.clone(),
                     batch_size,
                     offset,
                 );
+
                 let rows = self.adapter.fetch_rows(request).await?;
                 records.extend(rows.into_iter().map(Record::RowData));
             }

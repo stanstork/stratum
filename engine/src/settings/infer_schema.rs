@@ -3,7 +3,7 @@ use crate::{
     context::MigrationContext,
     destination::data_dest::DataDestination,
     metadata::{set_destination_metadata, set_source_metadata},
-    source::data_source::DataSource,
+    source::{data_source::DataSource, source::Source},
     state::MigrationState,
 };
 use async_trait::async_trait;
@@ -24,7 +24,7 @@ use tokio::sync::Mutex;
 use tracing::info;
 
 pub struct InferSchemaSetting {
-    source: DataSource,
+    source: Source,
     source_format: DataFormat,
     destination: DataDestination,
     dest_format: DataFormat,
@@ -107,7 +107,7 @@ impl InferSchemaSetting {
         schema_plan: &mut SchemaPlan<'_>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if let (DataSource::Database(_source), true) = (
-            &self.source,
+            &self.source.data_source,
             self.source_format.intersects(DataFormat::sql_databases()),
         ) {
             let adapter = self.source_adapter().await?;
@@ -149,7 +149,7 @@ impl InferSchemaSetting {
     async fn source_adapter(
         &self,
     ) -> Result<Arc<dyn SqlAdapter + Send + Sync>, Box<dyn std::error::Error>> {
-        match &self.source {
+        match &self.source.data_source {
             DataSource::Database(source) => Ok(source.lock().await.adapter()),
         }
     }

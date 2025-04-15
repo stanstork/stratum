@@ -1,7 +1,7 @@
 use crate::{
     buffer::SledBuffer,
     context::MigrationContext,
-    source::data_source::{DataSource, DbDataSource},
+    source::source::Source,
     transform::{
         computed::ComputedTransform,
         mapping::{ColumnMapper, TableMapper},
@@ -14,7 +14,7 @@ use tracing::{error, info};
 
 pub struct Producer {
     buffer: Arc<SledBuffer>,
-    data_source: Arc<Mutex<dyn DbDataSource>>,
+    source: Source,
     pipeline: TransformPipeline,
     shutdown_sender: watch::Sender<bool>,
     batch_size: usize,
@@ -24,9 +24,7 @@ impl Producer {
     pub async fn new(context: Arc<Mutex<MigrationContext>>, sender: watch::Sender<bool>) -> Self {
         let ctx = context.lock().await;
         let buffer = Arc::clone(&ctx.buffer);
-        let data_source = match &ctx.source {
-            DataSource::Database(db) => Arc::clone(db),
-        };
+        let source = ctx.source.clone();
 
         let mut pipeline = TransformPipeline::new();
 
@@ -45,7 +43,7 @@ impl Producer {
 
         Self {
             buffer,
-            data_source,
+            source,
             batch_size,
             shutdown_sender: sender,
             pipeline,
@@ -72,13 +70,7 @@ impl Producer {
                 self.batch_size
             );
 
-            match self
-                .data_source
-                .lock()
-                .await
-                .fetch_data(self.batch_size, Some(offset))
-                .await
-            {
+            match self.source.fetch_data(self.batch_size, Some(offset)).await {
                 Ok(records) if records.is_empty() => {
                     info!("No more records to fetch. Terminating producer.");
                     break;

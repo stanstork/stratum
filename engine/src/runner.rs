@@ -6,7 +6,7 @@ use crate::{
     metadata::{set_destination_metadata, set_source_metadata},
     producer::Producer,
     settings::parse_settings,
-    source::data_source::DataSource,
+    source::{data_source::DataSource, load::LoadSource, source::Source},
 };
 use smql::plan::MigrationPlan;
 use sql_adapter::metadata::{provider::MetadataProvider, table::TableMetadata};
@@ -59,15 +59,17 @@ pub async fn load_src_metadata(
     }
 }
 
-async fn create_source(plan: &MigrationPlan) -> Result<DataSource, Box<dyn std::error::Error>> {
-    let adapter = get_adapter(
-        plan.connections.source.data_format,
-        &plan.connections.source.con_str,
-    )
-    .await?;
+async fn create_source(plan: &MigrationPlan) -> Result<Source, Box<dyn std::error::Error>> {
+    let format = plan.connections.source.data_format;
+    let adapter = get_adapter(format, &plan.connections.source.con_str).await?;
 
-    let data_source = DataSource::from_adapter(plan.connections.source.data_format, adapter)?;
-    Ok(data_source)
+    let data_source = DataSource::from_adapter(format, adapter)?;
+    let load_source = plan
+        .load
+        .clone()
+        .map(|load| LoadSource::from_load(format, load));
+
+    Ok(Source::new(data_source, load_source))
 }
 
 async fn create_destination(

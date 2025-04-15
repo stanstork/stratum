@@ -1,8 +1,8 @@
 use crate::{
     context::MigrationContext,
     destination::data_dest::DataDestination,
-    metadata::{fetch_dest_metadata, fetch_source_metadata},
-    source::data_source::DataSource,
+    metadata::fetch_source_metadata,
+    source::{data_source::DataSource, source::Source},
     state::MigrationState,
 };
 use async_trait::async_trait;
@@ -25,7 +25,7 @@ use tracing::info;
 use super::MigrationSetting;
 
 pub struct CreateMissingTablesSetting {
-    source: DataSource,
+    source: Source,
     source_format: DataFormat,
     destination: DataDestination,
     dest_format: DataFormat,
@@ -64,7 +64,7 @@ impl MigrationSetting for CreateMissingTablesSetting {
             let dest_name = destination.clone();
             let src_name = context.entity_name_map.reverse_resolve(&dest_name);
 
-            let metadata = fetch_source_metadata(&context.source, &src_name).await?;
+            let metadata = fetch_source_metadata(&context.source.data_source, &src_name).await?;
 
             schema_plan.add_column_defs(
                 &metadata.name,
@@ -117,7 +117,7 @@ impl CreateMissingTablesSetting {
     async fn source_adapter(
         &self,
     ) -> Result<Arc<dyn SqlAdapter + Send + Sync>, Box<dyn std::error::Error>> {
-        match &self.source {
+        match &self.source.data_source {
             DataSource::Database(source) => Ok(source.lock().await.adapter()),
         }
     }
