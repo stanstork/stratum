@@ -64,7 +64,7 @@ impl SqlQueryBuilder {
             };
             self.query.push_str(&format!(
                 " {} JOIN {} AS {} ON ",
-                join_type, join.right.table, join.right.alias
+                join_type, join.left.table, join.left.alias
             ));
 
             let conditions: Vec<String> = join

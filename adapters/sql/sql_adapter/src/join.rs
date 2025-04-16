@@ -1,3 +1,20 @@
+use crate::metadata::table::TableMetadata;
+
+#[derive(Debug, Clone)]
+pub struct Join {
+    pub source_metadata: TableMetadata,
+    pub join_clause: JoinClause,
+}
+
+impl Join {
+    pub fn new(source_metadata: TableMetadata, join_clause: JoinClause) -> Self {
+        Self {
+            source_metadata,
+            join_clause,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct JoinClause {
     pub left: JoinedTable,

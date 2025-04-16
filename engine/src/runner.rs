@@ -64,10 +64,16 @@ async fn create_source(plan: &MigrationPlan) -> Result<Source, Box<dyn std::erro
     let adapter = get_adapter(format, &plan.connections.source.con_str).await?;
 
     let data_source = DataSource::from_adapter(format, adapter)?;
-    let load_source = plan
-        .load
-        .clone()
-        .map(|load| LoadSource::from_load(format, load));
+    let db_adapter = match &data_source {
+        DataSource::Database(db) => db.lock().await.adapter(),
+        _ => return Err("Invalid data source".into()),
+    };
+
+    let load_source = if plan.load.is_some() {
+        Some(LoadSource::from_load(db_adapter, format, plan.load.clone().unwrap()).await?)
+    } else {
+        None
+    };
 
     Ok(Source::new(data_source, load_source))
 }

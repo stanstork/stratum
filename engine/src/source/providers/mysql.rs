@@ -2,7 +2,7 @@ use crate::{record::Record, source::data_source::DbDataSource};
 use async_trait::async_trait;
 use mysql::mysql::MySqlAdapter;
 use sql_adapter::adapter::SqlAdapter;
-use sql_adapter::join::{self, JoinClause};
+use sql_adapter::join::{self, Join, JoinClause};
 use sql_adapter::{metadata::table::TableMetadata, requests::FetchRowsRequest};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -26,7 +26,7 @@ impl DbDataSource for MySqlDataSource {
     async fn fetch_data(
         &self,
         batch_size: usize,
-        join: Option<JoinClause>,
+        join: Option<Join>,
         offset: Option<usize>,
     ) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
         let mut records = Vec::new();
@@ -40,11 +40,41 @@ impl DbDataSource for MySqlDataSource {
                     continue;
                 }
 
+                let tbl_join = joins
+                    .iter()
+                    .filter(|j| j.join_clause.right.table.eq_ignore_ascii_case(&tbl))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let mut joined_fields = Vec::new();
+                for j in &tbl_join {
+                    let fields = j.source_metadata.select_fields();
+                    let mut fields = fields
+                        .get(&j.source_metadata.name)
+                        .map(|f| f.clone())
+                        .unwrap_or_default();
+
+                    for field in fields.iter_mut() {
+                        field.table = j.join_clause.left.alias.clone();
+                        field.alias =
+                            Some(format!("{}_{}", j.join_clause.left.table, field.column));
+                    }
+
+                    joined_fields.extend(fields);
+                }
+
+                let mut fields = fields.clone();
+                fields.extend(joined_fields);
+
+                let join_clause = tbl_join
+                    .iter()
+                    .map(|j| j.join_clause.clone())
+                    .collect::<Vec<_>>();
+
                 let request = FetchRowsRequest::new(
                     tbl.clone(),
                     Some(tbl.clone()),
                     fields,
-                    joins.clone(),
+                    join_clause,
                     batch_size,
                     offset,
                 );

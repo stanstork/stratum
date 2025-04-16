@@ -1,18 +1,30 @@
 use smql::statements::{connection::DataFormat, load::Load};
-use sql_adapter::join::{JoinClause, JoinColumn, JoinCondition, JoinType, JoinedTable};
+use sql_adapter::{
+    adapter::SqlAdapter,
+    join::{Join, JoinClause, JoinColumn, JoinCondition, JoinType, JoinedTable},
+};
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub enum LoadSource {
-    TableJoin(JoinClause),
+    TableJoin(Join),
     File { path: String, format: String },
 }
 
 impl LoadSource {
-    pub fn from_load(source_format: DataFormat, value: Load) -> Self {
+    pub async fn from_load(
+        adapter: Arc<(dyn SqlAdapter + Send + Sync)>,
+        source_format: DataFormat,
+        value: Load,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         match source_format {
             DataFormat::MySql | DataFormat::Postgres => {
                 let join_clause = Self::join_from_load(&value);
-                LoadSource::TableJoin(join_clause)
+                let source_metadata = adapter.fetch_metadata(&value.source).await?;
+                Ok(LoadSource::TableJoin(Join::new(
+                    source_metadata,
+                    join_clause,
+                )))
             }
             _ => panic!("Unsupported data format"),
         }
