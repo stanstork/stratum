@@ -46,7 +46,12 @@ pub struct MigrationContext {
     /// Typically used for renaming columns or attributes.
     pub field_name_map: EntityFieldsMap,
 
-    pub load: Option<Load>,
+    /// Data to be loaded outside of source
+    /// Used for loading data from files or other sources
+    /// and combining it with the main data source for migration.
+    ///
+    /// This is a list of load operations that will be performed
+    pub loads: Vec<Load>,
 }
 
 impl MigrationContext {
@@ -62,8 +67,7 @@ impl MigrationContext {
 
         let entity_name_map = NameMap::extract_name_map(plan);
         let field_name_map = NameMap::extract_field_map(&plan.mapping);
-
-        println!("Entity Name Map: {:?}", entity_name_map);
+        let loads = plan.loads.clone();
 
         Arc::new(Mutex::new(MigrationContext {
             state,
@@ -74,7 +78,7 @@ impl MigrationContext {
             destination_format,
             entity_name_map,
             field_name_map,
-            load: plan.load.clone(),
+            loads,
         }))
     }
 

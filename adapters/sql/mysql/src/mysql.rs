@@ -112,8 +112,6 @@ impl SqlAdapter for MySqlAdapter {
 
         println!("Executing query: {}", query.0);
 
-        unimplemented!("MySQL does not support fetching rows with a limit and offset");
-
         let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
         let result = rows
             .into_iter()

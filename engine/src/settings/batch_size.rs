@@ -1,4 +1,4 @@
-use super::MigrationSetting;
+use super::{phase::MigrationSettingsPhase, MigrationSetting};
 use crate::context::MigrationContext;
 use async_trait::async_trait;
 use smql::plan::MigrationPlan;
@@ -10,6 +10,10 @@ pub struct BatchSizeSetting(pub i64);
 
 #[async_trait]
 impl MigrationSetting for BatchSizeSetting {
+    fn phase(&self) -> MigrationSettingsPhase {
+        MigrationSettingsPhase::BatchSize
+    }
+
     async fn apply(
         &self,
         _plan: &MigrationPlan,

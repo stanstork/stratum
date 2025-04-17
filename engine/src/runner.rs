@@ -10,7 +10,7 @@ use crate::{
 };
 use smql::plan::MigrationPlan;
 use sql_adapter::metadata::{provider::MetadataProvider, table::TableMetadata};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, vec};
 use tokio::sync::{watch, Mutex};
 use tracing::info;
 
@@ -30,6 +30,7 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
     let producer = Producer::new(Arc::clone(&context), shutdown_sender)
         .await
         .spawn();
+
     let consumer = Consumer::new(Arc::clone(&context), shutdown_receiver)
         .await
         .spawn();
@@ -69,13 +70,13 @@ async fn create_source(plan: &MigrationPlan) -> Result<Source, Box<dyn std::erro
         _ => return Err("Invalid data source".into()),
     };
 
-    let load_source = if plan.load.is_some() {
-        Some(LoadSource::from_load(db_adapter, format, plan.load.clone().unwrap()).await?)
-    } else {
-        None
-    };
+    let mut load_sources = vec![];
+    for load in plan.loads.iter() {
+        let load_source = LoadSource::from_load(db_adapter.clone(), format, load.clone()).await?;
+        load_sources.push(load_source);
+    }
 
-    Ok(Source::new(data_source, load_source))
+    Ok(Source::new(data_source, load_sources))
 }
 
 async fn create_destination(

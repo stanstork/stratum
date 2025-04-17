@@ -1,4 +1,4 @@
-use super::MigrationSetting;
+use super::{phase::MigrationSettingsPhase, MigrationSetting};
 use crate::{
     context::MigrationContext,
     destination::data_dest::DataDestination,
@@ -35,6 +35,10 @@ pub struct InferSchemaSetting {
 
 #[async_trait]
 impl MigrationSetting for InferSchemaSetting {
+    fn phase(&self) -> MigrationSettingsPhase {
+        MigrationSettingsPhase::InferSchema
+    }
+
     async fn apply(
         &self,
         plan: &MigrationPlan,

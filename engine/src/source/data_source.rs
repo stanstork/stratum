@@ -42,7 +42,7 @@ pub trait DbDataSource: Send + Sync {
     async fn fetch_data(
         &self,
         batch_size: usize,
-        join: Option<Join>,
+        joins: Vec<Join>,
         offset: Option<usize>,
     ) -> Result<Vec<Record>, Box<dyn std::error::Error>>;
 

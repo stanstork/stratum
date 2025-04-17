@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use batch_size::BatchSizeSetting;
 use create_tables::CreateMissingTablesSetting;
 use infer_schema::InferSchemaSetting;
+use phase::MigrationSettingsPhase;
 use smql::{
     plan::MigrationPlan,
     statements::setting::{Setting, SettingValue},
@@ -14,9 +15,11 @@ pub mod batch_size;
 pub mod create_cols;
 pub mod create_tables;
 pub mod infer_schema;
+pub mod phase;
 
 #[async_trait]
 pub trait MigrationSetting {
+    fn phase(&self) -> MigrationSettingsPhase;
     async fn apply(
         &self,
         plan: &MigrationPlan,
@@ -48,5 +51,6 @@ pub async fn parse_settings(
         }
     }
 
+    migration_settings.sort_by_key(|s| s.phase());
     migration_settings
 }

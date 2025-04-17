@@ -17,9 +17,27 @@ JOIN orders (
     id -> user_id
 );
 
+LOAD oi FROM TABLE order_items
+JOIN orders (
+    order_id -> id
+);
+
+LOAD p FROM TABLE products
+JOIN order_items (
+    id -> product_id
+);
+
+LOAD p2 FROM TABLE products2
+JOIN order_items2 (
+    id -> product_id
+);
+
 MAP (
     orders_flat (
         u[name] -> user_name,
-        u[email] -> user_email
+        u[email] -> user_email,
+        oi[price] -> order_price,
+        p[name] -> product_name,
+        p[price] -> product_price
     )
 );

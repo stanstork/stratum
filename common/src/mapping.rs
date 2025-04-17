@@ -146,7 +146,7 @@ impl NameMap {
             name_map.insert(source.to_ascii_lowercase(), target.to_ascii_lowercase());
         }
 
-        if let Some(ref load) = plan.load {
+        for load in plan.loads.iter() {
             name_map.insert(
                 load.name.to_ascii_lowercase(),
                 load.source.to_ascii_lowercase(),

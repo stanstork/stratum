@@ -1,4 +1,4 @@
-use super::MigrationSetting;
+use super::{phase::MigrationSettingsPhase, MigrationSetting};
 use crate::{
     context::MigrationContext,
     destination::data_dest::DataDestination,
@@ -28,6 +28,10 @@ impl CreateMissingColumnsSetting {
 
 #[async_trait]
 impl MigrationSetting for CreateMissingColumnsSetting {
+    fn phase(&self) -> MigrationSettingsPhase {
+        MigrationSettingsPhase::CreateMissingColumns
+    }
+
     async fn apply(
         &self,
         plan: &MigrationPlan,

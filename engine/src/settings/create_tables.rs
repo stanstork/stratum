@@ -13,7 +13,6 @@ use sql_adapter::{
     adapter::SqlAdapter,
     metadata::{
         column::{data_type::ColumnDataType, metadata::ColumnMetadata},
-        fk,
         table::TableMetadata,
     },
     schema::plan::SchemaPlan,
@@ -22,7 +21,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
 
-use super::MigrationSetting;
+use super::{phase::MigrationSettingsPhase, MigrationSetting};
 
 pub struct CreateMissingTablesSetting {
     source: Source,
@@ -36,6 +35,10 @@ pub struct CreateMissingTablesSetting {
 
 #[async_trait]
 impl MigrationSetting for CreateMissingTablesSetting {
+    fn phase(&self) -> MigrationSettingsPhase {
+        MigrationSettingsPhase::CreateMissingTables
+    }
+
     async fn apply(
         &self,
         plan: &smql::plan::MigrationPlan,
