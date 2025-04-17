@@ -39,53 +39,45 @@ impl DbDataSource for MySqlDataSource {
                     continue;
                 }
 
-                let tbl_join = joins
+                let related_joins = Join::collect_related_joins(tbl.clone(), &joins);
+
+                let mut joined_fields = Vec::new();
+                for j in &related_joins {
+                    let fields = j.source_metadata.select_fields();
+                    let mut fields = fields
+                        .get(&j.source_metadata.name)
+                        .map(|f| f.clone())
+                        .unwrap_or_default();
+
+                    for field in fields.iter_mut() {
+                        field.table = j.join_clause.left.alias.clone();
+                        field.alias =
+                            Some(format!("{}_{}", j.join_clause.left.table, field.column));
+                        if j.join_clause.fields.contains(&field.column) {
+                            joined_fields.push(field.clone());
+                        }
+                    }
+                }
+
+                let mut fields = fields.clone();
+                fields.extend(joined_fields);
+
+                let join_clause = related_joins
                     .iter()
                     .map(|j| j.join_clause.clone())
                     .collect::<Vec<_>>();
 
-                let related_joins = Join::collect_related_joins(tbl.clone(), &tbl_join);
+                let request = FetchRowsRequest::new(
+                    tbl.clone(),
+                    Some(tbl.clone()),
+                    fields,
+                    join_clause,
+                    batch_size,
+                    offset,
+                );
 
-                println!("Related joins for table {}: {:?}", tbl, related_joins);
-
-                unimplemented!();
-
-                // let mut joined_fields = Vec::new();
-                // for j in &tbl_join {
-                //     let fields = j.source_metadata.select_fields();
-                //     let mut fields = fields
-                //         .get(&j.source_metadata.name)
-                //         .map(|f| f.clone())
-                //         .unwrap_or_default();
-
-                //     for field in fields.iter_mut() {
-                //         field.table = j.join_clause.left.alias.clone();
-                //         field.alias =
-                //             Some(format!("{}_{}", j.join_clause.left.table, field.column));
-                //     }
-
-                //     joined_fields.extend(fields);
-                // }
-
-                // let mut fields = fields.clone();
-                // fields.extend(joined_fields);
-
-                // let join_clause = tbl_join
-                //     .iter()
-                //     .map(|j| j.join_clause.clone())
-                //     .collect::<Vec<_>>();
-
-                // let request = FetchRowsRequest::new(
-                //     tbl.clone(),
-                //     Some(tbl.clone()),
-                //     fields,
-                //     join_clause,
-                //     batch_size,
-                //     offset,
-                // );
-
-                // let rows = self.adapter.fetch_rows(request).await?;
-                // records.extend(rows.into_iter().map(Record::RowData));
+                let rows = self.adapter.fetch_rows(request).await?;
+                records.extend(rows.into_iter().map(Record::RowData));
             }
         }
 

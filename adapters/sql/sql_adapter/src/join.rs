@@ -16,7 +16,7 @@ impl Join {
         }
     }
 
-    pub fn collect_related_joins(root_table: String, joins: &Vec<JoinClause>) -> Vec<JoinClause> {
+    pub fn collect_related_joins(root_table: String, joins: &Vec<Join>) -> Vec<Join> {
         let mut visited_tables = HashSet::new();
         let mut result_joins = Vec::new();
         let mut queue = VecDeque::new();
@@ -24,28 +24,29 @@ impl Join {
         visited_tables.insert(root_table.clone());
         queue.push_back(root_table.clone());
 
-        let mut remaining_joins: Vec<JoinClause> = joins.to_vec();
+        let mut remaining_joins = joins.to_vec();
 
         while let Some(current) = queue.pop_front() {
             let mut still_unprocessed = Vec::new();
 
             for join in remaining_joins.into_iter() {
-                let (next_table, matches) = if join.left.table.eq_ignore_ascii_case(&current)
-                    && !visited_tables.contains(&join.right.table)
-                {
-                    (Some(join.right.clone()), true)
-                } else if join.right.table.eq_ignore_ascii_case(&current)
-                    && !visited_tables.contains(&join.left.table)
-                {
-                    (Some(join.left.clone()), true)
-                } else if visited_tables.contains(&join.left.table)
-                    && visited_tables.contains(&join.right.table)
-                {
-                    // Already visited both sides, still valid join
-                    (None, true)
-                } else {
-                    (None, false)
-                };
+                let (next_table, matches) =
+                    if join.join_clause.left.table.eq_ignore_ascii_case(&current)
+                        && !visited_tables.contains(&join.join_clause.right.table)
+                    {
+                        (Some(join.join_clause.right.clone()), true)
+                    } else if join.join_clause.right.table.eq_ignore_ascii_case(&current)
+                        && !visited_tables.contains(&join.join_clause.left.table)
+                    {
+                        (Some(join.join_clause.left.clone()), true)
+                    } else if visited_tables.contains(&join.join_clause.left.table)
+                        && visited_tables.contains(&join.join_clause.right.table)
+                    {
+                        // Already visited both sides, still valid join
+                        (None, true)
+                    } else {
+                        (None, false)
+                    };
 
                 if matches {
                     result_joins.push(join.clone());
@@ -72,6 +73,7 @@ pub struct JoinClause {
     pub right: JoinedTable,
     pub join_type: JoinType,
     pub conditions: Vec<JoinCondition>,
+    pub fields: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

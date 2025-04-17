@@ -8,6 +8,7 @@ use crate::{
     settings::parse_settings,
     source::{data_source::DataSource, load::LoadSource, source::Source},
 };
+use common::mapping::NameMap;
 use smql::plan::MigrationPlan;
 use sql_adapter::metadata::{provider::MetadataProvider, table::TableMetadata};
 use std::{collections::HashMap, sync::Arc, vec};
@@ -70,9 +71,17 @@ async fn create_source(plan: &MigrationPlan) -> Result<Source, Box<dyn std::erro
         _ => return Err("Invalid data source".into()),
     };
 
+    let field_name_map = NameMap::extract_field_map(&plan.mapping);
+
     let mut load_sources = vec![];
     for load in plan.loads.iter() {
-        let load_source = LoadSource::from_load(db_adapter.clone(), format, load.clone()).await?;
+        let load_source = LoadSource::from_load(
+            db_adapter.clone(),
+            format,
+            load.clone(),
+            &field_name_map.computed,
+        )
+        .await?;
         load_sources.push(load_source);
     }
 

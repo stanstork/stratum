@@ -1,9 +1,10 @@
-use smql::statements::{connection::DataFormat, load::Load};
+use common::computed::ComputedField;
+use smql::statements::{connection::DataFormat, expr::Expression, load::Load};
 use sql_adapter::{
     adapter::SqlAdapter,
     join::{Join, JoinClause, JoinColumn, JoinCondition, JoinType, JoinedTable},
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(Debug, Clone)]
 pub enum LoadSource {
@@ -16,10 +17,11 @@ impl LoadSource {
         adapter: Arc<(dyn SqlAdapter + Send + Sync)>,
         source_format: DataFormat,
         value: Load,
+        computed: &HashMap<String, Vec<ComputedField>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         match source_format {
             DataFormat::MySql | DataFormat::Postgres => {
-                let join_clause = Self::join_from_load(&value);
+                let join_clause = Self::join_from_load(&value, computed);
                 let source_metadata = adapter.fetch_metadata(&value.source).await?;
                 Ok(LoadSource::TableJoin(Join::new(
                     source_metadata,
@@ -30,7 +32,7 @@ impl LoadSource {
         }
     }
 
-    fn join_from_load(load: &Load) -> JoinClause {
+    fn join_from_load(load: &Load, computed: &HashMap<String, Vec<ComputedField>>) -> JoinClause {
         let left_alias = load.name.clone();
         let left_table = load.source.clone();
         let right_table = load.join.clone();
@@ -51,6 +53,27 @@ impl LoadSource {
             })
             .collect();
 
+        let computed_fields = computed
+            .values()
+            .flat_map(|fields| fields.clone())
+            .collect::<Vec<_>>();
+
+        let fields = computed_fields
+            .iter()
+            .map(|f| match &f.expression {
+                Expression::Lookup { table, key, field } => {
+                    if table.eq_ignore_ascii_case(&left_alias) {
+                        Some(key.clone())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .filter(Option::is_some)
+            .map(Option::unwrap)
+            .collect::<Vec<_>>();
+
         JoinClause {
             left: JoinedTable {
                 table: left_table,
@@ -62,6 +85,7 @@ impl LoadSource {
             },
             join_type: JoinType::Inner, // default, can be customized later
             conditions,
+            fields,
         }
     }
 }
