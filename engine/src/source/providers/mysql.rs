@@ -1,5 +1,6 @@
 use crate::{record::Record, source::data_source::DbDataSource};
 use async_trait::async_trait;
+use common::mapping::NameMap;
 use mysql::mysql::MySqlAdapter;
 use sql_adapter::adapter::SqlAdapter;
 use sql_adapter::join::{self, Join, JoinClause};
@@ -9,15 +10,21 @@ use std::sync::Arc;
 
 pub struct MySqlDataSource {
     metadata: HashMap<String, TableMetadata>,
+    entity_name_map: NameMap,
     adapter: MySqlAdapter,
 }
 
 impl MySqlDataSource {
-    pub fn new(adapter: MySqlAdapter) -> Self {
+    pub fn new(adapter: MySqlAdapter, entity_name_map: NameMap) -> Self {
         Self {
             metadata: HashMap::new(),
+            entity_name_map,
             adapter,
         }
+    }
+
+    pub fn set_entity_name_map(&mut self, entity_name_map: NameMap) {
+        self.entity_name_map = entity_name_map;
     }
 }
 
@@ -62,10 +69,17 @@ impl DbDataSource for MySqlDataSource {
                 let mut fields = fields.clone();
                 fields.extend(joined_fields);
 
-                let join_clause = related_joins
+                let mut join_clause = related_joins
                     .iter()
                     .map(|j| j.join_clause.clone())
                     .collect::<Vec<_>>();
+
+                for j in join_clause.iter_mut() {
+                    j.right.table = self.entity_name_map.reverse_resolve(&j.right.table);
+                    j.right.alias = j.right.table.clone();
+                }
+
+                println!("Join clause: {:?}", join_clause);
 
                 let request = FetchRowsRequest::new(
                     tbl.clone(),
@@ -77,6 +91,9 @@ impl DbDataSource for MySqlDataSource {
                 );
 
                 let rows = self.adapter.fetch_rows(request).await?;
+
+                println!("Rows: {:?}", rows);
+
                 records.extend(rows.into_iter().map(Record::RowData));
             }
         }

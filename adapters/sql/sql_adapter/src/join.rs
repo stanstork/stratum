@@ -1,6 +1,5 @@
-use std::collections::{HashSet, VecDeque};
-
 use crate::metadata::table::TableMetadata;
+use std::collections::{HashSet, VecDeque};
 
 #[derive(Debug, Clone)]
 pub struct Join {

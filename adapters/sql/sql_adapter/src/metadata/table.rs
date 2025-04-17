@@ -32,7 +32,7 @@ impl TableMetadata {
                 .keys()
                 .map(|col_name| SelectField {
                     table: table.name.clone(),
-                    alias: Some(format!("{}_{}", table.name, col_name)),
+                    alias: None,
                     column: col_name.clone(),
                     data_type: table.columns[col_name].data_type.to_string(),
                 })

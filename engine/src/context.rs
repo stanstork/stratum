@@ -67,6 +67,7 @@ impl MigrationContext {
 
         let entity_name_map = NameMap::extract_name_map(plan);
         let field_name_map = NameMap::extract_field_map(&plan.mapping);
+
         let loads = plan.loads.clone();
 
         Arc::new(Mutex::new(MigrationContext {

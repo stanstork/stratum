@@ -1,6 +1,7 @@
 use super::providers::mysql::MySqlDataSource;
 use crate::{adapter::Adapter, record::Record};
 use async_trait::async_trait;
+use common::mapping::NameMap;
 use smql::statements::connection::DataFormat;
 use sql_adapter::{
     adapter::SqlAdapter,
@@ -19,11 +20,12 @@ impl DataSource {
     pub fn from_adapter(
         format: DataFormat,
         adapter: Adapter,
+        entity_name_map: NameMap,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         match format {
             DataFormat::MySql => match adapter {
                 Adapter::MySql(mysql_adapter) => {
-                    let source = MySqlDataSource::new(mysql_adapter);
+                    let source = MySqlDataSource::new(mysql_adapter, entity_name_map);
                     Ok(DataSource::Database(Arc::new(Mutex::new(source))))
                 }
                 _ => Err("Expected MySql adapter, but got a different type".into()),

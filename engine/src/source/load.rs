@@ -1,4 +1,4 @@
-use common::computed::ComputedField;
+use common::{computed::ComputedField, mapping::NameMap};
 use smql::statements::{connection::DataFormat, expr::Expression, load::Load};
 use sql_adapter::{
     adapter::SqlAdapter,
@@ -18,10 +18,11 @@ impl LoadSource {
         source_format: DataFormat,
         value: Load,
         computed: &HashMap<String, Vec<ComputedField>>,
+        entity_name_map: NameMap,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         match source_format {
             DataFormat::MySql | DataFormat::Postgres => {
-                let join_clause = Self::join_from_load(&value, computed);
+                let join_clause = Self::join_from_load(&value, computed, entity_name_map);
                 let source_metadata = adapter.fetch_metadata(&value.source).await?;
                 Ok(LoadSource::TableJoin(Join::new(
                     source_metadata,
@@ -32,7 +33,11 @@ impl LoadSource {
         }
     }
 
-    fn join_from_load(load: &Load, computed: &HashMap<String, Vec<ComputedField>>) -> JoinClause {
+    fn join_from_load(
+        load: &Load,
+        computed: &HashMap<String, Vec<ComputedField>>,
+        entity_name_map: NameMap,
+    ) -> JoinClause {
         let left_alias = load.name.clone();
         let left_table = load.source.clone();
         let right_table = load.join.clone();
