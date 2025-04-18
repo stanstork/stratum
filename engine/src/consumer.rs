@@ -45,9 +45,9 @@ impl Consumer {
     }
 
     async fn run(self) {
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
+        // loop {
+        //     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // }
 
         let tables = self.data_dest.lock().await.get_tables();
 
@@ -88,7 +88,7 @@ impl Consumer {
         tables: &Vec<TableMetadata>,
     ) {
         let row_data = RowData::deserialize(record);
-        let table_name = self.table_name_map.resolve(&row_data.table);
+        let table_name = row_data.table.clone(); //self.table_name_map.resolve(&row_data.table);
 
         let batch = batch_map.entry(table_name.clone()).or_default();
         batch.push(Record::RowData(row_data));

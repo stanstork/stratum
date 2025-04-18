@@ -30,6 +30,10 @@ pub struct SchemaPlan<'a> {
     /// Function used to extract custom types such as enums from table metadata.
     type_extractor: &'a TypeExtractor,
 
+    /// Indicates whether to ignore constraints during the migration process.
+    /// Primary keys and foreign keys are not created in the target database.
+    ignore_constraints: bool,
+
     /// Custom column name mapping provided by the user (e.g., source → target column names).
     column_name_map: EntityFieldsMap,
 
@@ -55,6 +59,7 @@ impl<'a> SchemaPlan<'a> {
         source_adapter: Arc<(dyn SqlAdapter + Send + Sync)>,
         type_converter: &'a TypeConverter,
         type_extractor: &'a TypeExtractor,
+        ignore_constraints: bool,
         table_name_map: NameMap,
         column_name_map: EntityFieldsMap,
     ) -> Self {
@@ -62,6 +67,7 @@ impl<'a> SchemaPlan<'a> {
             source_adapter,
             type_converter,
             type_extractor,
+            ignore_constraints,
             column_name_map,
             table_name_map,
             metadata_graph: HashMap::new(),
@@ -81,7 +87,12 @@ impl<'a> SchemaPlan<'a> {
                 resolved_columns.extend(self.computed_column_definitions(&table));
 
                 SqlQueryBuilder::new()
-                    .create_table(&resolved_table, &resolved_columns, &[])
+                    .create_table(
+                        &resolved_table,
+                        &resolved_columns,
+                        &[],
+                        self.ignore_constraints,
+                    )
                     .build()
                     .0
             })
@@ -89,6 +100,10 @@ impl<'a> SchemaPlan<'a> {
     }
 
     pub fn fk_queries(&self) -> HashSet<String> {
+        if self.ignore_constraints {
+            return HashSet::new();
+        }
+
         self.fk_definitions
             .iter()
             .flat_map(|(table, fks)| {

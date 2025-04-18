@@ -146,6 +146,7 @@ impl SqlQueryBuilder {
         table: &str,
         columns: &[ColumnDef],
         foreign_keys: &[ForeignKeyDef],
+        ignore_constraints: bool,
     ) -> Self {
         self.query
             .push_str(&format!("\nCREATE TABLE {} (\n", table));
@@ -166,7 +167,7 @@ impl SqlQueryBuilder {
                     definition.push_str(&format!(" {}", col.data_type));
                 }
 
-                if !composite_pk && col.is_primary_key {
+                if !ignore_constraints && !composite_pk && col.is_primary_key {
                     definition.push_str(" PRIMARY KEY");
                 }
                 if !col.is_nullable {
@@ -179,7 +180,7 @@ impl SqlQueryBuilder {
             })
             .collect();
 
-        let pk_columns = if composite_pk {
+        let pk_columns = if !ignore_constraints && composite_pk {
             let pk_columns: Vec<String> = columns
                 .iter()
                 .filter(|c| c.is_primary_key)
@@ -190,15 +191,19 @@ impl SqlQueryBuilder {
             vec![]
         };
 
-        let foreign_key_defs: Vec<String> = foreign_keys
-            .iter()
-            .map(|fk| {
-                format!(
-                    "\tFOREIGN KEY ({}) REFERENCES {}({})",
-                    fk.column, fk.referenced_table, fk.referenced_column
-                )
-            })
-            .collect();
+        let foreign_key_defs: Vec<String> = if !ignore_constraints {
+            foreign_keys
+                .iter()
+                .map(|fk| {
+                    format!(
+                        "\tFOREIGN KEY ({}) REFERENCES {}({})",
+                        fk.column, fk.referenced_table, fk.referenced_column
+                    )
+                })
+                .collect()
+        } else {
+            vec![]
+        };
 
         let all_defs = column_defs
             .into_iter()

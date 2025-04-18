@@ -40,10 +40,9 @@ impl Evaluator for Expression {
                 eval_function(name, &evaluated_args)
             }
 
-            Expression::Lookup { table, key, field } => {
-                println!("Lookup table: {}, key: {}", table, key);
-                // Implement lookup logic here
-                // For now, just return None
+            Expression::Lookup { .. } => {
+                // Lookups are handled when loading data from the source
+                // and are not evaluated here.
                 None
             }
 

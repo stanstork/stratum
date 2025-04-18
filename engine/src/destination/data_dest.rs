@@ -1,5 +1,5 @@
 use super::providers::postgres::PgDestination;
-use crate::{adapter::Adapter, record::Record};
+use crate::{adapter::Adapter, record::Record, state::MigrationState};
 use async_trait::async_trait;
 use smql::statements::connection::DataFormat;
 use sql_adapter::{

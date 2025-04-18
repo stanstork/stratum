@@ -63,10 +63,12 @@ pub async fn load_src_metadata(
 
 async fn create_source(plan: &MigrationPlan) -> Result<Source, Box<dyn std::error::Error>> {
     let entity_name_map = NameMap::extract_name_map(plan);
+    let entity_field_map = NameMap::extract_field_map(&plan.mapping);
     let format = plan.connections.source.data_format;
     let adapter = get_adapter(format, &plan.connections.source.con_str).await?;
 
-    let data_source = DataSource::from_adapter(format, adapter, entity_name_map.clone())?;
+    let data_source =
+        DataSource::from_adapter(format, adapter, entity_name_map.clone(), entity_field_map)?;
     let db_adapter = match &data_source {
         DataSource::Database(db) => db.lock().await.adapter(),
         _ => return Err("Invalid data source".into()),

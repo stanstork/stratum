@@ -1,24 +1,34 @@
 use crate::{record::Record, source::data_source::DbDataSource};
 use async_trait::async_trait;
-use common::mapping::NameMap;
+use common::computed;
+use common::mapping::{EntityFieldsMap, NameMap};
 use mysql::mysql::MySqlAdapter;
+use smql::statements::expr::Expression;
 use sql_adapter::adapter::SqlAdapter;
 use sql_adapter::join::{self, Join, JoinClause};
+use sql_adapter::metadata::table;
 use sql_adapter::{metadata::table::TableMetadata, requests::FetchRowsRequest};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use tracing::field;
 
 pub struct MySqlDataSource {
     metadata: HashMap<String, TableMetadata>,
     entity_name_map: NameMap,
+    entity_field_map: EntityFieldsMap,
     adapter: MySqlAdapter,
 }
 
 impl MySqlDataSource {
-    pub fn new(adapter: MySqlAdapter, entity_name_map: NameMap) -> Self {
+    pub fn new(
+        adapter: MySqlAdapter,
+        entity_name_map: NameMap,
+        entity_field_map: EntityFieldsMap,
+    ) -> Self {
         Self {
             metadata: HashMap::new(),
             entity_name_map,
+            entity_field_map,
             adapter,
         }
     }
@@ -56,12 +66,30 @@ impl DbDataSource for MySqlDataSource {
                         .map(|f| f.clone())
                         .unwrap_or_default();
 
-                    for field in fields.iter_mut() {
-                        field.table = j.join_clause.left.alias.clone();
-                        field.alias =
-                            Some(format!("{}_{}", j.join_clause.left.table, field.column));
-                        if j.join_clause.fields.contains(&field.column) {
-                            joined_fields.push(field.clone());
+                    for field1 in fields.iter_mut() {
+                        field1.table = j.join_clause.left.alias.clone();
+
+                        let get_computed = self
+                            .entity_field_map
+                            .get_computed(&self.entity_name_map.resolve(&tbl));
+
+                        if let Some(c_field) = get_computed {
+                            for f in c_field.iter() {
+                                match &f.expression {
+                                    Expression::Lookup { table, key, field } => {
+                                        if field1.table.eq_ignore_ascii_case(&table)
+                                            && field1.column.eq_ignore_ascii_case(&key)
+                                        {
+                                            field1.alias = Some(f.name.clone());
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+
+                        if j.join_clause.fields.contains(&field1.column) {
+                            joined_fields.push(field1.clone());
                         }
                     }
                 }
@@ -83,6 +111,7 @@ impl DbDataSource for MySqlDataSource {
 
                 let request = FetchRowsRequest::new(
                     tbl.clone(),
+                    Some(self.entity_name_map.resolve(&tbl)),
                     Some(tbl.clone()),
                     fields,
                     join_clause,

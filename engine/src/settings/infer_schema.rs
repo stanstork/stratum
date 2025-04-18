@@ -79,11 +79,13 @@ impl InferSchemaSetting {
         let type_extractor = |meta: &TableMetadata| TableMetadata::enums(meta);
 
         let source_adapter = self.source_adapter().await?;
+        let ignore_constraints = self.state.lock().await.ignore_constraints;
 
         let mut schema_plan = SchemaPlan::new(
             source_adapter,
             &type_converter,
             &type_extractor,
+            ignore_constraints,
             self.table_name_map.clone(),
             self.column_name_map.clone(),
         );
@@ -143,6 +145,7 @@ impl InferSchemaSetting {
             self.dest_format.intersects(DataFormat::sql_databases()),
         ) {
             (DataDestination::Database(destination), true) => {
+                let state = self.state.lock().await;
                 destination.lock().await.infer_schema(&schema_plan).await?;
                 Ok(())
             }
