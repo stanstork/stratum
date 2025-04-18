@@ -1,4 +1,4 @@
-use crate::{join::JoinClause, query::select::SelectField};
+use crate::{join::clause::JoinClause, query::select::SelectField};
 
 #[derive(Debug, Clone)]
 pub struct FetchRowsRequest {

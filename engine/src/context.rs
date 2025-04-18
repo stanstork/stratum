@@ -4,7 +4,7 @@ use crate::{
     source::{data_source::DataSource, source::Source},
     state::MigrationState,
 };
-use common::mapping::{EntityFieldsMap, NameMap};
+use common::mapping::{FieldMappings, FieldNameMap};
 use smql::{
     plan::MigrationPlan,
     statements::{connection::DataFormat, load::Load},
@@ -39,12 +39,12 @@ pub struct MigrationContext {
     /// Maps source entity names to destination entity names
     ///
     /// Typically used for renaming tables or collections.
-    pub entity_name_map: NameMap,
+    pub entity_name_map: FieldNameMap,
 
     /// Maps source field names to destination field names
     ///
     /// Typically used for renaming columns or attributes.
-    pub field_name_map: EntityFieldsMap,
+    pub field_name_map: FieldMappings,
 
     /// Data to be loaded outside of source
     /// Used for loading data from files or other sources
@@ -65,8 +65,8 @@ impl MigrationContext {
         let source_format = plan.connections.source.data_format;
         let destination_format = plan.connections.destination.data_format;
 
-        let entity_name_map = NameMap::extract_name_map(plan);
-        let field_name_map = NameMap::extract_field_map(&plan.mapping);
+        let entity_name_map = FieldNameMap::get_field_name_map(plan);
+        let field_name_map = FieldNameMap::get_field_mappings(&plan.mapping);
 
         println!("Field name map: {:?}", field_name_map);
 
@@ -89,7 +89,7 @@ impl MigrationContext {
         &self,
         source_name: &str,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
-        match (&self.source.data_source, &self.source_format) {
+        match (&self.source.primary, &self.source_format) {
             (DataSource::Database(db), format)
                 if format.intersects(DataFormat::sql_databases()) =>
             {

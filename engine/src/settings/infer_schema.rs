@@ -7,7 +7,7 @@ use crate::{
     state::MigrationState,
 };
 use async_trait::async_trait;
-use common::mapping::{EntityFieldsMap, NameMap};
+use common::mapping::{FieldMappings, FieldNameMap};
 use postgres::data_type::PgColumnDataType;
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::{
@@ -28,8 +28,8 @@ pub struct InferSchemaSetting {
     source_format: DataFormat,
     destination: DataDestination,
     dest_format: DataFormat,
-    table_name_map: NameMap,
-    column_name_map: EntityFieldsMap,
+    table_name_map: FieldNameMap,
+    column_name_map: FieldMappings,
     state: Arc<Mutex<MigrationState>>,
 }
 
@@ -113,7 +113,7 @@ impl InferSchemaSetting {
         schema_plan: &mut SchemaPlan<'_>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if let (DataSource::Database(_source), true) = (
-            &self.source.data_source,
+            &self.source.primary,
             self.source_format.intersects(DataFormat::sql_databases()),
         ) {
             let adapter = self.source_adapter().await?;
@@ -156,7 +156,7 @@ impl InferSchemaSetting {
     async fn source_adapter(
         &self,
     ) -> Result<Arc<dyn SqlAdapter + Send + Sync>, Box<dyn std::error::Error>> {
-        match &self.source.data_source {
+        match &self.source.primary {
             DataSource::Database(source) => Ok(source.lock().await.adapter()),
         }
     }

@@ -1,30 +1,21 @@
-use super::{data_source::DataSource, load::LoadSource};
+use super::{data_source::DataSource, linked_source::LinkedSource};
 use crate::record::Record;
+use sql_adapter::join::source::JoinSource;
 
-/// Represents a source of data, which can be either a database or a file.
+/// Represents a migration source,
+/// such as a database table, file, or API to be transformed and written to a destination.
 #[derive(Clone)]
 pub struct Source {
-    pub data_source: DataSource,
-    pub load_sources: Vec<LoadSource>,
+    pub primary: DataSource,
+    pub linked: Vec<LinkedSource>,
 }
 
 impl Source {
-    /// Creates a new `Source` instance from a `DataSource` and a `LoadSource`.
-    pub fn new(data_source: DataSource, load_source: Vec<LoadSource>) -> Self {
+    pub fn new(data_source: DataSource, load: Vec<LinkedSource>) -> Self {
         Source {
-            data_source,
-            load_sources: load_source,
+            primary: data_source,
+            linked: load,
         }
-    }
-
-    /// Returns the data source.
-    pub fn data_source(&self) -> &DataSource {
-        &self.data_source
-    }
-
-    /// Returns the load source.
-    pub fn load_source(&self) -> &Vec<LoadSource> {
-        &self.load_sources
     }
 
     pub async fn fetch_data(
@@ -32,20 +23,24 @@ impl Source {
         batch_size: usize,
         offset: Option<usize>,
     ) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
-        if let DataSource::Database(db) = &self.data_source {
-            let db = db.lock().await;
-            let mut joins = Vec::new();
+        match &self.primary {
+            DataSource::Database(db) => {
+                let db = db.lock().await;
+                let joins: Vec<JoinSource> = self
+                    .linked
+                    .iter()
+                    .filter_map(|linked| {
+                        if let LinkedSource::Table(join) = linked {
+                            Some(join.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
-            // Iterate over load sources and collect joins
-            for load in &self.load_sources {
-                if let LoadSource::TableJoin(join) = load {
-                    joins.push(join.clone());
-                }
+                db.fetch_data(batch_size, joins, offset).await
             }
-
-            db.fetch_data(batch_size, joins, offset).await
-        } else {
-            Err("Unsupported data source".into())
+            _ => Err("Unsupported primary data source".into()),
         }
     }
 }

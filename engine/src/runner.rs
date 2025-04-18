@@ -6,9 +6,9 @@ use crate::{
     metadata::{set_destination_metadata, set_source_metadata},
     producer::Producer,
     settings::parse_settings,
-    source::{data_source::DataSource, load::LoadSource, source::Source},
+    source::{data_source::DataSource, linked_source::LinkedSource, source::Source},
 };
-use common::mapping::NameMap;
+use common::mapping::{FieldMappings, FieldNameMap};
 use smql::plan::MigrationPlan;
 use sql_adapter::metadata::{provider::MetadataProvider, table::TableMetadata};
 use std::{collections::HashMap, sync::Arc, vec};
@@ -18,7 +18,10 @@ use tracing::info;
 pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
     info!("Running migration");
 
-    let source = create_source(&plan).await?;
+    let field_name_map = FieldNameMap::get_field_name_map(&plan);
+    let field_mappings = FieldNameMap::get_field_mappings(&plan.mapping);
+
+    let source = create_source(&plan, &field_name_map, &field_mappings).await?;
     let destination = create_destination(&plan).await?;
     let context = MigrationContext::init(source, destination, &plan);
 
@@ -61,29 +64,29 @@ pub async fn load_src_metadata(
     }
 }
 
-async fn create_source(plan: &MigrationPlan) -> Result<Source, Box<dyn std::error::Error>> {
-    let entity_name_map = NameMap::extract_name_map(plan);
-    let entity_field_map = NameMap::extract_field_map(&plan.mapping);
+async fn create_source(
+    plan: &MigrationPlan,
+    field_name_map: &FieldNameMap,
+    field_mappings: &FieldMappings,
+) -> Result<Source, Box<dyn std::error::Error>> {
     let format = plan.connections.source.data_format;
     let adapter = get_adapter(format, &plan.connections.source.con_str).await?;
 
-    let data_source =
-        DataSource::from_adapter(format, adapter, entity_name_map.clone(), entity_field_map)?;
-    let db_adapter = match &data_source {
-        DataSource::Database(db) => db.lock().await.adapter(),
-        _ => return Err("Invalid data source".into()),
-    };
-
-    let field_name_map = NameMap::extract_field_map(&plan.mapping);
+    let data_source = DataSource::from_adapter(
+        format,
+        &adapter,
+        field_name_map.clone(),
+        field_mappings.clone(),
+    )?;
 
     let mut load_sources = vec![];
     for load in plan.loads.iter() {
-        let load_source = LoadSource::from_load(
-            db_adapter.clone(),
-            format,
-            load.clone(),
-            &field_name_map.computed,
-            entity_name_map.clone(),
+        let load_source = LinkedSource::new(
+            &adapter,
+            &format,
+            &load,
+            field_name_map.clone(),
+            field_mappings.clone(),
         )
         .await?;
         load_sources.push(load_source);

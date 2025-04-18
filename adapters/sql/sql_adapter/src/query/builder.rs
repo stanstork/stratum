@@ -1,5 +1,6 @@
+use crate::join::clause::{JoinClause, JoinType};
+
 use super::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField};
-use crate::join::{JoinClause, JoinType};
 
 #[derive(Debug, Clone)]
 pub struct SqlQueryBuilder {

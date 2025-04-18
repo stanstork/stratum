@@ -9,43 +9,47 @@ use smql::{
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
-pub struct EntityFieldsMap {
-    pub entities: HashMap<String, NameMap>,
-    pub computed: HashMap<String, Vec<ComputedField>>,
+pub struct FieldMappings {
+    /// Maps entity name (table, file, API) to field name mapping.
+    pub column_mappings: HashMap<String, FieldNameMap>,
+
+    /// Maps entity name to computed fields that populate new columns.
+    pub computed_fields: HashMap<String, Vec<ComputedField>>,
 }
 
 #[derive(Clone, Debug)]
-pub struct NameMap {
-    forward: HashMap<String, String>, // old_name → new_name
-    reverse: HashMap<String, String>, // new_name → old_name
+pub struct FieldNameMap {
+    source_to_target: HashMap<String, String>, // old_name → new_name
+    target_to_source: HashMap<String, String>, // new_name → old_name
 }
 
-impl EntityFieldsMap {
+impl FieldMappings {
     pub fn new() -> Self {
         Self {
-            entities: HashMap::new(),
-            computed: HashMap::new(),
+            column_mappings: HashMap::new(),
+            computed_fields: HashMap::new(),
         }
     }
 
     pub fn add_mapping(&mut self, entity: &str, map: HashMap<String, String>) {
-        self.entities.insert(entity.to_string(), NameMap::new(map));
+        self.column_mappings
+            .insert(entity.to_string(), FieldNameMap::new(map));
     }
 
     pub fn add_computed(&mut self, entity: &str, computed: Vec<ComputedField>) {
-        self.computed.insert(entity.to_string(), computed);
+        self.computed_fields.insert(entity.to_string(), computed);
     }
 
-    pub fn get_entity(&self, entity: &str) -> Option<&NameMap> {
-        self.entities.get(entity)
+    pub fn get_entity(&self, entity: &str) -> Option<&FieldNameMap> {
+        self.column_mappings.get(entity)
     }
 
     pub fn get_computed(&self, entity: &str) -> Option<&Vec<ComputedField>> {
-        self.computed.get(entity)
+        self.computed_fields.get(entity)
     }
 
     pub fn resolve(&self, entity: &str, name: &str) -> String {
-        if let Some(name_map) = self.entities.get(entity) {
+        if let Some(name_map) = self.column_mappings.get(entity) {
             name_map.resolve(name)
         } else {
             name.to_string()
@@ -53,34 +57,37 @@ impl EntityFieldsMap {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.entities.is_empty()
+        self.column_mappings.is_empty()
     }
 
     pub fn contains(&self, entity: &str) -> bool {
-        self.entities.contains_key(entity)
+        self.column_mappings.contains_key(entity)
     }
 }
 
-impl NameMap {
+impl FieldNameMap {
     pub fn new(map: HashMap<String, String>) -> Self {
-        let mut forward = HashMap::new();
-        let mut reverse = HashMap::new();
+        let mut source_to_target = HashMap::new();
+        let mut target_to_source = HashMap::new();
 
         for (k, v) in map.into_iter() {
             let k_lower = k.to_ascii_lowercase();
             let v_lower = v.to_ascii_lowercase();
 
-            forward.insert(k_lower.clone(), v_lower.clone());
-            reverse.insert(v_lower, k_lower);
+            source_to_target.insert(k_lower.clone(), v_lower.clone());
+            target_to_source.insert(v_lower, k_lower);
         }
 
-        Self { forward, reverse }
+        Self {
+            source_to_target,
+            target_to_source,
+        }
     }
 
     /// Resolve old → new (default direction)
     pub fn resolve(&self, name: &str) -> String {
         let lower = name.to_ascii_lowercase();
-        self.forward
+        self.source_to_target
             .get(&lower)
             .cloned()
             .unwrap_or_else(|| name.to_string())
@@ -89,24 +96,24 @@ impl NameMap {
     /// Reverse resolve new → old
     pub fn reverse_resolve(&self, name: &str) -> String {
         let lower = name.to_ascii_lowercase();
-        self.reverse
+        self.target_to_source
             .get(&lower)
             .cloned()
             .unwrap_or_else(|| name.to_string())
     }
 
     pub fn is_empty(&self) -> bool {
-        self.forward.is_empty() && self.reverse.is_empty()
+        self.source_to_target.is_empty() && self.target_to_source.is_empty()
     }
 
-    pub fn extract_field_map(mappings: &Vec<EntityMapping>) -> EntityFieldsMap {
-        let mut entity_map = EntityFieldsMap::new();
-        for entities in mappings {
-            let entity = entities.entity.clone();
+    pub fn get_field_mappings(mappings: &Vec<EntityMapping>) -> FieldMappings {
+        let mut entity_map = FieldMappings::new();
+        for mapping in mappings {
+            let entity = mapping.entity.clone();
             let mut field_map = HashMap::new();
             let mut computed_fields = Vec::new();
 
-            for mapping in &entities.mappings {
+            for mapping in &mapping.mappings {
                 match mapping {
                     Mapping::ExpressionToColumn { expression, target } => {
                         match expression {
@@ -136,7 +143,7 @@ impl NameMap {
         entity_map
     }
 
-    pub fn extract_name_map(plan: &MigrationPlan) -> NameMap {
+    pub fn get_field_name_map(plan: &MigrationPlan) -> FieldNameMap {
         let mut name_map = HashMap::new();
 
         for migration in plan.migration.migrations.iter() {
@@ -153,14 +160,14 @@ impl NameMap {
             );
         }
 
-        NameMap::new(name_map)
+        FieldNameMap::new(name_map)
     }
 
     pub fn forward_map(&self) -> HashMap<String, String> {
-        self.forward.clone()
+        self.source_to_target.clone()
     }
 
     pub fn contains_key(&self, key: &str) -> bool {
-        self.forward.contains_key(key)
+        self.source_to_target.contains_key(key)
     }
 }

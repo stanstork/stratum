@@ -42,7 +42,7 @@ pub async fn set_source_metadata(
     let context = context.lock().await;
     let state = context.state.lock().await;
 
-    if let DataSource::Database(ref src) = context.source.data_source {
+    if let DataSource::Database(ref src) = context.source.primary {
         let metadata = get_metadata(
             src.lock().await.adapter(),
             source_tables,

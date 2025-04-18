@@ -3,7 +3,7 @@ use crate::{
     metadata::{column::metadata::ColumnMetadata, table::TableMetadata},
     query::{builder::SqlQueryBuilder, column::ColumnDef, fk::ForeignKeyDef},
 };
-use common::mapping::{EntityFieldsMap, NameMap};
+use common::mapping::{FieldMappings, FieldNameMap};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -35,10 +35,10 @@ pub struct SchemaPlan<'a> {
     ignore_constraints: bool,
 
     /// Custom column name mapping provided by the user (e.g., source → target column names).
-    column_name_map: EntityFieldsMap,
+    column_name_map: FieldMappings,
 
     /// Custom table name mapping provided by the user (e.g., source → target table names).
-    table_name_map: NameMap,
+    table_name_map: FieldNameMap,
 
     /// Metadata graph containing all source tables and their relationships
     /// (both referencing and referenced dependencies).
@@ -60,8 +60,8 @@ impl<'a> SchemaPlan<'a> {
         type_converter: &'a TypeConverter,
         type_extractor: &'a TypeExtractor,
         ignore_constraints: bool,
-        table_name_map: NameMap,
-        column_name_map: EntityFieldsMap,
+        table_name_map: FieldNameMap,
+        column_name_map: FieldMappings,
     ) -> Self {
         Self {
             source_adapter,

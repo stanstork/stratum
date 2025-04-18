@@ -35,8 +35,8 @@ impl Producer {
             .add_if(!ctx.field_name_map.is_empty(), || {
                 ColumnMapper::new(ctx.field_name_map.clone())
             })
-            .add_if(!ctx.field_name_map.computed.is_empty(), || {
-                ComputedTransform::new(ctx.field_name_map.computed.clone())
+            .add_if(!ctx.field_name_map.computed_fields.is_empty(), || {
+                ComputedTransform::new(ctx.field_name_map.computed_fields.clone())
             });
 
         let batch_size = ctx.state.lock().await.batch_size;

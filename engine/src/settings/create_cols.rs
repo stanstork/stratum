@@ -43,8 +43,7 @@ impl MigrationSetting for CreateMissingColumnsSetting {
             let dest_metadata = fetch_dest_metadata(&context.destination, &dest_name).await?;
 
             let src_name = context.entity_name_map.reverse_resolve(&dest_name);
-            let src_metadata =
-                fetch_source_metadata(&context.source.data_source, &src_name).await?;
+            let src_metadata = fetch_source_metadata(&context.source.primary, &src_name).await?;
 
             Self::add_columns(&context, &dest_name, &src_metadata, &dest_metadata).await?;
             Self::add_computed_columns(&context, &dest_name, &src_metadata, &dest_metadata).await?;
@@ -96,8 +95,7 @@ impl CreateMissingColumnsSetting {
                         Expression::Lookup { table, .. } => {
                             let table_name = context.entity_name_map.resolve(&table);
                             let source_metadata =
-                                fetch_source_metadata(&context.source.data_source, &table_name)
-                                    .await?;
+                                fetch_source_metadata(&context.source.primary, &table_name).await?;
                             computed_col
                                 .expression
                                 .infer_type(&source_metadata.columns())

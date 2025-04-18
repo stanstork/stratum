@@ -6,7 +6,7 @@ use crate::{
     state::{self, MigrationState},
 };
 use async_trait::async_trait;
-use common::mapping::{EntityFieldsMap, NameMap};
+use common::mapping::{FieldMappings, FieldNameMap};
 use postgres::data_type::PgColumnDataType;
 use smql::statements::connection::DataFormat;
 use sql_adapter::{
@@ -28,8 +28,8 @@ pub struct CreateMissingTablesSetting {
     source_format: DataFormat,
     destination: DataDestination,
     dest_format: DataFormat,
-    table_name_map: NameMap,
-    column_name_map: EntityFieldsMap,
+    table_name_map: FieldNameMap,
+    column_name_map: FieldMappings,
     state: Arc<Mutex<MigrationState>>,
 }
 
@@ -69,7 +69,7 @@ impl MigrationSetting for CreateMissingTablesSetting {
             let dest_name = destination.clone();
             let src_name = context.entity_name_map.reverse_resolve(&dest_name);
 
-            let metadata = fetch_source_metadata(&context.source.data_source, &src_name).await?;
+            let metadata = fetch_source_metadata(&context.source.primary, &src_name).await?;
 
             schema_plan.add_column_defs(
                 &metadata.name,
@@ -122,7 +122,7 @@ impl CreateMissingTablesSetting {
     async fn source_adapter(
         &self,
     ) -> Result<Arc<dyn SqlAdapter + Send + Sync>, Box<dyn std::error::Error>> {
-        match &self.source.data_source {
+        match &self.source.primary {
             DataSource::Database(source) => Ok(source.lock().await.adapter()),
         }
     }

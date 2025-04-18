@@ -8,6 +8,15 @@ pub enum Adapter {
     Postgres(PgAdapter),
 }
 
+impl Adapter {
+    pub fn get_adapter(&self) -> &dyn SqlAdapter {
+        match self {
+            Adapter::MySql(adapter) => adapter,
+            Adapter::Postgres(adapter) => adapter,
+        }
+    }
+}
+
 pub async fn get_adapter(
     data_format: DataFormat,
     con_str: &str,

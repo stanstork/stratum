@@ -1,11 +1,11 @@
 use crate::{record::Record, source::data_source::DbDataSource};
 use async_trait::async_trait;
 use common::computed;
-use common::mapping::{EntityFieldsMap, NameMap};
+use common::mapping::{FieldMappings, FieldNameMap};
 use mysql::mysql::MySqlAdapter;
 use smql::statements::expr::Expression;
 use sql_adapter::adapter::SqlAdapter;
-use sql_adapter::join::{self, Join, JoinClause};
+use sql_adapter::join::source::JoinSource;
 use sql_adapter::metadata::table;
 use sql_adapter::{metadata::table::TableMetadata, requests::FetchRowsRequest};
 use std::collections::{HashMap, HashSet};
@@ -14,16 +14,16 @@ use tracing::field;
 
 pub struct MySqlDataSource {
     metadata: HashMap<String, TableMetadata>,
-    entity_name_map: NameMap,
-    entity_field_map: EntityFieldsMap,
+    entity_name_map: FieldNameMap,
+    entity_field_map: FieldMappings,
     adapter: MySqlAdapter,
 }
 
 impl MySqlDataSource {
     pub fn new(
         adapter: MySqlAdapter,
-        entity_name_map: NameMap,
-        entity_field_map: EntityFieldsMap,
+        entity_name_map: FieldNameMap,
+        entity_field_map: FieldMappings,
     ) -> Self {
         Self {
             metadata: HashMap::new(),
@@ -33,7 +33,7 @@ impl MySqlDataSource {
         }
     }
 
-    pub fn set_entity_name_map(&mut self, entity_name_map: NameMap) {
+    pub fn set_entity_name_map(&mut self, entity_name_map: FieldNameMap) {
         self.entity_name_map = entity_name_map;
     }
 }
@@ -43,7 +43,7 @@ impl DbDataSource for MySqlDataSource {
     async fn fetch_data(
         &self,
         batch_size: usize,
-        joins: Vec<Join>,
+        joins: Vec<JoinSource>,
         offset: Option<usize>,
     ) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
         let mut records = Vec::new();
@@ -56,42 +56,12 @@ impl DbDataSource for MySqlDataSource {
                     continue;
                 }
 
-                let related_joins = Join::collect_related_joins(tbl.clone(), &joins);
-
+                let related_joins = JoinSource::related_joins(tbl.clone(), &joins);
                 let mut joined_fields = Vec::new();
-                for j in &related_joins {
-                    let fields = j.source_metadata.select_fields();
-                    let mut fields = fields
-                        .get(&j.source_metadata.name)
-                        .map(|f| f.clone())
-                        .unwrap_or_default();
 
-                    for field1 in fields.iter_mut() {
-                        field1.table = j.join_clause.left.alias.clone();
-
-                        let get_computed = self
-                            .entity_field_map
-                            .get_computed(&self.entity_name_map.resolve(&tbl));
-
-                        if let Some(c_field) = get_computed {
-                            for f in c_field.iter() {
-                                match &f.expression {
-                                    Expression::Lookup { table, key, field } => {
-                                        if field1.table.eq_ignore_ascii_case(&table)
-                                            && field1.column.eq_ignore_ascii_case(&key)
-                                        {
-                                            field1.alias = Some(f.name.clone());
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-
-                        if j.join_clause.fields.contains(&field1.column) {
-                            joined_fields.push(field1.clone());
-                        }
-                    }
+                for join_source in &related_joins {
+                    let fields = join_source.select_fields(&tbl);
+                    joined_fields.extend(fields);
                 }
 
                 let mut fields = fields.clone();
@@ -99,7 +69,7 @@ impl DbDataSource for MySqlDataSource {
 
                 let mut join_clause = related_joins
                     .iter()
-                    .map(|j| j.join_clause.clone())
+                    .map(|j| j.clause.clone())
                     .collect::<Vec<_>>();
 
                 for j in join_clause.iter_mut() {
