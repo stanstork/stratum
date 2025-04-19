@@ -2,8 +2,7 @@ use crate::{join::clause::JoinClause, query::select::SelectField};
 
 #[derive(Debug, Clone)]
 pub struct FetchRowsRequest {
-    pub source_table: String,
-    pub target_table: Option<String>,
+    pub table: String,
     pub alias: Option<String>,
     pub columns: Vec<SelectField>,
     pub joins: Vec<JoinClause>,
@@ -13,8 +12,7 @@ pub struct FetchRowsRequest {
 
 impl FetchRowsRequest {
     pub fn new(
-        source_table: String,
-        target_table: Option<String>,
+        table: String,
         alias: Option<String>,
         columns: Vec<SelectField>,
         joins: Vec<JoinClause>,
@@ -22,8 +20,7 @@ impl FetchRowsRequest {
         offset: Option<usize>,
     ) -> Self {
         FetchRowsRequest {
-            source_table,
-            target_table,
+            table,
             alias,
             columns,
             joins,

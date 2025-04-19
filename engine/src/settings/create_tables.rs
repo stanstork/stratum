@@ -1,12 +1,12 @@
 use crate::{
     context::MigrationContext,
-    destination::data_dest::DataDestination,
-    metadata::fetch_source_metadata,
+    destination::{data_dest::DataDestination, destination::Destination},
+    metadata::fetch_src_tbl_metadata,
     source::{data_source::DataSource, source::Source},
     state::{self, MigrationState},
 };
 use async_trait::async_trait;
-use common::mapping::{FieldMappings, FieldNameMap};
+use common::mapping::EntityMappingContext;
 use postgres::data_type::PgColumnDataType;
 use smql::statements::connection::DataFormat;
 use sql_adapter::{
@@ -25,11 +25,8 @@ use super::{phase::MigrationSettingsPhase, MigrationSetting};
 
 pub struct CreateMissingTablesSetting {
     source: Source,
-    source_format: DataFormat,
-    destination: DataDestination,
-    dest_format: DataFormat,
-    table_name_map: FieldNameMap,
-    column_name_map: FieldMappings,
+    destination: Destination,
+    mapping: EntityMappingContext,
     state: Arc<Mutex<MigrationState>>,
 }
 
@@ -57,8 +54,7 @@ impl MigrationSetting for CreateMissingTablesSetting {
             &type_converter,
             &type_extractor,
             ignore_constraints,
-            self.table_name_map.clone(),
-            self.column_name_map.clone(),
+            self.mapping.clone(),
         );
 
         for destination in plan.migration.targets() {
@@ -67,9 +63,9 @@ impl MigrationSetting for CreateMissingTablesSetting {
             }
 
             let dest_name = destination.clone();
-            let src_name = context.entity_name_map.reverse_resolve(&dest_name);
+            let src_name = context.mapping.entity_name_map.reverse_resolve(&dest_name);
 
-            let metadata = fetch_source_metadata(&context.source.primary, &src_name).await?;
+            let metadata = fetch_src_tbl_metadata(&context.source.primary, &src_name).await?;
 
             schema_plan.add_column_defs(
                 &metadata.name,
@@ -79,7 +75,7 @@ impl MigrationSetting for CreateMissingTablesSetting {
             let fk_defs = metadata.fk_defs();
             for fk in fk_defs {
                 let target = fk.referenced_table.clone();
-                if context.entity_name_map.contains_key(&target) {
+                if context.mapping.entity_name_map.contains_key(&target) {
                     schema_plan.add_fk_def(&metadata.name, fk.clone());
                 }
             }
@@ -110,11 +106,8 @@ impl CreateMissingTablesSetting {
         let ctx = context.lock().await;
         CreateMissingTablesSetting {
             source: ctx.source.clone(),
-            source_format: ctx.source_format,
             destination: ctx.destination.clone(),
-            dest_format: ctx.destination_format,
-            table_name_map: ctx.entity_name_map.clone(),
-            column_name_map: ctx.field_name_map.clone(),
+            mapping: ctx.mapping.clone(),
             state: ctx.state.clone(),
         }
     }
@@ -128,7 +121,7 @@ impl CreateMissingTablesSetting {
     }
 
     async fn destination_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        match &self.destination {
+        match &self.destination.data_dest {
             DataDestination::Database(dest) => Ok(dest.lock().await.table_exists(table).await?),
         }
     }
@@ -138,11 +131,12 @@ impl CreateMissingTablesSetting {
         schema_plan: SchemaPlan<'_>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match (
-            &self.destination,
-            self.dest_format.intersects(DataFormat::sql_databases()),
+            &self.destination.data_dest,
+            self.destination
+                .format
+                .intersects(DataFormat::sql_databases()),
         ) {
             (DataDestination::Database(destination), true) => {
-                let state = self.state.lock().await;
                 destination.lock().await.infer_schema(&schema_plan).await?;
                 Ok(())
             }

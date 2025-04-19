@@ -1,6 +1,6 @@
 use super::clause::JoinClause;
 use crate::{metadata::table::TableMetadata, query::select::SelectField};
-use common::mapping::{FieldMappings, FieldNameMap};
+use common::mapping::EntityMappingContext;
 use smql::statements::expr::Expression;
 use std::collections::{HashSet, VecDeque};
 
@@ -9,8 +9,7 @@ pub struct JoinSource {
     pub clause: JoinClause,
     pub metadata: TableMetadata,
     pub projection: Vec<String>,
-    pub field_name_map: FieldNameMap,
-    pub field_mappings: FieldMappings,
+    pub mapping: EntityMappingContext,
 }
 
 impl JoinSource {
@@ -18,19 +17,40 @@ impl JoinSource {
         metadata: TableMetadata,
         clause: JoinClause,
         projection: Vec<String>,
-        field_name_map: FieldNameMap,
-        field_mappings: FieldMappings,
+        mapping: EntityMappingContext,
     ) -> Self {
         Self {
             metadata,
             clause,
             projection,
-            field_name_map,
-            field_mappings,
+            mapping,
         }
     }
 
-    pub fn related_joins(root_table: String, joins: &Vec<JoinSource>) -> Vec<JoinSource> {
+    pub fn filter_joins(
+        table: &String,
+        joins: &Vec<JoinSource>,
+    ) -> (Vec<JoinClause>, Vec<SelectField>) {
+        let mut related_joins = Self::related_joins(table.clone(), joins);
+        let mut joined_fields = Vec::new();
+
+        for join_source in related_joins.iter_mut() {
+            let fields = join_source.select_fields(&table);
+            joined_fields.extend(fields);
+
+            // Set table names fom load mapping
+            join_source.apply_mapping();
+        }
+
+        let clauses = related_joins
+            .iter()
+            .map(|j| j.clause.clone())
+            .collect::<Vec<_>>();
+
+        (clauses, joined_fields)
+    }
+
+    fn related_joins(root_table: String, joins: &Vec<JoinSource>) -> Vec<JoinSource> {
         let mut visited = HashSet::new();
         let mut result_joins = Vec::new();
         let mut queue = VecDeque::new();
@@ -79,7 +99,7 @@ impl JoinSource {
         result_joins
     }
 
-    pub fn select_fields(&self, table: &str) -> Vec<SelectField> {
+    fn select_fields(&self, table: &str) -> Vec<SelectField> {
         let left_alias = &self.clause.left.alias;
         let source_fields = self
             .metadata
@@ -90,8 +110,9 @@ impl JoinSource {
 
         let binding = vec![];
         let computed_fields = self
+            .mapping
             .field_mappings
-            .get_computed(&self.field_name_map.resolve(table))
+            .get_computed(&self.mapping.entity_name_map.resolve(table))
             .unwrap_or(&binding);
 
         source_fields
@@ -111,8 +132,6 @@ impl JoinSource {
                     field.alias = Some(alias);
                 }
 
-                println!("Field: {:?}", field);
-
                 if self
                     .projection
                     .iter()
@@ -124,5 +143,13 @@ impl JoinSource {
                 }
             })
             .collect()
+    }
+
+    pub fn apply_mapping(&mut self) {
+        self.clause.right.table = self
+            .mapping
+            .entity_name_map
+            .reverse_resolve(&self.clause.right.table);
+        self.clause.right.alias = self.clause.right.table.clone();
     }
 }

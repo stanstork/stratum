@@ -29,14 +29,14 @@ impl Producer {
         let mut pipeline = TransformPipeline::new();
 
         pipeline = pipeline
-            .add_if(!ctx.entity_name_map.is_empty(), || {
-                TableMapper::new(ctx.entity_name_map.clone())
+            .add_if(!ctx.mapping.entity_name_map.is_empty(), || {
+                TableMapper::new(ctx.mapping.entity_name_map.clone())
             })
-            .add_if(!ctx.field_name_map.is_empty(), || {
-                ColumnMapper::new(ctx.field_name_map.clone())
+            .add_if(!ctx.mapping.field_mappings.is_empty(), || {
+                ColumnMapper::new(ctx.mapping.field_mappings.clone())
             })
-            .add_if(!ctx.field_name_map.computed_fields.is_empty(), || {
-                ComputedTransform::new(ctx.field_name_map.computed_fields.clone())
+            .add_if(!ctx.mapping.field_mappings.is_empty(), || {
+                ComputedTransform::new(ctx.mapping.field_mappings.computed_fields.clone())
             });
 
         let batch_size = ctx.state.lock().await.batch_size;

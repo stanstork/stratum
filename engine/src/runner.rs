@@ -1,14 +1,14 @@
 use crate::{
-    adapter::{get_adapter, Adapter},
+    adapter::Adapter,
     consumer::Consumer,
     context::MigrationContext,
-    destination::data_dest::DataDestination,
+    destination::{data_dest::DataDestination, destination::Destination},
     metadata::{set_destination_metadata, set_source_metadata},
     producer::Producer,
     settings::parse_settings,
     source::{data_source::DataSource, linked_source::LinkedSource, source::Source},
 };
-use common::mapping::{FieldMappings, FieldNameMap};
+use common::mapping::EntityMappingContext;
 use smql::plan::MigrationPlan;
 use sql_adapter::metadata::{provider::MetadataProvider, table::TableMetadata};
 use std::{collections::HashMap, sync::Arc, vec};
@@ -18,12 +18,10 @@ use tracing::info;
 pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
     info!("Running migration");
 
-    let field_name_map = FieldNameMap::get_field_name_map(&plan);
-    let field_mappings = FieldNameMap::get_field_mappings(&plan.mapping);
-
-    let source = create_source(&plan, &field_name_map, &field_mappings).await?;
+    let mapping = EntityMappingContext::new(&plan);
+    let source = create_source(&plan, &mapping).await?;
     let destination = create_destination(&plan).await?;
-    let context = MigrationContext::init(source, destination, &plan);
+    let context = MigrationContext::init(source, destination, mapping);
 
     apply_settings(&plan, Arc::clone(&context)).await?;
     // validate_destination(&plan, Arc::clone(&context)).await?;
@@ -48,7 +46,7 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
 pub async fn load_src_metadata(
     plan: &MigrationPlan,
 ) -> Result<HashMap<String, TableMetadata>, Box<dyn std::error::Error>> {
-    let source_adapter = get_adapter(
+    let source_adapter = Adapter::new(
         plan.connections.source.data_format,
         &plan.connections.source.con_str,
     )
@@ -66,47 +64,30 @@ pub async fn load_src_metadata(
 
 async fn create_source(
     plan: &MigrationPlan,
-    field_name_map: &FieldNameMap,
-    field_mappings: &FieldMappings,
+    mapping: &EntityMappingContext,
 ) -> Result<Source, Box<dyn std::error::Error>> {
     let format = plan.connections.source.data_format;
-    let adapter = get_adapter(format, &plan.connections.source.con_str).await?;
-
-    let data_source = DataSource::from_adapter(
-        format,
-        &adapter,
-        field_name_map.clone(),
-        field_mappings.clone(),
-    )?;
+    let adapter = Adapter::new(format, &plan.connections.source.con_str).await?;
+    let data_source = DataSource::from_adapter(format, &adapter)?;
 
     let mut load_sources = vec![];
     for load in plan.loads.iter() {
-        let load_source = LinkedSource::new(
-            &adapter,
-            &format,
-            &load,
-            field_name_map.clone(),
-            field_mappings.clone(),
-        )
-        .await?;
+        let load_source = LinkedSource::new(&adapter, &format, mapping, &load).await?;
         load_sources.push(load_source);
     }
 
-    Ok(Source::new(data_source, load_sources))
+    Ok(Source::new(format, data_source, load_sources))
 }
 
 async fn create_destination(
     plan: &MigrationPlan,
-) -> Result<DataDestination, Box<dyn std::error::Error>> {
-    let adapter = get_adapter(
-        plan.connections.destination.data_format,
-        &plan.connections.destination.con_str,
-    )
-    .await?;
-
-    let data_destination =
+) -> Result<Destination, Box<dyn std::error::Error>> {
+    let format = plan.connections.destination.data_format;
+    let adapter = Adapter::new(format, &plan.connections.destination.con_str).await?;
+    let data_dest =
         DataDestination::from_adapter(plan.connections.destination.data_format, adapter)?;
-    Ok(data_destination)
+
+    Ok(Destination::new(format, data_dest))
 }
 
 async fn apply_settings(

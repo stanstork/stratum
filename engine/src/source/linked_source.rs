@@ -1,8 +1,5 @@
 use crate::adapter::Adapter;
-use common::{
-    computed::ComputedField,
-    mapping::{FieldMappings, FieldNameMap},
-};
+use common::{computed::ComputedField, mapping::EntityMappingContext};
 use smql::statements::{connection::DataFormat, expr::Expression, load::Load};
 use sql_adapter::join::{
     clause::{JoinClause, JoinColumn, JoinCondition, JoinType, JoinedTable},
@@ -20,22 +17,21 @@ impl LinkedSource {
     pub async fn new(
         adapter: &Adapter,
         format: &DataFormat,
+        mapping_context: &EntityMappingContext,
         load: &Load,
-        field_name_map: FieldNameMap,
-        field_mappings: FieldMappings,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         match *format {
             DataFormat::MySql | DataFormat::Postgres => {
                 let join_clause = Self::build_join_clause(load);
-                let projection = Self::extract_projection(load, &field_mappings.computed_fields);
+                let projection =
+                    Self::extract_projection(load, &mapping_context.field_mappings.computed_fields);
                 let source_metadata = adapter.get_adapter().fetch_metadata(&load.source).await?;
 
                 Ok(LinkedSource::Table(JoinSource::new(
                     source_metadata,
                     join_clause,
                     projection,
-                    field_name_map,
-                    field_mappings,
+                    mapping_context.clone(),
                 )))
             }
             unsupported => Err(format!("Unsupported data format: {:?}", unsupported).into()),

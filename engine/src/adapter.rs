@@ -9,27 +9,27 @@ pub enum Adapter {
 }
 
 impl Adapter {
+    pub async fn new(
+        data_format: DataFormat,
+        con_str: &str,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        match data_format {
+            DataFormat::MySql => {
+                let adapter = MySqlAdapter::connect(con_str).await?;
+                Ok(Adapter::MySql(adapter))
+            }
+            DataFormat::Postgres => {
+                let adapter = PgAdapter::connect(con_str).await?;
+                Ok(Adapter::Postgres(adapter))
+            }
+            _ => panic!("Unsupported data format"),
+        }
+    }
+
     pub fn get_adapter(&self) -> &dyn SqlAdapter {
         match self {
             Adapter::MySql(adapter) => adapter,
             Adapter::Postgres(adapter) => adapter,
         }
-    }
-}
-
-pub async fn get_adapter(
-    data_format: DataFormat,
-    con_str: &str,
-) -> Result<Adapter, Box<dyn std::error::Error>> {
-    match data_format {
-        DataFormat::MySql => {
-            let adapter = MySqlAdapter::connect(con_str).await?;
-            Ok(Adapter::MySql(adapter))
-        }
-        DataFormat::Postgres => {
-            let adapter = PgAdapter::connect(con_str).await?;
-            Ok(Adapter::Postgres(adapter))
-        }
-        _ => panic!("Unsupported data format"),
     }
 }

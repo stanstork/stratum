@@ -23,6 +23,12 @@ pub struct FieldNameMap {
     target_to_source: HashMap<String, String>, // new_name → old_name
 }
 
+#[derive(Clone, Debug)]
+pub struct EntityMappingContext {
+    pub entity_name_map: FieldNameMap,
+    pub field_mappings: FieldMappings,
+}
+
 impl FieldMappings {
     pub fn new() -> Self {
         Self {
@@ -169,5 +175,29 @@ impl FieldNameMap {
 
     pub fn contains_key(&self, key: &str) -> bool {
         self.source_to_target.contains_key(key)
+    }
+}
+
+impl EntityMappingContext {
+    pub fn new(plan: &MigrationPlan) -> Self {
+        let field_name_map = FieldNameMap::get_field_name_map(&plan);
+        let field_mappings = FieldNameMap::get_field_mappings(&plan.mapping);
+
+        Self {
+            entity_name_map: field_name_map,
+            field_mappings,
+        }
+    }
+
+    pub fn get_field_name_map(&self) -> &FieldNameMap {
+        &self.entity_name_map
+    }
+
+    pub fn get_field_mappings(&self) -> &FieldMappings {
+        &self.field_mappings
+    }
+
+    pub fn get_computed_fields(&self, entity: &str) -> Option<&Vec<ComputedField>> {
+        self.field_mappings.get_computed(entity)
     }
 }

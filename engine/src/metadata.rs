@@ -9,7 +9,7 @@ use sql_adapter::{
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
-pub async fn fetch_dest_metadata(
+pub async fn fetch_dest_tbl_metadata(
     destination: &DataDestination,
     table: &str,
 ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
@@ -22,7 +22,7 @@ pub async fn fetch_dest_metadata(
     }
 }
 
-pub async fn fetch_source_metadata(
+pub async fn fetch_src_tbl_metadata(
     source: &DataSource,
     table: &str,
 ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
@@ -57,18 +57,14 @@ pub async fn set_source_metadata(
 
 pub async fn set_destination_metadata(
     context: &Arc<Mutex<MigrationContext>>,
-    destination_tables: &[String],
+    dest_tables: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let context = context.lock().await;
     let state = context.state.lock().await;
 
-    if let DataDestination::Database(ref dest) = context.destination {
-        let metadata = get_metadata(
-            dest.lock().await.adapter(),
-            destination_tables,
-            state.infer_schema,
-        )
-        .await?;
+    if let DataDestination::Database(ref dest) = context.destination.data_dest {
+        let metadata =
+            get_metadata(dest.lock().await.adapter(), dest_tables, state.infer_schema).await?;
         dest.lock().await.set_metadata(metadata);
     }
 

@@ -3,7 +3,7 @@ use crate::{
     metadata::{column::metadata::ColumnMetadata, table::TableMetadata},
     query::{builder::SqlQueryBuilder, column::ColumnDef, fk::ForeignKeyDef},
 };
-use common::mapping::{FieldMappings, FieldNameMap};
+use common::mapping::EntityMappingContext;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -34,11 +34,8 @@ pub struct SchemaPlan<'a> {
     /// Primary keys and foreign keys are not created in the target database.
     ignore_constraints: bool,
 
-    /// Custom column name mapping provided by the user (e.g., source → target column names).
-    column_name_map: FieldMappings,
-
-    /// Custom table name mapping provided by the user (e.g., source → target table names).
-    table_name_map: FieldNameMap,
+    /// Mapping of table names from source to target database.
+    mapping: EntityMappingContext,
 
     /// Metadata graph containing all source tables and their relationships
     /// (both referencing and referenced dependencies).
@@ -60,16 +57,14 @@ impl<'a> SchemaPlan<'a> {
         type_converter: &'a TypeConverter,
         type_extractor: &'a TypeExtractor,
         ignore_constraints: bool,
-        table_name_map: FieldNameMap,
-        column_name_map: FieldMappings,
+        mapping: EntityMappingContext,
     ) -> Self {
         Self {
             source_adapter,
             type_converter,
             type_extractor,
             ignore_constraints,
-            column_name_map,
-            table_name_map,
+            mapping,
             metadata_graph: HashMap::new(),
             column_definitions: HashMap::new(),
             enum_definitions: HashSet::new(),
@@ -81,7 +76,7 @@ impl<'a> SchemaPlan<'a> {
         self.column_definitions
             .iter()
             .map(|(table, columns)| {
-                let resolved_table = self.table_name_map.resolve(table);
+                let resolved_table = self.mapping.entity_name_map.resolve(table);
 
                 let mut resolved_columns = self.resolve_column_definitions(table, columns);
                 resolved_columns.extend(self.computed_column_definitions(&table));
@@ -107,17 +102,21 @@ impl<'a> SchemaPlan<'a> {
         self.fk_definitions
             .iter()
             .flat_map(|(table, fks)| {
-                let resolved_table = self.table_name_map.resolve(table);
+                let resolved_table = self.mapping.entity_name_map.resolve(table);
                 fks.iter().map(move |fk| {
-                    let ref_table = self.table_name_map.resolve(&fk.referenced_table);
+                    let ref_table = self.mapping.entity_name_map.resolve(&fk.referenced_table);
                     let ref_column = self
-                        .column_name_map
+                        .mapping
+                        .field_mappings
                         .resolve(&ref_table, &fk.referenced_column);
 
                     let resolved_fk = ForeignKeyDef {
                         referenced_table: ref_table,
                         referenced_column: ref_column,
-                        column: self.column_name_map.resolve(&resolved_table, &fk.column),
+                        column: self
+                            .mapping
+                            .field_mappings
+                            .resolve(&resolved_table, &fk.column),
                         ..fk.clone()
                     };
 
@@ -186,11 +185,14 @@ impl<'a> SchemaPlan<'a> {
     }
 
     fn resolve_column_definitions(&self, table: &str, columns: &[ColumnDef]) -> Vec<ColumnDef> {
-        let resolved_table = self.table_name_map.resolve(table);
+        let resolved_table = self.mapping.entity_name_map.resolve(table);
         columns
             .iter()
             .map(|col| ColumnDef {
-                name: self.column_name_map.resolve(&resolved_table, &col.name),
+                name: self
+                    .mapping
+                    .field_mappings
+                    .resolve(&resolved_table, &col.name),
                 ..col.clone()
             })
             .collect()
@@ -199,8 +201,8 @@ impl<'a> SchemaPlan<'a> {
     fn computed_column_definitions(&self, table: &str) -> Vec<ColumnDef> {
         let mut defs = Vec::new();
 
-        let resolved_table = self.table_name_map.resolve(table);
-        let computed_fields = match self.column_name_map.get_computed(&resolved_table) {
+        let resolved_table = self.mapping.entity_name_map.resolve(table);
+        let computed_fields = match self.mapping.field_mappings.get_computed(&resolved_table) {
             Some(fields) => fields,
             None => return defs,
         };

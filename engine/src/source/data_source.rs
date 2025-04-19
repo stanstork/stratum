@@ -1,7 +1,6 @@
 use super::providers::mysql::MySqlDataSource;
 use crate::{adapter::Adapter, record::Record};
 use async_trait::async_trait;
-use common::mapping::{FieldMappings, FieldNameMap};
 use smql::statements::connection::DataFormat;
 use sql_adapter::{adapter::SqlAdapter, join::source::JoinSource, metadata::table::TableMetadata};
 use std::{collections::HashMap, sync::Arc};
@@ -16,17 +15,11 @@ impl DataSource {
     pub fn from_adapter(
         format: DataFormat,
         adapter: &Adapter,
-        entity_name_map: FieldNameMap,
-        entity_field_map: FieldMappings,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         match format {
             DataFormat::MySql => match adapter {
                 Adapter::MySql(mysql_adapter) => {
-                    let source = MySqlDataSource::new(
-                        mysql_adapter.clone(),
-                        entity_name_map,
-                        entity_field_map,
-                    );
+                    let source = MySqlDataSource::new(mysql_adapter.clone());
                     Ok(DataSource::Database(Arc::new(Mutex::new(source))))
                 }
                 _ => Err("Expected MySql adapter, but got a different type".into()),
@@ -45,7 +38,7 @@ pub trait DbDataSource: Send + Sync {
     async fn fetch_data(
         &self,
         batch_size: usize,
-        joins: Vec<JoinSource>,
+        joins: &Vec<JoinSource>,
         offset: Option<usize>,
     ) -> Result<Vec<Record>, Box<dyn std::error::Error>>;
 
