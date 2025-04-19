@@ -8,12 +8,12 @@ use pest::iterators::Pair;
 // ─────────────────────────────────────────────────────────────
 #[derive(Debug)]
 pub struct Map {
-    pub mappings: Vec<ScopeMapping>,
+    pub mappings: Vec<EntityMapping>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ScopeMapping {
-    pub scope: String,
+pub struct EntityMapping {
+    pub entity: String,
     pub mappings: Vec<Mapping>,
 }
 
@@ -34,7 +34,7 @@ impl StatementParser for Map {
         let table_mappings = pair
             .into_inner()
             .filter(|p| p.as_rule() == Rule::table_mapping)
-            .map(ScopeMapping::parse)
+            .map(EntityMapping::parse)
             .collect();
 
         Map {
@@ -43,7 +43,7 @@ impl StatementParser for Map {
     }
 }
 
-impl StatementParser for ScopeMapping {
+impl StatementParser for EntityMapping {
     fn parse(pair: Pair<Rule>) -> Self {
         let mut inner = pair.into_inner();
         let table = inner
@@ -57,8 +57,8 @@ impl StatementParser for ScopeMapping {
             .map(Mapping::parse)
             .collect();
 
-        ScopeMapping {
-            scope: table,
+        EntityMapping {
+            entity: table,
             mappings,
         }
     }

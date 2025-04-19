@@ -34,6 +34,15 @@ impl TypeInferencer for Expression {
                 }
             }
 
+            Expression::Lookup {
+                table: _,
+                key,
+                field: _,
+            } => input_columns
+                .iter()
+                .find(|col| col.name.eq_ignore_ascii_case(&key))
+                .map(|col| col.data_type.clone()),
+
             _ => {
                 eprintln!("Unsupported expression type for type inference: {:?}", self);
                 None

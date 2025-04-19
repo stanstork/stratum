@@ -1,13 +1,13 @@
-use super::MigrationSetting;
+use super::{phase::MigrationSettingsPhase, MigrationSetting};
 use crate::{
     context::MigrationContext,
-    destination::data_dest::DataDestination,
+    destination::{data_dest::DataDestination, destination::Destination},
     metadata::{set_destination_metadata, set_source_metadata},
-    source::data_source::DataSource,
+    source::{data_source::DataSource, source::Source},
     state::MigrationState,
 };
 use async_trait::async_trait;
-use common::mapping::{FieldNameMap, ScopedNameMap};
+use common::mapping::{EntityMappingContext, FieldMappings, FieldNameMap};
 use postgres::data_type::PgColumnDataType;
 use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::{
@@ -24,17 +24,18 @@ use tokio::sync::Mutex;
 use tracing::info;
 
 pub struct InferSchemaSetting {
-    source: DataSource,
-    source_format: DataFormat,
-    destination: DataDestination,
-    dest_format: DataFormat,
-    table_name_map: FieldNameMap,
-    column_name_map: ScopedNameMap,
+    source: Source,
+    destination: Destination,
+    mapping: EntityMappingContext,
     state: Arc<Mutex<MigrationState>>,
 }
 
 #[async_trait]
 impl MigrationSetting for InferSchemaSetting {
+    fn phase(&self) -> MigrationSettingsPhase {
+        MigrationSettingsPhase::InferSchema
+    }
+
     async fn apply(
         &self,
         plan: &MigrationPlan,
@@ -61,11 +62,8 @@ impl InferSchemaSetting {
         let ctx = context.lock().await;
         InferSchemaSetting {
             source: ctx.source.clone(),
-            source_format: ctx.source_format,
             destination: ctx.destination.clone(),
-            dest_format: ctx.destination_format,
-            table_name_map: ctx.entity_name_map.clone(),
-            column_name_map: ctx.field_name_map.clone(),
+            mapping: ctx.mapping.clone(),
             state: ctx.state.clone(),
         }
     }
@@ -75,13 +73,14 @@ impl InferSchemaSetting {
         let type_extractor = |meta: &TableMetadata| TableMetadata::enums(meta);
 
         let source_adapter = self.source_adapter().await?;
+        let ignore_constraints = self.state.lock().await.ignore_constraints;
 
         let mut schema_plan = SchemaPlan::new(
             source_adapter,
             &type_converter,
             &type_extractor,
-            self.table_name_map.clone(),
-            self.column_name_map.clone(),
+            ignore_constraints,
+            self.mapping.clone(),
         );
 
         for migration in plan.migration.migrations.iter() {
@@ -96,7 +95,7 @@ impl InferSchemaSetting {
     }
 
     async fn destination_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        match &self.destination {
+        match &self.destination.data_dest {
             DataDestination::Database(dest) => Ok(dest.lock().await.table_exists(table).await?),
         }
     }
@@ -107,8 +106,8 @@ impl InferSchemaSetting {
         schema_plan: &mut SchemaPlan<'_>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if let (DataSource::Database(_source), true) = (
-            &self.source,
-            self.source_format.intersects(DataFormat::sql_databases()),
+            &self.source.primary,
+            self.source.format.intersects(DataFormat::sql_databases()),
         ) {
             let adapter = self.source_adapter().await?;
 
@@ -135,8 +134,10 @@ impl InferSchemaSetting {
         schema_plan: SchemaPlan<'_>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match (
-            &self.destination,
-            self.dest_format.intersects(DataFormat::sql_databases()),
+            &self.destination.data_dest,
+            self.destination
+                .format
+                .intersects(DataFormat::sql_databases()),
         ) {
             (DataDestination::Database(destination), true) => {
                 destination.lock().await.infer_schema(&schema_plan).await?;
@@ -149,7 +150,7 @@ impl InferSchemaSetting {
     async fn source_adapter(
         &self,
     ) -> Result<Arc<dyn SqlAdapter + Send + Sync>, Box<dyn std::error::Error>> {
-        match &self.source {
+        match &self.source.primary {
             DataSource::Database(source) => Ok(source.lock().await.adapter()),
         }
     }

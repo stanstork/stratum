@@ -40,6 +40,12 @@ impl Evaluator for Expression {
                 eval_function(name, &evaluated_args)
             }
 
+            Expression::Lookup { .. } => {
+                // Lookups are handled when loading data from the source
+                // and are not evaluated here.
+                None
+            }
+
             _ => {
                 eprintln!("Unsupported expression type: {:?}", self);
                 None

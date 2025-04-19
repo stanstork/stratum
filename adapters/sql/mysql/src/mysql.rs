@@ -110,6 +110,8 @@ impl SqlAdapter for MySqlAdapter {
             .offset(request.offset.unwrap_or(0))
             .build();
 
+        println!("Executing query: {}", query.0);
+
         let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
         let result = rows
             .into_iter()
