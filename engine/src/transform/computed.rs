@@ -29,8 +29,6 @@ impl Transform for ComputedTransform {
                 if let Some(computed_fields) = self.computed.get(&table) {
                     for computed in computed_fields {
                         if let Expression::Lookup { .. } = computed.expression {
-                            println!("Expression is a lookup: {:?}", computed.expression);
-                            println!("Field: {:?}", computed);
                             // Skip lookup expressions as they are handled during data loading
                             continue;
                         }

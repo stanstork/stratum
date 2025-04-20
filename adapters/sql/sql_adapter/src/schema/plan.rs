@@ -4,6 +4,7 @@ use crate::{
     query::{builder::SqlQueryBuilder, column::ColumnDef, fk::ForeignKeyDef},
 };
 use common::mapping::EntityMappingContext;
+use smql::statements::expr::Expression;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -79,7 +80,7 @@ impl<'a> SchemaPlan<'a> {
                 let resolved_table = self.mapping.entity_name_map.resolve(table);
 
                 let mut resolved_columns = self.resolve_column_definitions(table, columns);
-                resolved_columns.extend(self.computed_column_definitions(&table));
+                resolved_columns.extend(self.computed_column_definitions(table));
 
                 SqlQueryBuilder::new()
                     .create_table(
@@ -117,7 +118,6 @@ impl<'a> SchemaPlan<'a> {
                             .mapping
                             .field_mappings
                             .resolve(&resolved_table, &fk.column),
-                        ..fk.clone()
                     };
 
                     SqlQueryBuilder::new()
@@ -231,10 +231,15 @@ impl<'a> SchemaPlan<'a> {
                     char_max_length: None,
                 });
             } else {
-                eprintln!(
-                    "Warning: Could not infer type for computed field `{}` in table `{}`",
-                    column_name, table
-                );
+                match computed.expression {
+                    Expression::Lookup { .. } => {}
+                    _ => {
+                        panic!(
+                            "Failed to infer type for computed column `{}` in `{}`",
+                            column_name, table
+                        );
+                    }
+                }
             }
         }
 

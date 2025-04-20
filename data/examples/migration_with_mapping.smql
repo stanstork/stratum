@@ -4,7 +4,8 @@ CONNECTIONS (
 );
 
 MIGRATE (
-    orders -> orders_flat
+    orders -> orders_flat,
+    invoices -> statement
 )
 WITH SETTINGS (
     INFER_SCHEMA = FALSE,
@@ -28,17 +29,13 @@ JOIN order_items (
     id -> product_id
 );
 
-LOAD p2 FROM TABLE products2
-JOIN order_items2 (
-    id -> product_id
-);
-
 MAP (
     orders_flat (
         u[name] -> user_name,
         u[email] -> user_email,
         oi[price] -> order_price,
         p[name] -> product_name,
-        p[price] -> product_price
+        p[price] -> product_price,
+        total * 1.2 -> total_mul
     )
 );

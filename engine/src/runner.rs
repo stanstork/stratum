@@ -70,13 +70,13 @@ async fn create_source(
     let adapter = Adapter::new(format, &plan.connections.source.con_str).await?;
     let data_source = DataSource::from_adapter(format, &adapter)?;
 
-    let mut load_sources = vec![];
+    let mut linked = vec![];
     for load in plan.loads.iter() {
-        let load_source = LinkedSource::new(&adapter, &format, mapping, &load).await?;
-        load_sources.push(load_source);
+        let linked_source = LinkedSource::new(&adapter, &format, mapping, load).await?;
+        linked.push(linked_source);
     }
 
-    Ok(Source::new(format, data_source, load_sources))
+    Ok(Source::new(format, data_source, linked))
 }
 
 async fn create_destination(

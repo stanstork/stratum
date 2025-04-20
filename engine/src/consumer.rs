@@ -43,16 +43,8 @@ impl Consumer {
     }
 
     async fn run(self) {
-        // loop {
-        //     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        // }
-
         let tables = match &self.destination.data_dest {
             DataDestination::Database(db) => db.lock().await.get_tables(),
-            _ => {
-                error!("Unsupported destination type");
-                return;
-            }
         };
 
         info!("Disabling triggers for all tables");
@@ -134,7 +126,7 @@ impl Consumer {
         }
     }
 
-    async fn toggle_trigger(&self, tables: &Vec<TableMetadata>, enable: bool) {
+    async fn toggle_trigger(&self, tables: &[TableMetadata], enable: bool) {
         for table in tables.iter() {
             if let Err(e) = self.destination.toggle_trigger(&table.name, enable).await {
                 error!("Failed to toggle trigger for table {}: {}", table.name, e);

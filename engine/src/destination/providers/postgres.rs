@@ -1,4 +1,4 @@
-use crate::{destination::data_dest::DbDataDestination, record::Record, state::MigrationState};
+use crate::{destination::data_dest::DbDataDestination, record::Record};
 use async_trait::async_trait;
 use postgres::postgres::PgAdapter;
 use sql_adapter::{
@@ -44,8 +44,6 @@ impl DbDataDestination for PgDestination {
         if columns.is_empty() {
             return Err("write_batch: No valid columns found in records".into());
         }
-
-        println!("Records: {:?}", records);
 
         let all_values: Vec<Vec<String>> = records
             .into_iter()

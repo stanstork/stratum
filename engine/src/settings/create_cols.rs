@@ -39,7 +39,7 @@ impl MigrationSetting for CreateMissingColumnsSetting {
     async fn apply(
         &self,
         plan: &MigrationPlan,
-        context: Arc<Mutex<MigrationContext>>,
+        _context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         for destination in plan.migration.targets() {
             let dest_name = destination.clone();

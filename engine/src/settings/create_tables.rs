@@ -20,7 +20,6 @@ impl MigrationSetting for CreateMissingTablesSetting {
         plan: &smql::plan::MigrationPlan,
         context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let context = context.lock().await;
         let mut schema_plan = self.context.build_schema_plan().await?;
 
         for dest in plan.migration.targets() {
@@ -29,13 +28,14 @@ impl MigrationSetting for CreateMissingTablesSetting {
             }
 
             // reverse‐map destination → source
-            let src = context.mapping.entity_name_map.reverse_resolve(&dest);
-            let meta = fetch_src_tbl_metadata(&context.source.primary, &src).await?;
+            let src = self.context.mapping.entity_name_map.reverse_resolve(&dest);
+            let meta = fetch_src_tbl_metadata(&self.context.source.primary, &src).await?;
 
             // add columns, FKs, enums into plan
             schema_plan.add_column_defs(&meta.name, meta.column_defs(schema_plan.type_converter()));
             for fk in meta.fk_defs() {
-                if context
+                if self
+                    .context
                     .mapping
                     .entity_name_map
                     .contains_key(&fk.referenced_table)

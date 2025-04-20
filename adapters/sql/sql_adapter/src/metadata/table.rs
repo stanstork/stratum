@@ -96,10 +96,7 @@ impl TableMetadata {
     }
 
     pub fn columns(&self) -> Vec<ColumnMetadata> {
-        self.columns
-            .iter()
-            .map(|(_name, col)| col.clone())
-            .collect()
+        self.columns.values().cloned().collect()
     }
 
     pub fn print_tables_tree(table: &TableMetadata, indent: usize, visited: &mut HashSet<String>) {

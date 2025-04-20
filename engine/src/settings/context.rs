@@ -50,7 +50,6 @@ impl SchemaSettingContext {
     ) -> Result<bool, Box<dyn std::error::Error>> {
         match &self.destination.data_dest {
             DataDestination::Database(dest) => Ok(dest.lock().await.table_exists(table).await?),
-            _ => Ok(false),
         }
     }
 

@@ -80,7 +80,7 @@ impl Producer {
 
                     for record in records.iter() {
                         // Apply the transformation pipeline to each record
-                        let transformed_record = self.pipeline.apply(&record);
+                        let transformed_record = self.pipeline.apply(record);
 
                         // Store the transformed record in the buffer
                         if let Err(e) = self.buffer.store(transformed_record.serialize()) {

@@ -180,7 +180,7 @@ impl FieldNameMap {
 
 impl EntityMappingContext {
     pub fn new(plan: &MigrationPlan) -> Self {
-        let field_name_map = FieldNameMap::get_field_name_map(&plan);
+        let field_name_map = FieldNameMap::get_field_name_map(plan);
         let field_mappings = FieldNameMap::get_field_mappings(&plan.mapping);
 
         Self {
@@ -199,5 +199,11 @@ impl EntityMappingContext {
 
     pub fn get_computed_fields(&self, entity: &str) -> Option<&Vec<ComputedField>> {
         self.field_mappings.get_computed(entity)
+    }
+}
+
+impl Default for FieldMappings {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -29,13 +29,13 @@ impl JoinSource {
 
     pub fn filter_joins(
         table: &String,
-        joins: &Vec<JoinSource>,
+        joins: &[JoinSource],
     ) -> (Vec<JoinClause>, Vec<SelectField>) {
         let mut related_joins = Self::related_joins(table.clone(), joins);
         let mut joined_fields = Vec::new();
 
         for join_source in related_joins.iter_mut() {
-            let fields = join_source.select_fields(&table);
+            let fields = join_source.select_fields(table);
             joined_fields.extend(fields);
 
             // Set table names fom load mapping
@@ -50,7 +50,7 @@ impl JoinSource {
         (clauses, joined_fields)
     }
 
-    fn related_joins(root_table: String, joins: &Vec<JoinSource>) -> Vec<JoinSource> {
+    fn related_joins(root_table: String, joins: &[JoinSource]) -> Vec<JoinSource> {
         let mut visited = HashSet::new();
         let mut result_joins = Vec::new();
         let mut queue = VecDeque::new();

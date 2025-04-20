@@ -20,7 +20,7 @@ impl Source {
             .iter()
             .filter_map(|linked| {
                 if let LinkedSource::Table(join) = linked {
-                    Some(join.clone())
+                    Some((*join).clone())
                 } else {
                     None
                 }
@@ -45,7 +45,6 @@ impl Source {
                 let db = db.lock().await;
                 db.fetch_data(batch_size, &self.joins, offset).await
             }
-            _ => Err("Unsupported primary data source".into()),
         }
     }
 }
