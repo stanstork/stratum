@@ -2,6 +2,7 @@ use crate::context::MigrationContext;
 use async_trait::async_trait;
 use batch_size::BatchSizeSetting;
 use constraints::IgnoreConstraintsSettings;
+use create_cols::CreateMissingColumnsSetting;
 use create_tables::CreateMissingTablesSetting;
 use infer_schema::InferSchemaSetting;
 use phase::MigrationSettingsPhase;
@@ -14,6 +15,7 @@ use tokio::sync::Mutex;
 
 pub mod batch_size;
 pub mod constraints;
+pub mod context;
 pub mod create_cols;
 pub mod create_tables;
 pub mod infer_schema;
@@ -44,7 +46,7 @@ pub async fn parse_settings(
             ("batch_size", SettingValue::Integer(size)) => migration_settings
                 .push(Box::new(BatchSizeSetting(size)) as Box<dyn MigrationSetting>),
             ("create_missing_columns", SettingValue::Boolean(true)) => migration_settings
-                .push(Box::new(create_cols::CreateMissingColumnsSetting::new())
+                .push(Box::new(CreateMissingColumnsSetting::new(context).await)
                     as Box<dyn MigrationSetting>),
             ("create_missing_tables", SettingValue::Boolean(true)) => migration_settings
                 .push(Box::new(CreateMissingTablesSetting::new(context).await)

@@ -1,33 +1,12 @@
-use crate::{
-    context::MigrationContext,
-    destination::{data_dest::DataDestination, destination::Destination},
-    metadata::fetch_src_tbl_metadata,
-    source::{data_source::DataSource, source::Source},
-    state::{self, MigrationState},
-};
+use super::{context::SchemaSettingContext, phase::MigrationSettingsPhase, MigrationSetting};
+use crate::{context::MigrationContext, metadata::fetch_src_tbl_metadata};
 use async_trait::async_trait;
-use common::mapping::EntityMappingContext;
-use postgres::data_type::PgColumnDataType;
-use smql::statements::connection::DataFormat;
-use sql_adapter::{
-    adapter::SqlAdapter,
-    metadata::{
-        column::{data_type::ColumnDataType, metadata::ColumnMetadata},
-        table::TableMetadata,
-    },
-    schema::plan::SchemaPlan,
-};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
 
-use super::{phase::MigrationSettingsPhase, MigrationSetting};
-
 pub struct CreateMissingTablesSetting {
-    source: Source,
-    destination: Destination,
-    mapping: EntityMappingContext,
-    state: Arc<Mutex<MigrationState>>,
+    context: SchemaSettingContext,
 }
 
 #[async_trait]
@@ -42,105 +21,51 @@ impl MigrationSetting for CreateMissingTablesSetting {
         context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let context = context.lock().await;
+        let mut schema_plan = self.context.build_schema_plan().await?;
 
-        let type_converter = |meta: &ColumnMetadata| ColumnDataType::to_pg_type(meta);
-        let type_extractor = |meta: &TableMetadata| TableMetadata::enums(meta);
-
-        let source_adapter = self.source_adapter().await?;
-        let ignore_constraints = self.state.lock().await.ignore_constraints;
-
-        let mut schema_plan = SchemaPlan::new(
-            source_adapter,
-            &type_converter,
-            &type_extractor,
-            ignore_constraints,
-            self.mapping.clone(),
-        );
-
-        for destination in plan.migration.targets() {
-            if self.destination_exists(&destination).await? {
+        for dest in plan.migration.targets() {
+            if self.context.destination_exists(&dest).await? {
                 continue;
             }
 
-            let dest_name = destination.clone();
-            let src_name = context.mapping.entity_name_map.reverse_resolve(&dest_name);
+            // reverse‐map destination → source
+            let src = context.mapping.entity_name_map.reverse_resolve(&dest);
+            let meta = fetch_src_tbl_metadata(&context.source.primary, &src).await?;
 
-            let metadata = fetch_src_tbl_metadata(&context.source.primary, &src_name).await?;
-
-            schema_plan.add_column_defs(
-                &metadata.name,
-                metadata.column_defs(schema_plan.type_converter()),
-            );
-
-            let fk_defs = metadata.fk_defs();
-            for fk in fk_defs {
-                let target = fk.referenced_table.clone();
-                if context.mapping.entity_name_map.contains_key(&target) {
-                    schema_plan.add_fk_def(&metadata.name, fk.clone());
+            // add columns, FKs, enums into plan
+            schema_plan.add_column_defs(&meta.name, meta.column_defs(schema_plan.type_converter()));
+            for fk in meta.fk_defs() {
+                if context
+                    .mapping
+                    .entity_name_map
+                    .contains_key(&fk.referenced_table)
+                {
+                    schema_plan.add_fk_def(&meta.name, fk.clone());
                 }
             }
-
-            for col in (schema_plan.type_extractor())(&metadata) {
-                schema_plan.add_enum_def(&metadata.name, &col.name);
+            for col in (schema_plan.type_extractor())(&meta) {
+                schema_plan.add_enum_def(&meta.name, &col.name);
             }
-
-            schema_plan.add_metadata(&src_name, metadata.clone());
+            schema_plan.add_metadata(&src, meta);
         }
 
-        self.apply_to_destination(schema_plan).await?;
-
-        info!("Create missing tables setting applied");
+        self.context.apply_to_destination(schema_plan).await?;
 
         // Set the create missing tables flag to global state
         {
-            let mut state = self.state.lock().await;
+            let mut state = self.context.state.lock().await;
             state.create_missing_tables = true;
         }
 
+        info!("Create missing tables setting applied");
         Ok(())
     }
 }
 
 impl CreateMissingTablesSetting {
     pub async fn new(context: &Arc<Mutex<MigrationContext>>) -> Self {
-        let ctx = context.lock().await;
-        CreateMissingTablesSetting {
-            source: ctx.source.clone(),
-            destination: ctx.destination.clone(),
-            mapping: ctx.mapping.clone(),
-            state: ctx.state.clone(),
-        }
-    }
-
-    async fn source_adapter(
-        &self,
-    ) -> Result<Arc<dyn SqlAdapter + Send + Sync>, Box<dyn std::error::Error>> {
-        match &self.source.primary {
-            DataSource::Database(source) => Ok(source.lock().await.adapter()),
-        }
-    }
-
-    async fn destination_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        match &self.destination.data_dest {
-            DataDestination::Database(dest) => Ok(dest.lock().await.table_exists(table).await?),
-        }
-    }
-
-    async fn apply_to_destination(
-        &self,
-        schema_plan: SchemaPlan<'_>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        match (
-            &self.destination.data_dest,
-            self.destination
-                .format
-                .intersects(DataFormat::sql_databases()),
-        ) {
-            (DataDestination::Database(destination), true) => {
-                destination.lock().await.infer_schema(&schema_plan).await?;
-                Ok(())
-            }
-            _ => Err("Unsupported data destination format".into()),
+        Self {
+            context: SchemaSettingContext::new(context).await,
         }
     }
 }
