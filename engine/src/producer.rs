@@ -1,7 +1,7 @@
 use crate::{
     buffer::SledBuffer,
     context::MigrationContext,
-    source::data_source::{DataSource, DbDataSource},
+    source::source::Source,
     transform::{
         computed::ComputedTransform,
         mapping::{ColumnMapper, TableMapper},
@@ -14,7 +14,7 @@ use tracing::{error, info};
 
 pub struct Producer {
     buffer: Arc<SledBuffer>,
-    data_source: Arc<Mutex<dyn DbDataSource>>,
+    source: Source,
     pipeline: TransformPipeline,
     shutdown_sender: watch::Sender<bool>,
     batch_size: usize,
@@ -24,28 +24,26 @@ impl Producer {
     pub async fn new(context: Arc<Mutex<MigrationContext>>, sender: watch::Sender<bool>) -> Self {
         let ctx = context.lock().await;
         let buffer = Arc::clone(&ctx.buffer);
-        let data_source = match &ctx.source {
-            DataSource::Database(db) => Arc::clone(db),
-        };
+        let source = ctx.source.clone();
 
         let mut pipeline = TransformPipeline::new();
 
         pipeline = pipeline
-            .add_if(!ctx.entity_name_map.is_empty(), || {
-                TableMapper::new(ctx.entity_name_map.clone())
+            .add_if(!ctx.mapping.entity_name_map.is_empty(), || {
+                TableMapper::new(ctx.mapping.entity_name_map.clone())
             })
-            .add_if(!ctx.field_name_map.is_empty(), || {
-                ColumnMapper::new(ctx.field_name_map.clone())
+            .add_if(!ctx.mapping.field_mappings.is_empty(), || {
+                ColumnMapper::new(ctx.mapping.field_mappings.clone())
             })
-            .add_if(!ctx.field_name_map.computed.is_empty(), || {
-                ComputedTransform::new(ctx.field_name_map.computed.clone())
+            .add_if(!ctx.mapping.field_mappings.is_empty(), || {
+                ComputedTransform::new(ctx.mapping.field_mappings.computed_fields.clone())
             });
 
         let batch_size = ctx.state.lock().await.batch_size;
 
         Self {
             buffer,
-            data_source,
+            source,
             batch_size,
             shutdown_sender: sender,
             pipeline,
@@ -63,7 +61,7 @@ impl Producer {
     }
 
     async fn run(self) -> usize {
-        let mut offset = self.buffer.read_last_offset();
+        let mut offset = 0; //self.buffer.read_last_offset();
         let mut batch_number = 1;
 
         loop {
@@ -72,13 +70,7 @@ impl Producer {
                 self.batch_size
             );
 
-            match self
-                .data_source
-                .lock()
-                .await
-                .fetch_data(self.batch_size, Some(offset))
-                .await
-            {
+            match self.source.fetch_data(self.batch_size, Some(offset)).await {
                 Ok(records) if records.is_empty() => {
                     info!("No more records to fetch. Terminating producer.");
                     break;
@@ -88,7 +80,7 @@ impl Producer {
 
                     for record in records.iter() {
                         // Apply the transformation pipeline to each record
-                        let transformed_record = self.pipeline.apply(&record);
+                        let transformed_record = self.pipeline.apply(record);
 
                         // Store the transformed record in the buffer
                         if let Err(e) = self.buffer.store(transformed_record.serialize()) {

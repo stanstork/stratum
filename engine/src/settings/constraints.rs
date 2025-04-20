@@ -6,12 +6,12 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
 
-pub struct BatchSizeSetting(pub i64);
+pub struct IgnoreConstraintsSettings(pub bool);
 
 #[async_trait]
-impl MigrationSetting for BatchSizeSetting {
+impl MigrationSetting for IgnoreConstraintsSettings {
     fn phase(&self) -> MigrationSettingsPhase {
-        MigrationSettingsPhase::BatchSize
+        MigrationSettingsPhase::IgnoreConstraints
     }
 
     async fn apply(
@@ -21,8 +21,8 @@ impl MigrationSetting for BatchSizeSetting {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let context = context.lock().await;
         let mut state = context.state.lock().await;
-        state.batch_size = self.0 as usize;
-        info!("Batch size setting applied");
+        state.ignore_constraints = self.0;
+        info!("Ignore constraints setting applied");
         Ok(())
     }
 }

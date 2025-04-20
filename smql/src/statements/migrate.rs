@@ -48,12 +48,9 @@ impl StatementParser for Migrate {
 
         let mut migrate_pairs = vec![];
         for inner_pair in inner {
-            match inner_pair.as_rule() {
-                Rule::ident => {
-                    let source = inner_pair.as_str().to_string();
-                    migrate_pairs.push(source);
-                }
-                _ => {}
+            if inner_pair.as_rule() == Rule::ident {
+                let source = inner_pair.as_str().to_string();
+                migrate_pairs.push(source);
             }
         }
 

@@ -2,7 +2,6 @@ use super::{column::metadata::ColumnMetadata, fk::ForeignKeyMetadata};
 use crate::{
     metadata::column::data_type::ColumnDataType,
     query::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField},
-    requests::JoinClause,
     schema::plan::TypeConverter,
 };
 use std::collections::{HashMap, HashSet};
@@ -43,24 +42,6 @@ impl TableMetadata {
         }
 
         grouped
-    }
-
-    pub fn joins(&self) -> Vec<JoinClause> {
-        self.foreign_keys
-            .iter()
-            .filter_map(|fk| {
-                self.referenced_tables
-                    .get(&fk.referenced_table)
-                    .map(|_| JoinClause {
-                        table: fk.referenced_table.clone(),
-                        alias: fk.referenced_table.clone(),
-                        from_alias: self.name.clone(),
-                        from_col: fk.column.clone(),
-                        to_col: fk.referenced_column.clone(),
-                        join_type: "LEFT".to_string(),
-                    })
-            })
-            .collect()
     }
 
     pub fn enums(table: &TableMetadata) -> Vec<ColumnMetadata> {
@@ -115,10 +96,7 @@ impl TableMetadata {
     }
 
     pub fn columns(&self) -> Vec<ColumnMetadata> {
-        self.columns
-            .iter()
-            .map(|(_name, col)| col.clone())
-            .collect()
+        self.columns.values().cloned().collect()
     }
 
     pub fn print_tables_tree(table: &TableMetadata, indent: usize, visited: &mut HashSet<String>) {

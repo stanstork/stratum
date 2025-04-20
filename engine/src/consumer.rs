@@ -1,10 +1,10 @@
 use crate::{
     buffer::SledBuffer,
     context::MigrationContext,
-    destination::data_dest::{DataDestination, DbDataDestination},
+    destination::{data_dest::DataDestination, destination::Destination},
     record::{DataRecord, Record},
 };
-use common::mapping::FieldNameMap;
+use common::mapping::EntityMappingContext;
 use sql_adapter::{metadata::table::TableMetadata, row::row_data::RowData};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::sync::{watch, Mutex};
@@ -12,10 +12,10 @@ use tracing::{error, info};
 
 pub struct Consumer {
     buffer: Arc<SledBuffer>,
-    data_dest: Arc<Mutex<dyn DbDataDestination>>,
-    table_name_map: FieldNameMap,
-    batch_size: usize,
+    destination: Destination,
+    mappings: EntityMappingContext,
     shutdown_receiver: watch::Receiver<bool>,
+    batch_size: usize,
 }
 
 impl Consumer {
@@ -25,18 +25,16 @@ impl Consumer {
     ) -> Self {
         let ctx = context.lock().await;
         let buffer = Arc::clone(&ctx.buffer);
-        let data_dest = match &ctx.destination {
-            DataDestination::Database(db) => Arc::clone(db),
-        };
-        let table_name_map = ctx.entity_name_map.clone();
+        let destination = ctx.destination.clone();
+        let mappings = ctx.mapping.clone();
         let batch_size = ctx.state.lock().await.batch_size;
 
         Self {
             buffer,
-            data_dest,
-            table_name_map,
-            batch_size,
+            destination,
+            mappings,
             shutdown_receiver: receiver,
+            batch_size,
         }
     }
 
@@ -45,7 +43,9 @@ impl Consumer {
     }
 
     async fn run(self) {
-        let tables = self.data_dest.lock().await.get_tables();
+        let tables = match &self.destination.data_dest {
+            DataDestination::Database(db) => db.lock().await.get_tables(),
+        };
 
         info!("Disabling triggers for all tables");
         self.toggle_trigger(&tables, false).await;
@@ -84,7 +84,7 @@ impl Consumer {
         tables: &Vec<TableMetadata>,
     ) {
         let row_data = RowData::deserialize(record);
-        let table_name = self.table_name_map.resolve(&row_data.table);
+        let table_name = row_data.table.clone(); //self.table_name_map.resolve(&row_data.table);
 
         let batch = batch_map.entry(table_name.clone()).or_default();
         batch.push(Record::RowData(row_data));
@@ -102,7 +102,7 @@ impl Consumer {
         for table in tables.iter() {
             // Get the table name from the map or use the original name if no mapping is found
             // This is needed when the source and destination table names are different
-            let table_name = self.table_name_map.resolve(&table.name);
+            let table_name = self.mappings.entity_name_map.resolve(&table.name);
 
             if let Some(records) = batch_map.remove(&table_name) {
                 if records.is_empty() {
@@ -112,13 +112,7 @@ impl Consumer {
 
                 let start_time = Instant::now();
 
-                match self
-                    .data_dest
-                    .lock()
-                    .await
-                    .write_batch(table, records)
-                    .await
-                {
+                match self.destination.write_batch(table, records).await {
                     Ok(_) => {
                         let elapsed = start_time.elapsed().as_millis();
                         info!(
@@ -132,15 +126,9 @@ impl Consumer {
         }
     }
 
-    async fn toggle_trigger(&self, tables: &Vec<TableMetadata>, enable: bool) {
+    async fn toggle_trigger(&self, tables: &[TableMetadata], enable: bool) {
         for table in tables.iter() {
-            if let Err(e) = self
-                .data_dest
-                .lock()
-                .await
-                .toggle_trigger(&table.name, enable)
-                .await
-            {
+            if let Err(e) = self.destination.toggle_trigger(&table.name, enable).await {
                 error!("Failed to toggle trigger for table {}: {}", table.name, e);
             }
         }

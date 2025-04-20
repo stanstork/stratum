@@ -2,11 +2,14 @@ use crate::{
     context::MigrationContext, destination::data_dest::DataDestination,
     source::data_source::DataSource,
 };
-use sql_adapter::metadata::{provider::MetadataProvider, table::TableMetadata};
-use std::sync::Arc;
+use sql_adapter::{
+    adapter::SqlAdapter,
+    metadata::{provider::MetadataProvider, table::TableMetadata},
+};
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
-pub async fn fetch_dest_metadata(
+pub async fn fetch_dest_tbl_metadata(
     destination: &DataDestination,
     table: &str,
 ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
@@ -19,7 +22,7 @@ pub async fn fetch_dest_metadata(
     }
 }
 
-pub async fn fetch_source_metadata(
+pub async fn fetch_src_tbl_metadata(
     source: &DataSource,
     table: &str,
 ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
@@ -37,29 +40,52 @@ pub async fn set_source_metadata(
     source_tables: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let context = context.lock().await;
-    if let DataSource::Database(src) = &context.source {
-        let mut src_guard = src.lock().await;
-        let metadata =
-            MetadataProvider::build_metadata_graph(src_guard.adapter().as_ref(), source_tables)
-                .await?;
-        src_guard.set_metadata(metadata);
+    let state = context.state.lock().await;
+
+    if let DataSource::Database(ref src) = context.source.primary {
+        let metadata = get_metadata(
+            src.lock().await.adapter(),
+            source_tables,
+            state.infer_schema,
+        )
+        .await?;
+        src.lock().await.set_metadata(metadata);
     }
+
     Ok(())
 }
 
 pub async fn set_destination_metadata(
     context: &Arc<Mutex<MigrationContext>>,
-    destination_tables: &[String],
+    dest_tables: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let context = context.lock().await;
-    if let DataDestination::Database(dest) = &context.destination {
-        let mut dest_guard = dest.lock().await;
-        let metadata = MetadataProvider::build_metadata_graph(
-            dest_guard.adapter().as_ref(),
-            destination_tables,
-        )
-        .await?;
-        dest_guard.set_metadata(metadata);
+    let state = context.state.lock().await;
+
+    if let DataDestination::Database(ref dest) = context.destination.data_dest {
+        let metadata =
+            get_metadata(dest.lock().await.adapter(), dest_tables, state.infer_schema).await?;
+        dest.lock().await.set_metadata(metadata);
     }
+
     Ok(())
+}
+
+async fn get_metadata(
+    adapter: Arc<(dyn SqlAdapter + Send + Sync)>,
+    tables: &[String],
+    infer_schema: bool,
+) -> Result<HashMap<String, TableMetadata>, Box<dyn std::error::Error>> {
+    let adapter = adapter.as_ref();
+
+    if infer_schema {
+        MetadataProvider::build_metadata_graph(adapter, tables).await
+    } else {
+        let mut metadata = HashMap::new();
+        for table in tables {
+            let table_metadata = adapter.fetch_metadata(table).await?;
+            metadata.insert(table.clone(), table_metadata);
+        }
+        Ok(metadata)
+    }
 }

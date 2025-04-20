@@ -1,6 +1,6 @@
 use crate::statements::{
     aggregate::Aggregation, connection::Connection, filter::Filter, load::Load,
-    mapping::ScopeMapping, migrate::MigrateBlock, statement::Statement,
+    mapping::EntityMapping, migrate::MigrateBlock, statement::Statement,
 };
 
 #[derive(Debug, Clone)]
@@ -8,9 +8,9 @@ pub struct MigrationPlan {
     pub connections: Connection,
     pub migration: MigrateBlock,
     pub filter: Option<Filter>,
-    pub mapping: Vec<ScopeMapping>,
+    pub mapping: Vec<EntityMapping>,
     pub aggregations: Vec<Aggregation>,
-    pub load: Option<Load>,
+    pub loads: Vec<Load>,
 }
 
 impl MigrationPlan {
@@ -20,7 +20,7 @@ impl MigrationPlan {
         let mut filter = None;
         let mut mapping = vec![];
         let mut aggregations = vec![];
-        let mut load = None;
+        let mut loads = vec![];
 
         for statement in statements {
             match statement {
@@ -29,7 +29,7 @@ impl MigrationPlan {
                 Statement::Filter(f) => filter = Some(f),
                 Statement::Map(m) => mapping.extend(m.mappings),
                 Statement::Aggregate(a) => aggregations.extend(a.aggregations),
-                Statement::Load(l) => load = Some(l),
+                Statement::Load(l) => loads.push(l),
             }
         }
 
@@ -39,7 +39,7 @@ impl MigrationPlan {
             filter,
             mapping,
             aggregations,
-            load,
+            loads,
         }
     }
 }

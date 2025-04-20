@@ -23,7 +23,7 @@ impl ColumnValue {
     pub fn from_row(row: &DbRow, data_type: ColumnDataType, name: &str) -> Option<Self> {
         match data_type {
             ColumnDataType::Int | ColumnDataType::Long | ColumnDataType::Short => {
-                row.try_get_i64(name).map(|v| Self::Int(v as i64))
+                row.try_get_i64(name).map(Self::Int)
             }
             ColumnDataType::IntUnsigned | ColumnDataType::ShortUnsigned | ColumnDataType::Year => {
                 row.try_get_u64(name).map(|v| Self::Int(v as i64))
@@ -69,7 +69,9 @@ impl fmt::Display for ColumnValue {
             }
             ColumnValue::Uuid(v) => write!(f, "{}", v),
             ColumnValue::Bytes(v) => {
-                let hex = v.iter().map(|b| format!("{:02X}", b)).collect::<String>();
+                let hex = v
+                    .iter()
+                    .fold(String::new(), |acc, byte| acc + &format!("{:02x}", byte));
                 write!(f, "E'\\\\x{}'", hex)
             }
             ColumnValue::Date(v) => write!(f, "'{}'", v),

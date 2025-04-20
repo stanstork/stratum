@@ -11,7 +11,7 @@ impl TypeInferencer for Expression {
             Expression::Identifier(identifier) => input_columns
                 .iter()
                 .find(|col| col.name.eq_ignore_ascii_case(identifier))
-                .map(|col| col.data_type.clone()),
+                .map(|col| col.data_type),
 
             Expression::Literal(literal) => Some(match literal {
                 Literal::String(_) => ColumnDataType::String,
@@ -34,10 +34,14 @@ impl TypeInferencer for Expression {
                 }
             }
 
-            _ => {
-                eprintln!("Unsupported expression type for type inference: {:?}", self);
-                None
-            }
+            Expression::Lookup {
+                table: _,
+                key,
+                field: _,
+            } => input_columns
+                .iter()
+                .find(|col| col.name.eq_ignore_ascii_case(key))
+                .map(|col| col.data_type),
         }
     }
 }

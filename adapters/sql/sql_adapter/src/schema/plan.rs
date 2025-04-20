@@ -3,7 +3,8 @@ use crate::{
     metadata::{column::metadata::ColumnMetadata, table::TableMetadata},
     query::{builder::SqlQueryBuilder, column::ColumnDef, fk::ForeignKeyDef},
 };
-use common::mapping::{FieldNameMap, ScopedNameMap};
+use common::mapping::EntityMappingContext;
+use smql::statements::expr::Expression;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -30,11 +31,12 @@ pub struct SchemaPlan<'a> {
     /// Function used to extract custom types such as enums from table metadata.
     type_extractor: &'a TypeExtractor,
 
-    /// Custom column name mapping provided by the user (e.g., source → target column names).
-    column_name_map: ScopedNameMap,
+    /// Indicates whether to ignore constraints during the migration process.
+    /// Primary keys and foreign keys are not created in the target database.
+    ignore_constraints: bool,
 
-    /// Custom table name mapping provided by the user (e.g., source → target table names).
-    table_name_map: FieldNameMap,
+    /// Mapping of table names from source to target database.
+    mapping: EntityMappingContext,
 
     /// Metadata graph containing all source tables and their relationships
     /// (both referencing and referenced dependencies).
@@ -55,15 +57,15 @@ impl<'a> SchemaPlan<'a> {
         source_adapter: Arc<(dyn SqlAdapter + Send + Sync)>,
         type_converter: &'a TypeConverter,
         type_extractor: &'a TypeExtractor,
-        table_name_map: FieldNameMap,
-        column_name_map: ScopedNameMap,
+        ignore_constraints: bool,
+        mapping: EntityMappingContext,
     ) -> Self {
         Self {
             source_adapter,
             type_converter,
             type_extractor,
-            column_name_map,
-            table_name_map,
+            ignore_constraints,
+            mapping,
             metadata_graph: HashMap::new(),
             column_definitions: HashMap::new(),
             enum_definitions: HashSet::new(),
@@ -75,13 +77,18 @@ impl<'a> SchemaPlan<'a> {
         self.column_definitions
             .iter()
             .map(|(table, columns)| {
-                let resolved_table = self.table_name_map.resolve(table);
+                let resolved_table = self.mapping.entity_name_map.resolve(table);
 
                 let mut resolved_columns = self.resolve_column_definitions(table, columns);
-                resolved_columns.extend(self.computed_column_definitions(&table));
+                resolved_columns.extend(self.computed_column_definitions(table));
 
                 SqlQueryBuilder::new()
-                    .create_table(&resolved_table, &resolved_columns, &[])
+                    .create_table(
+                        &resolved_table,
+                        &resolved_columns,
+                        &[],
+                        self.ignore_constraints,
+                    )
                     .build()
                     .0
             })
@@ -89,21 +96,28 @@ impl<'a> SchemaPlan<'a> {
     }
 
     pub fn fk_queries(&self) -> HashSet<String> {
+        if self.ignore_constraints {
+            return HashSet::new();
+        }
+
         self.fk_definitions
             .iter()
             .flat_map(|(table, fks)| {
-                let resolved_table = self.table_name_map.resolve(table);
+                let resolved_table = self.mapping.entity_name_map.resolve(table);
                 fks.iter().map(move |fk| {
-                    let ref_table = self.table_name_map.resolve(&fk.referenced_table);
+                    let ref_table = self.mapping.entity_name_map.resolve(&fk.referenced_table);
                     let ref_column = self
-                        .column_name_map
+                        .mapping
+                        .field_mappings
                         .resolve(&ref_table, &fk.referenced_column);
 
                     let resolved_fk = ForeignKeyDef {
                         referenced_table: ref_table,
                         referenced_column: ref_column,
-                        column: self.column_name_map.resolve(&resolved_table, &fk.column),
-                        ..fk.clone()
+                        column: self
+                            .mapping
+                            .field_mappings
+                            .resolve(&resolved_table, &fk.column),
                     };
 
                     SqlQueryBuilder::new()
@@ -147,6 +161,13 @@ impl<'a> SchemaPlan<'a> {
         self.fk_definitions.insert(table_name.to_string(), fk_defs);
     }
 
+    pub fn add_fk_def(&mut self, table_name: &str, fk_def: ForeignKeyDef) {
+        self.fk_definitions
+            .entry(table_name.to_string())
+            .or_insert_with(Vec::new)
+            .push(fk_def);
+    }
+
     pub fn add_metadata(&mut self, table_name: &str, metadata: TableMetadata) {
         self.metadata_graph.insert(table_name.to_string(), metadata);
     }
@@ -164,11 +185,14 @@ impl<'a> SchemaPlan<'a> {
     }
 
     fn resolve_column_definitions(&self, table: &str, columns: &[ColumnDef]) -> Vec<ColumnDef> {
-        let resolved_table = self.table_name_map.resolve(table);
+        let resolved_table = self.mapping.entity_name_map.resolve(table);
         columns
             .iter()
             .map(|col| ColumnDef {
-                name: self.column_name_map.resolve(&resolved_table, &col.name),
+                name: self
+                    .mapping
+                    .field_mappings
+                    .resolve(&resolved_table, &col.name),
                 ..col.clone()
             })
             .collect()
@@ -177,8 +201,8 @@ impl<'a> SchemaPlan<'a> {
     fn computed_column_definitions(&self, table: &str) -> Vec<ColumnDef> {
         let mut defs = Vec::new();
 
-        let resolved_table = self.table_name_map.resolve(table);
-        let computed_fields = match self.column_name_map.get_computed(&resolved_table) {
+        let resolved_table = self.mapping.entity_name_map.resolve(table);
+        let computed_fields = match self.mapping.field_mappings.get_computed(&resolved_table) {
             Some(fields) => fields,
             None => return defs,
         };
@@ -207,10 +231,15 @@ impl<'a> SchemaPlan<'a> {
                     char_max_length: None,
                 });
             } else {
-                eprintln!(
-                    "Warning: Could not infer type for computed field `{}` in table `{}`",
-                    column_name, table
-                );
+                match computed.expression {
+                    Expression::Lookup { .. } => {}
+                    _ => {
+                        panic!(
+                            "Failed to infer type for computed column `{}` in `{}`",
+                            column_name, table
+                        );
+                    }
+                }
             }
         }
 

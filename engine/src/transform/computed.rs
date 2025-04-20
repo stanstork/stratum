@@ -1,6 +1,7 @@
 use super::pipeline::Transform;
 use crate::{expr::eval::Evaluator, record::Record};
 use common::computed::ComputedField;
+use smql::statements::expr::Expression;
 use sql_adapter::{
     metadata::column::value::{ColumnData, ColumnValue},
     row::row_data::RowData,
@@ -27,6 +28,11 @@ impl Transform for ComputedTransform {
 
                 if let Some(computed_fields) = self.computed.get(&table) {
                     for computed in computed_fields {
+                        if let Expression::Lookup { .. } = computed.expression {
+                            // Skip lookup expressions as they are handled during data loading
+                            continue;
+                        }
+
                         if let Some(value) = computed.expression.evaluate(&row) {
                             update_row(&mut row, &computed.name, &value);
                         } else {

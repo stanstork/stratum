@@ -1,5 +1,6 @@
+use crate::join::clause::{JoinClause, JoinType};
+
 use super::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField};
-use crate::requests::JoinClause;
 
 #[derive(Debug, Clone)]
 pub struct SqlQueryBuilder {
@@ -56,16 +57,29 @@ impl SqlQueryBuilder {
 
     pub fn join(mut self, joins: &Vec<JoinClause>) -> Self {
         for join in joins {
+            let join_type = match join.join_type {
+                JoinType::Inner => "INNER",
+                JoinType::Left => "LEFT",
+                JoinType::Right => "RIGHT",
+                JoinType::Full => "FULL",
+            };
             self.query.push_str(&format!(
-                " {} JOIN {} AS {} ON {}.{} = {}.{}",
-                join.join_type,
-                join.table,
-                join.alias,
-                join.from_alias,
-                join.from_col,
-                join.alias,
-                join.to_col
+                " {} JOIN {} AS {} ON ",
+                join_type, join.left.table, join.left.alias
             ));
+
+            let conditions: Vec<String> = join
+                .conditions
+                .iter()
+                .map(|cond| {
+                    format!(
+                        "{}.{} = {}.{}",
+                        join.left.alias, cond.left.column, join.right.alias, cond.right.column
+                    )
+                })
+                .collect();
+
+            self.query.push_str(&conditions.join(" AND "));
         }
         self
     }
@@ -133,6 +147,7 @@ impl SqlQueryBuilder {
         table: &str,
         columns: &[ColumnDef],
         foreign_keys: &[ForeignKeyDef],
+        ignore_constraints: bool,
     ) -> Self {
         self.query
             .push_str(&format!("\nCREATE TABLE {} (\n", table));
@@ -153,7 +168,7 @@ impl SqlQueryBuilder {
                     definition.push_str(&format!(" {}", col.data_type));
                 }
 
-                if !composite_pk && col.is_primary_key {
+                if !ignore_constraints && !composite_pk && col.is_primary_key {
                     definition.push_str(" PRIMARY KEY");
                 }
                 if !col.is_nullable {
@@ -166,7 +181,7 @@ impl SqlQueryBuilder {
             })
             .collect();
 
-        let pk_columns = if composite_pk {
+        let pk_columns = if !ignore_constraints && composite_pk {
             let pk_columns: Vec<String> = columns
                 .iter()
                 .filter(|c| c.is_primary_key)
@@ -177,15 +192,19 @@ impl SqlQueryBuilder {
             vec![]
         };
 
-        let foreign_key_defs: Vec<String> = foreign_keys
-            .iter()
-            .map(|fk| {
-                format!(
-                    "\tFOREIGN KEY ({}) REFERENCES {}({})",
-                    fk.column, fk.referenced_table, fk.referenced_column
-                )
-            })
-            .collect();
+        let foreign_key_defs: Vec<String> = if !ignore_constraints {
+            foreign_keys
+                .iter()
+                .map(|fk| {
+                    format!(
+                        "\tFOREIGN KEY ({}) REFERENCES {}({})",
+                        fk.column, fk.referenced_table, fk.referenced_column
+                    )
+                })
+                .collect()
+        } else {
+            vec![]
+        };
 
         let all_defs = column_defs
             .into_iter()

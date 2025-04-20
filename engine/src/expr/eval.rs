@@ -40,8 +40,9 @@ impl Evaluator for Expression {
                 eval_function(name, &evaluated_args)
             }
 
-            _ => {
-                eprintln!("Unsupported expression type: {:?}", self);
+            Expression::Lookup { .. } => {
+                // Lookups are handled when loading data from the source
+                // and are not evaluated here.
                 None
             }
         }
@@ -63,7 +64,6 @@ fn eval_arithmetic(left: &ColumnValue, right: &ColumnValue, op: &Operator) -> Op
             Operator::Subtract => Int(l - r),
             Operator::Multiply => Int(l * r),
             Operator::Divide => Int(l / r),
-            _ => return None,
         }),
 
         (Int(_), Float(_)) | (Float(_), Int(_)) | (Float(_), Float(_)) => {
@@ -74,7 +74,6 @@ fn eval_arithmetic(left: &ColumnValue, right: &ColumnValue, op: &Operator) -> Op
                 Operator::Subtract => Float(l - r),
                 Operator::Multiply => Float(l * r),
                 Operator::Divide => Float(l / r),
-                _ => return None,
             })
         }
 
@@ -82,13 +81,13 @@ fn eval_arithmetic(left: &ColumnValue, right: &ColumnValue, op: &Operator) -> Op
     }
 }
 
-fn eval_function(name: &str, args: &Vec<ColumnValue>) -> Option<ColumnValue> {
+fn eval_function(name: &str, args: &[ColumnValue]) -> Option<ColumnValue> {
     match name.to_ascii_lowercase().as_str() {
-        "lower" => match args.get(0)? {
+        "lower" => match args.first()? {
             ColumnValue::String(s) => Some(ColumnValue::String(s.to_lowercase())),
             _ => None,
         },
-        "upper" => match args.get(0)? {
+        "upper" => match args.first()? {
             ColumnValue::String(s) => Some(ColumnValue::String(s.to_uppercase())),
             _ => None,
         },

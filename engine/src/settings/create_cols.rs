@@ -1,12 +1,12 @@
-use super::MigrationSetting;
+use super::{context::SchemaSettingContext, phase::MigrationSettingsPhase, MigrationSetting};
 use crate::{
     context::MigrationContext,
     destination::data_dest::DataDestination,
-    metadata::{fetch_dest_metadata, fetch_source_metadata},
+    metadata::{fetch_dest_tbl_metadata, fetch_src_tbl_metadata},
 };
 use async_trait::async_trait;
 use postgres::data_type::PgColumnDataType;
-use smql::plan::MigrationPlan;
+use smql::{plan::MigrationPlan, statements::expr::Expression};
 use sql_adapter::{
     metadata::{
         column::{data_type::ColumnDataType, metadata::ColumnMetadata},
@@ -18,59 +18,71 @@ use sql_adapter::{
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-pub struct CreateMissingColumnsSetting;
+pub struct CreateMissingColumnsSetting {
+    context: SchemaSettingContext,
+}
 
 impl CreateMissingColumnsSetting {
-    pub fn new() -> Self {
-        Self {}
+    pub async fn new(global: &Arc<Mutex<MigrationContext>>) -> Self {
+        Self {
+            context: SchemaSettingContext::new(global).await,
+        }
     }
 }
 
 #[async_trait]
 impl MigrationSetting for CreateMissingColumnsSetting {
+    fn phase(&self) -> MigrationSettingsPhase {
+        MigrationSettingsPhase::CreateMissingColumns
+    }
+
     async fn apply(
         &self,
         plan: &MigrationPlan,
-        context: Arc<Mutex<MigrationContext>>,
+        _context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let context = context.lock().await;
         for destination in plan.migration.targets() {
             let dest_name = destination.clone();
-            let dest_metadata = fetch_dest_metadata(&context.destination, &dest_name).await?;
+            let dest_meta =
+                fetch_dest_tbl_metadata(&self.context.destination.data_dest, &dest_name).await?;
 
-            let src_name = context.entity_name_map.reverse_resolve(&dest_name);
-            let src_metadata = fetch_source_metadata(&context.source, &src_name).await?;
+            let src_name = self
+                .context
+                .mapping
+                .entity_name_map
+                .reverse_resolve(&dest_name);
+            let src_meta = fetch_src_tbl_metadata(&self.context.source.primary, &src_name).await?;
 
-            Self::add_columns(&context, &dest_name, &src_metadata, &dest_metadata).await?;
-            Self::add_computed_columns(&context, &dest_name, &src_metadata, &dest_metadata).await?;
+            self.add_columns(&dest_name, &src_meta, &dest_meta).await?;
+            self.add_computed_columns(&dest_name, &src_meta, &dest_meta)
+                .await?;
         }
 
-        let mut state = context.state.lock().await;
-        state.create_missing_columns = true;
+        {
+            let mut state = self.context.state.lock().await;
+            state.create_missing_columns = true;
+        }
+
         Ok(())
     }
 }
 
 impl CreateMissingColumnsSetting {
     async fn add_columns(
-        context: &MigrationContext,
+        &self,
         table: &str,
-        source_metadata: &TableMetadata,
-        dest_metadata: &TableMetadata,
+        source_meta: &TableMetadata,
+        dest_meta: &TableMetadata,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(columns) = context.field_name_map.get_scope(table) {
-            for (source_col, dest_col) in columns.forward_map() {
-                let source_col_meta = source_metadata
-                    .get_column(&source_col)
-                    .ok_or_else(|| format!("Column {} not found in source metadata", source_col))?;
-
-                // Currently, we only support PostgreSQL as a destination
-                let type_converter = |meta: &ColumnMetadata| ColumnDataType::to_pg_type(meta);
-
-                if dest_metadata.get_column(&dest_col).is_none() {
-                    let col_def =
-                        ColumnDef::with_type_convertor(&dest_col, &type_converter, source_col_meta);
-                    Self::add_column(context, table, &col_def).await?;
+        if let Some(columns) = self.context.mapping.field_mappings.get_entity(table) {
+            let type_conv = |meta: &ColumnMetadata| ColumnDataType::to_pg_type(meta); // Currently only Postgres
+            for (src_col, dst_col) in columns.forward_map() {
+                if dest_meta.get_column(&dst_col).is_none() {
+                    let meta = source_meta
+                        .get_column(&src_col)
+                        .ok_or_else(|| format!("{} not in source", src_col))?;
+                    let def = ColumnDef::with_type_convertor(&dst_col, &type_conv, meta);
+                    self.add_column(table, &def).await?;
                 }
             }
         }
@@ -78,47 +90,45 @@ impl CreateMissingColumnsSetting {
     }
 
     async fn add_computed_columns(
-        context: &MigrationContext,
+        &self,
         table: &str,
-        source_metadata: &TableMetadata,
-        dest_metadata: &TableMetadata,
+        source_meta: &TableMetadata,
+        dest_meta: &TableMetadata,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(computed) = context.field_name_map.get_computed(table) {
-            for computed_col in computed.iter() {
-                if dest_metadata.get_column(&computed_col.name).is_none() {
-                    // Add the computed column to the destination table
-                    let col_type = computed_col
-                        .expression
-                        .infer_type(&source_metadata.columns());
-                    if let Some(col_type) = col_type {
-                        let col_def =
-                            ColumnDef::from_computed(&computed_col.name, &col_type.to_string());
-                        Self::add_column(context, table, &col_def).await?;
-                    } else {
-                        return Err(format!(
-                            "Failed to infer type for computed column {}",
-                            computed_col.name
-                        )
-                        .into());
-                    }
+        if let Some(computed) = self.context.mapping.field_mappings.get_computed(table) {
+            for comp in computed.iter() {
+                if dest_meta.get_column(&comp.name).is_none() {
+                    // infer type (possibly lookup from another table)
+                    let col_type = match &comp.expression {
+                        Expression::Lookup { table: alias, .. } => {
+                            let table = self.context.mapping.entity_name_map.resolve(alias);
+                            let meta = fetch_src_tbl_metadata(&self.context.source.primary, &table)
+                                .await?;
+                            comp.expression.infer_type(&meta.columns())
+                        }
+                        _ => comp.expression.infer_type(&source_meta.columns()),
+                    };
+                    let data_type =
+                        col_type.ok_or_else(|| format!("Couldn’t infer type for {}", comp.name))?;
+                    let def = ColumnDef::from_computed(&comp.name, &data_type.to_string());
+                    self.add_column(table, &def).await?;
                 }
             }
         }
         Ok(())
     }
 
+    /// issue the ALTER TABLE … ADD COLUMN statement
     async fn add_column(
-        context: &MigrationContext,
+        &self,
         table: &str,
         column: &ColumnDef,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        match &context.destination {
-            DataDestination::Database(db) => {
-                let db = db.lock().await;
-                db.add_column(table, column).await?;
-                Ok(())
-            }
-            _ => Err("Unsupported data destination format".into()),
+        if let DataDestination::Database(db) = &self.context.destination.data_dest {
+            db.lock().await.add_column(table, column).await?;
+            Ok(())
+        } else {
+            Err("Unsupported data destination".into())
         }
     }
 }
