@@ -27,6 +27,7 @@ pub struct FieldNameMap {
 pub struct EntityMappingContext {
     pub entity_name_map: FieldNameMap,
     pub field_mappings: FieldMappings,
+    pub computed_flat: Vec<ComputedField>,
 }
 
 impl FieldMappings {
@@ -180,12 +181,18 @@ impl FieldNameMap {
 
 impl EntityMappingContext {
     pub fn new(plan: &MigrationPlan) -> Self {
-        let field_name_map = FieldNameMap::get_field_name_map(plan);
+        let entity_name_map = FieldNameMap::get_field_name_map(plan);
         let field_mappings = FieldNameMap::get_field_mappings(&plan.mapping);
+        let computed_flat = field_mappings
+            .computed_fields
+            .values()
+            .flat_map(|fields| fields.clone())
+            .collect::<Vec<_>>();
 
         Self {
-            entity_name_map: field_name_map,
+            entity_name_map,
             field_mappings,
+            computed_flat,
         }
     }
 

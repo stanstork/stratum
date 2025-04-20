@@ -1,21 +1,20 @@
 use super::pipeline::Transform;
 use crate::{expr::eval::Evaluator, record::Record};
-use common::computed::ComputedField;
+use common::mapping::EntityMappingContext;
 use smql::statements::expr::Expression;
 use sql_adapter::{
     metadata::column::value::{ColumnData, ColumnValue},
     row::row_data::RowData,
 };
-use std::collections::HashMap;
 use tracing::warn;
 
 pub struct ComputedTransform {
-    computed: HashMap<String, Vec<ComputedField>>,
+    mapping: EntityMappingContext,
 }
 
 impl ComputedTransform {
-    pub fn new(computed: HashMap<String, Vec<ComputedField>>) -> Self {
-        Self { computed }
+    pub fn new(mapping: EntityMappingContext) -> Self {
+        Self { mapping }
     }
 }
 
@@ -26,14 +25,15 @@ impl Transform for ComputedTransform {
                 let mut row = row.clone();
                 let table = row.table.clone();
 
-                if let Some(computed_fields) = self.computed.get(&table) {
+                if let Some(computed_fields) =
+                    self.mapping.field_mappings.computed_fields.get(&table)
+                {
                     for computed in computed_fields {
-                        if let Expression::Lookup { .. } = computed.expression {
-                            // Skip lookup expressions as they are handled during data loading
-                            continue;
-                        }
-
-                        if let Some(value) = computed.expression.evaluate(&row) {
+                        if let Some(value) = computed.expression.evaluate(&row, &self.mapping) {
+                            if let Expression::Lookup { .. } = computed.expression {
+                                // Skip lookup expressions as they are handled during data loading
+                                continue;
+                            }
                             update_row(&mut row, &computed.name, &value);
                         } else {
                             warn!(

@@ -39,4 +39,10 @@ impl RowData {
 
         RowData::new(table_name, columns)
     }
+
+    pub fn get(&self, column_name: &str) -> Option<&ColumnData> {
+        self.columns
+            .iter()
+            .find(|col| col.name.eq_ignore_ascii_case(column_name))
+    }
 }

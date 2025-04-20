@@ -1,12 +1,13 @@
+use common::mapping::EntityMappingContext;
 use smql::statements::expr::{Expression, Literal, Operator};
 use sql_adapter::{metadata::column::value::ColumnValue, row::row_data::RowData};
 
 pub trait Evaluator {
-    fn evaluate(&self, row: &RowData) -> Option<ColumnValue>;
+    fn evaluate(&self, row: &RowData, mapping: &EntityMappingContext) -> Option<ColumnValue>;
 }
 
 impl Evaluator for Expression {
-    fn evaluate(&self, row: &RowData) -> Option<ColumnValue> {
+    fn evaluate(&self, row: &RowData, mapping: &EntityMappingContext) -> Option<ColumnValue> {
         match self {
             Expression::Identifier(identifier) => row
                 .columns
@@ -27,24 +28,30 @@ impl Evaluator for Expression {
                 operator,
                 right,
             } => {
-                let left_val = left.evaluate(row)?;
-                let right_val = right.evaluate(row)?;
+                let left_val = left.evaluate(row, mapping)?;
+                let right_val = right.evaluate(row, mapping)?;
                 eval_arithmetic(&left_val, &right_val, operator)
             }
 
             Expression::FunctionCall { name, arguments } => {
                 let evaluated_args: Vec<ColumnValue> = arguments
                     .iter()
-                    .map(|arg| arg.evaluate(row))
+                    .map(|arg| arg.evaluate(row, mapping))
                     .collect::<Option<Vec<_>>>()?;
                 eval_function(name, &evaluated_args)
             }
 
-            Expression::Lookup { .. } => {
-                // Lookups are handled when loading data from the source
-                // and are not evaluated here.
-                None
-            }
+            Expression::Lookup { table, key, .. } => mapping
+                .computed_flat
+                .iter()
+                .find(|f| {
+                    matches!(&f.expression,
+                        Expression::Lookup { table: t, key: k, .. }
+                            if t.eq_ignore_ascii_case(&table) && k.eq_ignore_ascii_case(&key)
+                    )
+                })
+                .and_then(|field| row.get(&field.name))
+                .and_then(|col_data| col_data.value.clone()),
         }
     }
 }
