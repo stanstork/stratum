@@ -73,26 +73,29 @@ impl<'a> SchemaPlan<'a> {
         }
     }
 
-    pub fn table_queries(&self) -> HashSet<String> {
-        self.column_definitions
-            .iter()
-            .map(|(table, columns)| {
-                let resolved_table = self.mapping.entity_name_map.resolve(table);
+    pub async fn table_queries(&self) -> HashSet<String> {
+        let mut queries = HashSet::new();
 
-                let mut resolved_columns = self.resolve_column_definitions(table, columns);
-                resolved_columns.extend(self.computed_column_definitions(table));
+        for (table, columns) in &self.column_definitions {
+            let resolved_table = self.mapping.entity_name_map.resolve(table);
 
-                SqlQueryBuilder::new()
-                    .create_table(
-                        &resolved_table,
-                        &resolved_columns,
-                        &[],
-                        self.ignore_constraints,
-                    )
-                    .build()
-                    .0
-            })
-            .collect()
+            let mut resolved_columns = self.resolve_column_definitions(table, columns);
+            resolved_columns.extend(self.computed_column_definitions(table).await);
+
+            let query = SqlQueryBuilder::new()
+                .create_table(
+                    &resolved_table,
+                    &resolved_columns,
+                    &[],
+                    self.ignore_constraints,
+                )
+                .build()
+                .0;
+
+            queries.insert(query);
+        }
+
+        queries
     }
 
     pub fn fk_queries(&self) -> HashSet<String> {
@@ -198,7 +201,7 @@ impl<'a> SchemaPlan<'a> {
             .collect()
     }
 
-    fn computed_column_definitions(&self, table: &str) -> Vec<ColumnDef> {
+    async fn computed_column_definitions(&self, table: &str) -> Vec<ColumnDef> {
         let mut defs = Vec::new();
 
         let resolved_table = self.mapping.entity_name_map.resolve(table);
@@ -221,7 +224,11 @@ impl<'a> SchemaPlan<'a> {
                 continue;
             }
 
-            if let Some(inferred_type) = computed.expression.infer_type(&metadata.columns()) {
+            if let Some(inferred_type) = computed
+                .expression
+                .infer_type(&metadata.columns(), &self.mapping, &self.source_adapter)
+                .await
+            {
                 defs.push(ColumnDef {
                     name: column_name.clone(),
                     is_nullable: true, // Assuming computed fields are nullable

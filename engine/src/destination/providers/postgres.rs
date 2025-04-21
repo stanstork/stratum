@@ -78,7 +78,7 @@ impl DbDataDestination for PgDestination {
         schema_plan: &SchemaPlan<'_>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let enum_queries = schema_plan.enum_queries().await?;
-        let table_queries = schema_plan.table_queries();
+        let table_queries = schema_plan.table_queries().await;
         let fk_queries = schema_plan.fk_queries();
 
         let all_queries = enum_queries
