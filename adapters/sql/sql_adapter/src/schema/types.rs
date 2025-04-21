@@ -1,14 +1,35 @@
-use crate::metadata::column::{data_type::ColumnDataType, metadata::ColumnMetadata};
+use crate::{
+    adapter::SqlAdapter,
+    metadata::column::{data_type::ColumnDataType, metadata::ColumnMetadata},
+};
+use async_trait::async_trait;
+use common::mapping::EntityMappingContext;
 use smql::statements::expr::{Expression, Literal};
+use std::sync::Arc;
 
+// Alias for the SQL adapter reference
+pub type AdapterRef = Arc<dyn SqlAdapter + Send + Sync>;
+
+#[async_trait]
 pub trait TypeInferencer {
-    fn infer_type(&self, input_columns: &[ColumnMetadata]) -> Option<ColumnDataType>;
+    async fn infer_type(
+        &self,
+        columns: &[ColumnMetadata],
+        mapping: &EntityMappingContext,
+        adapter: &AdapterRef,
+    ) -> Option<ColumnDataType>;
 }
 
+#[async_trait]
 impl TypeInferencer for Expression {
-    fn infer_type(&self, input_columns: &[ColumnMetadata]) -> Option<ColumnDataType> {
+    async fn infer_type(
+        &self,
+        columns: &[ColumnMetadata],
+        mapping: &EntityMappingContext,
+        adapter: &AdapterRef,
+    ) -> Option<ColumnDataType> {
         match self {
-            Expression::Identifier(identifier) => input_columns
+            Expression::Identifier(identifier) => columns
                 .iter()
                 .find(|col| col.name.eq_ignore_ascii_case(identifier))
                 .map(|col| col.data_type),
@@ -21,27 +42,24 @@ impl TypeInferencer for Expression {
             }),
 
             Expression::Arithmetic { left, right, .. } => {
-                let lt = left.infer_type(input_columns)?;
-                let rt = right.infer_type(input_columns)?;
+                let lt = left.infer_type(columns, mapping, adapter).await?;
+                let rt = right.infer_type(columns, mapping, adapter).await?;
                 Some(get_numeric_type(lt, rt))
             }
 
-            Expression::FunctionCall { name, arguments: _ } => {
-                match name.to_ascii_lowercase().as_str() {
-                    "lower" | "upper" => Some(ColumnDataType::VarChar),
-                    "concat" => Some(ColumnDataType::VarChar),
-                    _ => None,
-                }
-            }
+            Expression::FunctionCall { name, .. } => match name.to_ascii_lowercase().as_str() {
+                "lower" | "upper" | "concat" => Some(ColumnDataType::VarChar),
+                _ => None,
+            },
 
-            Expression::Lookup {
-                table: _,
-                key,
-                field: _,
-            } => input_columns
-                .iter()
-                .find(|col| col.name.eq_ignore_ascii_case(key))
-                .map(|col| col.data_type),
+            Expression::Lookup { table, key, .. } => {
+                let table_name = mapping.entity_name_map.resolve(table);
+                let meta = adapter.fetch_metadata(&table_name).await.ok()?;
+                meta.columns()
+                    .iter()
+                    .find(|col| col.name.eq_ignore_ascii_case(key))
+                    .map(|col| col.data_type)
+            }
         }
     }
 }

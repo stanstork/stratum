@@ -17,21 +17,21 @@ impl LinkedSource {
     pub async fn new(
         adapter: &Adapter,
         format: &DataFormat,
-        mapping_context: &EntityMappingContext,
+        mapping: &EntityMappingContext,
         load: &Load,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         match *format {
             DataFormat::MySql | DataFormat::Postgres => {
                 let join_clause = Self::build_join_clause(load);
                 let projection =
-                    Self::extract_projection(load, &mapping_context.field_mappings.computed_fields);
+                    Self::extract_projection(load, &mapping.field_mappings.computed_fields);
                 let source_metadata = adapter.get_adapter().fetch_metadata(&load.source).await?;
 
                 Ok(LinkedSource::Table(JoinSource::new(
                     source_metadata,
                     join_clause,
                     projection,
-                    mapping_context.clone(),
+                    mapping.clone(),
                 )))
             }
             unsupported => Err(format!("Unsupported data format: {:?}", unsupported).into()),

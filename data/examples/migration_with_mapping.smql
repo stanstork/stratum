@@ -36,6 +36,7 @@ MAP (
         oi[price] -> order_price,
         p[name] -> product_name,
         p[price] -> product_price,
-        total * 1.2 -> total_mul
+        oi[price] * 1.4 -> order_price_with_tax,
+        CONCAT(u[name], p[name]) -> concat_lookup_test
     )
 );

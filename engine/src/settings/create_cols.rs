@@ -95,6 +95,7 @@ impl CreateMissingColumnsSetting {
         source_meta: &TableMetadata,
         dest_meta: &TableMetadata,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let adapter = self.context.source_adapter().await?;
         if let Some(computed) = self.context.mapping.field_mappings.get_computed(table) {
             for comp in computed.iter() {
                 if dest_meta.get_column(&comp.name).is_none() {
@@ -104,9 +105,15 @@ impl CreateMissingColumnsSetting {
                             let table = self.context.mapping.entity_name_map.resolve(alias);
                             let meta = fetch_src_tbl_metadata(&self.context.source.primary, &table)
                                 .await?;
-                            comp.expression.infer_type(&meta.columns())
+                            comp.expression
+                                .infer_type(&meta.columns(), &self.context.mapping, &adapter)
+                                .await
                         }
-                        _ => comp.expression.infer_type(&source_meta.columns()),
+                        _ => {
+                            comp.expression
+                                .infer_type(&source_meta.columns(), &self.context.mapping, &adapter)
+                                .await
+                        }
                     };
                     let data_type =
                         col_type.ok_or_else(|| format!("Couldn’t infer type for {}", comp.name))?;

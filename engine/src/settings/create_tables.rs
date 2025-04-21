@@ -18,7 +18,7 @@ impl MigrationSetting for CreateMissingTablesSetting {
     async fn apply(
         &self,
         plan: &smql::plan::MigrationPlan,
-        context: Arc<Mutex<MigrationContext>>,
+        _context: Arc<Mutex<MigrationContext>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut schema_plan = self.context.build_schema_plan().await?;
 
