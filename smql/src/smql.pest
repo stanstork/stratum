@@ -87,7 +87,7 @@ filter = {
     ~ WHITESPACE* ~ ")" ~ WHITESPACE* ~ ";"
 }
 
-condition = { ident ~ WHITESPACE* ~ comparator ~ WHITESPACE* ~ (string | decimal | integer | boolean) }
+condition = { expression ~ WHITESPACE* ~ comparator ~ WHITESPACE* ~ (string | decimal | integer | boolean) }
 
 // ==============================
 //         LOOKUPS (LOAD)

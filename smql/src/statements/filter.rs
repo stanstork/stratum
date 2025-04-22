@@ -13,7 +13,7 @@ pub struct Filter {
 
 #[derive(Debug, Clone)]
 pub struct Condition {
-    pub field: String,
+    pub field: Expression,
     pub comparator: Comparator,
     pub value: Expression,
 }
@@ -44,11 +44,7 @@ impl StatementParser for Condition {
     fn parse(pair: Pair<Rule>) -> Self {
         let mut inner = pair.clone().into_inner();
 
-        let field = inner
-            .next()
-            .expect("Expected field identifier")
-            .as_str()
-            .to_string();
+        let field = Expression::parse(inner.next().expect("Expected field identifier"));
         let comparator = Comparator::parse(inner.next().expect("Expected comparator"));
         let value = Expression::parse(inner.next().expect("Expected value"));
 

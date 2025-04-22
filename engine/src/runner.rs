@@ -18,10 +18,14 @@ use tracing::info;
 pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
     info!("Running migration");
 
+    println!("Migration plan: {:?}", plan.filter);
+
     let mapping = EntityMappingContext::new(&plan);
     let source = create_source(&plan, &mapping).await?;
     let destination = create_destination(&plan).await?;
     let context = MigrationContext::init(source, destination, mapping);
+
+    unimplemented!();
 
     apply_settings(&plan, Arc::clone(&context)).await?;
     // validate_destination(&plan, Arc::clone(&context)).await?;

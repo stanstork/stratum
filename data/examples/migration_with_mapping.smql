@@ -29,6 +29,11 @@ JOIN order_items (
     id -> product_id
 );
 
+FILTER (
+    orders[status] = "active",
+    u[age] > 18
+);
+
 MAP (
     orders_flat (
         u[name] -> user_name,
