@@ -1,34 +1,53 @@
-use crate::{record::Record, source::data_source::DbDataSource};
+use crate::adapter::MySqlAdapter;
 use async_trait::async_trait;
-use mysql::mysql::MySqlAdapter;
-use sql_adapter::adapter::SqlAdapter;
-use sql_adapter::join::source::JoinSource;
-use sql_adapter::{metadata::table::TableMetadata, requests::FetchRowsRequest};
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use sql_adapter::{
+    adapter::SqlAdapter, filter::SqlFilter, join::source::JoinSource,
+    metadata::table::TableMetadata, requests::FetchRowsRequest, row::row_data::RowData,
+    source::DbDataSource,
+};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
+#[derive(Clone)]
 pub struct MySqlDataSource {
-    metadata: HashMap<String, TableMetadata>,
     adapter: MySqlAdapter,
+    metadata: HashMap<String, TableMetadata>,
+    joins: Vec<JoinSource>,
+    filter: Option<SqlFilter>,
 }
 
 impl MySqlDataSource {
-    pub fn new(adapter: MySqlAdapter) -> Self {
+    pub fn new(adapter: MySqlAdapter, joins: Vec<JoinSource>) -> Self {
         Self {
-            metadata: HashMap::new(),
             adapter,
+            joins,
+            metadata: HashMap::new(),
+            filter: None,
         }
+    }
+
+    pub fn set_metadata(&mut self, metadata: HashMap<String, TableMetadata>) {
+        self.metadata = metadata;
+    }
+
+    pub fn set_joins(&mut self, joins: Vec<JoinSource>) {
+        self.joins = joins;
+    }
+
+    pub fn set_filter(&mut self, filter: Option<SqlFilter>) {
+        self.filter = filter;
     }
 }
 
 #[async_trait]
 impl DbDataSource for MySqlDataSource {
-    async fn fetch_data(
+    async fn fetch(
         &self,
         batch_size: usize,
-        joins: &Vec<JoinSource>,
         offset: Option<usize>,
-    ) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
         let mut records = Vec::new();
         let mut processed_tables = HashSet::new();
 
@@ -42,7 +61,7 @@ impl DbDataSource for MySqlDataSource {
                 }
 
                 // Extract join info for this table, if any
-                let (join_clause, joined_fields) = JoinSource::filter_joins(&tbl_name, joins);
+                let (join_clause, joined_fields) = JoinSource::filter_joins(&tbl_name, &self.joins);
 
                 let mut all_fields = base_fields;
                 all_fields.extend(joined_fields);
@@ -57,7 +76,7 @@ impl DbDataSource for MySqlDataSource {
                 );
 
                 let rows = self.adapter.fetch_rows(request).await?;
-                records.extend(rows.into_iter().map(Record::RowData));
+                records.extend(rows);
             }
         }
 

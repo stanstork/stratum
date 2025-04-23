@@ -35,7 +35,7 @@ impl MigrationContext {
     pub fn init(
         source: Source,
         destination: Destination,
-        mapping_context: EntityMappingContext,
+        mapping: EntityMappingContext,
     ) -> Arc<Mutex<MigrationContext>> {
         let state = Arc::new(Mutex::new(MigrationState::new()));
         let buffer = Arc::new(SledBuffer::new("migration_buffer"));
@@ -45,7 +45,7 @@ impl MigrationContext {
             source,
             destination,
             buffer,
-            mapping: mapping_context,
+            mapping,
         }))
     }
 
