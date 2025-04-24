@@ -1,5 +1,5 @@
 use mysql::adapter::MySqlAdapter;
-use postgres::postgres::PgAdapter;
+use postgres::adapter::PgAdapter;
 use smql::statements::connection::DataFormat;
 use sql_adapter::adapter::SqlAdapter;
 

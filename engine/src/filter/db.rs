@@ -10,12 +10,12 @@ pub fn sql_filter(plan: &MigrationPlan) -> Result<SqlFilter, Box<dyn std::error:
     let conditions = stmt_filter
         .conditions
         .iter()
-        .map(from_stmt_condtion)
+        .map(from_stmt_condition)
         .collect::<Result<Vec<_>, _>>()?;
     Ok(SqlFilter { conditions })
 }
 
-fn from_stmt_condtion(
+fn from_stmt_condition(
     c: &statements::filter::Condition,
 ) -> Result<Condition, Box<dyn std::error::Error>> {
     // extract table & column

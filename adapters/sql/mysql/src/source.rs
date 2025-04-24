@@ -1,8 +1,12 @@
 use crate::adapter::MySqlAdapter;
 use async_trait::async_trait;
 use sql_adapter::{
-    adapter::SqlAdapter, filter::SqlFilter, join::source::JoinSource,
-    metadata::table::TableMetadata, requests::FetchRowsRequest, row::row_data::RowData,
+    adapter::SqlAdapter,
+    filter::SqlFilter,
+    join::source::JoinSource,
+    metadata::{provider::MetadataHelper, table::TableMetadata},
+    requests::FetchRowsRequest,
+    row::row_data::RowData,
     source::DbDataSource,
 };
 use std::{
@@ -13,7 +17,7 @@ use std::{
 #[derive(Clone)]
 pub struct MySqlDataSource {
     adapter: MySqlAdapter,
-    metadata: HashMap<String, TableMetadata>,
+    meta: HashMap<String, TableMetadata>,
     joins: Vec<JoinSource>,
     filter: Option<SqlFilter>,
 }
@@ -23,13 +27,13 @@ impl MySqlDataSource {
         Self {
             adapter,
             joins,
-            metadata: HashMap::new(),
+            meta: HashMap::new(),
             filter: None,
         }
     }
 
     pub fn set_metadata(&mut self, metadata: HashMap<String, TableMetadata>) {
-        self.metadata = metadata;
+        self.meta = metadata;
     }
 
     pub fn set_joins(&mut self, joins: Vec<JoinSource>) {
@@ -51,7 +55,7 @@ impl DbDataSource for MySqlDataSource {
         let mut records = Vec::new();
         let mut processed_tables = HashSet::new();
 
-        for table in self.metadata.keys() {
+        for table in self.meta.keys() {
             let grouped_fields = self.get_metadata(table).select_fields();
 
             for (tbl_name, base_fields) in grouped_fields {
@@ -82,18 +86,24 @@ impl DbDataSource for MySqlDataSource {
 
         Ok(records)
     }
+}
 
+impl MetadataHelper for MySqlDataSource {
     fn get_metadata(&self, table: &str) -> &TableMetadata {
-        self.metadata
+        self.meta
             .get(table)
             .unwrap_or_else(|| panic!("Metadata for table {} not found", table))
     }
 
     fn set_metadata(&mut self, metadata: HashMap<String, TableMetadata>) {
-        self.metadata = metadata;
+        self.meta = metadata;
     }
 
     fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)> {
         Arc::new(self.adapter.clone())
+    }
+
+    fn get_tables(&self) -> Vec<TableMetadata> {
+        self.meta.values().cloned().collect()
     }
 }

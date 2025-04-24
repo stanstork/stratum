@@ -2,7 +2,7 @@ use super::{column::metadata::ColumnMetadata, fk::ForeignKeyMetadata};
 use crate::{
     metadata::column::data_type::ColumnDataType,
     query::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField},
-    schema::plan::TypeConverter,
+    schema::types::TypeConverter,
 };
 use std::collections::{HashMap, HashSet};
 

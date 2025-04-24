@@ -32,7 +32,10 @@ impl MigrationSetting for CreateMissingTablesSetting {
             let meta = fetch_src_tbl_metadata(&self.context.source.primary, &src).await?;
 
             // add columns, FKs, enums into plan
-            schema_plan.add_column_defs(&meta.name, meta.column_defs(schema_plan.type_converter()));
+            schema_plan.add_column_defs(
+                &meta.name,
+                meta.column_defs(schema_plan.type_engine().type_converter()),
+            );
             for fk in meta.fk_defs() {
                 if self
                     .context
@@ -43,7 +46,7 @@ impl MigrationSetting for CreateMissingTablesSetting {
                     schema_plan.add_fk_def(&meta.name, fk.clone());
                 }
             }
-            for col in (schema_plan.type_extractor())(&meta) {
+            for col in (schema_plan.type_engine().type_extractor())(&meta) {
                 schema_plan.add_enum_def(&meta.name, &col.name);
             }
             schema_plan.add_metadata(&src, meta);

@@ -21,7 +21,19 @@ impl Destination {
         records: Vec<Record>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match &self.data_dest {
-            DataDestination::Database(db) => db.lock().await.write_batch(metadata, records).await,
+            DataDestination::Database(db) => {
+                db.lock()
+                    .await
+                    .write_batch(
+                        metadata,
+                        records
+                            .iter()
+                            .filter_map(|r| r.to_row_data())
+                            .cloned()
+                            .collect(),
+                    )
+                    .await
+            }
         }
     }
 
