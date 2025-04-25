@@ -5,7 +5,7 @@ use sql_adapter::{
     filter::SqlFilter,
     join::source::JoinSource,
     metadata::{provider::MetadataHelper, table::TableMetadata},
-    requests::FetchRowsRequest,
+    requests::{FetchRowsRequest, FetchRowsRequestBuilder},
     row::row_data::RowData,
     source::DbDataSource,
 };
@@ -23,12 +23,12 @@ pub struct MySqlDataSource {
 }
 
 impl MySqlDataSource {
-    pub fn new(adapter: MySqlAdapter, joins: Vec<JoinSource>) -> Self {
+    pub fn new(adapter: MySqlAdapter, joins: Vec<JoinSource>, filter: Option<SqlFilter>) -> Self {
         Self {
             adapter,
             joins,
+            filter,
             meta: HashMap::new(),
-            filter: None,
         }
     }
 
@@ -70,16 +70,15 @@ impl DbDataSource for MySqlDataSource {
                 let mut all_fields = base_fields;
                 all_fields.extend(joined_fields);
 
-                let request = FetchRowsRequest::new(
-                    tbl_name.clone(),
-                    Some(tbl_name.clone()), // alias is same as table name for now
-                    all_fields,
-                    join_clause,
-                    batch_size,
-                    offset,
-                );
+                let request_builder = FetchRowsRequestBuilder::new(tbl_name.clone())
+                    .alias(tbl_name.clone())
+                    .columns(all_fields.clone())
+                    .joins(join_clause)
+                    .filter(self.filter.clone())
+                    .limit(batch_size)
+                    .offset(offset);
 
-                let rows = self.adapter.fetch_rows(request).await?;
+                let rows = self.adapter.fetch_rows(request_builder.build()).await?;
                 records.extend(rows);
             }
         }

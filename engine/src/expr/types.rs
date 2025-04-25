@@ -1,5 +1,3 @@
-use std::{future::Future, pin::Pin};
-
 use async_trait::async_trait;
 use common::{computed::ComputedField, mapping::EntityMappingContext};
 use smql::statements::expr::{Expression, Literal};
@@ -7,8 +5,9 @@ use sql_adapter::{
     metadata::column::{data_type::ColumnDataType, metadata::ColumnMetadata},
     schema::types::{AdapterRef, TypeInferencer},
 };
+use std::{future::Future, pin::Pin};
 
-/// A thin newtype wrapper around `Expression` so we can implement
+/// A thin newtype wrapper around `Expression` to implement
 /// `TypeInferencer` without touching the SMQL crate.
 pub struct ExpressionWrapper(pub Expression);
 
@@ -19,7 +18,7 @@ pub async fn infer_computed_type(
     mapping: &EntityMappingContext,
     adapter: &AdapterRef,
 ) -> Option<ColumnDataType> {
-    // Clone the expression node into our wrapper and run inference.
+    // Clone the expression node into wrapper and run inference.
     let expr = ExpressionWrapper(computed.expression.clone());
     let data_type = expr.infer_type(columns, mapping, adapter).await;
 
@@ -43,7 +42,7 @@ pub async fn infer_computed_type(
 /// 1. Erases the compiler-generated, unnamed `impl Future` type into a single,
 ///    heap-allocated trait object.
 /// 2. Gives the function a concrete, nameable return type that exactly matches
-///    our `InferComputedTypeFn` alias.
+///    `InferComputedTypeFn` alias.
 /// Without this boxing shim, there’s no way to coerce the raw `async fn` into
 /// a plain function-pointer signature, because its real future type is anonymous.
 pub fn boxed_infer_computed_type<'a>(
@@ -52,7 +51,7 @@ pub fn boxed_infer_computed_type<'a>(
     mapping: &'a EntityMappingContext,
     adapter: &'a AdapterRef,
 ) -> Pin<Box<dyn Future<Output = Option<ColumnDataType>> + Send + 'a>> {
-    // Box the future returned by your async fn:
+    // Box the future returned by async fn
     Box::pin(infer_computed_type(computed, columns, mapping, adapter))
 }
 

@@ -1,5 +1,5 @@
 use super::linked_source::LinkedSource;
-use crate::adapter::Adapter;
+use crate::{adapter::Adapter, filter::filter::Filter};
 use mysql::source::MySqlDataSource;
 use smql::statements::connection::DataFormat;
 use sql_adapter::{join::source::JoinSource, source::DbDataSource};
@@ -16,11 +16,27 @@ impl DataSource {
         format: DataFormat,
         adapter: &Adapter,
         linked: &Vec<LinkedSource>,
+        filter: &Option<Filter>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         match format {
             DataFormat::MySql => match adapter {
                 Adapter::MySql(mysql_adapter) => {
-                    let source = MySqlDataSource::new(mysql_adapter.clone(), linked_joins(linked));
+                    let sql_filter = if let Some(filter) = filter {
+                        match filter {
+                            Filter::Sql(sql) => {
+                                // Convert the filter to a SQL filter
+                                Some(sql.clone())
+                            }
+                        }
+                    } else {
+                        None
+                    };
+
+                    let source = MySqlDataSource::new(
+                        mysql_adapter.clone(),
+                        linked_joins(linked),
+                        sql_filter,
+                    );
                     Ok(DataSource::Database(Arc::new(Mutex::new(source))))
                 }
                 _ => Err("Expected MySql adapter, but got a different type".into()),

@@ -76,8 +76,8 @@ async fn create_source(
         linked.push(linked_source);
     }
 
-    let primary = DataSource::from_adapter(format, &adapter, &linked)?;
     let filter = create_filter(&plan)?;
+    let primary = DataSource::from_adapter(format, &adapter, &linked, &filter)?;
 
     Ok(Source::new(format, primary, linked, filter))
 }

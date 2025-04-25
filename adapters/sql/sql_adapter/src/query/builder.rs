@@ -1,4 +1,7 @@
-use crate::join::clause::{JoinClause, JoinType};
+use crate::{
+    filter::SqlFilter,
+    join::clause::{JoinClause, JoinType},
+};
 
 use super::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField};
 
@@ -282,6 +285,19 @@ impl SqlQueryBuilder {
 
     pub fn offset(mut self, offset: usize) -> Self {
         self.query.push_str(&format!(" OFFSET {}", offset));
+        self
+    }
+
+    pub fn where_clause(mut self, filter: &Option<SqlFilter>) -> Self {
+        if filter.is_none() {
+            return self;
+        }
+
+        let filter = filter.as_ref().unwrap();
+
+        self.query.push_str(" WHERE ");
+        self.query.push_str(&filter.to_sql());
+
         self
     }
 
