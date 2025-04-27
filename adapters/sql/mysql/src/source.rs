@@ -32,16 +32,45 @@ impl MySqlDataSource {
         }
     }
 
-    pub fn set_metadata(&mut self, metadata: HashMap<String, TableMetadata>) {
-        self.meta = metadata;
-    }
+    fn build_fetch_requests(
+        &self,
+        batch_size: usize,
+        offset: Option<usize>,
+    ) -> Vec<FetchRowsRequest> {
+        let mut seen_tables = HashSet::new();
+        let mut requests = Vec::new();
 
-    pub fn set_joins(&mut self, joins: Vec<JoinSource>) {
-        self.joins = joins;
-    }
+        for tbl_name in self.meta.keys() {
+            for (table_name, mut base_fields) in self.get_metadata(tbl_name).select_fields() {
+                // Skip already processed tables
+                if !seen_tables.insert(table_name.clone()) {
+                    continue;
+                }
 
-    pub fn set_filter(&mut self, filter: Option<SqlFilter>) {
-        self.filter = filter;
+                // Extract join info for this table, if any
+                let (joins, joined_fields) = JoinSource::filter_joins(&table_name, &self.joins);
+                base_fields.extend(joined_fields);
+
+                // Build filter for this table+joins
+                let filter = self
+                    .filter
+                    .as_ref()
+                    .map(|f| f.for_table(&table_name, &joins));
+
+                let request = FetchRowsRequestBuilder::new(table_name.clone())
+                    .alias(table_name.clone())
+                    .columns(base_fields)
+                    .joins(joins)
+                    .filter(filter)
+                    .limit(batch_size)
+                    .offset(offset)
+                    .build();
+
+                requests.push(request);
+            }
+        }
+
+        requests
     }
 }
 
@@ -52,38 +81,17 @@ impl DbDataSource for MySqlDataSource {
         batch_size: usize,
         offset: Option<usize>,
     ) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
-        let mut records = Vec::new();
-        let mut processed_tables = HashSet::new();
+        // Build fetch requests for each table
+        let requests = self.build_fetch_requests(batch_size, offset);
 
-        for table in self.meta.keys() {
-            let grouped_fields = self.get_metadata(table).select_fields();
-
-            for (tbl_name, base_fields) in grouped_fields {
-                // Skip already processed tables
-                if !processed_tables.insert(tbl_name.clone()) {
-                    continue;
-                }
-
-                // Extract join info for this table, if any
-                let (join_clause, joined_fields) = JoinSource::filter_joins(&tbl_name, &self.joins);
-
-                let mut all_fields = base_fields;
-                all_fields.extend(joined_fields);
-
-                let request_builder = FetchRowsRequestBuilder::new(tbl_name.clone())
-                    .alias(tbl_name.clone())
-                    .columns(all_fields.clone())
-                    .joins(join_clause)
-                    .filter(self.filter.clone())
-                    .limit(batch_size)
-                    .offset(offset);
-
-                let rows = self.adapter.fetch_rows(request_builder.build()).await?;
-                records.extend(rows);
-            }
+        let mut rows = Vec::new();
+        for request in requests {
+            // Execute each request and collect results
+            let result = self.adapter.fetch_rows(request).await?;
+            rows.extend(result);
         }
 
-        Ok(records)
+        Ok(rows)
     }
 }
 

@@ -30,8 +30,8 @@ JOIN order_items (
 );
 
 FILTER (
-    orders[status] = "active",
-    u[age] > 18
+    orders[total] > 400,
+    u[id] < 3
 );
 
 MAP (

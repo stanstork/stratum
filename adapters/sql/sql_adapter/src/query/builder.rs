@@ -1,5 +1,5 @@
 use crate::{
-    filter::SqlFilter,
+    filter::{Condition, SqlFilter},
     join::clause::{JoinClause, JoinType},
 };
 
@@ -294,6 +294,9 @@ impl SqlQueryBuilder {
         }
 
         let filter = filter.as_ref().unwrap();
+        if filter.conditions.is_empty() {
+            return self;
+        }
 
         self.query.push_str(" WHERE ");
         self.query.push_str(&filter.to_sql());
