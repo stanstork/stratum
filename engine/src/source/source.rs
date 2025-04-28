@@ -1,7 +1,6 @@
 use super::{data_source::DataSource, linked_source::LinkedSource};
-use crate::record::Record;
+use crate::{filter::filter::Filter, record::Record};
 use smql::statements::connection::DataFormat;
-use sql_adapter::join::source::JoinSource;
 
 /// Represents a migration source,
 /// such as a database table, file, or API to be transformed and written to a destination.
@@ -11,27 +10,21 @@ pub struct Source {
     pub format: DataFormat,
     pub primary: DataSource,
     pub linked: Vec<LinkedSource>,
-    pub joins: Vec<JoinSource>,
+    pub filter: Option<Filter>,
 }
 
 impl Source {
-    pub fn new(format: DataFormat, primary: DataSource, linked: Vec<LinkedSource>) -> Self {
-        let joins = linked
-            .iter()
-            .filter_map(|linked| {
-                if let LinkedSource::Table(join) = linked {
-                    Some((*join).clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
+    pub fn new(
+        format: DataFormat,
+        primary: DataSource,
+        linked: Vec<LinkedSource>,
+        filter: Option<Filter>,
+    ) -> Self {
         Source {
             format,
             primary,
             linked,
-            joins,
+            filter,
         }
     }
 
@@ -43,7 +36,9 @@ impl Source {
         match &self.primary {
             DataSource::Database(db) => {
                 let db = db.lock().await;
-                db.fetch_data(batch_size, &self.joins, offset).await
+                let rows = db.fetch(batch_size, offset).await?;
+                let records = rows.into_iter().map(Record::RowData).collect();
+                Ok(records)
             }
         }
     }

@@ -1,23 +1,14 @@
+use super::types::TypeEngine;
 use crate::{
     adapter::SqlAdapter,
-    metadata::{column::metadata::ColumnMetadata, table::TableMetadata},
+    metadata::table::TableMetadata,
     query::{builder::SqlQueryBuilder, column::ColumnDef, fk::ForeignKeyDef},
 };
 use common::mapping::EntityMappingContext;
-use smql::statements::expr::Expression;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
-
-use super::types::TypeInferencer;
-
-/// A function that converts a source database type to a target database type,
-/// returning the target type name and optional size (e.g., MySQL `blob` → PostgreSQL `bytea`).
-pub type TypeConverter = dyn Fn(&ColumnMetadata) -> (String, Option<usize>) + Send + Sync;
-
-/// A function that extracts custom types (such as enums) from a table’s metadata.
-pub type TypeExtractor = dyn Fn(&TableMetadata) -> Vec<ColumnMetadata> + Send + Sync;
 
 /// Represents the schema migration plan from source to target, including type conversion,
 /// name mapping, and metadata relationships.
@@ -25,11 +16,8 @@ pub struct SchemaPlan<'a> {
     /// Adapter for the source database; used to read metadata.
     source_adapter: Arc<(dyn SqlAdapter + Send + Sync)>,
 
-    /// Function used to convert column types from source to target database format.
-    type_converter: &'a TypeConverter,
-
-    /// Function used to extract custom types such as enums from table metadata.
-    type_extractor: &'a TypeExtractor,
+    /// Type engine for converting types between source and target databases.
+    type_engine: TypeEngine<'a>,
 
     /// Indicates whether to ignore constraints during the migration process.
     /// Primary keys and foreign keys are not created in the target database.
@@ -55,15 +43,13 @@ pub struct SchemaPlan<'a> {
 impl<'a> SchemaPlan<'a> {
     pub fn new(
         source_adapter: Arc<(dyn SqlAdapter + Send + Sync)>,
-        type_converter: &'a TypeConverter,
-        type_extractor: &'a TypeExtractor,
+        type_engine: TypeEngine<'a>,
         ignore_constraints: bool,
         mapping: EntityMappingContext,
     ) -> Self {
         Self {
             source_adapter,
-            type_converter,
-            type_extractor,
+            type_engine,
             ignore_constraints,
             mapping,
             metadata_graph: HashMap::new(),
@@ -71,6 +57,10 @@ impl<'a> SchemaPlan<'a> {
             enum_definitions: HashSet::new(),
             fk_definitions: HashMap::new(),
         }
+    }
+
+    pub fn type_engine(&self) -> &TypeEngine<'a> {
+        &self.type_engine
     }
 
     pub async fn table_queries(&self) -> HashSet<String> {
@@ -179,14 +169,6 @@ impl<'a> SchemaPlan<'a> {
         self.metadata_graph.contains_key(table_name)
     }
 
-    pub fn type_converter(&self) -> &TypeConverter {
-        self.type_converter
-    }
-
-    pub fn type_extractor(&self) -> &TypeExtractor {
-        self.type_extractor
-    }
-
     fn resolve_column_definitions(&self, table: &str, columns: &[ColumnDef]) -> Vec<ColumnDef> {
         let resolved_table = self.mapping.entity_name_map.resolve(table);
         columns
@@ -224,9 +206,9 @@ impl<'a> SchemaPlan<'a> {
                 continue;
             }
 
-            if let Some(inferred_type) = computed
-                .expression
-                .infer_type(&metadata.columns(), &self.mapping, &self.source_adapter)
+            if let Some(inferred_type) = self
+                .type_engine
+                .infer_computed_type(&computed, &metadata.columns(), &self.mapping)
                 .await
             {
                 defs.push(ColumnDef {
@@ -237,16 +219,6 @@ impl<'a> SchemaPlan<'a> {
                     is_primary_key: false,
                     char_max_length: None,
                 });
-            } else {
-                match computed.expression {
-                    Expression::Lookup { .. } => {}
-                    _ => {
-                        panic!(
-                            "Failed to infer type for computed column `{}` in `{}`",
-                            column_name, table
-                        );
-                    }
-                }
             }
         }
 

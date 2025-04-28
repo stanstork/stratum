@@ -3,13 +3,14 @@ use crate::{
     consumer::Consumer,
     context::MigrationContext,
     destination::{data_dest::DataDestination, destination::Destination},
+    filter::{compiler::FilterCompiler, filter::Filter, sql::SqlFilterCompiler},
     metadata::{set_destination_metadata, set_source_metadata},
     producer::Producer,
     settings::parse_settings,
     source::{data_source::DataSource, linked_source::LinkedSource, source::Source},
 };
 use common::mapping::EntityMappingContext;
-use smql::plan::MigrationPlan;
+use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 use sql_adapter::metadata::{provider::MetadataProvider, table::TableMetadata};
 use std::{collections::HashMap, sync::Arc, vec};
 use tokio::sync::{watch, Mutex};
@@ -68,7 +69,6 @@ async fn create_source(
 ) -> Result<Source, Box<dyn std::error::Error>> {
     let format = plan.connections.source.data_format;
     let adapter = Adapter::new(format, &plan.connections.source.con_str).await?;
-    let data_source = DataSource::from_adapter(format, &adapter)?;
 
     let mut linked = vec![];
     for load in plan.loads.iter() {
@@ -76,7 +76,10 @@ async fn create_source(
         linked.push(linked_source);
     }
 
-    Ok(Source::new(format, data_source, linked))
+    let filter = create_filter(&plan)?;
+    let primary = DataSource::from_adapter(format, &adapter, &linked, &filter)?;
+
+    Ok(Source::new(format, primary, linked, filter))
 }
 
 async fn create_destination(
@@ -88,6 +91,25 @@ async fn create_destination(
         DataDestination::from_adapter(plan.connections.destination.data_format, adapter)?;
 
     Ok(Destination::new(format, data_dest))
+}
+
+fn create_filter(plan: &MigrationPlan) -> Result<Option<Filter>, Box<dyn std::error::Error>> {
+    let format = plan.connections.source.data_format;
+    match format {
+        // If the format is SQL, try to build a SQL filter.
+        DataFormat::MySql | DataFormat::Postgres => {
+            // Create a new SQL filter
+            let filter = plan
+                .filter
+                .as_ref()
+                .map(|ast| Filter::Sql(SqlFilterCompiler::compile(&ast.expression)));
+            Ok(filter)
+        }
+        _ => {
+            // Unsupported format
+            Ok(None)
+        }
+    }
 }
 
 async fn apply_settings(

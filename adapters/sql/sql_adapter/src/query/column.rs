@@ -1,4 +1,4 @@
-use crate::{metadata::column::metadata::ColumnMetadata, schema::plan::TypeConverter};
+use crate::{metadata::column::metadata::ColumnMetadata, schema::types::TypeConverter};
 
 #[derive(Debug, Clone)]
 pub struct ColumnDef {

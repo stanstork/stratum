@@ -4,7 +4,15 @@ use std::{
     collections::{HashMap, HashSet},
     future::Future,
     pin::Pin,
+    sync::Arc,
 };
+
+pub trait MetadataHelper {
+    fn get_metadata(&self, table: &str) -> &TableMetadata;
+    fn set_metadata(&mut self, metadata: HashMap<String, TableMetadata>);
+    fn get_tables(&self) -> Vec<TableMetadata>;
+    fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)>;
+}
 
 // MetadataFuture is a type alias for a Future that returns a Result
 // containing the TableMetadata or an error
@@ -188,10 +196,13 @@ impl MetadataProvider {
                 Self::visit_schema_deps(related, plan, visited);
             });
 
-        plan.add_column_defs(&metadata.name, metadata.column_defs(plan.type_converter()));
+        plan.add_column_defs(
+            &metadata.name,
+            metadata.column_defs(plan.type_engine().type_converter()),
+        );
         plan.add_fk_defs(&metadata.name, metadata.fk_defs());
 
-        for col in (plan.type_extractor())(metadata) {
+        for col in (plan.type_engine().type_extractor())(metadata) {
             plan.add_enum_def(&metadata.name, &col.name);
         }
     }

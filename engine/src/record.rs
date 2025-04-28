@@ -23,6 +23,12 @@ impl Record {
             Record::RowData(_) => Record::RowData(RowData::deserialize(data)),
         }
     }
+
+    pub fn to_row_data(&self) -> Option<&RowData> {
+        match self {
+            Record::RowData(data) => Some(data),
+        }
+    }
 }
 
 pub trait DataRecord: Send + Sync {

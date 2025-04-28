@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 smql = { path = "../smql" }
+async-trait = "0.1.86"

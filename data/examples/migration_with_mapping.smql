@@ -29,6 +29,13 @@ JOIN order_items (
     id -> product_id
 );
 
+FILTER (
+    AND(
+        OR(orders[total] > 400, u[id] < 4),
+        orders[total] < 1200
+    )
+);
+
 MAP (
     orders_flat (
         u[name] -> user_name,

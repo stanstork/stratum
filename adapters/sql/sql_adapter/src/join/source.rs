@@ -1,7 +1,6 @@
 use super::clause::JoinClause;
 use crate::{metadata::table::TableMetadata, query::select::SelectField};
 use common::mapping::EntityMappingContext;
-use smql::statements::expr::Expression;
 use std::collections::{HashSet, VecDeque};
 
 #[derive(Debug, Clone)]
@@ -108,26 +107,18 @@ impl JoinSource {
             .cloned()
             .unwrap_or_default();
 
-        let binding = vec![];
-        let computed_fields = self
-            .mapping
-            .field_mappings
-            .get_computed(&self.mapping.entity_name_map.resolve(table))
-            .unwrap_or(&binding);
-
         source_fields
             .into_iter()
             .filter_map(|mut field| {
                 field.table = left_alias.clone();
 
-                if let Some(alias) = computed_fields.iter().find_map(|cf| match &cf.expression {
-                    Expression::Lookup { table, key, .. }
-                        if table.eq_ignore_ascii_case(&field.table)
-                            && key.eq_ignore_ascii_case(&field.column) =>
-                    {
-                        Some(cf.name.clone())
+                let lookups = self.mapping.get_lookups_for(&field.table);
+                if let Some(alias) = lookups.iter().find_map(|lookup| {
+                    if lookup.key.eq_ignore_ascii_case(&field.column) {
+                        Some(lookup.target.clone())
+                    } else {
+                        None
                     }
-                    _ => None,
                 }) {
                     field.alias = Some(alias);
                 }

@@ -106,6 +106,7 @@ impl SqlAdapter for MySqlAdapter {
             .select(&request.columns)
             .from(&request.table, alias)
             .join(&request.joins)
+            .where_clause(&request.filter)
             .limit(request.limit)
             .offset(request.offset.unwrap_or(0))
             .build();

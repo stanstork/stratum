@@ -2,6 +2,7 @@ use super::{context::SchemaSettingContext, phase::MigrationSettingsPhase, Migrat
 use crate::{
     context::MigrationContext,
     destination::data_dest::DataDestination,
+    expr::types::ExpressionWrapper,
     metadata::{fetch_dest_tbl_metadata, fetch_src_tbl_metadata},
 };
 use async_trait::async_trait;
@@ -105,12 +106,12 @@ impl CreateMissingColumnsSetting {
                             let table = self.context.mapping.entity_name_map.resolve(alias);
                             let meta = fetch_src_tbl_metadata(&self.context.source.primary, &table)
                                 .await?;
-                            comp.expression
+                            ExpressionWrapper(comp.expression.clone())
                                 .infer_type(&meta.columns(), &self.context.mapping, &adapter)
                                 .await
                         }
                         _ => {
-                            comp.expression
+                            ExpressionWrapper(comp.expression.clone())
                                 .infer_type(&source_meta.columns(), &self.context.mapping, &adapter)
                                 .await
                         }
