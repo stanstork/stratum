@@ -16,6 +16,7 @@ pub struct SchemaPlan<'a> {
     /// Adapter for the source database; used to read metadata.
     source_adapter: Arc<(dyn SqlAdapter + Send + Sync)>,
 
+    /// Type engine for converting types between source and target databases.
     type_engine: TypeEngine<'a>,
 
     /// Indicates whether to ignore constraints during the migration process.

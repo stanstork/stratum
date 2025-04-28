@@ -112,10 +112,9 @@ impl JoinSource {
             .filter_map(|mut field| {
                 field.table = left_alias.clone();
 
-                if let Some(alias) = self.mapping.lookups.iter().find_map(|lookup| {
-                    if lookup.entity.eq_ignore_ascii_case(&field.table)
-                        && lookup.key.eq_ignore_ascii_case(&field.column)
-                    {
+                let lookups = self.mapping.get_lookups_for(&field.table);
+                if let Some(alias) = lookups.iter().find_map(|lookup| {
+                    if lookup.key.eq_ignore_ascii_case(&field.column) {
                         Some(lookup.target.clone())
                     } else {
                         None

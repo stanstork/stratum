@@ -19,6 +19,7 @@ pub type TypeConverter = dyn Fn(&ColumnMetadata) -> (String, Option<usize>) + Se
 /// A function that extracts custom types (such as enums) from a table’s metadata.
 pub type TypeExtractor = dyn Fn(&TableMetadata) -> Vec<ColumnMetadata> + Send + Sync;
 
+/// A function that infers the type of computed fields based on the source database metadata.
 pub type InferComputedTypeFn =
     for<'a> fn(
         &'a ComputedField,

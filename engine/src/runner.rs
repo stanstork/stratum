@@ -99,12 +99,11 @@ fn create_filter(plan: &MigrationPlan) -> Result<Option<Filter>, Box<dyn std::er
         // If the format is SQL, try to build a SQL filter.
         DataFormat::MySql | DataFormat::Postgres => {
             // Create a new SQL filter
-            if let Some(filter) = &plan.filter {
-                let sql_filter = SqlFilterCompiler::compile(&filter.expression);
-                Ok(Some(Filter::Sql(sql_filter)))
-            } else {
-                Ok(None)
-            }
+            let filter = plan
+                .filter
+                .as_ref()
+                .map(|ast| Filter::Sql(SqlFilterCompiler::compile(&ast.expression)));
+            Ok(filter)
         }
         _ => {
             // Unsupported format

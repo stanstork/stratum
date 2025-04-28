@@ -1,7 +1,7 @@
 use super::expr::SqlFilterExpr;
 use crate::join::clause::JoinClause;
 
-/// A collection of SQL conditions, e.g. to be AND-joined
+/// A collection of SQL filter expressions.
 #[derive(Debug, Clone, Default)]
 pub struct SqlFilter {
     pub expr: Option<SqlFilterExpr>,
@@ -16,7 +16,7 @@ impl SqlFilter {
         SqlFilter { expr: Some(expr) }
     }
 
-    /// Render "WHERE ..." or empty string if no expr
+    /// Render "WHERE ..." or empty string if no expr.
     pub fn to_sql(&self) -> String {
         self.expr
             .as_ref()

@@ -35,7 +35,9 @@ pub struct EntityMappingContext {
     pub entity_name_map: FieldNameMap,
     pub field_mappings: FieldMappings,
     pub computed_flat: Vec<ComputedField>,
-    pub lookups: Vec<LookupField>,
+
+    /// Lookup fields grouped by by their source_entity.
+    pub lookups: HashMap<String, Vec<LookupField>>,
 }
 
 impl FieldMappings {
@@ -197,20 +199,17 @@ impl EntityMappingContext {
             .flat_map(|fields| fields.clone())
             .collect::<Vec<_>>();
 
-        let lookups = computed_flat
-            .iter()
-            .filter_map(|computed| {
-                if let Expression::Lookup { table, key, .. } = &computed.expression {
-                    Some(LookupField {
-                        entity: table.clone(),
-                        key: key.clone(),
-                        target: computed.name.clone(),
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let mut lookups: HashMap<String, Vec<LookupField>> = HashMap::new();
+        for computed in &computed_flat {
+            if let Expression::Lookup { table, key, .. } = &computed.expression {
+                let lf = LookupField {
+                    entity: table.clone(),
+                    key: key.clone(),
+                    target: computed.name.clone(),
+                };
+                lookups.entry(table.clone()).or_default().push(lf);
+            }
+        }
 
         Self {
             entity_name_map,
@@ -230,6 +229,10 @@ impl EntityMappingContext {
 
     pub fn get_computed_fields(&self, entity: &str) -> Option<&Vec<ComputedField>> {
         self.field_mappings.get_computed(entity)
+    }
+
+    pub fn get_lookups_for(&self, entity: &str) -> &[LookupField] {
+        self.lookups.get(entity).map(Vec::as_slice).unwrap_or(&[])
     }
 }
 
