@@ -8,7 +8,16 @@ use pest::iterators::Pair;
 // ─────────────────────────────────────────────────────────────
 #[derive(Debug, Clone)]
 pub struct Filter {
-    pub conditions: Vec<Condition>,
+    pub expresssion: FilterExpression,
+}
+
+#[derive(Debug, Clone)]
+pub enum FilterExpression {
+    /// e.g. table[col] > 3
+    Condition(Condition),
+
+    /// e.g. AND(expr1, expr2, …)
+    FunctionCall(String, Vec<FilterExpression>),
 }
 
 #[derive(Debug, Clone)]
@@ -30,13 +39,31 @@ pub enum Comparator {
 
 impl StatementParser for Filter {
     fn parse(pair: Pair<Rule>) -> Self {
-        let conditions = pair
-            .into_inner()
-            .filter(|p| p.as_rule() == Rule::condition)
-            .map(Condition::parse)
-            .collect();
+        let mut inner = pair.into_inner();
+        let expression = inner.next().expect("Expected filter expression");
 
-        Filter { conditions }
+        Filter {
+            expresssion: FilterExpression::parse(expression),
+        }
+    }
+}
+
+impl StatementParser for FilterExpression {
+    fn parse(pair: Pair<Rule>) -> Self {
+        match pair.as_rule() {
+            Rule::condition => FilterExpression::Condition(Condition::parse(pair)),
+            Rule::filter_func_call => {
+                let mut inner = pair.into_inner();
+                let function_name = inner
+                    .next()
+                    .expect("Expected function name")
+                    .as_str()
+                    .to_string();
+                let args = inner.map(FilterExpression::parse).collect();
+                FilterExpression::FunctionCall(function_name, args)
+            }
+            _ => panic!("Unexpected rule: {:?}", pair.as_rule()),
+        }
     }
 }
 

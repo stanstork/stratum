@@ -83,11 +83,15 @@ setting_pair = {
 
 filter = {
     ^"FILTER" ~ WHITESPACE* ~ "("
-    ~ WHITESPACE* ~ condition ~ ("," ~ WHITESPACE* ~ condition)*
+    ~ WHITESPACE* ~ filter_expression ~ ("," ~ WHITESPACE* ~ filter_expression)*
     ~ WHITESPACE* ~ ")" ~ WHITESPACE* ~ ";"
 }
 
-condition = { expression ~ WHITESPACE* ~ comparator ~ WHITESPACE* ~ (string | decimal | integer | boolean) }
+filter_expression = _{ filter_func_call | condition }
+
+filter_func_call  = { ident ~ "(" ~ WHITESPACE* ~ filter_expression ~ ( WHITESPACE* ~ "," ~ WHITESPACE* ~ filter_expression )* ~ WHITESPACE* ~ ")" }
+
+condition         = { expression ~ WHITESPACE* ~ comparator ~ WHITESPACE* ~ (string | decimal | integer | boolean) }
 
 // ==============================
 //         LOOKUPS (LOAD)

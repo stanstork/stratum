@@ -7,12 +7,17 @@ use sql_adapter::filter::{Condition, SqlFilter};
 
 pub fn sql_filter(plan: &MigrationPlan) -> Result<SqlFilter, Box<dyn std::error::Error>> {
     let stmt_filter = plan.filter.as_ref().ok_or("No filter found in the plan")?;
-    let conditions = stmt_filter
-        .conditions
-        .iter()
-        .map(from_stmt_condition)
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(SqlFilter { conditions })
+
+    println!("Filter: {:?}", stmt_filter);
+
+    unimplemented!();
+
+    // let conditions = stmt_filter
+    //     .conditions
+    //     .iter()
+    //     .map(from_stmt_condition)
+    //     .collect::<Result<Vec<_>, _>>()?;
+    // Ok(SqlFilter { conditions })
 }
 
 fn from_stmt_condition(
