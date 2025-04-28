@@ -3,7 +3,7 @@ use crate::{
     consumer::Consumer,
     context::MigrationContext,
     destination::{data_dest::DataDestination, destination::Destination},
-    filter::{db::sql_filter, filter::Filter},
+    filter::{compiler::FilterCompiler, filter::Filter, sql::SqlFilterCompiler},
     metadata::{set_destination_metadata, set_source_metadata},
     producer::Producer,
     settings::parse_settings,
@@ -99,10 +99,12 @@ fn create_filter(plan: &MigrationPlan) -> Result<Option<Filter>, Box<dyn std::er
         // If the format is SQL, try to build a SQL filter.
         DataFormat::MySql | DataFormat::Postgres => {
             // Create a new SQL filter
-            plan.filter
-                .as_ref()
-                .map(|_| sql_filter(plan).map(Filter::Sql))
-                .transpose()
+            if let Some(filter) = &plan.filter {
+                let sql_filter = SqlFilterCompiler::compile(&filter.expression);
+                Ok(Some(Filter::Sql(sql_filter)))
+            } else {
+                Ok(None)
+            }
         }
         _ => {
             // Unsupported format

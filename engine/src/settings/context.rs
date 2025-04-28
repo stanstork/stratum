@@ -1,7 +1,7 @@
 use crate::{
     context::MigrationContext,
     destination::{data_dest::DataDestination, destination::Destination},
-    expr::types::{boxed_infer_computed_type, infer_computed_type},
+    expr::types::boxed_infer_computed_type,
     source::{data_source::DataSource, source::Source},
     state::MigrationState,
 };

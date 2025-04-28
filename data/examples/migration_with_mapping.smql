@@ -30,7 +30,10 @@ JOIN order_items (
 );
 
 FILTER (
-    AND(orders[total] > 400, u[id] < 3)
+    AND(
+        OR(orders[total] > 400, u[id] < 4),
+        orders[total] < 1200
+    )
 );
 
 MAP (

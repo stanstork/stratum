@@ -1,9 +1,8 @@
+use super::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField};
 use crate::{
-    filter::{Condition, SqlFilter},
+    filter::filter::SqlFilter,
     join::clause::{JoinClause, JoinType},
 };
-
-use super::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField};
 
 #[derive(Debug, Clone)]
 pub struct SqlQueryBuilder {
@@ -294,11 +293,6 @@ impl SqlQueryBuilder {
         }
 
         let filter = filter.as_ref().unwrap();
-        if filter.conditions.is_empty() {
-            return self;
-        }
-
-        self.query.push_str(" WHERE ");
         self.query.push_str(&filter.to_sql());
 
         self

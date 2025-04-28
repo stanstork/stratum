@@ -4,11 +4,11 @@ use pest::iterators::Pair;
 
 // ─────────────────────────────────────────────────────────────
 // FILTER statement
-// Example: FILTER (status = "active", age > 18)
+// Example: FILTER (AND(a[status] = "active", b[age] > 18))
 // ─────────────────────────────────────────────────────────────
 #[derive(Debug, Clone)]
 pub struct Filter {
-    pub expresssion: FilterExpression,
+    pub expression: FilterExpression,
 }
 
 #[derive(Debug, Clone)]
@@ -43,7 +43,7 @@ impl StatementParser for Filter {
         let expression = inner.next().expect("Expected filter expression");
 
         Filter {
-            expresssion: FilterExpression::parse(expression),
+            expression: FilterExpression::parse(expression),
         }
     }
 }

@@ -2,7 +2,7 @@ use crate::adapter::MySqlAdapter;
 use async_trait::async_trait;
 use sql_adapter::{
     adapter::SqlAdapter,
-    filter::SqlFilter,
+    filter::filter::SqlFilter,
     join::source::JoinSource,
     metadata::{provider::MetadataHelper, table::TableMetadata},
     requests::{FetchRowsRequest, FetchRowsRequestBuilder},
