@@ -1,0 +1,65 @@
+CONNECTIONS (
+    SOURCE(MYSQL, "mysql://user:password@localhost:3306/testdb"),
+    DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/testdb")
+);
+
+MIGRATE (
+    SOURCE(TABLE, orders) -> DEST(TABLE, orders_flat) (
+        FILTER (
+            AND (
+                orders[status] = "active",
+                orders[total]  > 400
+            )
+        ),
+        LOAD (
+            ALIAS(u),
+            SOURCE(TABLE, users),
+            JOIN (
+                orders,
+                ON(u.id -> orders.user_id)
+            ),
+            FILTER(u[id] < 4)
+        ),
+        LOAD(
+            ALIAS(oi),
+            SOURCE(TABLE, order_items),
+            JOIN(
+                orders,
+                ON(oi.order_id -> orders.id)
+            )
+        ),
+        LOAD(
+            ALIAS(p),
+            SOURCE(TABLE, products),
+            JOIN(
+                order_items,
+                ON(order_items.id -> p.product_id)
+            )
+        ),
+        MAP (
+            u[name] -> user_name,
+            u[email] -> user_email,
+            oi[price] -> order_price,
+            p[name] -> product_name,
+            p[price] -> product_price,
+            oi[price] * 1.4 -> order_price_with_tax,
+            CONCAT(u[name], p[name]) -> concat_lookup_test
+        )
+    ),
+    SOURCE(TABLE, invoices) -> DEST(TABLE, statement) (
+        FILTER(
+            invoices[date] >= "2024-01-01"
+        )
+    ),
+    SOURCE(API, "https://api.example.com/invoices") -> DEST(FILE, "/tmp/invoices.json") {
+        FILTER(
+            invoices[date] >= "2024-01-01"
+        )
+    }
+)
+WITH SETTINGS (
+    INFER_SCHEMA = FALSE,
+    IGNORE_CONSTRAINTS = TRUE,
+    CREATE_MISSING_COLUMNS = TRUE,
+    CREATE_MISSING_TABLES = TRUE
+);
