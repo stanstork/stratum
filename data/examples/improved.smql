@@ -22,7 +22,7 @@ MIGRATE (
 
         LOAD(
             TABLES(users, order_items, products),
-            JOIN(
+            MATCH(
                 ON(users.id             -> orders.user_id),
                 ON(order_items.order_id -> orders.id),
                 ON(products.product_id  -> order_items.id)
