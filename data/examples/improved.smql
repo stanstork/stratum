@@ -1,65 +1,84 @@
 CONNECTIONS (
-    SOURCE(MYSQL, "mysql://user:password@localhost:3306/testdb"),
+    SOURCE(MYSQL,         "mysql://user:password@localhost:3306/testdb"),
     DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/testdb")
 );
 
 MIGRATE (
-    SOURCE(TABLE, orders) -> DEST(TABLE, orders_flat) (
-        FILTER (
-            AND (
+    SOURCE(TABLE, orders) -> DEST(TABLE, orders_flat) [
+        SETTINGS (
+            INFER_SCHEMA           = TRUE,
+            IGNORE_CONSTRAINTS     = TRUE,
+            CREATE_MISSING_COLUMNS = TRUE,
+            COPY_COLUMNS           = MAP_ONLY
+        ),
+
+        FILTER(
+            AND(
                 orders[status] = "active",
-                orders[total]  > 400
+                orders[total]  > 400,
+                users[id]      < 4
             )
         ),
-        LOAD (
-            ALIAS(u),
-            SOURCE(TABLE, users),
-            JOIN (
-                orders,
-                ON(u.id -> orders.user_id)
-            ),
-            FILTER(u[id] < 4)
-        ),
+
         LOAD(
-            ALIAS(oi),
-            SOURCE(TABLE, order_items),
+            TABLES(users, order_items, products),
             JOIN(
-                orders,
-                ON(oi.order_id -> orders.id)
+                ON(users.id             -> orders.user_id),
+                ON(order_items.order_id -> orders.id),
+                ON(products.product_id  -> order_items.id)
             )
         ),
-        LOAD(
-            ALIAS(p),
-            SOURCE(TABLE, products),
-            JOIN(
-                order_items,
-                ON(order_items.id -> p.product_id)
-            )
-        ),
-        MAP (
-            u[name] -> user_name,
-            u[email] -> user_email,
-            oi[price] -> order_price,
-            p[name] -> product_name,
-            p[price] -> product_price,
-            oi[price] * 1.4 -> order_price_with_tax,
-            CONCAT(u[name], p[name]) -> concat_lookup_test
+
+        MAP(
+            users[name]                         -> user_name,
+            users[email]                        -> user_email,
+            order_items[price]                  -> order_price,
+            products[name]                      -> product_name,
+            products[price]                     -> product_price,
+            order_items[price] * 1.4            -> order_price_with_tax,
+            CONCAT(users[name], products[name]) -> concat_lookup_test
         )
-    ),
-    SOURCE(TABLE, invoices) -> DEST(TABLE, statement) (
+    ],
+
+    SOURCES(TABLE, [products_a, products_b]) -> DEST(TABLE, products) [
+        SETTINGS (
+            INFER_SCHEMA = FALSE,
+            COPY_COLUMNS = ALL
+        ),
+
+        FILTER(
+            OR(
+                products_a[status] = "active",
+                products_b[status] = "active"
+            )
+        ),
+
+        MAP(
+            products_a[id]                               -> id,
+            COALESCE(products_a[name], products_b[name]) -> name,
+            products_a[price]                            -> price_a,
+            products_b[price]                            -> price_b
+        )
+    ],
+
+    SOURCE(TABLE, invoices) -> DEST(TABLE, statement) [
+        SETTINGS (
+            INFER_SCHEMA = FALSE,
+            COPY_COLUMNS = ALL
+        ),
+
         FILTER(
             invoices[date] >= "2024-01-01"
         )
-    ),
-    SOURCE(API, "https://api.example.com/invoices") -> DEST(FILE, "/tmp/invoices.json") {
+    ],
+
+    SOURCE(API, "https://api.example.com/invoices") -> DEST(FILE, "/tmp/invoices.json") [
         FILTER(
             invoices[date] >= "2024-01-01"
         )
-    }
+    ]
 )
 WITH SETTINGS (
-    INFER_SCHEMA = FALSE,
-    IGNORE_CONSTRAINTS = TRUE,
-    CREATE_MISSING_COLUMNS = TRUE,
-    CREATE_MISSING_TABLES = TRUE
+    CREATE_MISSING_TABLES = TRUE,
+    BATCH_SIZE            = 1000
 );
