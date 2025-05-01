@@ -1,0 +1,154 @@
+// ==============================
+//         Basic Rules
+// ==============================
+
+WHITESPACE  = _{ " " | "\t" | "\n" | "\r" }
+COMMENT     = _{ "//" ~ (!"\n" ~ ANY)* }
+
+ident       = @{ (ASCII_ALPHANUMERIC | "_")+ }
+string      = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+
+integer     = @{ ASCII_DIGIT+ }
+decimal     = @{ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* }
+boolean     = { ^"TRUE" | ^"FALSE" }
+
+operator    = { "+" | "-" | "*" | "/" }
+comparator  = { ">=" | "<=" | "!=" | "=" | ">" | "<" }
+
+data_format     = { ^"MYSQL" | ^"POSTGRES" | ^"SQLITE" | ^"MONGODB" }
+connection_type = { ^"SOURCE" | ^"DESTINATION" }
+
+// ==============================
+//     Top-level Structure
+// ==============================
+
+program   = _{ SOI ~ WHITESPACE* ~ statement* ~ WHITESPACE* ~ EOI }
+statement = _{ connections | migrate }
+
+// ==============================
+//      CONNECTIONS
+// ==============================
+
+connections = {
+    ^"CONNECTIONS" ~ WHITESPACE* ~ "("  
+    ~ WHITESPACE* ~ connection_pair ~ ("," ~ WHITESPACE* ~ connection_pair)*
+    ~ WHITESPACE* ~ ")" ~ WHITESPACE* ~ ";"
+}
+connection_pair = {
+    connection_type ~ WHITESPACE* ~ "(" ~ WHITESPACE*  
+    ~ data_format ~ WHITESPACE* ~ "," ~ WHITESPACE* ~ string
+    ~ WHITESPACE* ~ ")"
+}
+
+// ----------------------------------
+//    SOURCE / DEST clauses
+// ----------------------------------
+
+source_clause = _{
+    // single
+      ^"SOURCE"  ~ WHITESPACE* ~ "("
+        ~ WHITESPACE* ~ source_type ~ WHITESPACE* ~ "," 
+        ~ WHITESPACE* ~ (ident | string)
+      ~ WHITESPACE* ~ ")"
+    // plural
+    | ^"SOURCES" ~ WHITESPACE* ~ "("
+        ~ WHITESPACE* ~ source_type ~ WHITESPACE* ~ "," 
+        ~ WHITESPACE* ~ "[" 
+            ~ WHITESPACE* ~ ident 
+            ~ ( WHITESPACE* ~ "," ~ WHITESPACE* ~ ident )* 
+          ~ WHITESPACE* ~ "]"
+      ~ WHITESPACE* ~ ")"
+}
+
+source_type = { ^"TABLE" | ^"API" }
+
+dest_clause = {
+    ^"DEST" ~ WHITESPACE* ~ "("
+      ~ WHITESPACE* ~ dest_type   ~ WHITESPACE* ~ "," 
+      ~ WHITESPACE* ~ (ident | string) ~ WHITESPACE* 
+    ~ ")"
+}
+dest_type = { ^"TABLE" | ^"FILE" }
+
+// ==============================
+//         MIGRATE
+// ==============================
+
+inner_clauses = {
+    "[" ~ WHITESPACE*
+      ~ migrate_clause 
+      ~ ("," ~ WHITESPACE* ~ migrate_clause)*
+    ~ WHITESPACE* ~ "]"
+}
+
+migrate_item = {
+    source_clause      ~ WHITESPACE*
+  ~ "->"               ~ WHITESPACE*
+  ~ dest_clause        ~ WHITESPACE*
+  ~ inner_clauses
+}
+
+migrate = {
+    ^"MIGRATE" ~ WHITESPACE* ~ "("
+      ~ WHITESPACE* ~ migrate_item
+      ~ ("," ~ WHITESPACE* ~ migrate_item)*
+    ~ WHITESPACE* ~ ")"
+    ~ ( WHITESPACE* ~ migrate_settings )?
+    ~ WHITESPACE* ~ ";"
+}
+
+migrate_settings = {
+    ^"WITH" ~ WHITESPACE* ~ ^"SETTINGS" ~ WHITESPACE* ~ "("  
+    ~ WHITESPACE* ~ setting_pair ~ ("," ~ WHITESPACE* ~ setting_pair)*
+    ~ WHITESPACE* ~ ")"
+}
+setting_pair = {
+    ident ~ WHITESPACE* ~ "=" ~ WHITESPACE* ~ (boolean | decimal | integer | ident)
+}
+
+// ==============================
+//       Clause Definitions
+// ==============================
+
+migrate_clause = _{ settings_clause | filter_clause | load_clause | map_clause }
+
+settings_clause = {
+    ^"SETTINGS" ~ WHITESPACE* ~ "("  
+    ~ WHITESPACE* ~ setting_pair ~ ("," ~ WHITESPACE* ~ setting_pair)*
+    ~ WHITESPACE* ~ ")"
+}
+
+filter_clause = {
+    ^"FILTER" ~ WHITESPACE* ~ "("  
+    ~ WHITESPACE* ~ filter_expression ~ ("," ~ WHITESPACE* ~ filter_expression)*
+    ~ WHITESPACE* ~ ")"
+}
+
+filter_expression = _{ filter_func_call | condition }
+filter_func_call  = { ident ~ "(" ~ WHITESPACE* ~ filter_expression ~ (WHITESPACE* ~ "," ~ WHITESPACE* ~ filter_expression)* ~ WHITESPACE* ~ ")" }
+condition         = { lookup_expression ~ WHITESPACE* ~ comparator ~ WHITESPACE* ~ (string | decimal | integer | boolean) }
+
+load_clause = {
+    ^"LOAD" ~ WHITESPACE* ~ "("  
+    ~ WHITESPACE* ~ table_list ~ WHITESPACE* ~ "," ~ WHITESPACE* ~ match_clause
+    ~ WHITESPACE* ~ ")"
+}
+table_list   = { ^"TABLES" ~ WHITESPACE* ~ "(" ~ WHITESPACE* ~ ident ~ ("," ~ WHITESPACE* ~ ident)* ~ WHITESPACE* ~ ")" }
+match_clause = { ^"MATCH" ~ WHITESPACE* ~ "(" ~ WHITESPACE* ~ on_mapping ~ ("," ~ WHITESPACE* ~ on_mapping)* ~ WHITESPACE* ~ ")" }
+on_mapping   = { ^"ON" ~ WHITESPACE* ~ "(" ~ WHITESPACE* ~ lookup_expression ~ WHITESPACE* ~ "->" ~ WHITESPACE* ~ lookup_expression ~ WHITESPACE* ~ ")" }
+
+map_clause = {
+    ^"MAP" ~ WHITESPACE* ~ "("  
+    ~ WHITESPACE* ~ mapping ~ ("," ~ WHITESPACE* ~ mapping)* ~ WHITESPACE* ~ ")"
+}
+mapping = { expression ~ WHITESPACE* ~ "->" ~ WHITESPACE* ~ ident }
+
+// ==============================
+//        Expressions
+// ==============================
+
+expression = { arithmetic_expression | function_call | lookup_expression | ident | string | decimal | integer }
+arithmetic_expression = { (function_call | lookup_expression | decimal | integer | ident) ~ (WHITESPACE* ~ operator ~ WHITESPACE* ~ (function_call | lookup_expression | decimal | integer | ident))+ }
+function_call = { ident ~ "(" ~ function_args? ~ ")" }
+function_args = { expression ~ ("," ~ WHITESPACE* ~ expression)* }
+lookup_expression = { ident ~ "[" ~ ident ~ "]" ~ ("." ~ ident)? }

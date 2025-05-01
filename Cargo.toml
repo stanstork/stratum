@@ -3,9 +3,11 @@ members = [
     "adapters/sql/mysql",
     "adapters/sql/postgres",
     "adapters/sql/sql_adapter",
-    "cli", "common",
+    "cli",
+    "common",
     "engine",
     "smql",
+    "smql_v0.2",
 ]
 
 resolver = "2"
