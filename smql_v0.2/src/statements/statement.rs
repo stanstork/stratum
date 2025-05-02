@@ -17,10 +17,7 @@ impl StatementParser for Statement {
                 Statement::Connection(connection)
             }
             Rule::migrate => Statement::Migrate(MigrateBlock::parse(pair)),
-            _ => {
-                println!("Unexpected rule: {:?}", pair.as_rule());
-                Statement::EOI
-            }
+            _ => Statement::EOI,
         }
     }
 }

@@ -14,10 +14,11 @@ pub fn parse(source: &str) -> Result<MigrationPlan, Box<dyn std::error::Error>> 
     let pairs = SmqlParserV02::parse(Rule::program, source)
         .map_err(|e| format!("Parsing failed: {}", e))?;
 
+    let mut statements = vec![];
     for pair in pairs {
         let statement = Statement::parse(pair);
-        println!("Parsed statement: {:#?}", statement);
+        statements.push(statement);
     }
 
-    todo!("Implement parsing logic for SMQL v0.2");
+    Ok(MigrationPlan::from_statements(statements))
 }

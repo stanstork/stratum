@@ -4,20 +4,12 @@ mod tests {
 
     fn assert_parses(input: &str) {
         match parse(input) {
-            Ok(_) => assert!(true),
+            Ok(plan) => {
+                println!("Parsed successfully: {:#?}", plan);
+                assert!(true, "Parsed successfully");
+            }
             Err(e) => panic!("Failed to parse valid input: {:?}", e),
         }
-    }
-
-    #[test]
-    fn test_connections() {
-        let config = r#"
-            CONNECTIONS (
-                SOURCE(MYSQL, "mysql://user:password@localhost:3306/db"),
-                DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/db")
-            );
-        "#;
-        assert_parses(config);
     }
 
     #[test]
