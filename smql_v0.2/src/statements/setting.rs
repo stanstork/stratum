@@ -1,3 +1,5 @@
+use crate::parser::StatementParser;
+
 #[derive(Debug, Clone)]
 pub struct Settings {
     pub infer_schema: bool,
@@ -9,7 +11,32 @@ pub struct Settings {
 }
 
 #[derive(Debug, Clone)]
+pub struct SettingsPair {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone)]
 pub enum CopyColumns {
     All,
     MapOnly,
+}
+
+impl StatementParser for SettingsPair {
+    fn parse(pair: pest::iterators::Pair<crate::parser::Rule>) -> Self {
+        let mut inner = pair.into_inner();
+
+        let name = inner
+            .next()
+            .expect("Expected settings name")
+            .as_str()
+            .to_string();
+        let value = inner
+            .next()
+            .expect("Expected settings value")
+            .as_str()
+            .to_string();
+
+        SettingsPair { name, value }
+    }
 }

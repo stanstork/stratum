@@ -44,7 +44,7 @@ connection_pair = {
 //    SOURCE / DEST clauses
 // ----------------------------------
 
-source_clause = _{
+source_clause = {
     // single
       ^"SOURCE"  ~ WHITESPACE* ~ "("
         ~ WHITESPACE* ~ source_type ~ WHITESPACE* ~ "," 
