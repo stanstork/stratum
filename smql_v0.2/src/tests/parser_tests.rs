@@ -6,14 +6,116 @@ mod tests {
         match parse(input) {
             Ok(plan) => {
                 println!("Parsed successfully: {:#?}", plan);
-                assert!(true, "Parsed successfully");
             }
             Err(e) => panic!("Failed to parse valid input: {:?}", e),
         }
     }
 
+    const CONN: &str = r#"
+        CONNECTIONS (
+            SOURCE(MYSQL, "mysql://user:password@localhost:3306/db"),
+            DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/db")
+        );
+    "#;
+
     #[test]
-    fn test_migrate() {
+    fn test_inline_settings_only() {
+        let config = format!(
+            "{}\n\
+            MIGRATE (\n\
+                SOURCE(TABLE, foo) -> DEST(TABLE, bar) [\n\
+                    SETTINGS(INFER_SCHEMA = TRUE)\n\
+                ]\n\
+            );",
+            CONN
+        );
+        assert_parses(&config);
+    }
+
+    #[test]
+    fn test_inline_filter_only() {
+        let config = format!(
+            "{}\n\
+            MIGRATE (\n\
+                SOURCE(TABLE, foo) -> DEST(TABLE, bar) [\n\
+                    FILTER(\n\
+                        foo[id] > 1\n\
+                    )\n\
+                ]\n\
+            );",
+            CONN
+        );
+        assert_parses(&config);
+    }
+
+    #[test]
+    fn test_inline_load_only() {
+        let config = format!(
+            "{}\n\
+            MIGRATE (\n\
+                SOURCE(TABLE, foo) -> DEST(TABLE, bar) [\n\
+                    LOAD(\n\
+                        TABLES(foo),\n\
+                        MATCH(\n\
+                            ON(foo[id] -> bar[id])\n\
+                        )\n\
+                    )\n\
+                ]\n\
+            );",
+            CONN
+        );
+        assert_parses(&config);
+    }
+
+    #[test]
+    fn test_inline_map_only() {
+        let config = format!(
+            "{}\n\
+            MIGRATE (\n\
+                SOURCE(TABLE, foo) -> DEST(TABLE, bar) [\n\
+                    MAP(\n\
+                        foo[a] -> a\n\
+                    )\n\
+                ]\n\
+            );",
+            CONN
+        );
+        assert_parses(&config);
+    }
+
+    #[test]
+    fn test_multiple_sources() {
+        let config = format!(
+            "{}\n\
+            MIGRATE (\n\
+                SOURCES(TABLE, [a, b, c]) -> DEST(TABLE, combined) [\n\
+                    SETTINGS(COPY_COLUMNS = ALL)\n\
+                ]\n\
+            );",
+            CONN
+        );
+        assert_parses(&config);
+    }
+
+    #[test]
+    fn test_global_settings_only() {
+        let config = format!(
+            "{}\n\
+            MIGRATE (\n\
+                SOURCE(TABLE, foo) -> DEST(TABLE, bar) [\n\
+                    SETTINGS(INFER_SCHEMA = FALSE)\n\
+                ]\n\
+            )\n\
+            WITH SETTINGS (\n\
+                BATCH_SIZE = 500\n\
+            );",
+            CONN
+        );
+        assert_parses(&config);
+    }
+
+    #[test]
+    fn test_multiple_migrations() {
         let config = r#"
             CONNECTIONS (
                 SOURCE(MYSQL, "mysql://user:password@localhost:3306/db"),

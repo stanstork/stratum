@@ -8,6 +8,7 @@ use pest::iterators::Pair;
 #[derive(Debug, Clone)]
 pub struct MigrateBlock {
     pub migrate_items: Vec<MigrateItem>,
+    pub settings: Settings,
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +57,9 @@ impl StatementParser for MigrateBlock {
             migrate_item.destination = destination;
 
             let clauses_pair = inner.next().unwrap();
+
+            println!("Clauses pair: {:#?}", clauses_pair);
+
             for clause in clauses_pair.into_inner() {
                 match clause.as_rule() {
                     Rule::settings_clause => {
@@ -117,6 +121,7 @@ impl Default for MigrateBlock {
     fn default() -> Self {
         MigrateBlock {
             migrate_items: vec![],
+            settings: Settings::default(),
         }
     }
 }
