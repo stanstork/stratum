@@ -38,54 +38,61 @@ impl StatementParser for MigrateBlock {
     fn parse(pair: Pair<Rule>) -> Self {
         let mut migrate_block = MigrateBlock::default();
 
-        for item_pair in pair
-            .into_inner()
-            .filter(|p| p.as_rule() == Rule::migrate_item)
-        {
-            let mut migrate_item = MigrateItem::default();
-            let mut inner = item_pair.into_inner();
+        for item_pair in pair.into_inner() {
+            match item_pair.as_rule() {
+                Rule::migrate_item => {
+                    let mut migrate_item = MigrateItem::default();
+                    let mut inner = item_pair.into_inner();
 
-            // First item is the source
-            let source_pair = inner.next().unwrap();
-            let source = Spec::parse(source_pair);
+                    // First item is the source
+                    let source_pair = inner.next().unwrap();
+                    let source = Spec::parse(source_pair);
 
-            // Second item is the destination
-            let dest_pair = inner.next().unwrap();
-            let destination = Spec::parse(dest_pair);
+                    // Second item is the destination
+                    let dest_pair = inner.next().unwrap();
+                    let destination = Spec::parse(dest_pair);
 
-            migrate_item.source = source;
-            migrate_item.destination = destination;
+                    migrate_item.source = source;
+                    migrate_item.destination = destination;
 
-            let clauses_pair = inner.next().unwrap();
+                    let clauses_pair = inner.next().unwrap();
 
-            println!("Clauses pair: {:#?}", clauses_pair);
-
-            for clause in clauses_pair.into_inner() {
-                match clause.as_rule() {
-                    Rule::settings_clause => {
-                        let setting_pairs = clause
-                            .into_inner()
-                            .map(SettingsPair::parse)
-                            .collect::<Vec<_>>();
-                        migrate_item.settings = Settings::from_pairs(setting_pairs);
+                    for clause in clauses_pair.into_inner() {
+                        match clause.as_rule() {
+                            Rule::settings_clause => {
+                                let setting_pairs = clause
+                                    .into_inner()
+                                    .map(SettingsPair::parse)
+                                    .collect::<Vec<_>>();
+                                migrate_item.settings = Settings::from_pairs(setting_pairs);
+                            }
+                            Rule::filter_clause => {
+                                let filter = Filter::parse(clause);
+                                migrate_item.filter = Some(filter);
+                            }
+                            Rule::load_clause => {
+                                let load = Load::parse(clause);
+                                migrate_item.load = Some(load);
+                            }
+                            Rule::map_clause => {
+                                let map = MapSpec::parse(clause);
+                                migrate_item.map = Some(map);
+                            }
+                            _ => {}
+                        }
                     }
-                    Rule::filter_clause => {
-                        let filter = Filter::parse(clause);
-                        migrate_item.filter = Some(filter);
-                    }
-                    Rule::load_clause => {
-                        let load = Load::parse(clause);
-                        migrate_item.load = Some(load);
-                    }
-                    Rule::map_clause => {
-                        let map = MapSpec::parse(clause);
-                        migrate_item.map = Some(map);
-                    }
-                    _ => {}
+
+                    migrate_block.migrate_items.push(migrate_item);
                 }
+                Rule::migrate_settings => {
+                    let setting_pairs = item_pair
+                        .into_inner()
+                        .map(SettingsPair::parse)
+                        .collect::<Vec<_>>();
+                    migrate_block.settings = Settings::from_pairs(setting_pairs);
+                }
+                _ => {}
             }
-
-            migrate_block.migrate_items.push(migrate_item);
         }
 
         migrate_block

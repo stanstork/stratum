@@ -10,7 +10,6 @@ use pest::iterators::Pair;
 pub enum Statement {
     Connection(Connection),
     Migrate(MigrateBlock),
-    GlobalSettings(Settings),
     EOI,
 }
 
@@ -22,15 +21,6 @@ impl StatementParser for Statement {
                 Statement::Connection(connection)
             }
             Rule::migrate => Statement::Migrate(MigrateBlock::parse(pair)),
-            Rule::migrate_settings => {
-                let setting_pairs = pair
-                    .into_inner()
-                    .map(SettingsPair::parse)
-                    .collect::<Vec<_>>();
-                println!("Parsed settings: {:#?}", setting_pairs);
-                let settings = Settings::from_pairs(setting_pairs);
-                Statement::GlobalSettings(settings)
-            }
             _ => Statement::EOI,
         }
     }
