@@ -4,9 +4,7 @@ mod tests {
 
     fn assert_parses(input: &str) {
         match parse(input) {
-            Ok(plan) => {
-                println!("Parsed successfully: {:#?}", plan);
-            }
+            Ok(_) => assert!(true),
             Err(e) => panic!("Failed to parse valid input: {:?}", e),
         }
     }

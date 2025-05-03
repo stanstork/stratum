@@ -1,5 +1,4 @@
 pub mod connection;
-pub mod eoi;
 pub mod expr;
 pub mod filter;
 pub mod load;

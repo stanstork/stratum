@@ -1,17 +1,14 @@
 use super::{filter::Filter, load::Load, mapping::MapSpec, setting::Settings};
-use crate::{
-    parser::{Rule, StatementParser},
-    statements::setting::SettingsPair,
-};
+use crate::parser::{Rule, StatementParser};
 use pest::iterators::Pair;
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct MigrateBlock {
     pub migrate_items: Vec<MigrateItem>,
     pub settings: Settings,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct MigrateItem {
     pub source: Spec,
     pub destination: Spec,
@@ -33,6 +30,9 @@ pub enum SpecKind {
     Api,
     File,
 }
+
+const KEY_TABLE: &str = "TABLE";
+const KEY_API: &str = "API";
 
 impl StatementParser for MigrateBlock {
     fn parse(pair: Pair<Rule>) -> Self {
@@ -60,11 +60,7 @@ impl StatementParser for MigrateBlock {
                     for clause in clauses_pair.into_inner() {
                         match clause.as_rule() {
                             Rule::settings_clause => {
-                                let setting_pairs = clause
-                                    .into_inner()
-                                    .map(SettingsPair::parse)
-                                    .collect::<Vec<_>>();
-                                migrate_item.settings = Settings::from_pairs(setting_pairs);
+                                migrate_item.settings = Settings::parse(clause);
                             }
                             Rule::filter_clause => {
                                 let filter = Filter::parse(clause);
@@ -85,11 +81,7 @@ impl StatementParser for MigrateBlock {
                     migrate_block.migrate_items.push(migrate_item);
                 }
                 Rule::migrate_settings => {
-                    let setting_pairs = item_pair
-                        .into_inner()
-                        .map(SettingsPair::parse)
-                        .collect::<Vec<_>>();
-                    migrate_block.settings = Settings::from_pairs(setting_pairs);
+                    migrate_block.settings = Settings::parse(item_pair);
                 }
                 _ => {}
             }
@@ -108,8 +100,8 @@ impl StatementParser for Spec {
             match inner.as_rule() {
                 Rule::source_type => {
                     kind = match inner.as_str().to_ascii_uppercase().as_str() {
-                        "TABLE" => SpecKind::Table,
-                        "API" => SpecKind::Api,
+                        KEY_TABLE => SpecKind::Table,
+                        KEY_API => SpecKind::Api,
                         _ => panic!("Unknown source type: {}", inner.as_str()),
                     };
                 }
@@ -121,28 +113,6 @@ impl StatementParser for Spec {
         }
 
         Spec { kind, names }
-    }
-}
-
-impl Default for MigrateBlock {
-    fn default() -> Self {
-        MigrateBlock {
-            migrate_items: vec![],
-            settings: Settings::default(),
-        }
-    }
-}
-
-impl Default for MigrateItem {
-    fn default() -> Self {
-        MigrateItem {
-            source: Spec::default(),
-            destination: Spec::default(),
-            settings: Settings::default(),
-            filter: None,
-            load: None,
-            map: None,
-        }
     }
 }
 

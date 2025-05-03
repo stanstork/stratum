@@ -1,6 +1,4 @@
-use crate::statements::{
-    connection::Connection, migrate::MigrateBlock, setting::Settings, statement::Statement,
-};
+use crate::statements::{connection::Connection, migrate::MigrateBlock, statement::Statement};
 
 #[derive(Debug, Clone)]
 pub struct MigrationPlan {

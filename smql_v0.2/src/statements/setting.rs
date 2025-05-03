@@ -1,4 +1,4 @@
-use crate::parser::StatementParser;
+use crate::parser::{Rule, StatementParser};
 use pest::iterators::Pair;
 
 #[derive(Debug, Clone)]
@@ -23,8 +23,29 @@ pub enum CopyColumns {
     MapOnly,
 }
 
+// Constants for settings keys
+const KEY_INFER_SCHEMA: &str = "INFER_SCHEMA";
+const KEY_IGNORE_CONSTRAINTS: &str = "IGNORE_CONSTRAINTS";
+const KEY_CREATE_MISSING_COLUMNS: &str = "CREATE_MISSING_COLUMNS";
+const KEY_CREATE_MISSING_TABLES: &str = "CREATE_MISSING_TABLES";
+const KEY_COPY_COLUMNS: &str = "COPY_COLUMNS";
+const KEY_BATCH_SIZE: &str = "BATCH_SIZE";
+const KEY_TRUE: &str = "TRUE";
+const KEY_ALL: &str = "ALL";
+const KEY_MAP_ONLY: &str = "MAP_ONLY";
+
+impl StatementParser for Settings {
+    fn parse(pair: Pair<Rule>) -> Self {
+        let settings_pairs = pair
+            .into_inner()
+            .map(SettingsPair::parse)
+            .collect::<Vec<_>>();
+        Settings::from_pairs(settings_pairs)
+    }
+}
+
 impl StatementParser for SettingsPair {
-    fn parse(pair: Pair<crate::parser::Rule>) -> Self {
+    fn parse(pair: Pair<Rule>) -> Self {
         let mut inner = pair.into_inner();
 
         let name = inner
@@ -48,12 +69,12 @@ impl Settings {
 
         for pair in pairs {
             match pair.name.as_str().to_ascii_uppercase().as_str() {
-                "INFER_SCHEMA" => settings.infer_schema = pair.to_bool(),
-                "IGNORE_CONSTRAINTS" => settings.ignore_constraints = pair.to_bool(),
-                "CREATE_MISSING_COLUMNS" => settings.create_missing_columns = pair.to_bool(),
-                "CREATE_MISSING_TABLES" => settings.create_missing_tables = pair.to_bool(),
-                "COPY_COLUMNS" => settings.copy_columns = pair.to_copy_columns(),
-                "BATCH_SIZE" => settings.batch_size = pair.to_usize(),
+                KEY_INFER_SCHEMA => settings.infer_schema = pair.to_bool(),
+                KEY_IGNORE_CONSTRAINTS => settings.ignore_constraints = pair.to_bool(),
+                KEY_CREATE_MISSING_COLUMNS => settings.create_missing_columns = pair.to_bool(),
+                KEY_CREATE_MISSING_TABLES => settings.create_missing_tables = pair.to_bool(),
+                KEY_COPY_COLUMNS => settings.copy_columns = pair.to_copy_columns(),
+                KEY_BATCH_SIZE => settings.batch_size = pair.to_usize(),
                 _ => {}
             }
         }
@@ -77,13 +98,7 @@ impl Default for Settings {
 
 impl SettingsPair {
     pub fn to_bool(&self) -> bool {
-        self.value.to_ascii_uppercase() == "TRUE"
-            || self.value.to_ascii_uppercase() == "YES"
-            || self.value.to_ascii_uppercase() == "1"
-    }
-
-    pub fn to_string(&self) -> String {
-        self.value.clone()
+        self.value.eq_ignore_ascii_case(KEY_TRUE)
     }
 
     pub fn to_usize(&self) -> usize {
@@ -92,8 +107,8 @@ impl SettingsPair {
 
     pub fn to_copy_columns(&self) -> CopyColumns {
         match self.value.as_str().to_ascii_uppercase().as_str() {
-            "ALL" => CopyColumns::All,
-            "MAP_ONLY" => CopyColumns::MapOnly,
+            KEY_ALL => CopyColumns::All,
+            KEY_MAP_ONLY => CopyColumns::MapOnly,
             _ => CopyColumns::All,
         }
     }

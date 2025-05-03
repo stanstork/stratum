@@ -1,8 +1,4 @@
-use super::{
-    connection::Connection,
-    migrate::MigrateBlock,
-    setting::{Settings, SettingsPair},
-};
+use super::{connection::Connection, migrate::MigrateBlock};
 use crate::parser::{Rule, StatementParser};
 use pest::iterators::Pair;
 
