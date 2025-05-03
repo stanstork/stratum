@@ -24,9 +24,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::Migrate { config } => {
             let source = read_migration_config(&config).expect("Failed to read config file");
-            let plan = parse(&source).expect("Failed to parse config file");
+            // let plan = parse(&source).expect("Failed to parse config file");
 
-            runner::run(plan).await?;
+            // runner::run(plan).await?;
+
+            let plan_v2 = smql_v02::parser::parse(&source).expect("Failed to parse config file");
+            runner::run_v2(plan_v2)?;
         }
         Commands::Source { command } => match command {
             commands::SourceCommand::Info { config, verbose } => {

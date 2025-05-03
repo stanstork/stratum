@@ -212,7 +212,7 @@ impl<'a> SchemaPlan<'a> {
                 .await
             {
                 defs.push(ColumnDef {
-                    name: column_name.clone(),
+                    name: (*column_name).clone(),
                     is_nullable: true, // Assuming computed fields are nullable
                     default: None,
                     data_type: inferred_type.to_string(),

@@ -44,6 +44,15 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
+pub fn run_v2(plan_v2: smql_v02::plan::MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
+    info!("Running migration v2");
+
+    println!("Migration plan v2: {:#?}", plan_v2);
+    let mapping = EntityMappingContext::from_plan(&plan_v2);
+
+    todo!("Implement v2 migration");
+}
+
 pub async fn load_src_metadata(
     plan: &MigrationPlan,
 ) -> Result<HashMap<String, TableMetadata>, Box<dyn std::error::Error>> {

@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 engine = { path = "../engine" }
 smql = { path = "../smql" }
+smql_v02 = { path = "../smql_v0.2" }
 sql_adapter = { path = "../adapters/sql/sql_adapter" }
 
 tokio = { version = "1.43.0", features = ["full"] }

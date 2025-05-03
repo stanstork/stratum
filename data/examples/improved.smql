@@ -70,12 +70,6 @@ MIGRATE (
         FILTER(
             invoices[date] >= "2024-01-01"
         )
-    ],
-
-    SOURCE(API, "https://api.example.com/invoices") -> DEST(FILE, "/tmp/invoices.json") [
-        FILTER(
-            invoices[date] >= "2024-01-01"
-        )
     ]
 )
 WITH SETTINGS (

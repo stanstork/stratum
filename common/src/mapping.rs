@@ -11,14 +11,14 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 pub struct FieldMappings {
     /// Maps entity name (table, file, API) to field name mapping.
-    pub column_mappings: HashMap<String, FieldNameMap>,
+    pub column_mappings: HashMap<String, NameMap>,
 
     /// Maps entity name to computed fields that populate new columns.
     pub computed_fields: HashMap<String, Vec<ComputedField>>,
 }
 
 #[derive(Clone, Debug)]
-pub struct FieldNameMap {
+pub struct NameMap {
     source_to_target: HashMap<String, String>, // old_name → new_name
     target_to_source: HashMap<String, String>, // new_name → old_name
 }
@@ -32,7 +32,7 @@ pub struct LookupField {
 
 #[derive(Clone, Debug)]
 pub struct EntityMappingContext {
-    pub entity_name_map: FieldNameMap,
+    pub entity_name_map: NameMap,
     pub field_mappings: FieldMappings,
     pub computed_flat: Vec<ComputedField>,
 
@@ -50,14 +50,14 @@ impl FieldMappings {
 
     pub fn add_mapping(&mut self, entity: &str, map: HashMap<String, String>) {
         self.column_mappings
-            .insert(entity.to_string(), FieldNameMap::new(map));
+            .insert(entity.to_string(), NameMap::new(map));
     }
 
     pub fn add_computed(&mut self, entity: &str, computed: Vec<ComputedField>) {
         self.computed_fields.insert(entity.to_string(), computed);
     }
 
-    pub fn get_entity(&self, entity: &str) -> Option<&FieldNameMap> {
+    pub fn get_entity(&self, entity: &str) -> Option<&NameMap> {
         self.column_mappings.get(entity)
     }
 
@@ -82,7 +82,7 @@ impl FieldMappings {
     }
 }
 
-impl FieldNameMap {
+impl NameMap {
     pub fn new(map: HashMap<String, String>) -> Self {
         let mut source_to_target = HashMap::new();
         let mut target_to_source = HashMap::new();
@@ -160,7 +160,7 @@ impl FieldNameMap {
         entity_map
     }
 
-    pub fn get_field_name_map(plan: &MigrationPlan) -> FieldNameMap {
+    pub fn get_entities_name_map(plan: &MigrationPlan) -> NameMap {
         let mut name_map = HashMap::new();
 
         for migration in plan.migration.migrations.iter() {
@@ -177,7 +177,37 @@ impl FieldNameMap {
             );
         }
 
-        FieldNameMap::new(name_map)
+        NameMap::new(name_map)
+    }
+
+    pub fn get_entities_name_map_v2(plan: &smql_v02::plan::MigrationPlan) -> NameMap {
+        let mut name_map = HashMap::new();
+
+        for mi in plan.migration.migrate_items.iter() {
+            let src = mi
+                .source
+                .names
+                .first()
+                .expect("each migrate_item must have at least one source name")
+                .to_ascii_lowercase(); // currently supports only one source
+            let dst = mi
+                .destination
+                .names
+                .first()
+                .expect("each migrate_item must have at least one destination name")
+                .to_ascii_lowercase(); // currently supports only one destination
+
+            name_map.insert(src.to_ascii_lowercase(), dst.to_ascii_lowercase());
+
+            if let Some(load) = &mi.load {
+                name_map.extend(load.entities.iter().map(|name| {
+                    let lower = name.to_ascii_lowercase();
+                    (lower.clone(), lower)
+                }));
+            }
+        }
+
+        NameMap::new(name_map)
     }
 
     pub fn forward_map(&self) -> HashMap<String, String> {
@@ -191,8 +221,8 @@ impl FieldNameMap {
 
 impl EntityMappingContext {
     pub fn new(plan: &MigrationPlan) -> Self {
-        let entity_name_map = FieldNameMap::get_field_name_map(plan);
-        let field_mappings = FieldNameMap::get_field_mappings(&plan.mapping);
+        let entity_name_map = NameMap::get_entities_name_map(plan);
+        let field_mappings = NameMap::get_field_mappings(&plan.mapping);
         let computed_flat = field_mappings
             .computed_fields
             .values()
@@ -219,7 +249,14 @@ impl EntityMappingContext {
         }
     }
 
-    pub fn get_field_name_map(&self) -> &FieldNameMap {
+    pub fn from_plan(plan: &smql_v02::plan::MigrationPlan) -> Self {
+        let entity_name_map = NameMap::get_entities_name_map_v2(plan);
+        println!("Entity name map: {:#?}", entity_name_map);
+
+        todo!("Implement from_plan");
+    }
+
+    pub fn get_field_name_map(&self) -> &NameMap {
         &self.entity_name_map
     }
 
