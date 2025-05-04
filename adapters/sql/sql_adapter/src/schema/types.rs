@@ -6,7 +6,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use common::{computed::ComputedField, mapping::EntityMappingContext};
+use common::{computed::ComputedField, mapping::EntityMapping};
 use std::{future::Future, pin::Pin, sync::Arc};
 
 // Alias for the SQL adapter reference
@@ -24,7 +24,7 @@ pub type InferComputedTypeFn =
     for<'a> fn(
         &'a ComputedField,
         &'a [ColumnMetadata],
-        &'a EntityMappingContext,
+        &'a EntityMapping,
         &'a AdapterRef,
     ) -> Pin<Box<dyn Future<Output = Option<ColumnDataType>> + Send + 'a>>;
 
@@ -47,7 +47,7 @@ pub trait TypeInferencer {
     async fn infer_type(
         &self,
         columns: &[ColumnMetadata],
-        mapping: &EntityMappingContext,
+        mapping: &EntityMapping,
         adapter: &AdapterRef,
     ) -> Option<ColumnDataType>;
 }
@@ -71,7 +71,7 @@ impl<'a> TypeEngine<'a> {
         &self,
         expr: &E,
         columns: &[ColumnMetadata],
-        mapping: &EntityMappingContext,
+        mapping: &EntityMapping,
     ) -> Option<ColumnDataType> {
         E::infer_type(&expr, columns, mapping, &self.adapter).await
     }
@@ -88,7 +88,7 @@ impl<'a> TypeEngine<'a> {
         &self,
         computed: &ComputedField,
         columns: &[ColumnMetadata],
-        mapping: &EntityMappingContext,
+        mapping: &EntityMapping,
     ) -> Option<ColumnDataType> {
         (self.type_inferencer)(computed, columns, mapping, &self.adapter).await
     }

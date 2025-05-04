@@ -1,14 +1,11 @@
 use crate::computed::ComputedField;
-use smql::{
+use smql_v02::{
     plan::MigrationPlan,
-    statements::{
-        expr::Expression,
-        mapping::{EntityMapping, Mapping},
-    },
+    statements::{expr::Expression, migrate::MigrateBlock},
 };
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct FieldMappings {
     /// Maps entity name (table, file, API) to field name mapping.
     pub column_mappings: HashMap<String, NameMap>,
@@ -19,22 +16,30 @@ pub struct FieldMappings {
 
 #[derive(Clone, Debug)]
 pub struct NameMap {
-    source_to_target: HashMap<String, String>, // old_name → new_name
-    target_to_source: HashMap<String, String>, // new_name → old_name
+    source_to_target: HashMap<String, String>, // old_name -> new_name
+    target_to_source: HashMap<String, String>, // new_name -> old_name
 }
 
 #[derive(Clone, Debug)]
 pub struct LookupField {
-    pub entity: String, // The entity name (table, file, API) where the lookup is performed
-    pub key: String,    // The key used for the lookup (e.g., column name)
-    pub target: String, // The target field name in the destination entity
+    /// The entity name (table, file, API) where the lookup is performed.
+    pub entity: String,
+    /// The key used for the lookup (e.g., column name).
+    pub key: String,
+    /// The target field name in the destination entity.
+    pub target: String,
 }
 
 #[derive(Clone, Debug)]
-pub struct EntityMappingContext {
+pub struct EntityMapping {
+    /// Maps each source entity name to its corresponding
+    /// destination entity name.
     pub entity_name_map: NameMap,
+
+    /// For each destination entity:
+    /// - a `HashMap` of simple field renames (`source_field` -> `target_field`)
+    /// - a list of `ComputedField`s for any expressions or lookups.
     pub field_mappings: FieldMappings,
-    pub computed_flat: Vec<ComputedField>,
 
     /// Lookup fields grouped by by their source_entity.
     pub lookups: HashMap<String, Vec<LookupField>>,
@@ -101,7 +106,7 @@ impl NameMap {
         }
     }
 
-    /// Resolve old → new (default direction)
+    /// Resolve old -> new (default direction)
     pub fn resolve(&self, name: &str) -> String {
         let lower = name.to_ascii_lowercase();
         self.source_to_target
@@ -110,7 +115,7 @@ impl NameMap {
             .unwrap_or_else(|| name.to_string())
     }
 
-    /// Reverse resolve new → old
+    /// Reverse resolve new -> old
     pub fn reverse_resolve(&self, name: &str) -> String {
         let lower = name.to_ascii_lowercase();
         self.target_to_source
@@ -123,64 +128,45 @@ impl NameMap {
         self.source_to_target.is_empty() && self.target_to_source.is_empty()
     }
 
-    pub fn get_field_mappings(mappings: &Vec<EntityMapping>) -> FieldMappings {
+    pub fn get_field_mappings(migration_block: &MigrateBlock) -> FieldMappings {
         let mut entity_map = FieldMappings::new();
-        for mapping in mappings {
-            let entity = mapping.entity.clone();
+
+        for mi in &migration_block.migrate_items {
+            let entity = mi
+                .destination
+                .names
+                .first()
+                .expect("MigrateItem must have destination name")
+                .to_ascii_lowercase();
+
             let mut field_map = HashMap::new();
             let mut computed_fields = Vec::new();
 
-            for mapping in &mapping.mappings {
-                match mapping {
-                    Mapping::ExpressionToColumn { expression, target } => {
-                        match expression {
-                            Expression::Identifier(column) => {
-                                field_map.insert(column.clone(), target.clone());
-                            }
-                            Expression::Arithmetic { .. } => {
-                                computed_fields.push(ComputedField::new(target, expression));
-                            }
-                            Expression::FunctionCall { .. } => {
-                                computed_fields.push(ComputedField::new(target, expression));
-                            }
-                            Expression::Lookup { .. } => {
-                                computed_fields.push(ComputedField::new(target, expression));
-                            }
-                            _ => {} // Handle other expression types
+            if let Some(map_spec) = &mi.map {
+                for mapping in &map_spec.mappings {
+                    match &mapping.source {
+                        // direct identifier -> simple rename
+                        Expression::Identifier(field) => {
+                            field_map.insert(
+                                field.to_ascii_lowercase(),
+                                mapping.target.to_ascii_lowercase(),
+                            );
+                        }
+                        // everything else is a computed field
+                        other_expr => {
+                            computed_fields.push(ComputedField::new(&mapping.target, other_expr));
                         }
                     }
-                    _ => {} // Skip other types of mappings
                 }
             }
 
-            // Add the field map and computed fields to the entity map
             entity_map.add_mapping(&entity, field_map);
             entity_map.add_computed(&entity, computed_fields);
         }
         entity_map
     }
 
-    pub fn get_entities_name_map(plan: &MigrationPlan) -> NameMap {
-        let mut name_map = HashMap::new();
-
-        for migration in plan.migration.migrations.iter() {
-            let source = migration.sources.first().unwrap().clone();
-            let target = migration.target.clone();
-
-            name_map.insert(source.to_ascii_lowercase(), target.to_ascii_lowercase());
-        }
-
-        for load in plan.loads.iter() {
-            name_map.insert(
-                load.name.to_ascii_lowercase(),
-                load.source.to_ascii_lowercase(),
-            );
-        }
-
-        NameMap::new(name_map)
-    }
-
-    pub fn get_entities_name_map_v2(plan: &smql_v02::plan::MigrationPlan) -> NameMap {
+    pub fn get_entities_name_map(plan: &smql_v02::plan::MigrationPlan) -> NameMap {
         let mut name_map = HashMap::new();
 
         for mi in plan.migration.migrate_items.iter() {
@@ -188,14 +174,14 @@ impl NameMap {
                 .source
                 .names
                 .first()
-                .expect("each migrate_item must have at least one source name")
+                .expect("MigrateItem must have at least one source name")
                 .to_ascii_lowercase(); // currently supports only one source
             let dst = mi
                 .destination
                 .names
                 .first()
-                .expect("each migrate_item must have at least one destination name")
-                .to_ascii_lowercase(); // currently supports only one destination
+                .expect("MigrateItem must have destination name")
+                .to_ascii_lowercase();
 
             name_map.insert(src.to_ascii_lowercase(), dst.to_ascii_lowercase());
 
@@ -219,41 +205,17 @@ impl NameMap {
     }
 }
 
-impl EntityMappingContext {
+impl EntityMapping {
     pub fn new(plan: &MigrationPlan) -> Self {
         let entity_name_map = NameMap::get_entities_name_map(plan);
-        let field_mappings = NameMap::get_field_mappings(&plan.mapping);
-        let computed_flat = field_mappings
-            .computed_fields
-            .values()
-            .flat_map(|fields| fields.clone())
-            .collect::<Vec<_>>();
-
-        let mut lookups: HashMap<String, Vec<LookupField>> = HashMap::new();
-        for computed in &computed_flat {
-            if let Expression::Lookup { table, key, .. } = &computed.expression {
-                let lf = LookupField {
-                    entity: table.clone(),
-                    key: key.clone(),
-                    target: computed.name.clone(),
-                };
-                lookups.entry(table.clone()).or_default().push(lf);
-            }
-        }
+        let field_mappings = NameMap::get_field_mappings(&plan.migration);
+        let lookups = Self::get_lookups(&field_mappings);
 
         Self {
             entity_name_map,
             field_mappings,
-            computed_flat,
             lookups,
         }
-    }
-
-    pub fn from_plan(plan: &smql_v02::plan::MigrationPlan) -> Self {
-        let entity_name_map = NameMap::get_entities_name_map_v2(plan);
-        println!("Entity name map: {:#?}", entity_name_map);
-
-        todo!("Implement from_plan");
     }
 
     pub fn get_field_name_map(&self) -> &NameMap {
@@ -271,10 +233,27 @@ impl EntityMappingContext {
     pub fn get_lookups_for(&self, entity: &str) -> &[LookupField] {
         self.lookups.get(entity).map(Vec::as_slice).unwrap_or(&[])
     }
-}
 
-impl Default for FieldMappings {
-    fn default() -> Self {
-        Self::new()
+    fn get_lookups(field_mappings: &FieldMappings) -> HashMap<String, Vec<LookupField>> {
+        let mut lookups: HashMap<String, Vec<LookupField>> = HashMap::new();
+        for computed_list in field_mappings.computed_fields.values() {
+            for computed in computed_list {
+                if let Expression::Lookup { entity, key, .. } = &computed.expression {
+                    let entity_name = entity.clone();
+                    let key_name = key.clone();
+                    let target_name = computed.name.clone();
+
+                    let lf = LookupField {
+                        entity: entity_name.clone(),
+                        key: key_name,
+                        target: target_name,
+                    };
+
+                    lookups.entry(entity_name).or_default().push(lf);
+                }
+            }
+        }
+
+        lookups
     }
 }

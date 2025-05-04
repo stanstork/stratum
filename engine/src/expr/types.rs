@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use common::{computed::ComputedField, mapping::EntityMappingContext};
+use common::{computed::ComputedField, mapping::EntityMapping};
 use smql::statements::expr::{Expression, Literal};
 use sql_adapter::{
     metadata::column::{data_type::ColumnDataType, metadata::ColumnMetadata},
@@ -15,7 +15,7 @@ pub struct ExpressionWrapper(pub Expression);
 pub async fn infer_computed_type(
     computed: &ComputedField,
     columns: &[ColumnMetadata],
-    mapping: &EntityMappingContext,
+    mapping: &EntityMapping,
     adapter: &AdapterRef,
 ) -> Option<ColumnDataType> {
     // Clone the expression node into wrapper and run inference.
@@ -48,7 +48,7 @@ pub async fn infer_computed_type(
 pub fn boxed_infer_computed_type<'a>(
     computed: &'a ComputedField,
     columns: &'a [ColumnMetadata],
-    mapping: &'a EntityMappingContext,
+    mapping: &'a EntityMapping,
     adapter: &'a AdapterRef,
 ) -> Pin<Box<dyn Future<Output = Option<ColumnDataType>> + Send + 'a>> {
     // Box the future returned by async fn
@@ -61,7 +61,7 @@ impl TypeInferencer for ExpressionWrapper {
     async fn infer_type(
         &self,
         columns: &[ColumnMetadata],
-        mapping: &EntityMappingContext,
+        mapping: &EntityMapping,
         adapter: &AdapterRef,
     ) -> Option<ColumnDataType> {
         match &self.0 {

@@ -4,7 +4,7 @@ use crate::{
     source::{data_source::DataSource, source::Source},
     state::MigrationState,
 };
-use common::mapping::EntityMappingContext;
+use common::mapping::EntityMapping;
 use smql::statements::connection::DataFormat;
 use sql_adapter::metadata::table::TableMetadata;
 use std::sync::Arc;
@@ -28,14 +28,14 @@ pub struct MigrationContext {
     pub buffer: Arc<SledBuffer>,
 
     /// Mapping of entity names between source and destination
-    pub mapping: EntityMappingContext,
+    pub mapping: EntityMapping,
 }
 
 impl MigrationContext {
     pub fn init(
         source: Source,
         destination: Destination,
-        mapping: EntityMappingContext,
+        mapping: EntityMapping,
     ) -> Arc<Mutex<MigrationContext>> {
         let state = Arc::new(Mutex::new(MigrationState::new()));
         let buffer = Arc::new(SledBuffer::new("migration_buffer"));

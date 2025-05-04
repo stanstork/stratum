@@ -4,7 +4,7 @@ use crate::{
     metadata::table::TableMetadata,
     query::{builder::SqlQueryBuilder, column::ColumnDef, fk::ForeignKeyDef},
 };
-use common::mapping::EntityMappingContext;
+use common::mapping::EntityMapping;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -24,7 +24,7 @@ pub struct SchemaPlan<'a> {
     ignore_constraints: bool,
 
     /// Mapping of table names from source to target database.
-    mapping: EntityMappingContext,
+    mapping: EntityMapping,
 
     /// Metadata graph containing all source tables and their relationships
     /// (both referencing and referenced dependencies).
@@ -45,7 +45,7 @@ impl<'a> SchemaPlan<'a> {
         source_adapter: Arc<(dyn SqlAdapter + Send + Sync)>,
         type_engine: TypeEngine<'a>,
         ignore_constraints: bool,
-        mapping: EntityMappingContext,
+        mapping: EntityMapping,
     ) -> Self {
         Self {
             source_adapter,

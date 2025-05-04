@@ -1,13 +1,13 @@
-use common::mapping::EntityMappingContext;
+use common::mapping::EntityMapping;
 use smql::statements::expr::{Expression, Literal, Operator};
 use sql_adapter::{metadata::column::value::ColumnValue, row::row_data::RowData};
 
 pub trait Evaluator {
-    fn evaluate(&self, row: &RowData, mapping: &EntityMappingContext) -> Option<ColumnValue>;
+    fn evaluate(&self, row: &RowData, mapping: &EntityMapping) -> Option<ColumnValue>;
 }
 
 impl Evaluator for Expression {
-    fn evaluate(&self, row: &RowData, mapping: &EntityMappingContext) -> Option<ColumnValue> {
+    fn evaluate(&self, row: &RowData, mapping: &EntityMapping) -> Option<ColumnValue> {
         match self {
             Expression::Identifier(identifier) => row
                 .columns

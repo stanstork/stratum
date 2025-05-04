@@ -9,8 +9,8 @@ use crate::{
     settings::parse_settings,
     source::{data_source::DataSource, linked_source::LinkedSource, source::Source},
 };
-use common::mapping::EntityMappingContext;
-use smql::{plan::MigrationPlan, statements::connection::DataFormat};
+use common::mapping::EntityMapping;
+use smql_v02::plan::MigrationPlan;
 use sql_adapter::metadata::{provider::MetadataProvider, table::TableMetadata};
 use std::{collections::HashMap, sync::Arc, vec};
 use tokio::sync::{watch, Mutex};
@@ -19,36 +19,36 @@ use tracing::info;
 pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
     info!("Running migration");
 
-    let mapping = EntityMappingContext::new(&plan);
-    let source = create_source(&plan, &mapping).await?;
-    let destination = create_destination(&plan).await?;
-    let context = MigrationContext::init(source, destination, mapping);
+    // let mapping = EntityMapping::new(&plan);
+    // let source = create_source(&plan, &mapping).await?;
+    // let destination = create_destination(&plan).await?;
+    // let context = MigrationContext::init(source, destination, mapping);
 
-    apply_settings(&plan, Arc::clone(&context)).await?;
-    // validate_destination(&plan, Arc::clone(&context)).await?;
-    set_metadata(&context, &plan).await?;
+    // apply_settings(&plan, Arc::clone(&context)).await?;
+    // // validate_destination(&plan, Arc::clone(&context)).await?;
+    // set_metadata(&context, &plan).await?;
 
-    let (shutdown_sender, shutdown_receiver) = watch::channel(false);
+    // let (shutdown_sender, shutdown_receiver) = watch::channel(false);
 
-    let producer = Producer::new(Arc::clone(&context), shutdown_sender)
-        .await
-        .spawn();
+    // let producer = Producer::new(Arc::clone(&context), shutdown_sender)
+    //     .await
+    //     .spawn();
 
-    let consumer = Consumer::new(Arc::clone(&context), shutdown_receiver)
-        .await
-        .spawn();
+    // let consumer = Consumer::new(Arc::clone(&context), shutdown_receiver)
+    //     .await
+    //     .spawn();
 
-    // Wait for both producer and consumer to finish
-    tokio::try_join!(producer, consumer)?;
+    // // Wait for both producer and consumer to finish
+    // tokio::try_join!(producer, consumer)?;
 
     Ok(())
 }
 
-pub fn run_v2(plan_v2: smql_v02::plan::MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run_v2(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
     info!("Running migration v2");
 
-    println!("Migration plan v2: {:#?}", plan_v2);
-    let mapping = EntityMappingContext::from_plan(&plan_v2);
+    let mapping = EntityMapping::new(&plan);
+    let source = create_source(&plan, &mapping).await?;
 
     todo!("Implement v2 migration");
 }
@@ -74,10 +74,10 @@ pub async fn load_src_metadata(
 
 async fn create_source(
     plan: &MigrationPlan,
-    mapping: &EntityMappingContext,
+    mapping: &EntityMapping,
 ) -> Result<Source, Box<dyn std::error::Error>> {
-    let format = plan.connections.source.data_format;
-    let adapter = Adapter::new(format, &plan.connections.source.con_str).await?;
+    let format = plan.connections.source.format;
+    let adapter = Adapter::new(format, &plan.connections.source.conn_str).await?;
 
     let mut linked = vec![];
     for load in plan.loads.iter() {

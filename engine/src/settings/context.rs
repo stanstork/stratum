@@ -5,7 +5,7 @@ use crate::{
     source::{data_source::DataSource, source::Source},
     state::MigrationState,
 };
-use common::mapping::EntityMappingContext;
+use common::mapping::EntityMapping;
 use postgres::data_type::PgColumnDataType;
 use smql::statements::connection::DataFormat;
 use sql_adapter::{
@@ -22,7 +22,7 @@ use tokio::sync::Mutex;
 pub struct SchemaSettingContext {
     pub source: Source,
     pub destination: Destination,
-    pub mapping: EntityMappingContext,
+    pub mapping: EntityMapping,
     pub state: Arc<Mutex<MigrationState>>,
 }
 

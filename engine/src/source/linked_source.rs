@@ -1,6 +1,6 @@
 use crate::adapter::Adapter;
-use common::{computed::ComputedField, mapping::EntityMappingContext};
-use smql::statements::{connection::DataFormat, expr::Expression, load::Load};
+use common::{computed::ComputedField, mapping::EntityMapping};
+use smql_v02::statements::{connection::DataFormat, expr::Expression, load::Load};
 use sql_adapter::join::{
     clause::{JoinClause, JoinColumn, JoinCondition, JoinType, JoinedTable},
     source::JoinSource,
@@ -17,22 +17,23 @@ impl LinkedSource {
     pub async fn new(
         adapter: &Adapter,
         format: &DataFormat,
-        mapping: &EntityMappingContext,
+        mapping: &EntityMapping,
         load: &Load,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         match *format {
-            DataFormat::MySql | DataFormat::Postgres => {
-                let join_clause = Self::build_join_clause(load);
-                let projection =
-                    Self::extract_projection(load, &mapping.field_mappings.computed_fields);
-                let source_metadata = adapter.get_adapter().fetch_metadata(&load.source).await?;
+            DataFormat::MYSQL | DataFormat::POSTGRES => {
+                // let join_clause = Self::build_join_clause(load);
+                // let projection =
+                //     Self::extract_projection(load, &mapping.field_mappings.computed_fields);
+                // let source_metadata = adapter.get_adapter().fetch_metadata(&load.source).await?;
 
-                Ok(LinkedSource::Table(JoinSource::new(
-                    source_metadata,
-                    join_clause,
-                    projection,
-                    mapping.clone(),
-                )))
+                // Ok(LinkedSource::Table(JoinSource::new(
+                //     source_metadata,
+                //     join_clause,
+                //     projection,
+                //     mapping.clone(),
+                // )))
+                todo!("Implement MySQL and Postgres linked source");
             }
             unsupported => Err(format!("Unsupported data format: {:?}", unsupported).into()),
         }
@@ -85,7 +86,9 @@ impl LinkedSource {
         fields
             .iter()
             .filter_map(|f| match &f.expression {
-                Expression::Lookup { table, key, .. } if table.eq_ignore_ascii_case(&load.name) => {
+                Expression::Lookup { entity, key, .. }
+                    if entity.eq_ignore_ascii_case(&load.name) =>
+                {
                     Some(key.clone())
                 }
                 _ => None,

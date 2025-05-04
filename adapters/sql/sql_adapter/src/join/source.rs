@@ -1,6 +1,6 @@
 use super::clause::JoinClause;
 use crate::{metadata::table::TableMetadata, query::select::SelectField};
-use common::mapping::EntityMappingContext;
+use common::mapping::EntityMapping;
 use std::collections::{HashSet, VecDeque};
 
 #[derive(Debug, Clone)]
@@ -8,7 +8,7 @@ pub struct JoinSource {
     pub clause: JoinClause,
     pub metadata: TableMetadata,
     pub projection: Vec<String>,
-    pub mapping: EntityMappingContext,
+    pub mapping: EntityMapping,
 }
 
 impl JoinSource {
@@ -16,7 +16,7 @@ impl JoinSource {
         metadata: TableMetadata,
         clause: JoinClause,
         projection: Vec<String>,
-        mapping: EntityMappingContext,
+        mapping: EntityMapping,
     ) -> Self {
         Self {
             metadata,

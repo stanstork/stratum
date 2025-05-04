@@ -4,7 +4,7 @@ use crate::{
     destination::{data_dest::DataDestination, destination::Destination},
     record::{DataRecord, Record},
 };
-use common::mapping::EntityMappingContext;
+use common::mapping::EntityMapping;
 use sql_adapter::{metadata::table::TableMetadata, row::row_data::RowData};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::sync::{watch, Mutex};
@@ -13,7 +13,7 @@ use tracing::{error, info};
 pub struct Consumer {
     buffer: Arc<SledBuffer>,
     destination: Destination,
-    mappings: EntityMappingContext,
+    mappings: EntityMapping,
     shutdown_receiver: watch::Receiver<bool>,
     batch_size: usize,
 }

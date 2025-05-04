@@ -1,6 +1,6 @@
 use mysql::adapter::MySqlAdapter;
 use postgres::adapter::PgAdapter;
-use smql::statements::connection::DataFormat;
+use smql_v02::statements::connection::DataFormat;
 use sql_adapter::adapter::SqlAdapter;
 
 pub enum Adapter {
@@ -14,11 +14,11 @@ impl Adapter {
         con_str: &str,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         match data_format {
-            DataFormat::MySql => {
+            DataFormat::MYSQL => {
                 let adapter = MySqlAdapter::connect(con_str).await?;
                 Ok(Adapter::MySql(adapter))
             }
-            DataFormat::Postgres => {
+            DataFormat::POSTGRES => {
                 let adapter = PgAdapter::connect(con_str).await?;
                 Ok(Adapter::Postgres(adapter))
             }
