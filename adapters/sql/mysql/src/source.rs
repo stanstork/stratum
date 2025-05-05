@@ -48,25 +48,27 @@ impl MySqlDataSource {
                 }
 
                 // Extract join info for this table, if any
-                let (joins, joined_fields) = JoinSource::filter_joins(&table_name, &self.joins);
-                base_fields.extend(joined_fields);
+                // let (joins, joined_fields) = JoinSource::filter_joins(&table_name, &self.joins);
+                // base_fields.extend(joined_fields);
 
-                // Build filter for this table+joins
-                let filter = self
-                    .filter
-                    .as_ref()
-                    .map(|f| f.for_table(&table_name, &joins));
+                // // Build filter for this table+joins
+                // let filter = self
+                //     .filter
+                //     .as_ref()
+                //     .map(|f| f.for_table(&table_name, &joins));
 
-                let request = FetchRowsRequestBuilder::new(table_name.clone())
-                    .alias(table_name.clone())
-                    .columns(base_fields)
-                    .joins(joins)
-                    .filter(filter)
-                    .limit(batch_size)
-                    .offset(offset)
-                    .build();
+                // let request = FetchRowsRequestBuilder::new(table_name.clone())
+                //     .alias(table_name.clone())
+                //     .columns(base_fields)
+                //     .joins(joins)
+                //     .filter(filter)
+                //     .limit(batch_size)
+                //     .offset(offset)
+                //     .build();
 
-                requests.push(request);
+                // requests.push(request);
+
+                todo!("Implement the request building logic");
             }
         }
 

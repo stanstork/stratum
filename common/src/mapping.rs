@@ -1,8 +1,5 @@
 use crate::computed::ComputedField;
-use smql_v02::{
-    plan::MigrationPlan,
-    statements::{expr::Expression, migrate::MigrateBlock},
-};
+use smql_v02::statements::{expr::Expression, migrate::MigrateItem};
 use std::collections::HashMap;
 
 #[derive(Default, Clone, Debug)]
@@ -128,69 +125,66 @@ impl NameMap {
         self.source_to_target.is_empty() && self.target_to_source.is_empty()
     }
 
-    pub fn get_field_mappings(migration_block: &MigrateBlock) -> FieldMappings {
+    pub fn get_field_mappings(mi: &MigrateItem) -> FieldMappings {
         let mut entity_map = FieldMappings::new();
 
-        for mi in &migration_block.migrate_items {
-            let entity = mi
-                .destination
-                .names
-                .first()
-                .expect("MigrateItem must have destination name")
-                .to_ascii_lowercase();
+        let entity = mi
+            .destination
+            .names
+            .first()
+            .expect("MigrateItem must have destination name")
+            .to_ascii_lowercase();
 
-            let mut field_map = HashMap::new();
-            let mut computed_fields = Vec::new();
+        let mut field_map = HashMap::new();
+        let mut computed_fields = Vec::new();
 
-            if let Some(map_spec) = &mi.map {
-                for mapping in &map_spec.mappings {
-                    match &mapping.source {
-                        // direct identifier -> simple rename
-                        Expression::Identifier(field) => {
-                            field_map.insert(
-                                field.to_ascii_lowercase(),
-                                mapping.target.to_ascii_lowercase(),
-                            );
-                        }
-                        // everything else is a computed field
-                        other_expr => {
-                            computed_fields.push(ComputedField::new(&mapping.target, other_expr));
-                        }
+        if let Some(map_spec) = &mi.map {
+            for mapping in &map_spec.mappings {
+                match &mapping.source {
+                    // direct identifier -> simple rename
+                    Expression::Identifier(field) => {
+                        field_map.insert(
+                            field.to_ascii_lowercase(),
+                            mapping.target.to_ascii_lowercase(),
+                        );
+                    }
+                    // everything else is a computed field
+                    other_expr => {
+                        computed_fields.push(ComputedField::new(&mapping.target, other_expr));
                     }
                 }
             }
-
-            entity_map.add_mapping(&entity, field_map);
-            entity_map.add_computed(&entity, computed_fields);
         }
+
+        entity_map.add_mapping(&entity, field_map);
+        entity_map.add_computed(&entity, computed_fields);
+
         entity_map
     }
 
-    pub fn get_entities_name_map(plan: &smql_v02::plan::MigrationPlan) -> NameMap {
+    pub fn get_entities_name_map(mi: &MigrateItem) -> NameMap {
         let mut name_map = HashMap::new();
 
-        for mi in plan.migration.migrate_items.iter() {
-            let src = mi
-                .source
-                .names
-                .first()
-                .expect("MigrateItem must have at least one source name")
-                .to_ascii_lowercase(); // currently supports only one source
-            let dst = mi
-                .destination
-                .names
-                .first()
-                .expect("MigrateItem must have destination name")
-                .to_ascii_lowercase();
+        let src = mi
+            .source
+            .names
+            .first()
+            .expect("MigrateItem must have at least one source name")
+            .to_ascii_lowercase(); // currently supports only one source
+        let dst = mi
+            .destination
+            .names
+            .first()
+            .expect("MigrateItem must have destination name")
+            .to_ascii_lowercase();
 
-            name_map.insert(src.to_ascii_lowercase(), dst.to_ascii_lowercase());
+        name_map.insert(src.to_ascii_lowercase(), dst.to_ascii_lowercase());
 
-            if let Some(load) = &mi.load {
-                name_map.extend(load.entities.iter().map(|name| {
-                    let lower = name.to_ascii_lowercase();
-                    (lower.clone(), lower)
-                }));
-            }
+        if let Some(load) = &mi.load {
+            name_map.extend(load.entities.iter().map(|name| {
+                let lower = name.to_ascii_lowercase();
+                (lower.clone(), lower)
+            }));
         }
 
         NameMap::new(name_map)
@@ -206,9 +200,9 @@ impl NameMap {
 }
 
 impl EntityMapping {
-    pub fn new(plan: &MigrationPlan) -> Self {
-        let entity_name_map = NameMap::get_entities_name_map(plan);
-        let field_mappings = NameMap::get_field_mappings(&plan.migration);
+    pub fn new(mi: &MigrateItem) -> Self {
+        let entity_name_map = NameMap::get_entities_name_map(mi);
+        let field_mappings = NameMap::get_field_mappings(mi);
         let lookups = Self::get_lookups(&field_mappings);
 
         Self {

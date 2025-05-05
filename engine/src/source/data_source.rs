@@ -1,7 +1,7 @@
 use super::linked_source::LinkedSource;
 use crate::{adapter::Adapter, filter::filter::Filter};
 use mysql::source::MySqlDataSource;
-use smql::statements::connection::DataFormat;
+use smql_v02::statements::connection::DataFormat;
 use sql_adapter::{join::source::JoinSource, source::DbDataSource};
 use std::sync::Arc;
 use tokio::sync::Mutex;

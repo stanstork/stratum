@@ -29,22 +29,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // runner::run(plan).await?;
 
             let plan_v2 = smql_v02::parser::parse(&source).expect("Failed to parse config file");
-            runner::run_v2(plan_v2)?;
+            runner::run_v2(plan_v2).await?;
         }
         Commands::Source { command } => match command {
             commands::SourceCommand::Info { config, verbose } => {
-                let source = read_migration_config(&config).expect("Failed to read config file");
-                let plan = parse(&source).expect("Failed to parse config file");
-                let metadata = runner::load_src_metadata(&plan).await?;
+                // let source = read_migration_config(&config).expect("Failed to read config file");
+                // let plan = parse(&source).expect("Failed to parse config file");
+                // let metadata = runner::load_src_metadata(&plan).await?;
 
-                if verbose {
-                    println!("{:#?}", metadata);
-                } else {
-                    let mut visited = HashSet::new();
-                    for m in metadata.values() {
-                        TableMetadata::print_tables_tree(m, 1, &mut visited);
-                    }
-                }
+                // if verbose {
+                //     println!("{:#?}", metadata);
+                // } else {
+                //     let mut visited = HashSet::new();
+                //     for m in metadata.values() {
+                //         TableMetadata::print_tables_tree(m, 1, &mut visited);
+                //     }
+                // }
             }
         },
     }

@@ -129,3 +129,19 @@ impl StatementParser for Literal {
         }
     }
 }
+
+impl Expression {
+    pub fn entity(&self) -> Option<String> {
+        match self {
+            Expression::Lookup { entity, .. } => Some(entity.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn key(&self) -> Option<String> {
+        match self {
+            Expression::Lookup { key, .. } => Some(key.clone()),
+            _ => None,
+        }
+    }
+}

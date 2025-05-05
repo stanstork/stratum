@@ -3,6 +3,8 @@ use postgres::adapter::PgAdapter;
 use smql_v02::statements::connection::DataFormat;
 use sql_adapter::adapter::SqlAdapter;
 
+#[derive(Clone)]
+/// Represents the SQL adapter for different database types.
 pub enum Adapter {
     MySql(MySqlAdapter),
     Postgres(PgAdapter),
@@ -10,16 +12,16 @@ pub enum Adapter {
 
 impl Adapter {
     pub async fn new(
-        data_format: DataFormat,
-        con_str: &str,
+        format: DataFormat,
+        conn_str: &str,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        match data_format {
-            DataFormat::MYSQL => {
-                let adapter = MySqlAdapter::connect(con_str).await?;
+        match format {
+            DataFormat::MySql => {
+                let adapter = MySqlAdapter::connect(conn_str).await?;
                 Ok(Adapter::MySql(adapter))
             }
-            DataFormat::POSTGRES => {
-                let adapter = PgAdapter::connect(con_str).await?;
+            DataFormat::Postgres => {
+                let adapter = PgAdapter::connect(conn_str).await?;
                 Ok(Adapter::Postgres(adapter))
             }
             _ => panic!("Unsupported data format"),

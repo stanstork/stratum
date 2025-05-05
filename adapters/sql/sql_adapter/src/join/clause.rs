@@ -1,3 +1,5 @@
+use common::mapping::EntityMapping;
+
 #[derive(Debug, Clone)]
 pub struct JoinClause {
     pub left: JoinedTable,
@@ -30,4 +32,11 @@ pub struct JoinCondition {
 pub struct JoinColumn {
     pub alias: String,
     pub column: String,
+}
+
+impl JoinClause {
+    pub fn apply_mapping(&mut self, mapping: &EntityMapping) {
+        self.right.table = mapping.entity_name_map.reverse_resolve(&self.right.table);
+        self.right.alias = self.right.table.clone();
+    }
 }

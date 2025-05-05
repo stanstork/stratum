@@ -124,3 +124,13 @@ impl Default for Spec {
         }
     }
 }
+
+impl Spec {
+    pub fn name(&self) -> String {
+        // Currently, we only support one name per spec
+        self.names
+            .get(0)
+            .cloned()
+            .unwrap_or_else(|| panic!("No name found for spec: {:?}", self))
+    }
+}

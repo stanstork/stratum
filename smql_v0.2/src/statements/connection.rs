@@ -1,4 +1,5 @@
 use crate::parser::{Rule, StatementParser};
+use bitflags::bitflags;
 use pest::iterators::Pair;
 
 // ─────────────────────────────────────────────────────────────
@@ -27,12 +28,14 @@ pub enum ConnectionType {
     Dest,
 }
 
-#[derive(Debug, Clone)]
-pub enum DataFormat {
-    MYSQL,
-    POSTGRES,
-    SQLITE,
-    MONGODB,
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct DataFormat: u8 {
+        const MySql    = 0b0001;
+        const Postgres = 0b0010;
+        const Sqlite   = 0b0100;
+        const Mongo    = 0b1000;
+    }
 }
 
 const KEY_SOURCE: &str = "SOURCE";
@@ -77,10 +80,10 @@ impl StatementParser for ConnectionPair {
         // parse data format
         let format_str = inner.next().unwrap().as_str().to_ascii_uppercase();
         let format = match format_str.as_str() {
-            KEY_MYSQL => DataFormat::MYSQL,
-            KEY_POSTGRES => DataFormat::POSTGRES,
-            KEY_SQLITE => DataFormat::SQLITE,
-            _ => DataFormat::MONGODB,
+            KEY_MYSQL => DataFormat::MySql,
+            KEY_POSTGRES => DataFormat::Postgres,
+            KEY_SQLITE => DataFormat::Sqlite,
+            _ => DataFormat::empty(),
         };
 
         // parse connection string

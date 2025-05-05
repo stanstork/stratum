@@ -56,4 +56,10 @@ impl MatchPair {
     pub fn new(left: Expression, right: Expression) -> Self {
         MatchPair { left, right }
     }
+
+    pub fn belongs_to(&self, entity: &str) -> bool {
+        self.right
+            .entity()
+            .map_or(false, |right| right.eq_ignore_ascii_case(entity))
+    }
 }

@@ -5,20 +5,21 @@ use crate::{
     state::MigrationState,
 };
 use common::mapping::EntityMapping;
-use smql::statements::connection::DataFormat;
+use smql_v02::statements::connection::DataFormat;
 use sql_adapter::metadata::table::TableMetadata;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
 
-pub struct MigrationContext {
-    /// Shared migration state used for coordination and progress tracking
+/// Represents the context for a single item in the migration process.
+pub struct ItemContext {
+    /// Shared migration state used for coordination and progress tracking.
     pub state: Arc<Mutex<MigrationState>>,
 
-    /// Input data source (e.g., databases, files)
+    /// Input data source (e.g., databases, files).
     pub source: Source,
 
-    /// Output data destination (e.g., databases, files)
+    /// Output data destination (e.g., databases, files).
     pub destination: Destination,
 
     /// Temporary storage for intermediate migration data
@@ -27,20 +28,24 @@ pub struct MigrationContext {
     /// and helps facilitate efficient data transfer between sources and destinations.
     pub buffer: Arc<SledBuffer>,
 
-    /// Mapping of entity names between source and destination
+    /// Mapping of entity names between source and destination.
     pub mapping: EntityMapping,
 }
 
-impl MigrationContext {
-    pub fn init(
+impl ItemContext {
+    /// Initializes a new `ItemContext` with the provided source, destination, and mapping.
+    pub fn new(
         source: Source,
         destination: Destination,
         mapping: EntityMapping,
-    ) -> Arc<Mutex<MigrationContext>> {
+    ) -> Arc<Mutex<ItemContext>> {
         let state = Arc::new(Mutex::new(MigrationState::new()));
-        let buffer = Arc::new(SledBuffer::new("migration_buffer"));
+        let buffer = Arc::new(SledBuffer::new(&format!(
+            "migration_buffer_{}",
+            source.name
+        )));
 
-        Arc::new(Mutex::new(MigrationContext {
+        Arc::new(Mutex::new(ItemContext {
             state,
             source,
             destination,
@@ -54,9 +59,7 @@ impl MigrationContext {
         source_name: &str,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
         match (&self.source.primary, &self.source.format) {
-            (DataSource::Database(db), format)
-                if format.intersects(DataFormat::sql_databases()) =>
-            {
+            (DataSource::Database(db), format) if format.intersects(Self::sql_databases()) => {
                 Ok(db.lock().await.get_metadata(source_name).clone())
             }
             _ => Err("Unsupported data source format".into()),
@@ -68,9 +71,7 @@ impl MigrationContext {
         destination_name: &str,
     ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
         match (&self.destination.data_dest, &self.destination.format) {
-            (DataDestination::Database(db), format)
-                if format.intersects(DataFormat::sql_databases()) =>
-            {
+            (DataDestination::Database(db), format) if format.intersects(Self::sql_databases()) => {
                 Ok(db.lock().await.get_metadata(destination_name).clone())
             }
             _ => Err("Unsupported data destination format".into()),
@@ -80,5 +81,11 @@ impl MigrationContext {
     pub async fn debug_state(&self) {
         let state = self.state.lock().await;
         info!("State: {:?}", state);
+    }
+
+    fn sql_databases() -> DataFormat {
+        DataFormat::MySql
+            .union(DataFormat::Postgres)
+            .union(DataFormat::Sqlite)
     }
 }
