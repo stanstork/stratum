@@ -1,4 +1,4 @@
-use smql::statements::filter::FilterExpression;
+use smql_v02::statements::filter::FilterExpression;
 
 /// A trait for compiling filter expressions into a specific format.
 pub trait FilterCompiler {

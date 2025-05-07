@@ -1,5 +1,5 @@
 use super::{compiler::FilterCompiler, filter::expr_to_string};
-use smql::statements::{
+use smql_v02::statements::{
     self,
     expr::Expression,
     filter::{Comparator, FilterExpression},
@@ -42,19 +42,19 @@ fn from_stmt_condition(
     c: &statements::filter::Condition,
 ) -> Result<Condition, Box<dyn std::error::Error>> {
     // extract table & column
-    let (table, column) = match &c.field {
-        Expression::Lookup { table, key, .. } => (table.clone(), key.clone()),
+    let (table, column) = match &c.left {
+        Expression::Lookup { entity, key, .. } => (entity.clone(), key.clone()),
         other => {
             return Err(format!("Unsupported expression type filter field: {:?}", other).into())
         }
     };
 
     // stringify the RHS (literal, identifier, lookup or arithmetic)
-    let value = expr_to_string(&c.value)
+    let value = expr_to_string(&c.right)
         .map_err(|e| format!("Unsupported expression type filter value: {:?}", e))?;
 
     // map comparator to its SQL symbol
-    let comparator = match c.comparator {
+    let comparator = match c.op {
         Comparator::Equal => "=",
         Comparator::NotEqual => "!=",
         Comparator::GreaterThan => ">",

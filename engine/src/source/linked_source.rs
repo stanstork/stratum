@@ -18,7 +18,7 @@ pub enum LinkedSource {
 }
 
 impl LinkedSource {
-    pub async fn new_linked_table_src(
+    pub async fn new(
         ctx: &GlobalContext,
         load: &Load,
         mapping: &EntityMapping,

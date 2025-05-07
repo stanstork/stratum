@@ -1,4 +1,4 @@
-use smql::statements::expr::{Expression, Literal, Operator};
+use smql_v02::statements::expr::{Expression, Literal, Operator};
 use sql_adapter::filter::filter::SqlFilter;
 
 #[derive(Debug, Clone)]
@@ -16,7 +16,7 @@ pub fn expr_to_string(e: &Expression) -> Result<String, Expression> {
         }),
         Expression::Identifier(ident) => Ok(ident.clone()),
 
-        Expression::Lookup { table, key, .. } => Ok(format!("{}.{}", table, key)),
+        Expression::Lookup { entity, key, .. } => Ok(format!("{}.{}", entity, key)),
 
         Expression::Arithmetic {
             left,

@@ -1,9 +1,13 @@
 use crate::{
     context::global::GlobalContext,
-    source::{linked_source::LinkedSource, source::Source},
+    filter::{compiler::FilterCompiler, filter::Filter, sql::SqlFilterCompiler},
+    source::{data_source::DataSource, linked_source::LinkedSource, source::Source},
 };
 use common::mapping::EntityMapping;
-use smql_v02::{plan::MigrationPlan, statements::migrate::MigrateItem};
+use smql_v02::{
+    plan::MigrationPlan,
+    statements::{connection::DataFormat, migrate::MigrateItem},
+};
 use tracing::info;
 
 pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
@@ -72,17 +76,38 @@ async fn create_source(
 ) -> Result<Source, Box<dyn std::error::Error>> {
     let src_name = migrate_item.source.name();
     let linked_src = if let Some(load) = &migrate_item.load {
-        Some(LinkedSource::new_linked_table_src(ctx, load, mapping).await?)
+        Some(LinkedSource::new(ctx, load, mapping).await?)
     } else {
         None
     };
 
-    // let filter = create_filter(&plan)?;
-    // let primary = DataSource::from_adapter(ctx.src_format, &ctx.src_adapter, &linked, &filter)?;
+    let filter = create_filter(migrate_item, ctx.src_format)?;
+    let primary = DataSource::from_adapter(ctx.src_format, &ctx.src_adapter, &linked, &filter)?;
 
     // Ok(Source::new(ctx.src_format, primary, linked, filter))
 
     todo!("Implement source creation");
+}
+
+fn create_filter(
+    migrate_item: &MigrateItem,
+    format: DataFormat,
+) -> Result<Option<Filter>, Box<dyn std::error::Error>> {
+    match format {
+        // If the format is SQL, try to build a SQL filter.
+        DataFormat::MySql | DataFormat::Postgres => {
+            // Create a new SQL filter
+            let filter = migrate_item
+                .filter
+                .as_ref()
+                .map(|ast| Filter::Sql(SqlFilterCompiler::compile(&ast.expression)));
+            Ok(filter)
+        }
+        _ => {
+            // Unsupported format
+            Ok(None)
+        }
+    }
 }
 
 // async fn create_destination(
@@ -94,25 +119,6 @@ async fn create_source(
 //         DataDestination::from_adapter(plan.connections.destination.data_format, adapter)?;
 
 //     Ok(Destination::new(format, data_dest))
-// }
-
-// fn create_filter(plan: &MigrationPlan) -> Result<Option<Filter>, Box<dyn std::error::Error>> {
-//     let format = plan.connections.source.data_format;
-//     match format {
-//         // If the format is SQL, try to build a SQL filter.
-//         DataFormat::MySql | DataFormat::Postgres => {
-//             // Create a new SQL filter
-//             let filter = plan
-//                 .filter
-//                 .as_ref()
-//                 .map(|ast| Filter::Sql(SqlFilterCompiler::compile(&ast.expression)));
-//             Ok(filter)
-//         }
-//         _ => {
-//             // Unsupported format
-//             Ok(None)
-//         }
-//     }
 // }
 
 // async fn apply_settings(
