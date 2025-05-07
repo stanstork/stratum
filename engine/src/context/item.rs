@@ -10,6 +10,7 @@ use sql_adapter::metadata::table::TableMetadata;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
+use uuid::Uuid;
 
 /// Represents the context for a single item in the migration process.
 pub struct ItemContext {
@@ -38,12 +39,11 @@ impl ItemContext {
         source: Source,
         destination: Destination,
         mapping: EntityMapping,
+        state: MigrationState,
     ) -> Arc<Mutex<ItemContext>> {
-        let state = Arc::new(Mutex::new(MigrationState::new()));
-        let buffer = Arc::new(SledBuffer::new(&format!(
-            "migration_buffer_{}",
-            source.name
-        )));
+        let state = Arc::new(Mutex::new(state));
+        let guid = Uuid::new_v4().to_string(); // Generate a unique identifier for the buffer
+        let buffer = Arc::new(SledBuffer::new(&format!("migration_buffer_{}", guid)));
 
         Arc::new(Mutex::new(ItemContext {
             state,
@@ -83,7 +83,7 @@ impl ItemContext {
         info!("State: {:?}", state);
     }
 
-    fn sql_databases() -> DataFormat {
+    pub fn sql_databases() -> DataFormat {
         DataFormat::MySql
             .union(DataFormat::Postgres)
             .union(DataFormat::Sqlite)

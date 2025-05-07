@@ -1,14 +1,20 @@
+use std::sync::Arc;
+
 use crate::{
-    context::global::GlobalContext,
+    context::{global::GlobalContext, item::ItemContext},
+    destination::{data_dest::DataDestination, destination::Destination},
     filter::{compiler::FilterCompiler, filter::Filter, sql::SqlFilterCompiler},
+    settings::collect_settings,
     source::{data_source::DataSource, linked_source::LinkedSource, source::Source},
+    state::MigrationState,
 };
 use common::mapping::EntityMapping;
 use smql_v02::{
     plan::MigrationPlan,
-    statements::{connection::DataFormat, migrate::MigrateItem},
+    statements::{connection::DataFormat, migrate::MigrateItem, setting::Settings},
 };
-use tracing::info;
+use tokio::sync::Mutex;
+use tracing::{error, info};
 
 pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
     info!("Running migration");
@@ -45,6 +51,21 @@ pub async fn run_v2(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error
     for mi in plan.migration.migrate_items {
         let mapping = EntityMapping::new(&mi);
         let source = create_source(&global_context, &mapping, &mi).await?;
+        let destination = create_destination(&global_context).await?;
+        tokio::spawn(async move {
+            let state = MigrationState::from_settings(&mi.settings);
+            let item_context = ItemContext::new(source, destination, mapping, state);
+
+            let apply_settings = apply_settings(&item_context, &mi.settings).await;
+            if let Err(e) = apply_settings {
+                error!("Failed to apply settings: {:?}", e);
+                return;
+            }
+
+            // let producer = Producer::new(item_context.clone()).await.spawn();
+            // let consumer = Consumer::new(item_context.clone()).await.spawn();
+            // tokio::try_join!(producer, consumer).unwrap();
+        });
     }
 
     todo!("Implement v2 migration");
@@ -74,8 +95,7 @@ async fn create_source(
     mapping: &EntityMapping,
     migrate_item: &MigrateItem,
 ) -> Result<Source, Box<dyn std::error::Error>> {
-    let src_name = migrate_item.source.name();
-    let linked_src = if let Some(load) = &migrate_item.load {
+    let linked = if let Some(load) = migrate_item.load.as_ref() {
         Some(LinkedSource::new(ctx, load, mapping).await?)
     } else {
         None
@@ -84,9 +104,7 @@ async fn create_source(
     let filter = create_filter(migrate_item, ctx.src_format)?;
     let primary = DataSource::from_adapter(ctx.src_format, &ctx.src_adapter, &linked, &filter)?;
 
-    // Ok(Source::new(ctx.src_format, primary, linked, filter))
-
-    todo!("Implement source creation");
+    Ok(Source::new(ctx.src_format, primary, linked, filter))
 }
 
 fn create_filter(
@@ -110,32 +128,28 @@ fn create_filter(
     }
 }
 
-// async fn create_destination(
-//     plan: &MigrationPlan,
-// ) -> Result<Destination, Box<dyn std::error::Error>> {
-//     let format = plan.connections.destination.data_format;
-//     let adapter = Adapter::new(format, &plan.connections.destination.con_str).await?;
-//     let data_dest =
-//         DataDestination::from_adapter(plan.connections.destination.data_format, adapter)?;
+async fn create_destination(
+    ctx: &GlobalContext,
+) -> Result<Destination, Box<dyn std::error::Error>> {
+    let data_dest = DataDestination::from_adapter(ctx.dest_format, &ctx.dest_adapter)?;
+    Ok(Destination::new(ctx.dest_format, data_dest))
+}
 
-//     Ok(Destination::new(format, data_dest))
-// }
+async fn apply_settings(
+    ctx: &Arc<Mutex<ItemContext>>,
+    settings: &Settings,
+) -> Result<(), Box<dyn std::error::Error>> {
+    info!("Applying migration settings");
 
-// async fn apply_settings(
-//     plan: &MigrationPlan,
-//     context: Arc<Mutex<MigrationContext>>,
-// ) -> Result<(), Box<dyn std::error::Error>> {
-//     info!("Applying migration settings");
+    let settings = collect_settings(&settings, &ctx).await;
+    for setting in settings.iter() {
+        setting.apply(ctx.clone()).await?;
+    }
 
-//     let settings = parse_settings(&plan.migration.settings, &context).await;
-//     for setting in settings.iter() {
-//         setting.apply(plan, Arc::clone(&context)).await?;
-//     }
+    ctx.lock().await.debug_state().await;
 
-//     context.lock().await.debug_state().await;
-
-//     Ok(())
-// }
+    Ok(())
+}
 
 // async fn set_metadata(
 //     context: &Arc<Mutex<MigrationContext>>,

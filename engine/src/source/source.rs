@@ -8,23 +8,20 @@ use smql_v02::statements::connection::DataFormat;
 pub struct Source {
     /// Format of the source data (e.g., SQL, CSV, JSON)
     pub format: DataFormat,
-    pub name: String,
     pub primary: DataSource,
-    pub linked: Vec<LinkedSource>,
+    pub linked: Option<LinkedSource>,
     pub filter: Option<Filter>,
 }
 
 impl Source {
     pub fn new(
         format: DataFormat,
-        name: String,
         primary: DataSource,
-        linked: Vec<LinkedSource>,
+        linked: Option<LinkedSource>,
         filter: Option<Filter>,
     ) -> Self {
         Source {
             format,
-            name,
             primary,
             linked,
             filter,

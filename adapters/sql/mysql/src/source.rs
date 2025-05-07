@@ -18,15 +18,15 @@ use std::{
 pub struct MySqlDataSource {
     adapter: MySqlAdapter,
     meta: HashMap<String, TableMetadata>,
-    joins: Vec<JoinSource>,
+    join: Option<JoinSource>,
     filter: Option<SqlFilter>,
 }
 
 impl MySqlDataSource {
-    pub fn new(adapter: MySqlAdapter, joins: Vec<JoinSource>, filter: Option<SqlFilter>) -> Self {
+    pub fn new(adapter: MySqlAdapter, join: Option<JoinSource>, filter: Option<SqlFilter>) -> Self {
         Self {
             adapter,
-            joins,
+            join,
             filter,
             meta: HashMap::new(),
         }
@@ -38,41 +38,48 @@ impl MySqlDataSource {
         offset: Option<usize>,
     ) -> Vec<FetchRowsRequest> {
         let mut seen_tables = HashSet::new();
-        let mut requests = Vec::new();
 
-        for tbl_name in self.meta.keys() {
-            for (table_name, mut base_fields) in self.get_metadata(tbl_name).select_fields() {
-                // Skip already processed tables
+        // Precompute join clauses and joined fields
+        let join_clauses = self
+            .join
+            .as_ref()
+            .map(|j| j.clauses.clone())
+            .unwrap_or_default();
+        let joined_fields = self.join.as_ref().map(|j| j.fields()).unwrap_or_default();
+
+        // For each table‐metadata, extract (table_name, base_fields),
+        // dedupe on table_name, extend with joined_fields, build request.
+        self.meta
+            .values()
+            .flat_map(|table_meta| table_meta.select_fields())
+            .filter_map(|(table_name, mut base_fields)| {
+                // Skip duplicates
                 if !seen_tables.insert(table_name.clone()) {
-                    continue;
+                    return None;
                 }
 
-                // Extract join info for this table, if any
-                // let (joins, joined_fields) = JoinSource::filter_joins(&table_name, &self.joins);
-                // base_fields.extend(joined_fields);
+                // Merge in any join‐generated fields
+                base_fields.extend(joined_fields.clone());
 
-                // // Build filter for this table+joins
-                // let filter = self
-                //     .filter
-                //     .as_ref()
-                //     .map(|f| f.for_table(&table_name, &joins));
+                // Build optional filter expression
+                let filter = self
+                    .filter
+                    .as_ref()
+                    .map(|f| f.for_table(&table_name, &join_clauses));
 
-                // let request = FetchRowsRequestBuilder::new(table_name.clone())
-                //     .alias(table_name.clone())
-                //     .columns(base_fields)
-                //     .joins(joins)
-                //     .filter(filter)
-                //     .limit(batch_size)
-                //     .offset(offset)
-                //     .build();
-
-                // requests.push(request);
-
-                todo!("Implement the request building logic");
-            }
-        }
-
-        requests
+                // Create the FetchRowsRequest
+                Some(
+                    FetchRowsRequestBuilder::new(table_name.clone())
+                        .alias(table_name.clone())
+                        .columns(base_fields)
+                        .joins(join_clauses.clone())
+                        .filter(filter)
+                        .limit(batch_size)
+                        .offset(offset)
+                        .build(),
+                )
+            })
+            .collect()
     }
 }
 

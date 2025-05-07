@@ -32,8 +32,6 @@ impl LinkedSource {
         let projection =
             Self::extract_projection(&load.entities, &mapping.field_mappings.computed_fields);
 
-        println!("Projection: {:?}", projection);
-
         // fetch metadata for all tables
         let mut meta = HashMap::new();
         for table in &load.entities {

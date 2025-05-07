@@ -1,4 +1,5 @@
 use core::fmt;
+use smql_v02::statements::setting::Settings;
 
 pub struct MigrationState {
     pub batch_size: usize,
@@ -16,6 +17,16 @@ impl MigrationState {
             infer_schema: false,
             create_missing_columns: false,
             create_missing_tables: false,
+        }
+    }
+
+    pub fn from_settings(settings: &Settings) -> Self {
+        MigrationState {
+            batch_size: settings.batch_size,
+            ignore_constraints: settings.ignore_constraints,
+            infer_schema: settings.infer_schema,
+            create_missing_columns: settings.create_missing_columns,
+            create_missing_tables: settings.create_missing_tables,
         }
     }
 }
