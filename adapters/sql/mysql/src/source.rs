@@ -4,7 +4,7 @@ use sql_adapter::{
     adapter::SqlAdapter,
     error::db::DbError,
     filter::filter::SqlFilter,
-    join::source::JoinSource,
+    join::{clause::JoinClause, source::JoinSource},
     metadata::{provider::MetadataHelper, table::TableMetadata},
     requests::{FetchRowsRequest, FetchRowsRequestBuilder},
     row::row_data::RowData,
@@ -41,12 +41,22 @@ impl MySqlDataSource {
         let mut seen_tables = HashSet::new();
 
         // Precompute join clauses and joined fields
-        let join_clauses = self
+        let join_clauses_all = self
             .join
             .as_ref()
             .map(|j| j.clauses.clone())
             .unwrap_or_default();
-        let joined_fields = self.join.as_ref().map(|j| j.fields()).unwrap_or_default();
+        let joined_fields_all = self.join.as_ref().map(|j| j.fields()).unwrap_or_default();
+
+        let mut clauses_by_table: HashMap<String, Vec<JoinClause>> = HashMap::new();
+        for clause in &join_clauses_all {
+            for table in [&clause.left.table, &clause.right.table] {
+                clauses_by_table
+                    .entry(table.to_lowercase())
+                    .or_default()
+                    .push(clause.clone());
+            }
+        }
 
         // For each table‐metadata, extract (table_name, base_fields),
         // dedupe on table_name, extend with joined_fields, build request.
@@ -59,21 +69,41 @@ impl MySqlDataSource {
                     return None;
                 }
 
-                // Merge in any join‐generated fields
-                base_fields.extend(joined_fields.clone());
+                // get only those join clauses that involve this table
+                let clauses = clauses_by_table
+                    .get(&table_name.to_lowercase())
+                    .cloned()
+                    .unwrap_or_default();
+
+                // get only those joined fields that come from tables this table joins to
+                let peers: HashSet<_> = clauses
+                    .iter()
+                    .flat_map(|jc| vec![&jc.left.table, &jc.right.table])
+                    .filter(|t| !t.to_lowercase().eq_ignore_ascii_case(&table_name))
+                    .cloned()
+                    .collect();
+
+                let extra_fields: Vec<_> = joined_fields_all
+                    .iter()
+                    .filter(|f| peers.contains(&f.table))
+                    .cloned()
+                    .collect();
+
+                // merge in any join‐generated fields
+                base_fields.extend(extra_fields);
 
                 // Build optional filter expression
                 let filter = self
                     .filter
                     .as_ref()
-                    .map(|f| f.for_table(&table_name, &join_clauses));
+                    .map(|f| f.for_table(&table_name, &clauses));
 
                 // Create the FetchRowsRequest
                 Some(
                     FetchRowsRequestBuilder::new(table_name.clone())
                         .alias(table_name.clone())
                         .columns(base_fields)
-                        .joins(join_clauses.clone())
+                        .joins(clauses)
                         .filter(filter)
                         .limit(batch_size)
                         .offset(offset)

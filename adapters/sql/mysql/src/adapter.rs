@@ -103,13 +103,17 @@ impl SqlAdapter for MySqlAdapter {
             .offset(request.offset.unwrap_or(0))
             .build();
 
-        let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
-        let result = rows
-            .into_iter()
-            .map(|row| RowData::from_db_row(&request.table, &DbRow::MySqlRow(&row)))
-            .collect();
+        println!("Executing query: {}", query.0);
 
-        Ok(result)
+        // let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
+        // let result = rows
+        //     .into_iter()
+        //     .map(|row| RowData::from_db_row(&request.table, &DbRow::MySqlRow(&row)))
+        //     .collect();
+
+        // Ok(result)
+
+        Ok(vec![])
     }
 
     async fn fetch_column_type(&self, table: &str, column: &str) -> Result<String, DbError> {
