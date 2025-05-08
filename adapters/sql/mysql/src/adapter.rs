@@ -2,6 +2,7 @@ use crate::data_type::MySqlColumnDataType;
 use async_trait::async_trait;
 use sql_adapter::{
     adapter::SqlAdapter,
+    error::{adapter::ConnectorError, db::DbError},
     metadata::{
         column::{
             data_type::ColumnDataType,
@@ -30,12 +31,12 @@ const QUERY_COLUMN_TYPE: &str = "queries/mysql/column_type.sql";
 
 #[async_trait]
 impl SqlAdapter for MySqlAdapter {
-    async fn connect(url: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    async fn connect(url: &str) -> Result<Self, ConnectorError> {
         let pool = Pool::connect(url).await?;
         Ok(MySqlAdapter { pool })
     }
 
-    async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    async fn table_exists(&self, table: &str) -> Result<bool, DbError> {
         let query = QueryLoader::load_query(QUERY_TABLE_EXISTS)?;
         let row = sqlx::query(&query)
             .bind(table)
@@ -44,21 +45,18 @@ impl SqlAdapter for MySqlAdapter {
         Ok(row.get(0))
     }
 
-    async fn truncate_table(&self, table: &str) -> Result<(), Box<dyn std::error::Error>> {
+    async fn truncate_table(&self, table: &str) -> Result<(), DbError> {
         let query = QueryLoader::load_query(QUERY_TRUNCATE_TABLE)?;
         sqlx::query(&query).bind(table).execute(&self.pool).await?;
         Ok(())
     }
 
-    async fn execute(&self, query: &str) -> Result<(), Box<dyn std::error::Error>> {
+    async fn execute(&self, query: &str) -> Result<(), DbError> {
         sqlx::query(query).execute(&self.pool).await?;
         Ok(())
     }
 
-    async fn fetch_metadata(
-        &self,
-        table: &str,
-    ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
+    async fn fetch_metadata(&self, table: &str) -> Result<TableMetadata, DbError> {
         let query = QueryLoader::load_query(QUERY_TABLE_METADATA)?;
         let rows = sqlx::query(&query)
             .bind(table)
@@ -74,15 +72,12 @@ impl SqlAdapter for MySqlAdapter {
                 let column_metadata = ColumnMetadata::from_row(&DbRow::MySqlRow(row), data_type);
                 Ok((column_metadata.name.clone(), column_metadata))
             })
-            .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+            .collect::<Result<HashMap<_, _>, DbError>>()?;
 
         MetadataProvider::construct_table_metadata(table, columns)
     }
 
-    async fn fetch_referencing_tables(
-        &self,
-        table: &str,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    async fn fetch_referencing_tables(&self, table: &str) -> Result<Vec<String>, DbError> {
         let query = QueryLoader::load_query(QUERY_TABLE_REFERENCING)?;
         let rows = sqlx::query(&query)
             .bind(table)
@@ -97,10 +92,7 @@ impl SqlAdapter for MySqlAdapter {
         Ok(tables)
     }
 
-    async fn fetch_rows(
-        &self,
-        request: FetchRowsRequest,
-    ) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
+    async fn fetch_rows(&self, request: FetchRowsRequest) -> Result<Vec<RowData>, DbError> {
         let alias = request.alias.as_deref().unwrap_or(&request.table);
         let query = SqlQueryBuilder::new()
             .select(&request.columns)
@@ -120,11 +112,7 @@ impl SqlAdapter for MySqlAdapter {
         Ok(result)
     }
 
-    async fn fetch_column_type(
-        &self,
-        table: &str,
-        column: &str,
-    ) -> Result<String, Box<dyn std::error::Error>> {
+    async fn fetch_column_type(&self, table: &str, column: &str) -> Result<String, DbError> {
         let query = QueryLoader::load_query(QUERY_COLUMN_TYPE)?;
         let row = sqlx::query(&query)
             .bind(table)

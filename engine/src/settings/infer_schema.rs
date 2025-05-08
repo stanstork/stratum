@@ -1,7 +1,10 @@
-use super::{context::SchemaSettingContext, phase::MigrationSettingsPhase, MigrationSetting};
+use super::{
+    context::SchemaSettingContext, error::SettingsError, phase::MigrationSettingsPhase,
+    MigrationSetting,
+};
 use crate::{
-    context::item::ItemContext, destination::destination::Destination, source::source::Source,
-    state::MigrationState,
+    context::item::ItemContext, destination::destination::Destination, error::MigrationError,
+    source::source::Source, state::MigrationState,
 };
 use async_trait::async_trait;
 use common::mapping::EntityMapping;
@@ -20,7 +23,7 @@ impl MigrationSetting for InferSchemaSetting {
         MigrationSettingsPhase::InferSchema
     }
 
-    async fn apply(&self, _ctx: Arc<Mutex<ItemContext>>) -> Result<(), Box<dyn std::error::Error>> {
+    async fn apply(&self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
         self.apply_schema().await?;
 
         // Set the infer schema flag to global state
@@ -46,7 +49,7 @@ impl InferSchemaSetting {
         }
     }
 
-    async fn apply_schema(&self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn apply_schema(&self) -> Result<(), SettingsError> {
         let ctx = &self.context;
 
         let adapter = ctx.source_adapter().await?;

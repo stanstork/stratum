@@ -1,4 +1,4 @@
-use crate::context::item::ItemContext;
+use crate::{context::item::ItemContext, error::MigrationError};
 use async_trait::async_trait;
 use batch_size::BatchSizeSetting;
 use constraints::IgnoreConstraintsSettings;
@@ -7,28 +7,23 @@ use create_tables::CreateMissingTablesSetting;
 use infer_schema::InferSchemaSetting;
 use phase::MigrationSettingsPhase;
 use smql_v02::statements::setting::Settings;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 pub mod batch_size;
 pub mod constraints;
 pub mod context;
 pub mod create_cols;
 pub mod create_tables;
+pub mod error;
 pub mod infer_schema;
 pub mod phase;
 
 #[async_trait]
 pub trait MigrationSetting: Send + Sync {
     fn phase(&self) -> MigrationSettingsPhase;
-    async fn apply(&self, ctx: Arc<Mutex<ItemContext>>) -> Result<(), Box<dyn std::error::Error>>;
+    async fn apply(&self, ctx: &mut ItemContext) -> Result<(), MigrationError>;
 }
 
-pub async fn collect_settings(
-    cfg: &Settings,
-    ctx: &Arc<Mutex<ItemContext>>,
-) -> Vec<Box<dyn MigrationSetting>> {
-    let ctx = ctx.lock().await;
+pub async fn collect_settings(cfg: &Settings, ctx: &ItemContext) -> Vec<Box<dyn MigrationSetting>> {
     let src = ctx.source.clone();
     let dest = ctx.destination.clone();
     let state = ctx.state.clone();

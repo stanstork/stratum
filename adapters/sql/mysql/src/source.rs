@@ -2,6 +2,7 @@ use crate::adapter::MySqlAdapter;
 use async_trait::async_trait;
 use sql_adapter::{
     adapter::SqlAdapter,
+    error::db::DbError,
     filter::filter::SqlFilter,
     join::source::JoinSource,
     metadata::{provider::MetadataHelper, table::TableMetadata},
@@ -85,11 +86,13 @@ impl MySqlDataSource {
 
 #[async_trait]
 impl DbDataSource for MySqlDataSource {
+    type Error = DbError;
+
     async fn fetch(
         &self,
         batch_size: usize,
         offset: Option<usize>,
-    ) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<RowData>, DbError> {
         // Build fetch requests for each table
         let requests = self.build_fetch_requests(batch_size, offset);
 

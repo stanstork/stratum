@@ -1,6 +1,8 @@
+use crate::data_type::PgColumnDataType;
 use async_trait::async_trait;
 use sql_adapter::{
     adapter::SqlAdapter,
+    error::{adapter::ConnectorError, db::DbError},
     metadata::{
         column::{
             data_type::ColumnDataType,
@@ -16,8 +18,6 @@ use sql_adapter::{
 use sqlx::{Pool, Postgres, Row};
 use std::collections::HashMap;
 
-use crate::data_type::PgColumnDataType;
-
 #[derive(Clone)]
 pub struct PgAdapter {
     pool: Pool<Postgres>,
@@ -31,12 +31,12 @@ const QUERY_COLUMN_TYPE: &str = "queries/pg/column_type.sql";
 
 #[async_trait]
 impl SqlAdapter for PgAdapter {
-    async fn connect(url: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    async fn connect(url: &str) -> Result<Self, ConnectorError> {
         let pool = Pool::connect(url).await?;
         Ok(PgAdapter { pool })
     }
 
-    async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    async fn table_exists(&self, table: &str) -> Result<bool, DbError> {
         let query = QueryLoader::load_query(QUERY_TABLE_EXISTS)?;
         let row = sqlx::query(&query)
             .bind(table)
@@ -45,21 +45,18 @@ impl SqlAdapter for PgAdapter {
         Ok(row.get(0))
     }
 
-    async fn truncate_table(&self, table: &str) -> Result<(), Box<dyn std::error::Error>> {
+    async fn truncate_table(&self, table: &str) -> Result<(), DbError> {
         let query = QueryLoader::load_query(QUERY_TRUNCATE_TABLE)?;
         sqlx::query(&query).bind(table).execute(&self.pool).await?;
         Ok(())
     }
 
-    async fn execute(&self, query: &str) -> Result<(), Box<dyn std::error::Error>> {
+    async fn execute(&self, query: &str) -> Result<(), DbError> {
         sqlx::query(query).execute(&self.pool).await?;
         Ok(())
     }
 
-    async fn fetch_metadata(
-        &self,
-        table: &str,
-    ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
+    async fn fetch_metadata(&self, table: &str) -> Result<TableMetadata, DbError> {
         let query = QueryLoader::load_query(QUERY_TABLE_METADATA)?.replace("{table}", table);
         let rows = sqlx::query(&query).fetch_all(&self.pool).await?;
         let columns = rows
@@ -69,15 +66,12 @@ impl SqlAdapter for PgAdapter {
                 let column_metadata = ColumnMetadata::from_row(&DbRow::PostgresRow(row), data_type);
                 Ok((column_metadata.name.clone(), column_metadata))
             })
-            .collect::<Result<HashMap<_, _>, Box<dyn std::error::Error>>>()?;
+            .collect::<Result<HashMap<_, _>, DbError>>()?;
 
         MetadataProvider::construct_table_metadata(table, columns)
     }
 
-    async fn fetch_referencing_tables(
-        &self,
-        table: &str,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    async fn fetch_referencing_tables(&self, table: &str) -> Result<Vec<String>, DbError> {
         let query = QueryLoader::load_query(QUERY_TABLE_REFERENCING)?;
         let rows = sqlx::query(&query)
             .bind(table)
@@ -92,18 +86,11 @@ impl SqlAdapter for PgAdapter {
         Ok(tables)
     }
 
-    async fn fetch_rows(
-        &self,
-        _request: FetchRowsRequest,
-    ) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
+    async fn fetch_rows(&self, _request: FetchRowsRequest) -> Result<Vec<RowData>, DbError> {
         todo!("Implement fetch_all for Postgres")
     }
 
-    async fn fetch_column_type(
-        &self,
-        table: &str,
-        column: &str,
-    ) -> Result<String, Box<dyn std::error::Error>> {
+    async fn fetch_column_type(&self, table: &str, column: &str) -> Result<String, DbError> {
         let query = QueryLoader::load_query(QUERY_COLUMN_TYPE)?;
         let row = sqlx::query(&query)
             .bind(table)

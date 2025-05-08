@@ -1,7 +1,7 @@
 use super::{context::SchemaSettingContext, phase::MigrationSettingsPhase, MigrationSetting};
 use crate::{
-    context::item::ItemContext, destination::destination::Destination, source::source::Source,
-    state::MigrationState,
+    context::item::ItemContext, destination::destination::Destination, error::MigrationError,
+    source::source::Source, state::MigrationState,
 };
 use async_trait::async_trait;
 use common::mapping::EntityMapping;
@@ -19,7 +19,7 @@ impl MigrationSetting for CreateMissingTablesSetting {
         MigrationSettingsPhase::CreateMissingTables
     }
 
-    async fn apply(&self, _ctx: Arc<Mutex<ItemContext>>) -> Result<(), Box<dyn std::error::Error>> {
+    async fn apply(&self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
         let mut schema_plan = self.context.build_schema_plan().await?;
 
         if self.context.destination_exists().await? {
@@ -32,7 +32,7 @@ impl MigrationSetting for CreateMissingTablesSetting {
 
         // reverse‐map destination -> source
         let src = self.context.mapping.entity_name_map.reverse_resolve(&dest);
-        let meta = self.context.source.primary.fetch_meta(&src).await?;
+        let meta = self.context.source.primary.fetch_meta(src.clone()).await?;
 
         // add columns, FKs, enums into plan
         schema_plan.add_column_defs(

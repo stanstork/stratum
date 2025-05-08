@@ -3,6 +3,7 @@ pub mod buffer;
 pub mod consumer;
 pub mod context;
 pub mod destination;
+pub mod error;
 pub mod expr;
 pub mod filter;
 pub mod metadata;

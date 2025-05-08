@@ -1,4 +1,4 @@
-use crate::context::global::GlobalContext;
+use crate::{context::global::GlobalContext, error::MigrationError};
 use common::{computed::ComputedField, mapping::EntityMapping};
 use smql_v02::statements::{
     connection::DataFormat,
@@ -22,9 +22,11 @@ impl LinkedSource {
         ctx: &GlobalContext,
         load: &Load,
         mapping: &EntityMapping,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> Result<Self, MigrationError> {
         if !matches!(ctx.src_format, DataFormat::MySql | DataFormat::Postgres) {
-            return Err(format!("Unsupported data format: {:?}", ctx.src_format).into());
+            return Err(MigrationError::UnsupportedFormat(
+                ctx.src_format.to_string(),
+            ));
         }
 
         // precompute join clauses & projection

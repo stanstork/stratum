@@ -1,14 +1,14 @@
 use super::linked_source::LinkedSource;
-use crate::{adapter::Adapter, filter::filter::Filter};
+use crate::{adapter::Adapter, error::MigrationError, filter::filter::Filter};
 use mysql::source::MySqlDataSource;
 use smql_v02::statements::connection::DataFormat;
-use sql_adapter::{metadata::table::TableMetadata, source::DbDataSource};
+use sql_adapter::{error::db::DbError, metadata::table::TableMetadata, source::DbDataSource};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
 pub enum DataSource {
-    Database(Arc<Mutex<dyn DbDataSource>>),
+    Database(Arc<Mutex<dyn DbDataSource<Error = DbError>>>),
 }
 
 impl DataSource {
@@ -17,7 +17,7 @@ impl DataSource {
         adapter: &Adapter,
         linked: &Option<LinkedSource>,
         filter: &Option<Filter>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> Result<Self, MigrationError> {
         match (format, adapter) {
             // MySQL + MySqlAdapter -> build a MySqlDataSource
             (DataFormat::MySql, Adapter::MySql(mysql_adapter)) => {
@@ -43,28 +43,31 @@ impl DataSource {
             // Postgres + PostgresAdapter -> stub for future implementation
             (DataFormat::Postgres, Adapter::Postgres(_pg_adapter)) => {
                 // TODO: implement PostgresDataSource
-                Err("Postgres data source is not implemented yet".into())
+                panic!("Postgres data source is not implemented yet")
             }
 
             // Format says MySql but adapter is wrong
-            (DataFormat::MySql, _) => Err("Adapter mismatch: expected MySql adapter".into()),
+            (DataFormat::MySql, _) => Err(DbError::InvalidAdapter(
+                "Adapter mismatch: expected MySql adapter".to_string(),
+            )
+            .into()),
 
             // Format says Postgres but adapter is wrong
-            (DataFormat::Postgres, _) => Err("Adapter mismatch: expected Postgres adapter".into()),
+            (DataFormat::Postgres, _) => Err(DbError::InvalidAdapter(
+                "Adapter mismatch: expected Postgres adapter".to_string(),
+            )
+            .into()),
 
             // Anything else isn’t a SQL format we support
-            (fmt, _) => Err(format!("Unsupported data source format: {:?}", fmt).into()),
+            (fmt, _) => Err(MigrationError::UnsupportedFormat(fmt.to_string())),
         }
     }
 
-    pub async fn fetch_meta(
-        &self,
-        table: &str,
-    ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
+    pub async fn fetch_meta(&self, table: String) -> Result<TableMetadata, DbError> {
         match &self {
             DataSource::Database(db) => {
                 let db = db.lock().await.adapter();
-                let metadata = db.fetch_metadata(table).await?;
+                let metadata = db.fetch_metadata(&table).await?;
                 Ok(metadata)
             }
         }

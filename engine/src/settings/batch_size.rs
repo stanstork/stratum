@@ -1,8 +1,6 @@
 use super::{phase::MigrationSettingsPhase, MigrationSetting};
-use crate::context::item::ItemContext;
+use crate::{context::item::ItemContext, error::MigrationError};
 use async_trait::async_trait;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use tracing::info;
 
 pub struct BatchSizeSetting(pub i64);
@@ -13,9 +11,8 @@ impl MigrationSetting for BatchSizeSetting {
         MigrationSettingsPhase::BatchSize
     }
 
-    async fn apply(&self, ctx: Arc<Mutex<ItemContext>>) -> Result<(), Box<dyn std::error::Error>> {
-        let context = ctx.lock().await;
-        let mut state = context.state.lock().await;
+    async fn apply(&self, ctx: &mut ItemContext) -> Result<(), MigrationError> {
+        let mut state = ctx.state.lock().await;
         state.batch_size = self.0 as usize;
         info!("Batch size setting applied");
         Ok(())

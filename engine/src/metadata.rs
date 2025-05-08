@@ -71,21 +71,29 @@
 //     Ok(())
 // }
 
-// async fn get_metadata(
-//     adapter: Arc<(dyn SqlAdapter + Send + Sync)>,
-//     tables: &[String],
-//     infer_schema: bool,
-// ) -> Result<HashMap<String, TableMetadata>, Box<dyn std::error::Error>> {
-//     let adapter = adapter.as_ref();
+use std::{collections::HashMap, sync::Arc};
 
-//     if infer_schema {
-//         MetadataProvider::build_metadata_graph(adapter, tables).await
-//     } else {
-//         let mut metadata = HashMap::new();
-//         for table in tables {
-//             let table_metadata = adapter.fetch_metadata(table).await?;
-//             metadata.insert(table.clone(), table_metadata);
-//         }
-//         Ok(metadata)
-//     }
-// }
+use sql_adapter::{
+    adapter::SqlAdapter,
+    error::db::DbError,
+    metadata::{provider::MetadataProvider, table::TableMetadata},
+};
+
+pub async fn get_metadata(
+    adapter: Arc<(dyn SqlAdapter + Send + Sync)>,
+    tables: &[String],
+    infer_schema: bool,
+) -> Result<HashMap<String, TableMetadata>, DbError> {
+    let adapter = adapter.as_ref();
+
+    if infer_schema {
+        MetadataProvider::build_metadata_graph(adapter, tables).await
+    } else {
+        let mut metadata = HashMap::new();
+        for table in tables {
+            let table_metadata = adapter.fetch_metadata(table).await?;
+            metadata.insert(table.clone(), table_metadata);
+        }
+        Ok(metadata)
+    }
+}

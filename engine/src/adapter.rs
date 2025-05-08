@@ -1,3 +1,4 @@
+use crate::error::MigrationError;
 use mysql::adapter::MySqlAdapter;
 use postgres::adapter::PgAdapter;
 use smql_v02::statements::connection::DataFormat;
@@ -11,10 +12,7 @@ pub enum Adapter {
 }
 
 impl Adapter {
-    pub async fn new(
-        format: DataFormat,
-        conn_str: &str,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new(format: DataFormat, conn_str: &str) -> Result<Self, MigrationError> {
         match format {
             DataFormat::MySql => {
                 let adapter = MySqlAdapter::connect(conn_str).await?;
@@ -24,7 +22,7 @@ impl Adapter {
                 let adapter = PgAdapter::connect(conn_str).await?;
                 Ok(Adapter::Postgres(adapter))
             }
-            _ => panic!("Unsupported data format"),
+            _ => Err(MigrationError::UnsupportedFormat(format.to_string())),
         }
     }
 

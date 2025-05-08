@@ -1,6 +1,7 @@
 use super::types::TypeEngine;
 use crate::{
     adapter::SqlAdapter,
+    error::db::DbError,
     metadata::table::TableMetadata,
     query::{builder::SqlQueryBuilder, column::ColumnDef, fk::ForeignKeyDef},
 };
@@ -122,7 +123,7 @@ impl<'a> SchemaPlan<'a> {
             .collect()
     }
 
-    pub async fn enum_queries(&self) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
+    pub async fn enum_queries(&self) -> Result<HashSet<String>, DbError> {
         let mut queries = HashSet::new();
 
         for (table, column) in &self.enum_definitions {

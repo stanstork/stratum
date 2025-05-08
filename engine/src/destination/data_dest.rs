@@ -1,44 +1,42 @@
 use crate::adapter::Adapter;
 use postgres::destination::PgDestination;
 use smql_v02::statements::connection::DataFormat;
-use sql_adapter::{destination::DbDataDestination, metadata::table::TableMetadata};
+use sql_adapter::{
+    destination::DbDataDestination, error::db::DbError, metadata::table::TableMetadata,
+};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
 pub enum DataDestination {
-    Database(Arc<Mutex<dyn DbDataDestination>>),
+    Database(Arc<Mutex<dyn DbDataDestination<Error = DbError>>>),
 }
 
 impl DataDestination {
-    pub fn from_adapter(
-        format: DataFormat,
-        adapter: &Adapter,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_adapter(format: DataFormat, adapter: &Adapter) -> Result<Self, DbError> {
         match format {
             DataFormat::Postgres => match adapter {
                 Adapter::Postgres(adapter) => {
                     let destination = PgDestination::new(adapter.clone());
                     Ok(DataDestination::Database(Arc::new(Mutex::new(destination))))
                 }
-                _ => Err("Expected Postgres adapter, but got a different type".into()),
+                _ => panic!("Expected Postgres adapter, but got a different type"),
             },
             DataFormat::MySql => {
                 // Add once implemented
-                Err("MySql data destination is not implemented yet".into())
+                panic!("MySql data destination is not implemented yet")
             }
-            other => Err(format!("Unsupported data source format: {:?}", other).into()),
+            other => {
+                panic!("Unsupported data destination format: {:?}", other);
+            }
         }
     }
 
-    pub async fn fetch_meta(
-        &self,
-        table: &str,
-    ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
+    pub async fn fetch_meta(&self, table: String) -> Result<TableMetadata, DbError> {
         match &self {
             DataDestination::Database(db) => {
                 let db = db.lock().await.adapter();
-                let metadata = db.fetch_metadata(table).await?;
+                let metadata = db.fetch_metadata(&table).await?;
                 Ok(metadata)
             }
         }

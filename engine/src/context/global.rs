@@ -1,4 +1,4 @@
-use crate::adapter::Adapter;
+use crate::{adapter::Adapter, error::MigrationError};
 use smql_v02::{plan::MigrationPlan, statements::connection::DataFormat};
 
 #[derive(Clone)]
@@ -15,7 +15,7 @@ pub struct GlobalContext {
 }
 
 impl GlobalContext {
-    pub async fn new(plan: &MigrationPlan) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new(plan: &MigrationPlan) -> Result<Self, MigrationError> {
         let src_format = plan.connections.source.format;
         let src_adapter = Adapter::new(
             plan.connections.source.format,

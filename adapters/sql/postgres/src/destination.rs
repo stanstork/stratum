@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use sql_adapter::{
     adapter::SqlAdapter,
     destination::DbDataDestination,
+    error::db::DbError,
     metadata::{provider::MetadataHelper, table::TableMetadata},
     query::{builder::SqlQueryBuilder, column::ColumnDef},
     row::row_data::RowData,
@@ -27,11 +28,9 @@ impl PgDestination {
 
 #[async_trait]
 impl DbDataDestination for PgDestination {
-    async fn write_batch(
-        &self,
-        meta: &TableMetadata,
-        rows: Vec<RowData>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    type Error = DbError;
+
+    async fn write_batch(&self, meta: &TableMetadata, rows: Vec<RowData>) -> Result<(), DbError> {
         if rows.is_empty() {
             return Ok(());
         }
@@ -43,7 +42,7 @@ impl DbDataDestination for PgDestination {
             .collect::<Vec<_>>();
 
         if columns.is_empty() {
-            return Err("write_batch: No valid columns found in records".into());
+            return Err(DbError::Write("No columns found in metadata".to_string()));
         }
 
         let all_values: Vec<Vec<String>> = rows
@@ -72,10 +71,7 @@ impl DbDataDestination for PgDestination {
         Ok(())
     }
 
-    async fn infer_schema(
-        &self,
-        schema_plan: &SchemaPlan<'_>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    async fn infer_schema(&self, schema_plan: &SchemaPlan<'_>) -> Result<(), DbError> {
         let enum_queries = schema_plan.enum_queries().await?;
         let table_queries = schema_plan.table_queries().await;
         let fk_queries = schema_plan.fk_queries();
@@ -98,11 +94,7 @@ impl DbDataDestination for PgDestination {
         Ok(())
     }
 
-    async fn toggle_trigger(
-        &self,
-        table: &str,
-        enable: bool,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    async fn toggle_trigger(&self, table: &str, enable: bool) -> Result<(), DbError> {
         let query = SqlQueryBuilder::new().toggle_trigger(table, enable).build();
 
         info!("Executing query: {}", query.0);
@@ -111,15 +103,11 @@ impl DbDataDestination for PgDestination {
         Ok(())
     }
 
-    async fn table_exists(&self, table: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    async fn table_exists(&self, table: &str) -> Result<bool, DbError> {
         self.adapter.table_exists(table).await
     }
 
-    async fn add_column(
-        &self,
-        table: &str,
-        column: &ColumnDef,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    async fn add_column(&self, table: &str, column: &ColumnDef) -> Result<(), DbError> {
         let query = SqlQueryBuilder::new().add_column(table, column).build();
 
         info!("Executing query: {}", query.0);

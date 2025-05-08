@@ -1,8 +1,7 @@
-use std::{sync::Arc, vec};
-
 use crate::{
     context::{global::GlobalContext, item::ItemContext},
     destination::{data_dest::DataDestination, destination::Destination},
+    error::MigrationError,
     filter::{compiler::FilterCompiler, filter::Filter, sql::SqlFilterCompiler},
     settings::collect_settings,
     source::{data_source::DataSource, linked_source::LinkedSource, source::Source},
@@ -13,7 +12,7 @@ use smql_v02::{
     plan::MigrationPlan,
     statements::{connection::DataFormat, migrate::MigrateItem, setting::Settings},
 };
-use tokio::sync::Mutex;
+use std::vec;
 use tracing::{error, info};
 
 pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
@@ -44,7 +43,7 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
-pub async fn run_v2(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run_v2(plan: MigrationPlan) -> Result<(), MigrationError> {
     info!("Running migration v2");
 
     let mut migration_tasks = vec![];
@@ -56,11 +55,17 @@ pub async fn run_v2(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error
         let destination = create_destination(&global_context, &mi).await?;
         let mi_task = tokio::spawn(async move {
             let state = MigrationState::from_settings(&mi.settings);
-            let item_context = ItemContext::new(source, destination, mapping, state);
+            let mut item_context = ItemContext::new(source, destination, mapping, state);
 
-            let apply_settings = apply_settings(&item_context, &mi.settings).await;
+            let apply_settings = apply_settings(&mut item_context, &mi.settings).await;
             if let Err(e) = apply_settings {
                 error!("Failed to apply settings: {:?}", e);
+                return;
+            }
+
+            let set_src_meta = item_context.set_src_meta().await;
+            if let Err(e) = set_src_meta {
+                error!("Failed to set source metadata: {:?}", e);
                 return;
             }
 
@@ -106,7 +111,7 @@ async fn create_source(
     ctx: &GlobalContext,
     mapping: &EntityMapping,
     migrate_item: &MigrateItem,
-) -> Result<Source, Box<dyn std::error::Error>> {
+) -> Result<Source, MigrationError> {
     let linked = if let Some(load) = migrate_item.load.as_ref() {
         Some(LinkedSource::new(ctx, load, mapping).await?)
     } else {
@@ -128,7 +133,7 @@ async fn create_source(
 fn create_filter(
     migrate_item: &MigrateItem,
     format: DataFormat,
-) -> Result<Option<Filter>, Box<dyn std::error::Error>> {
+) -> Result<Option<Filter>, MigrationError> {
     match format {
         // If the format is SQL, try to build a SQL filter.
         DataFormat::MySql | DataFormat::Postgres => {
@@ -149,7 +154,7 @@ fn create_filter(
 async fn create_destination(
     ctx: &GlobalContext,
     migrate_item: &MigrateItem,
-) -> Result<Destination, Box<dyn std::error::Error>> {
+) -> Result<Destination, MigrationError> {
     let data_dest = DataDestination::from_adapter(ctx.dest_format, &ctx.dest_adapter)?;
     Ok(Destination::new(
         migrate_item.destination.name(),
@@ -158,31 +163,22 @@ async fn create_destination(
     ))
 }
 
-async fn apply_settings(
-    ctx: &Arc<Mutex<ItemContext>>,
-    settings: &Settings,
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn apply_settings(ctx: &mut ItemContext, settings: &Settings) -> Result<(), MigrationError> {
     info!("Applying migration settings");
 
     let settings = collect_settings(&settings, &ctx).await;
     for setting in settings.iter() {
-        setting.apply(ctx.clone()).await?;
+        setting.apply(ctx).await?;
     }
 
-    ctx.lock().await.debug_state().await;
+    ctx.debug_state().await;
 
     Ok(())
 }
 
-// async fn set_metadata(
-//     context: &Arc<Mutex<MigrationContext>>,
-//     plan: &MigrationPlan,
-// ) -> Result<(), Box<dyn std::error::Error>> {
-//     let source_tables = plan.migration.sources();
-//     let destination_tables = plan.migration.targets();
-
-//     set_source_metadata(context, &source_tables).await?;
-//     set_destination_metadata(context, &destination_tables).await?;
+// async fn set_metadata(ctx: &mut ItemContext) -> Result<(), Box<dyn std::error::Error>> {
+//     ctx.set_src_meta().await?;
+//     ctx.set_dest_meta().await?;
 
 //     Ok(())
 // }

@@ -1,3 +1,4 @@
+use super::error::SettingsError;
 use crate::{
     context::item::ItemContext,
     destination::{data_dest::DataDestination, destination::Destination},
@@ -40,15 +41,13 @@ impl SchemaSettingContext {
         }
     }
 
-    pub async fn source_adapter(
-        &self,
-    ) -> Result<Arc<dyn SqlAdapter + Send + Sync>, Box<dyn std::error::Error>> {
+    pub async fn source_adapter(&self) -> Result<Arc<dyn SqlAdapter + Send + Sync>, SettingsError> {
         match &self.source.primary {
             DataSource::Database(src) => Ok(src.lock().await.adapter()),
         }
     }
 
-    pub async fn destination_exists(&self) -> Result<bool, Box<dyn std::error::Error>> {
+    pub async fn destination_exists(&self) -> Result<bool, SettingsError> {
         match &self.destination.data_dest {
             DataDestination::Database(dest) => Ok(dest
                 .lock()
@@ -61,7 +60,7 @@ impl SchemaSettingContext {
     pub async fn apply_to_destination(
         &self,
         schema_plan: SchemaPlan<'_>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), SettingsError> {
         if self
             .destination
             .format
@@ -72,10 +71,12 @@ impl SchemaSettingContext {
                 return Ok(());
             }
         }
-        Err("Unsupported data destination format".into())
+        Err(SettingsError::UnsupportedDestinationFormat(
+            self.destination.format.to_string(),
+        ))
     }
 
-    pub async fn build_schema_plan(&self) -> Result<SchemaPlan<'_>, Box<dyn std::error::Error>> {
+    pub async fn build_schema_plan(&self) -> Result<SchemaPlan<'_>, SettingsError> {
         let adapter = self.source_adapter().await?;
         let ignore_constraints = self.state.lock().await.ignore_constraints;
         let type_engine = TypeEngine::new(

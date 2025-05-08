@@ -1,7 +1,7 @@
 use super::data_dest::DataDestination;
 use crate::record::Record;
 use smql_v02::statements::connection::DataFormat;
-use sql_adapter::metadata::table::TableMetadata;
+use sql_adapter::{error::db::DbError, metadata::table::TableMetadata};
 
 #[derive(Clone)]
 pub struct Destination {
@@ -23,7 +23,7 @@ impl Destination {
         &self,
         metadata: &TableMetadata,
         records: Vec<Record>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), DbError> {
         match &self.data_dest {
             DataDestination::Database(db) => {
                 db.lock()
@@ -41,11 +41,7 @@ impl Destination {
         }
     }
 
-    pub async fn toggle_trigger(
-        &self,
-        table: &str,
-        enable: bool,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn toggle_trigger(&self, table: &str, enable: bool) -> Result<(), DbError> {
         match &self.data_dest {
             DataDestination::Database(db) => db.lock().await.toggle_trigger(table, enable).await,
         }

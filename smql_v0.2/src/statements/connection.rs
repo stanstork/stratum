@@ -1,3 +1,6 @@
+use core::fmt;
+use std::path::Display;
+
 use crate::parser::{Rule, StatementParser};
 use bitflags::bitflags;
 use pest::iterators::Pair;
@@ -94,5 +97,24 @@ impl StatementParser for ConnectionPair {
             format,
             conn_str,
         }
+    }
+}
+
+impl fmt::Display for DataFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut formats = Vec::new();
+        if self.contains(DataFormat::MySql) {
+            formats.push("MySQL");
+        }
+        if self.contains(DataFormat::Postgres) {
+            formats.push("Postgres");
+        }
+        if self.contains(DataFormat::Sqlite) {
+            formats.push("SQLite");
+        }
+        if self.contains(DataFormat::Mongo) {
+            formats.push("MongoDB");
+        }
+        write!(f, "{}", formats.join(", "))
     }
 }
