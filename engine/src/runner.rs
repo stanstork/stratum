@@ -3,6 +3,7 @@ use crate::{
     destination::{data_dest::DataDestination, destination::Destination},
     error::MigrationError,
     filter::{compiler::FilterCompiler, filter::Filter, sql::SqlFilterCompiler},
+    producer::Producer,
     settings::collect_settings,
     source::{data_source::DataSource, linked_source::LinkedSource, source::Source},
     state::MigrationState,
@@ -12,7 +13,8 @@ use smql_v02::{
     plan::MigrationPlan,
     statements::{connection::DataFormat, migrate::MigrateItem, setting::Settings},
 };
-use std::vec;
+use std::{sync::Arc, vec};
+use tokio::sync::{watch, Mutex};
 use tracing::{error, info};
 
 pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
@@ -63,15 +65,21 @@ pub async fn run_v2(plan: MigrationPlan) -> Result<(), MigrationError> {
                 return;
             }
 
-            let set_src_meta = item_context.set_src_meta().await;
-            if let Err(e) = set_src_meta {
-                error!("Failed to set source metadata: {:?}", e);
+            let set_meta = set_meta(&mut item_context).await;
+            if let Err(e) = set_meta {
+                error!("Failed to set metadata: {:?}", e);
                 return;
             }
 
-            // let producer = Producer::new(item_context.clone()).await.spawn();
+            let (shutdown_sender, shutdown_receiver) = watch::channel(false);
+
+            let context = Arc::new(Mutex::new(item_context));
+            let producer = Producer::new(context.clone(), shutdown_sender)
+                .await
+                .spawn();
+
             // let consumer = Consumer::new(item_context.clone()).await.spawn();
-            // tokio::try_join!(producer, consumer).unwrap();
+            tokio::try_join!(producer).unwrap();
         });
         migration_tasks.push(mi_task);
     }
@@ -84,8 +92,6 @@ pub async fn run_v2(plan: MigrationPlan) -> Result<(), MigrationError> {
     }
 
     Ok(())
-
-    // todo!("Implement v2 migration");
 }
 
 // pub async fn load_src_metadata(
@@ -176,12 +182,11 @@ async fn apply_settings(ctx: &mut ItemContext, settings: &Settings) -> Result<()
     Ok(())
 }
 
-// async fn set_metadata(ctx: &mut ItemContext) -> Result<(), Box<dyn std::error::Error>> {
-//     ctx.set_src_meta().await?;
-//     ctx.set_dest_meta().await?;
-
-//     Ok(())
-// }
+async fn set_meta(ctx: &mut ItemContext) -> Result<(), MigrationError> {
+    ctx.set_src_meta().await?;
+    ctx.set_dest_meta().await?;
+    Ok(())
+}
 
 // async fn validate_destination(
 //     plan: &MigrationPlan,
