@@ -6,7 +6,7 @@ use smql_v02::statements::connection::DataFormat;
 /// such as a database table, file, or API to be transformed and written to a destination.
 #[derive(Clone)]
 pub struct Source {
-    /// Format of the source data (e.g., SQL, CSV, JSON)
+    pub name: String,
     pub format: DataFormat,
     pub primary: DataSource,
     pub linked: Option<LinkedSource>,
@@ -15,12 +15,14 @@ pub struct Source {
 
 impl Source {
     pub fn new(
+        name: String,
         format: DataFormat,
         primary: DataSource,
         linked: Option<LinkedSource>,
         filter: Option<Filter>,
     ) -> Self {
         Source {
+            name,
             format,
             primary,
             linked,

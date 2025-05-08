@@ -1,66 +1,76 @@
-// use super::{context::SchemaSettingContext, phase::MigrationSettingsPhase, MigrationSetting};
-// use crate::context::MigrationContext;
-// use async_trait::async_trait;
-// use smql::plan::MigrationPlan;
-// use sql_adapter::metadata::provider::MetadataProvider;
-// use std::sync::Arc;
-// use tokio::sync::Mutex;
-// use tracing::info;
+use super::{context::SchemaSettingContext, phase::MigrationSettingsPhase, MigrationSetting};
+use crate::{
+    context::item::ItemContext, destination::destination::Destination, source::source::Source,
+    state::MigrationState,
+};
+use async_trait::async_trait;
+use common::mapping::EntityMapping;
+use sql_adapter::metadata::provider::MetadataProvider;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tracing::info;
 
-// pub struct InferSchemaSetting {
-//     context: SchemaSettingContext,
-// }
+pub struct InferSchemaSetting {
+    context: SchemaSettingContext,
+}
 
-// #[async_trait]
-// impl MigrationSetting for InferSchemaSetting {
-//     fn phase(&self) -> MigrationSettingsPhase {
-//         MigrationSettingsPhase::InferSchema
-//     }
+#[async_trait]
+impl MigrationSetting for InferSchemaSetting {
+    fn phase(&self) -> MigrationSettingsPhase {
+        MigrationSettingsPhase::InferSchema
+    }
 
-//     async fn apply(
-//         &self,
-//         plan: &MigrationPlan,
-//         _context: Arc<Mutex<MigrationContext>>,
-//     ) -> Result<(), Box<dyn std::error::Error>> {
-//         self.apply_schema(plan).await?;
+    async fn apply(&self, _ctx: Arc<Mutex<ItemContext>>) -> Result<(), Box<dyn std::error::Error>> {
+        self.apply_schema().await?;
 
-//         // Set the infer schema flag to global state
-//         {
-//             let mut state = self.context.state.lock().await;
-//             state.infer_schema = true;
-//         }
+        // Set the infer schema flag to global state
+        {
+            let mut state = self.context.state.lock().await;
+            state.infer_schema = true;
+        }
 
-//         info!("Infer schema setting applied");
-//         Ok(())
-//     }
-// }
+        info!("Infer schema setting applied");
+        Ok(())
+    }
+}
 
-// impl InferSchemaSetting {
-//     pub async fn new(context: &Arc<Mutex<MigrationContext>>) -> Self {
-//         Self {
-//             context: SchemaSettingContext::new(context).await,
-//         }
-//     }
+impl InferSchemaSetting {
+    pub fn new(
+        src: &Source,
+        dest: &Destination,
+        mapping: &EntityMapping,
+        state: &Arc<Mutex<MigrationState>>,
+    ) -> Self {
+        Self {
+            context: SchemaSettingContext::new(src, dest, mapping, state),
+        }
+    }
 
-//     async fn apply_schema(&self, plan: &MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
-//         let adapter = self.context.source_adapter().await?;
-//         let mut schema_plan = self.context.build_schema_plan().await?;
+    async fn apply_schema(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let ctx = &self.context;
 
-//         for migration in plan.migration.migrations.iter() {
-//             if !self.context.destination_exists(&migration.target).await? {
-//                 info!("Destination table does not exist. Infer schema setting will be applied");
+        let adapter = ctx.source_adapter().await?;
+        let mut schema_plan = ctx.build_schema_plan().await?;
 
-//                 let metadata_graph =
-//                     MetadataProvider::build_metadata_graph(&*adapter, &migration.sources).await?;
-//                 for meta in metadata_graph.values() {
-//                     if !schema_plan.metadata_exists(&meta.name) {
-//                         MetadataProvider::collect_schema_deps(meta, &mut schema_plan);
-//                         schema_plan.add_metadata(&meta.name, meta.clone());
-//                     }
-//                 }
-//             }
-//         }
+        // Check for existing destination
+        if ctx.destination_exists().await? {
+            info!("Skipping schema inference: destination table already exists");
+            return Ok(());
+        }
+        info!("Destination table not found—applying schema inference");
 
-//         self.context.apply_to_destination(schema_plan).await
-//     }
-// }
+        // Build metadata graph for source tables
+        let sources = &[ctx.source.name.clone()];
+        let meta_graph = MetadataProvider::build_metadata_graph(&*adapter, sources).await?;
+
+        // Add only those metadata entries that aren't already in schema plan
+        for meta in meta_graph.values() {
+            if !schema_plan.metadata_exists(&meta.name) {
+                MetadataProvider::collect_schema_deps(meta, &mut schema_plan);
+                schema_plan.add_metadata(&meta.name, meta.clone());
+            }
+        }
+
+        self.context.apply_to_destination(schema_plan).await
+    }
+}

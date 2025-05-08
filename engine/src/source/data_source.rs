@@ -2,7 +2,7 @@ use super::linked_source::LinkedSource;
 use crate::{adapter::Adapter, filter::filter::Filter};
 use mysql::source::MySqlDataSource;
 use smql_v02::statements::connection::DataFormat;
-use sql_adapter::source::DbDataSource;
+use sql_adapter::{metadata::table::TableMetadata, source::DbDataSource};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -54,6 +54,19 @@ impl DataSource {
 
             // Anything else isn’t a SQL format we support
             (fmt, _) => Err(format!("Unsupported data source format: {:?}", fmt).into()),
+        }
+    }
+
+    pub async fn fetch_meta(
+        &self,
+        table: &str,
+    ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
+        match &self {
+            DataSource::Database(db) => {
+                let db = db.lock().await.adapter();
+                let metadata = db.fetch_metadata(table).await?;
+                Ok(metadata)
+            }
         }
     }
 }

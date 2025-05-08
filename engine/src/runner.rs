@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, vec};
 
 use crate::{
     context::{global::GlobalContext, item::ItemContext},
@@ -47,12 +47,14 @@ pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> 
 pub async fn run_v2(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
     info!("Running migration v2");
 
+    let mut migration_tasks = vec![];
+
     let global_context = GlobalContext::new(&plan).await?;
     for mi in plan.migration.migrate_items {
         let mapping = EntityMapping::new(&mi);
         let source = create_source(&global_context, &mapping, &mi).await?;
-        let destination = create_destination(&global_context).await?;
-        tokio::spawn(async move {
+        let destination = create_destination(&global_context, &mi).await?;
+        let mi_task = tokio::spawn(async move {
             let state = MigrationState::from_settings(&mi.settings);
             let item_context = ItemContext::new(source, destination, mapping, state);
 
@@ -66,9 +68,19 @@ pub async fn run_v2(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error
             // let consumer = Consumer::new(item_context.clone()).await.spawn();
             // tokio::try_join!(producer, consumer).unwrap();
         });
+        migration_tasks.push(mi_task);
     }
 
-    todo!("Implement v2 migration");
+    // Wait for all migration tasks to finish
+    for task in migration_tasks {
+        if let Err(e) = task.await {
+            error!("Migration task failed: {:?}", e);
+        }
+    }
+
+    Ok(())
+
+    // todo!("Implement v2 migration");
 }
 
 // pub async fn load_src_metadata(
@@ -104,7 +116,13 @@ async fn create_source(
     let filter = create_filter(migrate_item, ctx.src_format)?;
     let primary = DataSource::from_adapter(ctx.src_format, &ctx.src_adapter, &linked, &filter)?;
 
-    Ok(Source::new(ctx.src_format, primary, linked, filter))
+    Ok(Source::new(
+        migrate_item.source.name(),
+        ctx.src_format,
+        primary,
+        linked,
+        filter,
+    ))
 }
 
 fn create_filter(
@@ -130,9 +148,14 @@ fn create_filter(
 
 async fn create_destination(
     ctx: &GlobalContext,
+    migrate_item: &MigrateItem,
 ) -> Result<Destination, Box<dyn std::error::Error>> {
     let data_dest = DataDestination::from_adapter(ctx.dest_format, &ctx.dest_adapter)?;
-    Ok(Destination::new(ctx.dest_format, data_dest))
+    Ok(Destination::new(
+        migrate_item.destination.name(),
+        ctx.dest_format,
+        data_dest,
+    ))
 }
 
 async fn apply_settings(

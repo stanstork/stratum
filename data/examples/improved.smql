@@ -7,7 +7,7 @@ MIGRATE (
     SOURCE(TABLE, orders) -> DEST(TABLE, orders_flat) [
         SETTINGS (
             INFER_SCHEMA           = TRUE,
-            IGNORE_CONSTRAINTS     = TRUE,
+            IGNORE_CONSTRAINTS     = FALSE,
             CREATE_MISSING_COLUMNS = TRUE,
             COPY_COLUMNS           = MAP_ONLY
         ),

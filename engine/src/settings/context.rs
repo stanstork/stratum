@@ -48,12 +48,13 @@ impl SchemaSettingContext {
         }
     }
 
-    pub async fn destination_exists(
-        &self,
-        table: &str,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub async fn destination_exists(&self) -> Result<bool, Box<dyn std::error::Error>> {
         match &self.destination.data_dest {
-            DataDestination::Database(dest) => Ok(dest.lock().await.table_exists(table).await?),
+            DataDestination::Database(dest) => Ok(dest
+                .lock()
+                .await
+                .table_exists(&self.destination.name)
+                .await?),
         }
     }
 

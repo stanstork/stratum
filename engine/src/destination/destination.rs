@@ -5,14 +5,18 @@ use sql_adapter::metadata::table::TableMetadata;
 
 #[derive(Clone)]
 pub struct Destination {
-    /// Format of the destination data (e.g., SQL, CSV, JSON)
+    pub name: String,
     pub format: DataFormat,
     pub data_dest: DataDestination,
 }
 
 impl Destination {
-    pub fn new(format: DataFormat, data_dest: DataDestination) -> Self {
-        Destination { format, data_dest }
+    pub fn new(name: String, format: DataFormat, data_dest: DataDestination) -> Self {
+        Destination {
+            name,
+            format,
+            data_dest,
+        }
     }
 
     pub async fn write_batch(
