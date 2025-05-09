@@ -17,6 +17,7 @@ use sql_adapter::{
 };
 use sqlx::{MySql, Pool, Row};
 use std::collections::HashMap;
+use tracing::{debug, info};
 
 #[derive(Clone)]
 pub struct MySqlAdapter {
@@ -103,17 +104,17 @@ impl SqlAdapter for MySqlAdapter {
             .offset(request.offset.unwrap_or(0))
             .build();
 
-        println!("Executing query: {}", query.0);
+        // Log the generated SQL query for debugging
+        info!("Generated SQL query: {:#?}", query.0);
 
-        // let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
-        // let result = rows
-        //     .into_iter()
-        //     .map(|row| RowData::from_db_row(&request.table, &DbRow::MySqlRow(&row)))
-        //     .collect();
+        // Execute the query and fetch the rows
+        let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
+        let result = rows
+            .into_iter()
+            .map(|row| RowData::from_db_row(&request.table, &DbRow::MySqlRow(&row)))
+            .collect();
 
-        // Ok(result)
-
-        Ok(vec![])
+        Ok(result)
     }
 
     async fn fetch_column_type(&self, table: &str, column: &str) -> Result<String, DbError> {

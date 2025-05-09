@@ -9,19 +9,19 @@ use sql_adapter::{
     row::row_data::RowData,
     schema::plan::SchemaPlan,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use tracing::{error, info};
 
 pub struct PgDestination {
-    pub metadata: HashMap<String, TableMetadata>,
     pub adapter: PgAdapter,
+    pub meta: Option<TableMetadata>,
 }
 
 impl PgDestination {
     pub fn new(adapter: PgAdapter) -> Self {
         Self {
-            metadata: HashMap::new(),
             adapter,
+            meta: None,
         }
     }
 }
@@ -118,18 +118,19 @@ impl DbDataDestination for PgDestination {
 }
 
 impl MetadataHelper for PgDestination {
-    fn get_metadata(&self, table: &str) -> &TableMetadata {
-        self.metadata
-            .get(table)
-            .unwrap_or_else(|| panic!("Metadata for table {} not found", table))
+    fn get_metadata(&self) -> &Option<TableMetadata> {
+        &self.meta
     }
 
-    fn set_metadata(&mut self, metadata: HashMap<String, TableMetadata>) {
-        self.metadata = metadata;
+    fn set_metadata(&mut self, meta: TableMetadata) {
+        self.meta = Some(meta);
     }
 
     fn get_tables(&self) -> Vec<TableMetadata> {
-        self.metadata.values().cloned().collect()
+        self.meta
+            .as_ref()
+            .map(|meta| vec![meta.clone()])
+            .unwrap_or_default()
     }
 
     fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)> {

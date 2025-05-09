@@ -20,4 +20,9 @@ pub enum MigrationError {
     /// Something went wrong applying migration settings.
     #[error("Settings application error: {0}")]
     Settings(#[from] SettingsError),
+
+    /// An error occurred while joining a task.
+    /// This usually indicates that the task was cancelled or panicked.
+    #[error("Task join error: {0}")]
+    TaskJoin(#[from] tokio::task::JoinError),
 }

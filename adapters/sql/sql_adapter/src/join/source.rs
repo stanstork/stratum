@@ -36,7 +36,7 @@ impl JoinSource {
                 let source_fields = self
                     .meta
                     .get(&clause.left.table)
-                    .map(|m| m.select_fields())
+                    .map(|m| m.select_fields_rec())
                     .unwrap_or_default()
                     .get(&clause.left.table)
                     .cloned()
@@ -92,7 +92,7 @@ impl JoinSource {
                 let source_fields = self
                     .meta
                     .get(&clause.left.table)
-                    .map(|m| m.select_fields())
+                    .map(|m| m.select_fields_rec())
                     .unwrap_or_default()
                     .get(table)
                     .cloned()

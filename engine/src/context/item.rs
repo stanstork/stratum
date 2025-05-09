@@ -8,12 +8,9 @@ use common::mapping::EntityMapping;
 use smql_v02::statements::connection::DataFormat;
 use sql_adapter::{
     error::db::DbError,
-    metadata::{
-        provider::{MetadataHelper, MetadataProvider},
-        table::TableMetadata,
-    },
+    metadata::{provider::MetadataHelper, table::TableMetadata},
 };
-use std::{collections::HashMap, future::Future, sync::Arc};
+use std::{future::Future, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::info;
 
@@ -62,7 +59,6 @@ impl ItemContext {
     }
 
     pub async fn set_src_meta(&self) -> Result<(), DbError> {
-        let infer = self.state.lock().await.infer_schema;
         let name = &self.source.name;
         let db = match &self.source.primary {
             DataSource::Database(db) => Some(db),
@@ -70,13 +66,12 @@ impl ItemContext {
         };
 
         let fetch_meta_fn = |tbl: String| self.source.primary.fetch_meta(tbl);
-        Self::set_meta(name, infer, db, fetch_meta_fn).await?;
+        Self::set_meta(name, db, fetch_meta_fn).await?;
 
         Ok(())
     }
 
     pub async fn set_dest_meta(&self) -> Result<(), DbError> {
-        let infer = self.state.lock().await.infer_schema;
         let name = &self.destination.name;
         let db = match &self.destination.data_dest {
             DataDestination::Database(db) => Some(db),
@@ -84,7 +79,7 @@ impl ItemContext {
         };
 
         let fetch_meta_fn = |tbl: String| self.destination.data_dest.fetch_meta(tbl);
-        Self::set_meta(name, infer, db, fetch_meta_fn).await?;
+        Self::set_meta(name, db, fetch_meta_fn).await?;
 
         Ok(())
     }
@@ -102,7 +97,6 @@ impl ItemContext {
 
     async fn set_meta<F, Fut, M>(
         table: &str,
-        infer_schema: bool,
         db: Option<&Arc<Mutex<M>>>,
         fetch_meta_fn: F,
     ) -> Result<(), DbError>
@@ -116,18 +110,9 @@ impl ItemContext {
             None => return Ok(()),
         };
 
-        // build either full graph or single‐table
-        let meta_map = if infer_schema {
-            let adapter = db.lock().await.adapter();
-            MetadataProvider::build_metadata_graph(adapter.as_ref(), &[table.to_string()]).await?
-        } else {
-            let one = fetch_meta_fn(table.to_string()).await?;
-            let mut m = HashMap::new();
-            m.insert(table.to_string(), one);
-            m
-        };
+        let meta = fetch_meta_fn(table.to_string()).await?;
 
-        db.lock().await.set_metadata(meta_map);
+        db.lock().await.set_metadata(meta);
         Ok(())
     }
 }

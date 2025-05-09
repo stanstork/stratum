@@ -1,4 +1,5 @@
 use crate::{
+    consumer::Consumer,
     context::{global::GlobalContext, item::ItemContext},
     destination::{data_dest::DataDestination, destination::Destination},
     error::MigrationError,
@@ -9,109 +10,72 @@ use crate::{
     state::MigrationState,
 };
 use common::mapping::EntityMapping;
+use futures::{stream::FuturesUnordered, StreamExt};
 use smql_v02::{
     plan::MigrationPlan,
     statements::{connection::DataFormat, migrate::MigrateItem, setting::Settings},
 };
-use std::{sync::Arc, vec};
-use tokio::sync::{watch, Mutex};
+use std::sync::Arc;
+use tokio::{
+    sync::{watch, Mutex},
+    task::JoinHandle,
+};
 use tracing::{error, info};
 
-pub async fn run(plan: MigrationPlan) -> Result<(), Box<dyn std::error::Error>> {
-    info!("Running migration");
-
-    // let mapping = EntityMapping::new(&plan);
-    // let source = create_source(&plan, &mapping).await?;
-    // let destination = create_destination(&plan).await?;
-    // let context = MigrationContext::init(source, destination, mapping);
-
-    // apply_settings(&plan, Arc::clone(&context)).await?;
-    // // validate_destination(&plan, Arc::clone(&context)).await?;
-    // set_metadata(&context, &plan).await?;
-
-    // let (shutdown_sender, shutdown_receiver) = watch::channel(false);
-
-    // let producer = Producer::new(Arc::clone(&context), shutdown_sender)
-    //     .await
-    //     .spawn();
-
-    // let consumer = Consumer::new(Arc::clone(&context), shutdown_receiver)
-    //     .await
-    //     .spawn();
-
-    // // Wait for both producer and consumer to finish
-    // tokio::try_join!(producer, consumer)?;
-
-    Ok(())
-}
-
-pub async fn run_v2(plan: MigrationPlan) -> Result<(), MigrationError> {
+pub async fn run(plan: MigrationPlan) -> Result<(), MigrationError> {
     info!("Running migration v2");
 
-    let mut migration_tasks = vec![];
+    // Build the shared context
+    let global_ctx = GlobalContext::new(&plan).await?;
 
-    let global_context = GlobalContext::new(&plan).await?;
+    // Spawn one task per MigrateItem, collecting JoinHandles
+    let mut handles: FuturesUnordered<JoinHandle<Result<(), MigrationError>>> =
+        FuturesUnordered::new();
+
     for mi in plan.migration.migrate_items {
-        let mapping = EntityMapping::new(&mi);
-        let source = create_source(&global_context, &mapping, &mi).await?;
-        let destination = create_destination(&global_context, &mi).await?;
-        let mi_task = tokio::spawn(async move {
-            let state = MigrationState::from_settings(&mi.settings);
-            let mut item_context = ItemContext::new(source, destination, mapping, state);
+        let gc = global_ctx.clone();
+        handles.push(tokio::spawn(async move {
+            // Prepare per-item state
+            let mapping = EntityMapping::new(&mi);
+            let source = create_source(&gc, &mapping, &mi).await?;
+            let destination = create_destination(&gc, &mi).await?;
+            let mut item_ctx = ItemContext::new(
+                source,
+                destination,
+                mapping.clone(),
+                MigrationState::from_settings(&mi.settings),
+            );
 
-            let apply_settings = apply_settings(&mut item_context, &mi.settings).await;
-            if let Err(e) = apply_settings {
-                error!("Failed to apply settings: {:?}", e);
-                return;
-            }
+            // Apply all settings
+            apply_settings(&mut item_ctx, &mi.settings).await?;
+            set_meta(&mut item_ctx).await?;
 
-            let set_meta = set_meta(&mut item_context).await;
-            if let Err(e) = set_meta {
-                error!("Failed to set metadata: {:?}", e);
-                return;
-            }
+            // Wire up producer and consumer
+            let (shutdown_tx, shutdown_rx) = watch::channel(false);
+            let ctx = Arc::new(Mutex::new(item_ctx));
 
-            let (shutdown_sender, shutdown_receiver) = watch::channel(false);
+            let prod = Producer::new(ctx.clone(), shutdown_tx).await.spawn();
+            let cons = Consumer::new(ctx.clone(), shutdown_rx).await.spawn();
 
-            let context = Arc::new(Mutex::new(item_context));
-            let producer = Producer::new(context.clone(), shutdown_sender)
-                .await
-                .spawn();
-
-            // let consumer = Consumer::new(item_context.clone()).await.spawn();
-            tokio::try_join!(producer).unwrap();
-        });
-        migration_tasks.push(mi_task);
+            // Run both sides in parallel, propagate any error
+            tokio::try_join!(prod, cons)?;
+            Ok(())
+        }));
     }
 
-    // Wait for all migration tasks to finish
-    for task in migration_tasks {
-        if let Err(e) = task.await {
-            error!("Migration task failed: {:?}", e);
+    // Await all item‐tasks, logging any failures
+    while let Some(join_res) = handles.next().await {
+        match join_res {
+            Ok(Ok(())) => (), // task completed successfully
+            Ok(Err(e)) => error!("Migration item error: {}", e),
+            Err(join_err) => error!("Task panicked: {}", join_err),
         }
     }
 
+    info!("Migration completed");
+
     Ok(())
 }
-
-// pub async fn load_src_metadata(
-//     plan: &MigrationPlan,
-// ) -> Result<HashMap<String, TableMetadata>, Box<dyn std::error::Error>> {
-//     let source_adapter = Adapter::new(
-//         plan.connections.source.data_format,
-//         &plan.connections.source.con_str,
-//     )
-//     .await?;
-
-//     match source_adapter {
-//         Adapter::MySql(my_sql_adapter) => {
-//             let tables = plan.migration.sources();
-//             let metadata = MetadataProvider::build_metadata_graph(&my_sql_adapter, &tables).await?;
-//             Ok(metadata)
-//         }
-//         Adapter::Postgres(_pg_adapter) => unimplemented!("Postgres metadata loading"),
-//     }
-// }
 
 async fn create_source(
     ctx: &GlobalContext,
@@ -187,6 +151,25 @@ async fn set_meta(ctx: &mut ItemContext) -> Result<(), MigrationError> {
     ctx.set_dest_meta().await?;
     Ok(())
 }
+
+// pub async fn load_src_metadata(
+//     plan: &MigrationPlan,
+// ) -> Result<HashMap<String, TableMetadata>, Box<dyn std::error::Error>> {
+//     let source_adapter = Adapter::new(
+//         plan.connections.source.data_format,
+//         &plan.connections.source.con_str,
+//     )
+//     .await?;
+
+//     match source_adapter {
+//         Adapter::MySql(my_sql_adapter) => {
+//             let tables = plan.migration.sources();
+//             let metadata = MetadataProvider::build_metadata_graph(&my_sql_adapter, &tables).await?;
+//             Ok(metadata)
+//         }
+//         Adapter::Postgres(_pg_adapter) => unimplemented!("Postgres metadata loading"),
+//     }
+// }
 
 // async fn validate_destination(
 //     plan: &MigrationPlan,

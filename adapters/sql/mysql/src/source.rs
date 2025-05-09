@@ -4,21 +4,18 @@ use sql_adapter::{
     adapter::SqlAdapter,
     error::db::DbError,
     filter::filter::SqlFilter,
-    join::{clause::JoinClause, source::JoinSource},
+    join::source::JoinSource,
     metadata::{provider::MetadataHelper, table::TableMetadata},
     requests::{FetchRowsRequest, FetchRowsRequestBuilder},
     row::row_data::RowData,
     source::DbDataSource,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct MySqlDataSource {
     adapter: MySqlAdapter,
-    meta: HashMap<String, TableMetadata>,
+    meta: Option<TableMetadata>,
     join: Option<JoinSource>,
     filter: Option<SqlFilter>,
 }
@@ -29,88 +26,44 @@ impl MySqlDataSource {
             adapter,
             join,
             filter,
-            meta: HashMap::new(),
+            meta: None,
         }
     }
 
-    fn build_fetch_requests(
-        &self,
-        batch_size: usize,
-        offset: Option<usize>,
-    ) -> Vec<FetchRowsRequest> {
-        let mut seen_tables = HashSet::new();
+    fn build_fetch_request(&self, batch_size: usize, offset: Option<usize>) -> FetchRowsRequest {
+        let meta = self
+            .meta
+            .as_ref()
+            .expect("MySqlDataSource: Metadata is not set");
 
-        // Precompute join clauses and joined fields
-        let join_clauses_all = self
+        // Precompute the JOIN clauses (if any) and any extra fields they bring in
+        let join_clauses = self
             .join
             .as_ref()
             .map(|j| j.clauses.clone())
             .unwrap_or_default();
-        let joined_fields_all = self.join.as_ref().map(|j| j.fields()).unwrap_or_default();
+        let extra_fields = self.join.as_ref().map(|j| j.fields()).unwrap_or_default();
 
-        let mut clauses_by_table: HashMap<String, Vec<JoinClause>> = HashMap::new();
-        for clause in &join_clauses_all {
-            for table in [&clause.left.table, &clause.right.table] {
-                clauses_by_table
-                    .entry(table.to_lowercase())
-                    .or_default()
-                    .push(clause.clone());
-            }
-        }
+        // Base table name and its own metadata‐driven columns
+        let table_name = meta.name.clone();
+        let mut columns = meta.select_fields();
+        // merge in the JOIN‐generated columns
+        columns.extend(extra_fields);
 
-        // For each table‐metadata, extract (table_name, base_fields),
-        // dedupe on table_name, extend with joined_fields, build request.
-        self.meta
-            .values()
-            .flat_map(|table_meta| table_meta.select_fields())
-            .filter_map(|(table_name, mut base_fields)| {
-                // Skip duplicates
-                if !seen_tables.insert(table_name.clone()) {
-                    return None;
-                }
+        // Build the optional filter for this table
+        let filter = self
+            .filter
+            .as_ref()
+            .map(|f| f.for_table(&table_name, &join_clauses));
 
-                // get only those join clauses that involve this table
-                let clauses = clauses_by_table
-                    .get(&table_name.to_lowercase())
-                    .cloned()
-                    .unwrap_or_default();
-
-                // get only those joined fields that come from tables this table joins to
-                let peers: HashSet<_> = clauses
-                    .iter()
-                    .flat_map(|jc| vec![&jc.left.table, &jc.right.table])
-                    .filter(|t| !t.to_lowercase().eq_ignore_ascii_case(&table_name))
-                    .cloned()
-                    .collect();
-
-                let extra_fields: Vec<_> = joined_fields_all
-                    .iter()
-                    .filter(|f| peers.contains(&f.table))
-                    .cloned()
-                    .collect();
-
-                // merge in any join‐generated fields
-                base_fields.extend(extra_fields);
-
-                // Build optional filter expression
-                let filter = self
-                    .filter
-                    .as_ref()
-                    .map(|f| f.for_table(&table_name, &clauses));
-
-                // Create the FetchRowsRequest
-                Some(
-                    FetchRowsRequestBuilder::new(table_name.clone())
-                        .alias(table_name.clone())
-                        .columns(base_fields)
-                        .joins(clauses)
-                        .filter(filter)
-                        .limit(batch_size)
-                        .offset(offset)
-                        .build(),
-                )
-            })
-            .collect()
+        FetchRowsRequestBuilder::new(table_name.clone())
+            .alias(table_name.clone())
+            .columns(columns)
+            .joins(join_clauses)
+            .filter(filter)
+            .limit(batch_size)
+            .offset(offset)
+            .build()
     }
 }
 
@@ -123,29 +76,19 @@ impl DbDataSource for MySqlDataSource {
         batch_size: usize,
         offset: Option<usize>,
     ) -> Result<Vec<RowData>, DbError> {
-        // Build fetch requests for each table
-        let requests = self.build_fetch_requests(batch_size, offset);
-
-        let mut rows = Vec::new();
-        for request in requests {
-            // Execute each request and collect results
-            let result = self.adapter.fetch_rows(request).await?;
-            rows.extend(result);
-        }
-
-        Ok(rows)
+        // Build fetch request
+        let request = self.build_fetch_request(batch_size, offset);
+        self.adapter.fetch_rows(request).await
     }
 }
 
 impl MetadataHelper for MySqlDataSource {
-    fn get_metadata(&self, table: &str) -> &TableMetadata {
-        self.meta
-            .get(table)
-            .unwrap_or_else(|| panic!("Metadata for table {} not found", table))
+    fn get_metadata(&self) -> &Option<TableMetadata> {
+        &self.meta
     }
 
-    fn set_metadata(&mut self, metadata: HashMap<String, TableMetadata>) {
-        self.meta = metadata;
+    fn set_metadata(&mut self, meta: TableMetadata) {
+        self.meta = Some(meta);
     }
 
     fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)> {
@@ -153,6 +96,9 @@ impl MetadataHelper for MySqlDataSource {
     }
 
     fn get_tables(&self) -> Vec<TableMetadata> {
-        self.meta.values().cloned().collect()
+        self.meta
+            .as_ref()
+            .map(|meta| vec![meta.clone()])
+            .unwrap_or_default()
     }
 }

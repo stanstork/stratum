@@ -6,15 +6,15 @@ CONNECTIONS (
 MIGRATE (
     SOURCE(TABLE, orders) -> DEST(TABLE, orders_flat) [
         SETTINGS (
-            INFER_SCHEMA           = TRUE,
-            IGNORE_CONSTRAINTS     = FALSE,
+            INFER_SCHEMA           = FALSE,
+            IGNORE_CONSTRAINTS     = TRUE,
+            CREATE_MISSING_TABLES  = TRUE,
             CREATE_MISSING_COLUMNS = TRUE,
             COPY_COLUMNS           = MAP_ONLY
         ),
 
         FILTER(
             AND(
-                orders[status] = "active",
                 orders[total]  > 400,
                 users[id]      < 4
             )
@@ -25,7 +25,7 @@ MIGRATE (
             MATCH(
                 ON(users[id]             -> orders[user_id]),
                 ON(order_items[order_id] -> orders[id]),
-                ON(products[product_id]  -> order_items[id])
+                ON(products[id]  -> order_items[id])
             )
         ),
 
@@ -38,41 +38,5 @@ MIGRATE (
             order_items[price] * 1.4            -> order_price_with_tax,
             CONCAT(users[name], products[name]) -> concat_lookup_test
         )
-    ],
-
-    SOURCES(TABLE, [products_a, products_b]) -> DEST(TABLE, products) [
-        SETTINGS (
-            INFER_SCHEMA = FALSE,
-            COPY_COLUMNS = ALL
-        ),
-
-        FILTER(
-            OR(
-                products_a[status] = "active",
-                products_b[status] = "active"
-            )
-        ),
-
-        MAP(
-            products_a[id]                               -> id,
-            COALESCE(products_a[name], products_b[name]) -> name,
-            products_a[price]                            -> price_a,
-            products_b[price]                            -> price_b
-        )
-    ],
-
-    SOURCE(TABLE, invoices) -> DEST(TABLE, statement) [
-        SETTINGS (
-            INFER_SCHEMA = FALSE,
-            COPY_COLUMNS = ALL
-        ),
-
-        FILTER(
-            invoices[date] >= "2024-01-01"
-        )
     ]
-)
-WITH SETTINGS (
-    CREATE_MISSING_TABLES = TRUE,
-    BATCH_SIZE            = 1000
 );
