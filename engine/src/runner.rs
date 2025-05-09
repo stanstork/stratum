@@ -11,7 +11,7 @@ use crate::{
 };
 use common::mapping::EntityMapping;
 use futures::{stream::FuturesUnordered, StreamExt};
-use smql_v02::{
+use smql::{
     plan::MigrationPlan,
     statements::{connection::DataFormat, migrate::MigrateItem, setting::Settings},
 };

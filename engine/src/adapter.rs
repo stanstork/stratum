@@ -1,7 +1,7 @@
 use crate::error::MigrationError;
 use mysql::adapter::MySqlAdapter;
 use postgres::adapter::PgAdapter;
-use smql_v02::statements::connection::DataFormat;
+use smql::statements::connection::DataFormat;
 use sql_adapter::adapter::SqlAdapter;
 
 #[derive(Clone)]

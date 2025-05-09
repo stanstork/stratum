@@ -2,10 +2,6 @@ use super::expr::Expression;
 use crate::parser::{Rule, StatementParser};
 use pest::iterators::Pair;
 
-// ─────────────────────────────────────────────────────────────
-// FILTER statement
-// Example: FILTER (AND(a[status] = "active", b[age] > 18))
-// ─────────────────────────────────────────────────────────────
 #[derive(Debug, Clone)]
 pub struct Filter {
     pub expression: FilterExpression,
@@ -22,9 +18,9 @@ pub enum FilterExpression {
 
 #[derive(Debug, Clone)]
 pub struct Condition {
-    pub field: Expression,
-    pub comparator: Comparator,
-    pub value: Expression,
+    pub left: Expression,
+    pub op: Comparator,
+    pub right: Expression,
 }
 
 #[derive(Debug, Clone)]
@@ -71,15 +67,11 @@ impl StatementParser for Condition {
     fn parse(pair: Pair<Rule>) -> Self {
         let mut inner = pair.clone().into_inner();
 
-        let field = Expression::parse(inner.next().expect("Expected field identifier"));
-        let comparator = Comparator::parse(inner.next().expect("Expected comparator"));
-        let value = Expression::parse(inner.next().expect("Expected value"));
+        let left = Expression::parse(inner.next().expect("Expected field identifier"));
+        let op = Comparator::parse(inner.next().expect("Expected comparator"));
+        let right = Expression::parse(inner.next().expect("Expected value"));
 
-        Condition {
-            field,
-            comparator,
-            value,
-        }
+        Condition { left, op, right }
     }
 }
 

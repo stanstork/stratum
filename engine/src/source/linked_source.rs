@@ -1,6 +1,6 @@
 use crate::{context::global::GlobalContext, error::MigrationError};
 use common::{computed::ComputedField, mapping::EntityMapping};
-use smql_v02::statements::{
+use smql::statements::{
     connection::DataFormat,
     expr::Expression,
     load::{Load, MatchPair},

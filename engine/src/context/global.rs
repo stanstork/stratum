@@ -1,5 +1,5 @@
 use crate::{adapter::Adapter, error::MigrationError};
-use smql_v02::{plan::MigrationPlan, statements::connection::DataFormat};
+use smql::{plan::MigrationPlan, statements::connection::DataFormat};
 
 #[derive(Clone)]
 /// Represents the global context for a migration process.

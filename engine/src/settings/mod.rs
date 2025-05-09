@@ -6,7 +6,7 @@ use create_cols::CreateMissingColumnsSetting;
 use create_tables::CreateMissingTablesSetting;
 use infer_schema::InferSchemaSetting;
 use phase::MigrationSettingsPhase;
-use smql_v02::statements::setting::Settings;
+use smql::statements::setting::Settings;
 
 pub mod batch_size;
 pub mod constraints;

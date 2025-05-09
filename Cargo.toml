@@ -7,7 +7,6 @@ members = [
     "common",
     "engine",
     "smql",
-    "smql_v0.2",
 ]
 
 resolver = "2"

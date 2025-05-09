@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use common::{computed::ComputedField, mapping::EntityMapping};
-use smql_v02::statements::expr::{Expression, Literal};
+use smql::statements::expr::{Expression, Literal};
 use sql_adapter::{
     metadata::column::{data_type::ColumnDataType, metadata::ColumnMetadata},
     schema::types::{AdapterRef, TypeInferencer},

@@ -1,75 +1,136 @@
-use super::setting::Setting;
+use super::{filter::Filter, load::Load, mapping::MapSpec, setting::Settings};
 use crate::parser::{Rule, StatementParser};
 use pest::iterators::Pair;
 
-// ─────────────────────────────────────────────────────────────
-// MIGRATE statement
-// Example: MIGRATE (source1 -> target) WITH SETTINGS (setting1 = "value", setting2 = 42)
-// ─────────────────────────────────────────────────────────────
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct MigrateBlock {
-    pub migrations: Vec<Migrate>,
-    pub settings: Vec<Setting>,
+    pub migrate_items: Vec<MigrateItem>,
+    pub settings: Settings,
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct MigrateItem {
+    pub source: Spec,
+    pub destination: Spec,
+    pub settings: Settings,
+    pub filter: Option<Filter>,
+    pub load: Option<Load>,
+    pub map: Option<MapSpec>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Migrate {
-    pub sources: Vec<String>,
-    pub target: String,
+pub struct Spec {
+    pub kind: SpecKind,
+    pub names: Vec<String>,
 }
+
+#[derive(Debug, Clone)]
+pub enum SpecKind {
+    Table,
+    Api,
+    File,
+}
+
+const KEY_TABLE: &str = "TABLE";
+const KEY_API: &str = "API";
 
 impl StatementParser for MigrateBlock {
     fn parse(pair: Pair<Rule>) -> Self {
-        let mut migrations = vec![];
-        let mut settings = vec![];
+        let mut migrate_block = MigrateBlock::default();
 
-        for inner in pair.into_inner() {
-            match inner.as_rule() {
-                Rule::migrate_pair => {
-                    migrations.push(Migrate::parse(inner));
+        for item_pair in pair.into_inner() {
+            match item_pair.as_rule() {
+                Rule::migrate_item => {
+                    let mut migrate_item = MigrateItem::default();
+                    let mut inner = item_pair.into_inner();
+
+                    // First item is the source
+                    let source_pair = inner.next().unwrap();
+                    let source = Spec::parse(source_pair);
+
+                    // Second item is the destination
+                    let dest_pair = inner.next().unwrap();
+                    let destination = Spec::parse(dest_pair);
+
+                    migrate_item.source = source;
+                    migrate_item.destination = destination;
+
+                    let clauses_pair = inner.next().unwrap();
+
+                    for clause in clauses_pair.into_inner() {
+                        match clause.as_rule() {
+                            Rule::settings_clause => {
+                                migrate_item.settings = Settings::parse(clause);
+                            }
+                            Rule::filter_clause => {
+                                let filter = Filter::parse(clause);
+                                migrate_item.filter = Some(filter);
+                            }
+                            Rule::load_clause => {
+                                let load = Load::parse(clause);
+                                migrate_item.load = Some(load);
+                            }
+                            Rule::map_clause => {
+                                let map = MapSpec::parse(clause);
+                                migrate_item.map = Some(map);
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    migrate_block.migrate_items.push(migrate_item);
                 }
                 Rule::migrate_settings => {
-                    settings = inner.into_inner().map(Setting::parse).collect();
+                    migrate_block.settings = Settings::parse(item_pair);
                 }
                 _ => {}
             }
         }
 
-        MigrateBlock {
-            migrations,
-            settings,
-        }
+        migrate_block
     }
 }
 
-impl StatementParser for Migrate {
+impl StatementParser for Spec {
     fn parse(pair: Pair<Rule>) -> Self {
-        let inner = pair.into_inner();
+        let mut kind = SpecKind::Table;
+        let mut names = vec![];
 
-        let mut migrate_pairs = vec![];
-        for inner_pair in inner {
-            if inner_pair.as_rule() == Rule::ident {
-                let source = inner_pair.as_str().to_string();
-                migrate_pairs.push(source);
+        for inner in pair.into_inner() {
+            match inner.as_rule() {
+                Rule::source_type => {
+                    kind = match inner.as_str().to_ascii_uppercase().as_str() {
+                        KEY_TABLE => SpecKind::Table,
+                        KEY_API => SpecKind::Api,
+                        _ => panic!("Unknown source type: {}", inner.as_str()),
+                    };
+                }
+                Rule::ident => {
+                    names.push(inner.as_str().to_string());
+                }
+                _ => {}
             }
         }
 
-        let sources = migrate_pairs[..migrate_pairs.len() - 1].to_vec();
-        let target = migrate_pairs.last().expect("Expected target").to_string();
-
-        Migrate { sources, target }
+        Spec { kind, names }
     }
 }
 
-impl MigrateBlock {
-    pub fn targets(&self) -> Vec<String> {
-        self.migrations.iter().map(|m| m.target.clone()).collect()
+impl Default for Spec {
+    fn default() -> Self {
+        Spec {
+            kind: SpecKind::Table,
+            names: vec![],
+        }
     }
+}
 
-    pub fn sources(&self) -> Vec<String> {
-        self.migrations
-            .iter()
-            .flat_map(|m| m.sources.clone())
-            .collect()
+impl Spec {
+    pub fn name(&self) -> String {
+        // Currently, we only support one name per spec
+        self.names
+            .get(0)
+            .cloned()
+            .unwrap_or_else(|| panic!("No name found for spec: {:?}", self))
     }
 }

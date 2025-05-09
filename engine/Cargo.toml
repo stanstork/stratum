@@ -8,7 +8,6 @@ mysql = { path = "../adapters/sql/mysql" }
 postgres = { path = "../adapters/sql/postgres" }
 sql_adapter = { path = "../adapters/sql/sql_adapter" }
 smql = { path = "../smql" }
-smql_v02 = { path = "../smql_v0.2" }
 common = { path = "../common" }
 
 async-trait = "0.1.86"

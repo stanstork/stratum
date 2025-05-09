@@ -1,6 +1,6 @@
 use super::data_dest::DataDestination;
 use crate::record::Record;
-use smql_v02::statements::connection::DataFormat;
+use smql::statements::connection::DataFormat;
 use sql_adapter::{error::db::DbError, metadata::table::TableMetadata};
 
 #[derive(Clone)]

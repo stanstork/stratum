@@ -13,7 +13,7 @@ use crate::{
 use async_trait::async_trait;
 use common::mapping::EntityMapping;
 use postgres::data_type::PgColumnDataType;
-use smql_v02::statements::expr::Expression;
+use smql::statements::expr::Expression;
 use sql_adapter::{
     metadata::{
         column::{data_type::ColumnDataType, metadata::ColumnMetadata},

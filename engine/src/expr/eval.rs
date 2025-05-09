@@ -1,5 +1,5 @@
 use common::mapping::EntityMapping;
-use smql_v02::statements::expr::{Expression, Literal, Operator};
+use smql::statements::expr::{Expression, Literal, Operator};
 use sql_adapter::{metadata::column::value::ColumnValue, row::row_data::RowData};
 
 pub trait Evaluator {

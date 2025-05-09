@@ -1,5 +1,5 @@
 use super::{compiler::FilterCompiler, filter::expr_to_string};
-use smql_v02::statements::{
+use smql::statements::{
     self,
     expr::Expression,
     filter::{Comparator, FilterExpression},

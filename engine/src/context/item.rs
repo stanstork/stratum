@@ -5,7 +5,7 @@ use crate::{
     state::MigrationState,
 };
 use common::mapping::EntityMapping;
-use smql_v02::statements::connection::DataFormat;
+use smql::statements::connection::DataFormat;
 use sql_adapter::{
     error::db::DbError,
     metadata::{provider::MetadataHelper, table::TableMetadata},

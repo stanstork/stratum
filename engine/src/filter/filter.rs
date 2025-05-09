@@ -1,4 +1,4 @@
-use smql_v02::statements::expr::{Expression, Literal, Operator};
+use smql::statements::expr::{Expression, Literal, Operator};
 use sql_adapter::filter::filter::SqlFilter;
 
 #[derive(Debug, Clone)]

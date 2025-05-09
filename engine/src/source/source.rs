@@ -1,6 +1,6 @@
 use super::{data_source::DataSource, linked_source::LinkedSource};
 use crate::{filter::filter::Filter, record::Record};
-use smql_v02::statements::connection::DataFormat;
+use smql::statements::connection::DataFormat;
 
 /// Represents a migration source,
 /// such as a database table, file, or API to be transformed and written to a destination.

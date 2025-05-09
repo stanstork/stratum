@@ -9,307 +9,198 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_migrate() {
-        let input = r#"
-            CONNECTIONS (
-                SOURCE MYSQL "mysql://user:password@localhost:3306/db",
-                DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
-            );
+    const CONN: &str = r#"
+        CONNECTIONS (
+            SOURCE(MYSQL, "mysql://user:password@localhost:3306/db"),
+            DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/db")
+        );
+    "#;
 
-            MIGRATE (
-                orders -> orders_collection
-            )
-            WITH SETTINGS (
-                INFER_SCHEMA = TRUE,
-                CREATE_TABLE = TRUE
-            );
-        "#;
-        assert_parses(input);
+    #[test]
+    fn test_inline_settings_only() {
+        let config = format!(
+            "{}\n\
+            MIGRATE (\n\
+                SOURCE(TABLE, foo) -> DEST(TABLE, bar) [\n\
+                    SETTINGS(INFER_SCHEMA = TRUE)\n\
+                ]\n\
+            );",
+            CONN
+        );
+        assert_parses(&config);
     }
 
     #[test]
-    fn test_parse_map_with_functions() {
-        let input = r#"
-            CONNECTIONS (
-                SOURCE MYSQL "mysql://user:password@localhost:3306/db",
-                DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
-            );
-
-            MIGRATE (
-                orders -> orders_collection
-            )
-            WITH SETTINGS (
-                INFER_SCHEMA = TRUE,
-                CREATE_TABLE = TRUE
-            );
-
-            MAP (
-                orders_collection (
-                    COALESCE(products_a[id], products_b[id]) -> product_id,
-                    CONCAT(products_a[name], " / ", products_b[name]) -> product_name,
-                    ROUND(products_a[price] * 1.2, 2) -> price_with_tax
-                )
-            );
-        "#;
-        assert_parses(input);
+    fn test_inline_filter_only() {
+        let config = format!(
+            "{}\n\
+            MIGRATE (\n\
+                SOURCE(TABLE, foo) -> DEST(TABLE, bar) [\n\
+                    FILTER(\n\
+                        foo[id] > 1\n\
+                    )\n\
+                ]\n\
+            );",
+            CONN
+        );
+        assert_parses(&config);
     }
 
     #[test]
-    fn test_parse_filter() {
-        let input = r#"
-            CONNECTIONS (
-                SOURCE MYSQL "mysql://user:password@localhost:3306/db",
-                DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
-            );
-
-            MIGRATE (
-                orders -> orders_collection
-            )
-            WITH SETTINGS (
-                INFER_SCHEMA = TRUE,
-                CREATE_TABLE = TRUE
-            );
-
-            FILTER (
-                price > 100,
-                status = "paid"
-            );
-        "#;
-        assert_parses(input);
+    fn test_inline_load_only() {
+        let config = format!(
+            "{}\n\
+            MIGRATE (\n\
+                SOURCE(TABLE, foo) -> DEST(TABLE, bar) [\n\
+                    LOAD(\n\
+                        TABLES(foo),\n\
+                        MATCH(\n\
+                            ON(foo[id] -> bar[id])\n\
+                        )\n\
+                    )\n\
+                ]\n\
+            );",
+            CONN
+        );
+        assert_parses(&config);
     }
 
     #[test]
-    fn test_parse_aggregate() {
-        let input = r#"
-            CONNECTIONS (
-                SOURCE MYSQL "mysql://user:password@localhost:3306/db",
-                DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
-            );
-
-            MIGRATE (
-                orders -> orders_collection
-            )
-            WITH SETTINGS (
-                INFER_SCHEMA = TRUE,
-                CREATE_TABLE = TRUE
-            );
-
-            AGGREGATE (
-                SUM(price) -> total_price,
-                COUNT(*) -> order_count,
-                AVG(discount) -> avg_discount
-            );
-        "#;
-        assert_parses(input);
+    fn test_inline_map_only() {
+        let config = format!(
+            "{}\n\
+            MIGRATE (\n\
+                SOURCE(TABLE, foo) -> DEST(TABLE, bar) [\n\
+                    MAP(\n\
+                        foo[a] -> a\n\
+                    )\n\
+                ]\n\
+            );",
+            CONN
+        );
+        assert_parses(&config);
     }
 
     #[test]
-    fn test_parse_complex_migrate_with_multiple_sources() {
-        let input = r#"
-            CONNECTIONS (
-                SOURCE MYSQL "mysql://user:password@localhost:3306/db",
-                DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
-            );
-
-            MIGRATE (
-                orders -> orders_collection
-            )
-            WITH SETTINGS (
-                INFER_SCHEMA = TRUE,
-                CREATE_TABLE = TRUE
-            );
-
-            MAP (
-                orders_collection (
-                    COALESCE(products_a[id], products_b[id]) -> product_id,
-                    COALESCE(products_a[name], products_b[name]) -> product_name,
-                    COALESCE(products_a[price], products_b[price]) -> product_price
-                )
-            );
-        "#;
-        assert_parses(input);
+    fn test_multiple_sources() {
+        let config = format!(
+            "{}\n\
+            MIGRATE (\n\
+                SOURCES(TABLE, [a, b, c]) -> DEST(TABLE, combined) [\n\
+                    SETTINGS(COPY_COLUMNS = ALL)\n\
+                ]\n\
+            );",
+            CONN
+        );
+        assert_parses(&config);
     }
 
     #[test]
-    fn test_parse_nested_function_calls() {
-        let input = r#"
-            CONNECTIONS (
-                SOURCE MYSQL "mysql://user:password@localhost:3306/db",
-                DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
-            );
-
-            MIGRATE (
-                orders -> orders_collection
-            )
-            WITH SETTINGS (
-                INFER_SCHEMA = TRUE,
-                CREATE_TABLE = TRUE
-            );
-
-            MAP (
-                orders_collection (
-                    ROUND(SUM(products_a[price]) * 1.2, 2) -> total_price_adjusted,
-                    UPPER(CONCAT(products_a[name], " ", products_b[name])) -> full_product_name
-                )
-            );
-        "#;
-        assert_parses(input);
+    fn test_global_settings_only() {
+        let config = format!(
+            "{}\n\
+            MIGRATE (\n\
+                SOURCE(TABLE, foo) -> DEST(TABLE, bar) [\n\
+                    SETTINGS(INFER_SCHEMA = FALSE)\n\
+                ]\n\
+            )\n\
+            WITH SETTINGS (\n\
+                BATCH_SIZE = 500\n\
+            );",
+            CONN
+        );
+        assert_parses(&config);
     }
 
     #[test]
-    fn test_parse_large_config() {
-        let input = r#"
+    fn test_multiple_migrations() {
+        let config = r#"
             CONNECTIONS (
-                SOURCE MYSQL "mysql://user:password@source_db",
-                DESTINATION POSTGRES "postgres://user:password@dest_db"
+                SOURCE(MYSQL, "mysql://user:password@localhost:3306/db"),
+                DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/db")
             );
 
             MIGRATE (
-                users -> customers,
-                orders -> order_table
-            )
-            WITH SETTINGS (
-                INFER_SCHEMA = TRUE,
-                CREATE_TABLE = TRUE,
-                BATCH_SIZE = 500
-            );
+                SOURCE(TABLE, orders) -> DEST(TABLE, orders_flat) [
+                    SETTINGS (
+                        INFER_SCHEMA           = TRUE,
+                        IGNORE_CONSTRAINTS     = TRUE,
+                        CREATE_MISSING_COLUMNS = TRUE,
+                        COPY_COLUMNS           = MAP_ONLY
+                    ),
 
-            FILTER (
-                age > 18,
-                status = "active"
-            );
+                    FILTER(
+                        AND(
+                            orders[status] = "active",
+                            orders[total]  > 400,
+                            users[id]      < 4
+                        )
+                    ),
 
-            LOAD customers FROM TABLE customers
-            JOIN orders (
-                id -> customer_id,
-                product_id -> product_id
-            );
+                    LOAD(
+                        TABLES(users, order_items, products),
+                        MATCH(
+                            ON(users[id]             -> orders[user_id]),
+                            ON(order_items[order_id] -> orders[id]),
+                            ON(products[product_id]  -> order_items[id])
+                        )
+                    ),
 
-            MAP (
-                customers(
-                    COALESCE(users[id], orders[user_id]) -> customer_id,
-                    CONCAT(users[first_name], " ", users[last_name]) -> full_name,
-                    ROUND(users[balance] * 1.05, 2) -> adjusted_balance,
-                    orders[status] -> order_status
-                )
-            );
-
-            AGGREGATE (
-                SUM(orders[total]) -> total_revenue,
-                COUNT(users[id]) -> active_users
-            );
-        "#;
-        assert_parses(input);
-    }
-
-    #[test]
-    fn test_parse_mixed_case_and_whitespace() {
-        let input = r#"
-                connections (
-                    source mysql "mysql://user:pass@db",
-                    destination postgres "postgres://user:pass@db"
-                );
-
-                migrate   (orders -> orders_collection)   WITH SETTINGS ( infer_schema = true   );
-                
-                filter (  age   >= 18  ,   status =  "active"   );
-
-                map ( 
-                    customers (
-                        Coalesce(Users[id], Orders[user_id]) -> CustomerId,
-                        ROUND( Users[balance] * 1.1 , 2 ) -> adjusted_balance
+                    MAP(
+                        users[name]                         -> user_name,
+                        users[email]                        -> user_email,
+                        order_items[price]                  -> order_price,
+                        products[name]                      -> product_name,
+                        products[price]                     -> product_price,
+                        order_items[price] * 1.4            -> order_price_with_tax,
+                        CONCAT(users[name], products[name]) -> concat_lookup_test
                     )
-                );
-        "#;
-        assert_parses(input);
-    }
+                ],
 
-    #[test]
-    fn test_parse_complex_nested_expressions() {
-        let input = r#"
-            CONNECTIONS (
-                SOURCE MYSQL "mysql://user:password@localhost:3306/db",
-                DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
-            );
+                SOURCES(TABLE, [products_a, products_b]) -> DEST(TABLE, products) [
+                    SETTINGS (
+                        INFER_SCHEMA = FALSE,
+                        COPY_COLUMNS = ALL
+                    ),
 
-            MIGRATE (
-                orders -> orders_collection
+                    FILTER(
+                        OR(
+                            products_a[status] = "active",
+                            products_b[status] = "active"
+                        )
+                    ),
+
+                    MAP(
+                        products_a[id]                               -> id,
+                        COALESCE(products_a[name], products_b[name]) -> name,
+                        products_a[price]                            -> price_a,
+                        products_b[price]                            -> price_b
+                    )
+                ],
+
+                SOURCE(TABLE, invoices) -> DEST(TABLE, statement) [
+                    SETTINGS (
+                        INFER_SCHEMA = FALSE,
+                        COPY_COLUMNS = ALL
+                    ),
+
+                    FILTER(
+                        invoices[date] >= "2024-01-01"
+                    )
+                ],
+
+                SOURCE(API, "https://api.example.com/invoices") -> DEST(FILE, "/tmp/invoices.json") [
+                    FILTER(
+                        invoices[date] >= "2024-01-01"
+                    )
+                ]
             )
             WITH SETTINGS (
-                INFER_SCHEMA = TRUE,
-                CREATE_TABLE = TRUE
+                CREATE_MISSING_TABLES = TRUE,
+                BATCH_SIZE            = 1000
             );
 
-            MAP (
-                orders_collection (
-                    ROUND(AVG(COALESCE(products_a[price], products_b[price]) * 1.2), 2) -> adjusted_price
-                )
-            );
         "#;
-        assert_parses(input);
-    }
-
-    #[test]
-    fn test_parse_multiple_statements() {
-        let input = r#"
-            CONNECTIONS (
-                SOURCE MYSQL "mysql://source_db",
-                DESTINATION POSTGRES "postgres://dest_db"
-            );
-
-            MIGRATE (
-                orders -> transactions,
-                users -> customers
-            );
-
-            FILTER (
-                status = "shipped",
-                total > 100
-            );
-
-            MAP (
-                transactions (
-                    orders[id] -> transaction_id,
-                    orders[user_id] -> customer_id,
-                    orders[total] * 1.1 -> total_with_tax
-                )
-            );
-
-            AGGREGATE (
-                SUM(orders[total]) -> total_revenue,
-                COUNT(orders[id]) -> order_count
-            );
-        "#;
-        assert_parses(input);
-    }
-
-    #[test]
-    fn test_parse_multiple_maps() {
-        let input = r#"
-            CONNECTIONS (
-                SOURCE MYSQL "mysql://user:password@localhost:3306/db",
-                DESTINATION POSTGRES "postgres://user:password@localhost:5432/db"
-            );
-
-            MIGRATE (
-                orders -> orders_collection
-            )
-            WITH SETTINGS (
-                INFER_SCHEMA = TRUE,
-                CREATE_TABLE = TRUE
-            );
-
-            MAP (
-                orders_collection (
-                    prod_id -> product_id,
-                    CONCAT(products_a[name], " / ", products_b[name]) -> product_name
-                ),
-                users (
-                    CONCAT(users_a[first_name], " ", users_b[last_name]) -> full_name
-                )
-            );
-        "#;
-        assert_parses(input);
+        assert_parses(config);
     }
 }

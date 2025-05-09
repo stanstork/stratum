@@ -1,6 +1,6 @@
 use crate::adapter::Adapter;
 use postgres::destination::PgDestination;
-use smql_v02::statements::connection::DataFormat;
+use smql::statements::connection::DataFormat;
 use sql_adapter::{
     destination::DbDataDestination, error::db::DbError, metadata::table::TableMetadata,
 };

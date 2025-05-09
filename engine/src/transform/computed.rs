@@ -1,7 +1,7 @@
 use super::pipeline::Transform;
 use crate::{expr::eval::Evaluator, record::Record};
 use common::mapping::EntityMapping;
-use smql_v02::statements::expr::Expression;
+use smql::statements::expr::Expression;
 use sql_adapter::{
     metadata::column::value::{ColumnData, ColumnValue},
     row::row_data::RowData,

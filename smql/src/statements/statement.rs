@@ -1,14 +1,23 @@
-use super::{
-    aggregate::Aggregate, connection::Connection, filter::Filter, load::Load, mapping::Map,
-    migrate::MigrateBlock,
-};
+use super::{connection::Connection, migrate::MigrateBlock};
+use crate::parser::{Rule, StatementParser};
+use pest::iterators::Pair;
 
 #[derive(Debug)]
 pub enum Statement {
-    Connections(Connection),
+    Connection(Connection),
     Migrate(MigrateBlock),
-    Filter(Filter),
-    Load(Load),
-    Map(Map),
-    Aggregate(Aggregate),
+    EOI,
+}
+
+impl StatementParser for Statement {
+    fn parse(pair: Pair<Rule>) -> Self {
+        match pair.as_rule() {
+            Rule::connections => {
+                let connection = Connection::parse(pair);
+                Statement::Connection(connection)
+            }
+            Rule::migrate => Statement::Migrate(MigrateBlock::parse(pair)),
+            _ => Statement::EOI,
+        }
+    }
 }

@@ -1,4 +1,4 @@
-use smql_v02::statements::setting::Settings;
+use smql::statements::setting::Settings;
 
 #[derive(Debug)]
 pub struct MigrationState {
