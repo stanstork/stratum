@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use common::{computed::ComputedField, mapping::EntityMappingContext};
+use common::{computed::ComputedField, mapping::EntityMapping};
 use smql::statements::expr::{Expression, Literal};
 use sql_adapter::{
     metadata::column::{data_type::ColumnDataType, metadata::ColumnMetadata},
@@ -15,7 +15,7 @@ pub struct ExpressionWrapper(pub Expression);
 pub async fn infer_computed_type(
     computed: &ComputedField,
     columns: &[ColumnMetadata],
-    mapping: &EntityMappingContext,
+    mapping: &EntityMapping,
     adapter: &AdapterRef,
 ) -> Option<ColumnDataType> {
     // Clone the expression node into wrapper and run inference.
@@ -23,7 +23,7 @@ pub async fn infer_computed_type(
     let data_type = expr.infer_type(columns, mapping, adapter).await;
 
     if let Some(data_type) = data_type {
-        return Some(data_type);
+        Some(data_type)
     } else {
         match computed.expression {
             Expression::Lookup { .. } => None,
@@ -43,12 +43,13 @@ pub async fn infer_computed_type(
 ///    heap-allocated trait object.
 /// 2. Gives the function a concrete, nameable return type that exactly matches
 ///    `InferComputedTypeFn` alias.
+///
 /// Without this boxing shim, there’s no way to coerce the raw `async fn` into
 /// a plain function-pointer signature, because its real future type is anonymous.
 pub fn boxed_infer_computed_type<'a>(
     computed: &'a ComputedField,
     columns: &'a [ColumnMetadata],
-    mapping: &'a EntityMappingContext,
+    mapping: &'a EntityMapping,
     adapter: &'a AdapterRef,
 ) -> Pin<Box<dyn Future<Output = Option<ColumnDataType>> + Send + 'a>> {
     // Box the future returned by async fn
@@ -61,7 +62,7 @@ impl TypeInferencer for ExpressionWrapper {
     async fn infer_type(
         &self,
         columns: &[ColumnMetadata],
-        mapping: &EntityMappingContext,
+        mapping: &EntityMapping,
         adapter: &AdapterRef,
     ) -> Option<ColumnDataType> {
         match &self.0 {
@@ -92,8 +93,8 @@ impl TypeInferencer for ExpressionWrapper {
                 _ => None,
             },
 
-            Expression::Lookup { table, key, .. } => {
-                let table_name = mapping.entity_name_map.resolve(table);
+            Expression::Lookup { entity, key, .. } => {
+                let table_name = mapping.entity_name_map.resolve(entity);
                 let meta = adapter.fetch_metadata(&table_name).await.ok()?;
                 meta.columns()
                     .iter()

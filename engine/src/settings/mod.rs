@@ -1,4 +1,4 @@
-use crate::context::MigrationContext;
+use crate::{context::item::ItemContext, error::MigrationError};
 use async_trait::async_trait;
 use batch_size::BatchSizeSetting;
 use constraints::IgnoreConstraintsSettings;
@@ -6,57 +6,60 @@ use create_cols::CreateMissingColumnsSetting;
 use create_tables::CreateMissingTablesSetting;
 use infer_schema::InferSchemaSetting;
 use phase::MigrationSettingsPhase;
-use smql::{
-    plan::MigrationPlan,
-    statements::setting::{Setting, SettingValue},
-};
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use smql::statements::setting::Settings;
 
 pub mod batch_size;
 pub mod constraints;
 pub mod context;
 pub mod create_cols;
 pub mod create_tables;
+pub mod error;
 pub mod infer_schema;
 pub mod phase;
 
 #[async_trait]
-pub trait MigrationSetting {
+pub trait MigrationSetting: Send + Sync {
     fn phase(&self) -> MigrationSettingsPhase;
-    async fn apply(
-        &self,
-        plan: &MigrationPlan,
-        context: Arc<Mutex<MigrationContext>>,
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    async fn apply(&self, ctx: &mut ItemContext) -> Result<(), MigrationError>;
 }
 
-pub async fn parse_settings(
-    settings: &[Setting],
-    context: &Arc<Mutex<MigrationContext>>,
-) -> Vec<Box<dyn MigrationSetting>> {
-    let mut migration_settings = Vec::new();
-    for setting in settings {
-        match (setting.key.as_str(), setting.value.clone()) {
-            ("infer_schema", SettingValue::Boolean(true)) => {
-                migration_settings
-                    .push(Box::new(InferSchemaSetting::new(context).await)
-                        as Box<dyn MigrationSetting>)
-            }
-            ("batch_size", SettingValue::Integer(size)) => migration_settings
-                .push(Box::new(BatchSizeSetting(size)) as Box<dyn MigrationSetting>),
-            ("create_missing_columns", SettingValue::Boolean(true)) => migration_settings
-                .push(Box::new(CreateMissingColumnsSetting::new(context).await)
-                    as Box<dyn MigrationSetting>),
-            ("create_missing_tables", SettingValue::Boolean(true)) => migration_settings
-                .push(Box::new(CreateMissingTablesSetting::new(context).await)
-                    as Box<dyn MigrationSetting>),
-            ("ignore_constraints", SettingValue::Boolean(true)) => migration_settings
-                .push(Box::new(IgnoreConstraintsSettings(true)) as Box<dyn MigrationSetting>),
-            _ => (), // Ignore unknown settings
-        }
-    }
+pub async fn collect_settings(cfg: &Settings, ctx: &ItemContext) -> Vec<Box<dyn MigrationSetting>> {
+    let src = ctx.source.clone();
+    let dest = ctx.destination.clone();
+    let state = ctx.state.clone();
+    let mapping = ctx.mapping.clone();
 
-    migration_settings.sort_by_key(|s| s.phase());
-    migration_settings
+    // Collect all settings based on the configuration
+    let mut all: Vec<Box<dyn MigrationSetting>> = [
+        // batch size > 0?
+        cfg.batch_size
+            .gt(&0)
+            .then(|| Box::new(BatchSizeSetting(cfg.batch_size as i64)) as _),
+        // ignore constraints?
+        cfg.ignore_constraints
+            .then(|| Box::new(IgnoreConstraintsSettings(true)) as _),
+        // create missing tables?
+        cfg.create_missing_tables.then(|| {
+            Box::new(CreateMissingTablesSetting::new(
+                &src, &dest, &mapping, &state,
+            )) as _
+        }),
+        // create missing columns?
+        cfg.create_missing_columns.then(|| {
+            Box::new(CreateMissingColumnsSetting::new(
+                &src, &dest, &mapping, &state,
+            )) as _
+        }),
+        // infer schema?
+        cfg.infer_schema
+            .then(|| Box::new(InferSchemaSetting::new(&src, &dest, &mapping, &state)) as _),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    // Sort settings by phase to ensure they are applied in the correct order
+    all.sort_by_key(|s| s.phase());
+
+    all
 }

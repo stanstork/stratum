@@ -3,9 +3,11 @@ use async_trait::async_trait;
 
 #[async_trait]
 pub trait DbDataSource: MetadataHelper + Send + Sync {
+    type Error;
+
     async fn fetch(
         &self,
         batch_size: usize,
         offset: Option<usize>,
-    ) -> Result<Vec<RowData>, Box<dyn std::error::Error>>;
+    ) -> Result<Vec<RowData>, Self::Error>;
 }

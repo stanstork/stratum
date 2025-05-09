@@ -1,10 +1,11 @@
 use super::types::TypeEngine;
 use crate::{
     adapter::SqlAdapter,
+    error::db::DbError,
     metadata::table::TableMetadata,
     query::{builder::SqlQueryBuilder, column::ColumnDef, fk::ForeignKeyDef},
 };
-use common::mapping::EntityMappingContext;
+use common::mapping::EntityMapping;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -24,7 +25,7 @@ pub struct SchemaPlan<'a> {
     ignore_constraints: bool,
 
     /// Mapping of table names from source to target database.
-    mapping: EntityMappingContext,
+    mapping: EntityMapping,
 
     /// Metadata graph containing all source tables and their relationships
     /// (both referencing and referenced dependencies).
@@ -45,7 +46,7 @@ impl<'a> SchemaPlan<'a> {
         source_adapter: Arc<(dyn SqlAdapter + Send + Sync)>,
         type_engine: TypeEngine<'a>,
         ignore_constraints: bool,
-        mapping: EntityMappingContext,
+        mapping: EntityMapping,
     ) -> Self {
         Self {
             source_adapter,
@@ -122,7 +123,7 @@ impl<'a> SchemaPlan<'a> {
             .collect()
     }
 
-    pub async fn enum_queries(&self) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
+    pub async fn enum_queries(&self) -> Result<HashSet<String>, DbError> {
         let mut queries = HashSet::new();
 
         for (table, column) in &self.enum_definitions {
@@ -157,7 +158,7 @@ impl<'a> SchemaPlan<'a> {
     pub fn add_fk_def(&mut self, table_name: &str, fk_def: ForeignKeyDef) {
         self.fk_definitions
             .entry(table_name.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(fk_def);
     }
 
@@ -208,11 +209,11 @@ impl<'a> SchemaPlan<'a> {
 
             if let Some(inferred_type) = self
                 .type_engine
-                .infer_computed_type(&computed, &metadata.columns(), &self.mapping)
+                .infer_computed_type(computed, &metadata.columns(), &self.mapping)
                 .await
             {
                 defs.push(ColumnDef {
-                    name: column_name.clone(),
+                    name: (*column_name).clone(),
                     is_nullable: true, // Assuming computed fields are nullable
                     default: None,
                     data_type: inferred_type.to_string(),

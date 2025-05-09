@@ -2,108 +2,93 @@ use crate::adapter::MySqlAdapter;
 use async_trait::async_trait;
 use sql_adapter::{
     adapter::SqlAdapter,
-    filter::filter::SqlFilter,
+    error::db::DbError,
+    filter::SqlFilter,
     join::source::JoinSource,
     metadata::{provider::MetadataHelper, table::TableMetadata},
     requests::{FetchRowsRequest, FetchRowsRequestBuilder},
     row::row_data::RowData,
     source::DbDataSource,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct MySqlDataSource {
     adapter: MySqlAdapter,
-    meta: HashMap<String, TableMetadata>,
-    joins: Vec<JoinSource>,
+    meta: Option<TableMetadata>,
+    join: Option<JoinSource>,
     filter: Option<SqlFilter>,
 }
 
 impl MySqlDataSource {
-    pub fn new(adapter: MySqlAdapter, joins: Vec<JoinSource>, filter: Option<SqlFilter>) -> Self {
+    pub fn new(adapter: MySqlAdapter, join: Option<JoinSource>, filter: Option<SqlFilter>) -> Self {
         Self {
             adapter,
-            joins,
+            join,
             filter,
-            meta: HashMap::new(),
+            meta: None,
         }
     }
 
-    fn build_fetch_requests(
-        &self,
-        batch_size: usize,
-        offset: Option<usize>,
-    ) -> Vec<FetchRowsRequest> {
-        let mut seen_tables = HashSet::new();
-        let mut requests = Vec::new();
+    fn build_fetch_request(&self, batch_size: usize, offset: Option<usize>) -> FetchRowsRequest {
+        let meta = self
+            .meta
+            .as_ref()
+            .expect("MySqlDataSource: Metadata is not set");
 
-        for tbl_name in self.meta.keys() {
-            for (table_name, mut base_fields) in self.get_metadata(tbl_name).select_fields() {
-                // Skip already processed tables
-                if !seen_tables.insert(table_name.clone()) {
-                    continue;
-                }
+        // Precompute the JOIN clauses (if any) and any extra fields they bring in
+        let join_clauses = self
+            .join
+            .as_ref()
+            .map(|j| j.clauses.clone())
+            .unwrap_or_default();
+        let extra_fields = self.join.as_ref().map(|j| j.fields()).unwrap_or_default();
 
-                // Extract join info for this table, if any
-                let (joins, joined_fields) = JoinSource::filter_joins(&table_name, &self.joins);
-                base_fields.extend(joined_fields);
+        // Base table name and its own metadata‐driven columns
+        let table_name = meta.name.clone();
+        let mut columns = meta.select_fields();
+        // merge in the JOIN‐generated columns
+        columns.extend(extra_fields);
 
-                // Build filter for this table+joins
-                let filter = self
-                    .filter
-                    .as_ref()
-                    .map(|f| f.for_table(&table_name, &joins));
+        // Build the optional filter for this table
+        let filter = self
+            .filter
+            .as_ref()
+            .map(|f| f.for_table(&table_name, &join_clauses));
 
-                let request = FetchRowsRequestBuilder::new(table_name.clone())
-                    .alias(table_name.clone())
-                    .columns(base_fields)
-                    .joins(joins)
-                    .filter(filter)
-                    .limit(batch_size)
-                    .offset(offset)
-                    .build();
-
-                requests.push(request);
-            }
-        }
-
-        requests
+        FetchRowsRequestBuilder::new(table_name.clone())
+            .alias(table_name.clone())
+            .columns(columns)
+            .joins(join_clauses)
+            .filter(filter)
+            .limit(batch_size)
+            .offset(offset)
+            .build()
     }
 }
 
 #[async_trait]
 impl DbDataSource for MySqlDataSource {
+    type Error = DbError;
+
     async fn fetch(
         &self,
         batch_size: usize,
         offset: Option<usize>,
-    ) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
-        // Build fetch requests for each table
-        let requests = self.build_fetch_requests(batch_size, offset);
-
-        let mut rows = Vec::new();
-        for request in requests {
-            // Execute each request and collect results
-            let result = self.adapter.fetch_rows(request).await?;
-            rows.extend(result);
-        }
-
-        Ok(rows)
+    ) -> Result<Vec<RowData>, DbError> {
+        // Build fetch request
+        let request = self.build_fetch_request(batch_size, offset);
+        self.adapter.fetch_rows(request).await
     }
 }
 
 impl MetadataHelper for MySqlDataSource {
-    fn get_metadata(&self, table: &str) -> &TableMetadata {
-        self.meta
-            .get(table)
-            .unwrap_or_else(|| panic!("Metadata for table {} not found", table))
+    fn get_metadata(&self) -> &Option<TableMetadata> {
+        &self.meta
     }
 
-    fn set_metadata(&mut self, metadata: HashMap<String, TableMetadata>) {
-        self.meta = metadata;
+    fn set_metadata(&mut self, meta: TableMetadata) {
+        self.meta = Some(meta);
     }
 
     fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)> {
@@ -111,6 +96,9 @@ impl MetadataHelper for MySqlDataSource {
     }
 
     fn get_tables(&self) -> Vec<TableMetadata> {
-        self.meta.values().cloned().collect()
+        self.meta
+            .as_ref()
+            .map(|meta| vec![meta.clone()])
+            .unwrap_or_default()
     }
 }

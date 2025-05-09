@@ -1,9 +1,6 @@
 use super::{phase::MigrationSettingsPhase, MigrationSetting};
-use crate::context::MigrationContext;
+use crate::{context::item::ItemContext, error::MigrationError};
 use async_trait::async_trait;
-use smql::plan::MigrationPlan;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use tracing::info;
 
 pub struct IgnoreConstraintsSettings(pub bool);
@@ -14,13 +11,8 @@ impl MigrationSetting for IgnoreConstraintsSettings {
         MigrationSettingsPhase::IgnoreConstraints
     }
 
-    async fn apply(
-        &self,
-        _plan: &MigrationPlan,
-        context: Arc<Mutex<MigrationContext>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let context = context.lock().await;
-        let mut state = context.state.lock().await;
+    async fn apply(&self, ctx: &mut ItemContext) -> Result<(), MigrationError> {
+        let mut state = ctx.state.lock().await;
         state.ignore_constraints = self.0;
         info!("Ignore constraints setting applied");
         Ok(())

@@ -22,6 +22,7 @@ Cargo.lock
 
 # Migration buffer created by sled
 migration_buffer/
+migration_buffer_*/
 
 /.idea
 .DS_Store

@@ -1,29 +1,26 @@
 use crate::{
     buffer::SledBuffer,
-    context::MigrationContext,
-    destination::{data_dest::DataDestination, destination::Destination},
+    context::item::ItemContext,
+    destination::{data::DataDestination, Destination},
     record::{DataRecord, Record},
 };
-use common::mapping::EntityMappingContext;
+use common::mapping::EntityMapping;
 use sql_adapter::{metadata::table::TableMetadata, row::row_data::RowData};
 use std::{collections::HashMap, sync::Arc, time::Instant};
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{watch::Receiver, Mutex};
 use tracing::{error, info};
 
 pub struct Consumer {
     buffer: Arc<SledBuffer>,
     destination: Destination,
-    mappings: EntityMappingContext,
-    shutdown_receiver: watch::Receiver<bool>,
+    mappings: EntityMapping,
+    shutdown_receiver: Receiver<bool>,
     batch_size: usize,
 }
 
 impl Consumer {
-    pub async fn new(
-        context: Arc<Mutex<MigrationContext>>,
-        receiver: watch::Receiver<bool>,
-    ) -> Self {
-        let ctx = context.lock().await;
+    pub async fn new(ctx: Arc<Mutex<ItemContext>>, receiver: Receiver<bool>) -> Self {
+        let ctx = ctx.lock().await;
         let buffer = Arc::clone(&ctx.buffer);
         let destination = ctx.destination.clone();
         let mappings = ctx.mapping.clone();
@@ -81,7 +78,7 @@ impl Consumer {
         &self,
         record: Vec<u8>,
         batch_map: &mut HashMap<String, Vec<Record>>,
-        tables: &Vec<TableMetadata>,
+        tables: &[TableMetadata],
     ) {
         let row_data = RowData::deserialize(record);
         let table_name = row_data.table.clone(); //self.table_name_map.resolve(&row_data.table);
@@ -97,7 +94,7 @@ impl Consumer {
     async fn flush_all(
         &self,
         batch_map: &mut HashMap<String, Vec<Record>>,
-        tables: &Vec<TableMetadata>,
+        tables: &[TableMetadata],
     ) {
         for table in tables.iter() {
             // Get the table name from the map or use the original name if no mapping is found

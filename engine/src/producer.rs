@@ -1,7 +1,7 @@
 use crate::{
     buffer::SledBuffer,
-    context::MigrationContext,
-    source::source::Source,
+    context::item::ItemContext,
+    source::Source,
     transform::{
         computed::ComputedTransform,
         mapping::{ColumnMapper, TableMapper},
@@ -9,20 +9,20 @@ use crate::{
     },
 };
 use std::sync::Arc;
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{watch::Sender, Mutex};
 use tracing::{error, info};
 
 pub struct Producer {
     buffer: Arc<SledBuffer>,
     source: Source,
     pipeline: TransformPipeline,
-    shutdown_sender: watch::Sender<bool>,
+    shutdown_sender: Sender<bool>,
     batch_size: usize,
 }
 
 impl Producer {
-    pub async fn new(context: Arc<Mutex<MigrationContext>>, sender: watch::Sender<bool>) -> Self {
-        let ctx = context.lock().await;
+    pub async fn new(ctx: Arc<Mutex<ItemContext>>, sender: Sender<bool>) -> Self {
+        let ctx = ctx.lock().await;
         let buffer = Arc::clone(&ctx.buffer);
         let source = ctx.source.clone();
 

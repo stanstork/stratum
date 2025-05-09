@@ -1,9 +1,6 @@
 use crate::parser::{Rule, StatementParser};
 use pest::iterators::Pair;
 
-// ─────────────────────────────────────────────────────────────
-// EXPRESSIONS: Used across statements
-// ─────────────────────────────────────────────────────────────
 #[derive(Debug, Clone)]
 pub enum Expression {
     Arithmetic {
@@ -16,7 +13,7 @@ pub enum Expression {
         arguments: Vec<Expression>,
     },
     Lookup {
-        table: String,
+        entity: String,
         key: String,
         field: Option<String>,
     },
@@ -79,7 +76,7 @@ impl StatementParser for Expression {
             }
             Rule::lookup_expression => {
                 let mut inner = pair.into_inner();
-                let table = inner
+                let entity = inner
                     .next()
                     .expect("Expected lookup table name")
                     .as_str()
@@ -91,7 +88,7 @@ impl StatementParser for Expression {
                     .to_string();
                 let field = inner.next().map(|p| p.as_str().to_string());
 
-                Expression::Lookup { table, key, field }
+                Expression::Lookup { entity, key, field }
             }
             Rule::ident => Expression::Identifier(pair.as_str().to_string()),
             Rule::string => Expression::Literal(Literal::String(pair.as_str().to_string())),
@@ -129,6 +126,22 @@ impl StatementParser for Literal {
             Rule::decimal => Literal::Float(pair.as_str().parse().expect("Invalid float")),
             Rule::boolean => Literal::Boolean(pair.as_str().eq_ignore_ascii_case("true")),
             _ => panic!("Invalid literal: {:?}", pair.as_str()),
+        }
+    }
+}
+
+impl Expression {
+    pub fn entity(&self) -> Option<String> {
+        match self {
+            Expression::Lookup { entity, .. } => Some(entity.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn key(&self) -> Option<String> {
+        match self {
+            Expression::Lookup { key, .. } => Some(key.clone()),
+            _ => None,
         }
     }
 }

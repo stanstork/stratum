@@ -1,13 +1,13 @@
-use common::mapping::EntityMappingContext;
+use common::mapping::EntityMapping;
 use smql::statements::expr::{Expression, Literal, Operator};
 use sql_adapter::{metadata::column::value::ColumnValue, row::row_data::RowData};
 
 pub trait Evaluator {
-    fn evaluate(&self, row: &RowData, mapping: &EntityMappingContext) -> Option<ColumnValue>;
+    fn evaluate(&self, row: &RowData, mapping: &EntityMapping) -> Option<ColumnValue>;
 }
 
 impl Evaluator for Expression {
-    fn evaluate(&self, row: &RowData, mapping: &EntityMappingContext) -> Option<ColumnValue> {
+    fn evaluate(&self, row: &RowData, mapping: &EntityMapping) -> Option<ColumnValue> {
         match self {
             Expression::Identifier(identifier) => row
                 .columns
@@ -41,17 +41,25 @@ impl Evaluator for Expression {
                 eval_function(name, &evaluated_args)
             }
 
-            Expression::Lookup { table, key, .. } => mapping
-                .computed_flat
-                .iter()
-                .find(|f| {
-                    matches!(&f.expression,
-                        Expression::Lookup { table: t, key: k, .. }
-                            if t.eq_ignore_ascii_case(&table) && k.eq_ignore_ascii_case(&key)
-                    )
-                })
-                .and_then(|field| row.get(&field.name))
-                .and_then(|col_data| col_data.value.clone()),
+            Expression::Lookup { entity, key, .. } => {
+                // Find the LookupField for this entity+key
+                mapping
+                    .lookups
+                    .get(entity)
+                    .and_then(|fields| fields.iter().find(|lk| lk.key.eq_ignore_ascii_case(key)))
+                    // Given the LookupField, find the matching column in the current row
+                    .and_then(|lk| {
+                        row.columns
+                            .iter()
+                            .find(|col| col.name.eq_ignore_ascii_case(&lk.target))
+                            .and_then(|col| col.value.clone())
+                    })
+                    // If anything was missing, log and return None
+                    .or_else(|| {
+                        eprintln!("Lookup failed for entity='{}', key='{}'", entity, key);
+                        None
+                    })
+            }
         }
     }
 }

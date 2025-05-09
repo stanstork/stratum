@@ -1,24 +1,32 @@
 use crate::parser::{Rule, StatementParser};
 use bitflags::bitflags;
+use core::fmt;
 use pest::iterators::Pair;
 
+// ─────────────────────────────────────────────────────────────
+// CONNECTION statement
+// Example: CONNECTIONS (
+//    SOURCE(MYSQL,         "mysql://user:password@localhost:3306/testdb"),
+//    DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/testdb")
+//  );
+// ─────────────────────────────────────────────────────────────
 #[derive(Debug, Clone)]
 pub struct Connection {
     pub source: ConnectionPair,
-    pub destination: ConnectionPair,
+    pub dest: ConnectionPair,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConnectionPair {
+    pub conn_type: ConnectionType,
+    pub format: DataFormat,
+    pub conn_str: String,
 }
 
 #[derive(Debug, Clone)]
 pub enum ConnectionType {
     Source,
-    Destination,
-}
-
-#[derive(Debug, Clone)]
-pub struct ConnectionPair {
-    pub con_str: String,
-    pub data_format: DataFormat,
-    pub con_type: ConnectionType,
+    Dest,
 }
 
 bitflags! {
@@ -31,82 +39,80 @@ bitflags! {
     }
 }
 
-impl DataFormat {
-    fn from_pair(pair: Pair<'_, Rule>) -> Result<Self, String> {
-        match pair.as_str().to_lowercase().as_str() {
-            "mysql" => Ok(DataFormat::MySql),
-            "postgres" => Ok(DataFormat::Postgres),
-            "sqlite" => Ok(DataFormat::Sqlite),
-            "mongo" => Ok(DataFormat::Mongo),
-            _ => Err(format!("Invalid data format: {}", pair.as_str())),
-        }
-    }
-
-    pub const fn sql_databases() -> Self {
-        Self::MySql.union(Self::Postgres).union(Self::Sqlite)
-    }
-}
-
-impl Connection {
-    const SOURCE: &'static str = "source";
-    const DESTINATION: &'static str = "destination";
-}
+const KEY_SOURCE: &str = "SOURCE";
+const KEY_MYSQL: &str = "MYSQL";
+const KEY_POSTGRES: &str = "POSTGRES";
+const KEY_SQLITE: &str = "SQLITE";
 
 impl StatementParser for Connection {
-    fn parse(pair: Pair<Rule>) -> Self {
+    fn parse(pair: Pair<crate::parser::Rule>) -> Self {
         let mut source = None;
-        let mut destination = None;
+        let mut dest = None;
 
         for inner_pair in pair.into_inner() {
-            if let Rule::connection_pair = inner_pair.as_rule() {
+            if inner_pair.as_rule() == Rule::connection_pair {
                 let connection_pair = ConnectionPair::parse(inner_pair);
-                match connection_pair.con_type {
+                match connection_pair.conn_type {
                     ConnectionType::Source => source = Some(connection_pair),
-                    ConnectionType::Destination => destination = Some(connection_pair),
+                    ConnectionType::Dest => dest = Some(connection_pair),
                 }
             }
         }
 
         Connection {
-            source: source.expect("Missing source connection"),
-            destination: destination.expect("Missing destination connection"),
+            source: source.expect("Expected a source connection"),
+            dest: dest.expect("Expected a destination connection"),
         }
     }
 }
 
 impl StatementParser for ConnectionPair {
-    fn parse(pair: Pair<Rule>) -> Self {
-        let mut con_str = String::new();
-        let mut data_format = None;
-        let mut con_type = None;
+    fn parse(pair: Pair<crate::parser::Rule>) -> Self {
+        let mut inner = pair.into_inner();
 
-        for inner_pair in pair.into_inner() {
-            match inner_pair.as_rule() {
-                Rule::con_str => {
-                    con_str = inner_pair.as_str().trim_matches('"').to_string();
-                }
-                Rule::data_format => {
-                    data_format =
-                        Some(DataFormat::from_pair(inner_pair).expect("Invalid data format"));
-                }
-                Rule::connection_type => {
-                    con_type = match inner_pair.as_str().to_lowercase().as_str() {
-                        Connection::SOURCE => Some(ConnectionType::Source),
-                        Connection::DESTINATION => Some(ConnectionType::Destination),
-                        _ => None,
-                    };
-                }
-                _ => panic!(
-                    "Unexpected rule in connection pair: {:?}",
-                    inner_pair.as_rule()
-                ),
-            }
-        }
+        // parse connection type
+        let conn_type_str = inner.next().unwrap().as_str();
+        let conn_type = if conn_type_str.eq_ignore_ascii_case(KEY_SOURCE) {
+            ConnectionType::Source
+        } else {
+            ConnectionType::Dest
+        };
+
+        // parse data format
+        let format_str = inner.next().unwrap().as_str().to_ascii_uppercase();
+        let format = match format_str.as_str() {
+            KEY_MYSQL => DataFormat::MySql,
+            KEY_POSTGRES => DataFormat::Postgres,
+            KEY_SQLITE => DataFormat::Sqlite,
+            _ => DataFormat::empty(),
+        };
+
+        // parse connection string
+        let conn_str = inner.next().unwrap().as_str().trim_matches('"').to_string();
 
         ConnectionPair {
-            con_str,
-            data_format: data_format.expect("Missing data format"),
-            con_type: con_type.expect("Missing connection type"),
+            conn_type,
+            format,
+            conn_str,
         }
+    }
+}
+
+impl fmt::Display for DataFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut formats = Vec::new();
+        if self.contains(DataFormat::MySql) {
+            formats.push("MySQL");
+        }
+        if self.contains(DataFormat::Postgres) {
+            formats.push("Postgres");
+        }
+        if self.contains(DataFormat::Sqlite) {
+            formats.push("SQLite");
+        }
+        if self.contains(DataFormat::Mongo) {
+            formats.push("MongoDB");
+        }
+        write!(f, "{}", formats.join(", "))
     }
 }

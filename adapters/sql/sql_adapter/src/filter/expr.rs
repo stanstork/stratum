@@ -15,10 +15,6 @@ pub enum SqlFilterExpr {
     /// An OR of 1+ sub‐expressions
     /// (e.g. `WHERE a = 1 OR b = 2`)
     Or(Vec<SqlFilterExpr>),
-
-    /// A NOT of a sub‐expression
-    /// (e.g. NOT (a = 1 AND b = 2))
-    Not(Box<SqlFilterExpr>),
 }
 
 impl SqlFilterExpr {
@@ -34,10 +30,6 @@ impl SqlFilterExpr {
         SqlFilterExpr::Or(exprs)
     }
 
-    pub fn not(expr: SqlFilterExpr) -> Self {
-        SqlFilterExpr::Not(Box::new(expr))
-    }
-
     /// Render this expression as SQL
     pub fn to_sql(&self) -> String {
         match self {
@@ -50,7 +42,6 @@ impl SqlFilterExpr {
                 let exprs = exprs.iter().map(SqlFilterExpr::to_sql).collect::<Vec<_>>();
                 format!("({})", exprs.join(" OR "))
             }
-            SqlFilterExpr::Not(expr) => format!("NOT ({})", expr.to_sql()),
         }
     }
 
@@ -90,10 +81,6 @@ impl SqlFilterExpr {
                     _ => Some(SqlFilterExpr::Or(kept)),
                 }
             }
-            // NOT: keep inner if it survives, then rewrap
-            SqlFilterExpr::Not(inner) => inner
-                .filter_for_table(table, joins)
-                .map(|c| SqlFilterExpr::Not(Box::new(c))),
         }
     }
 }

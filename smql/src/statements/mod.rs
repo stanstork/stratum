@@ -1,4 +1,3 @@
-pub mod aggregate;
 pub mod connection;
 pub mod expr;
 pub mod filter;

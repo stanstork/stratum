@@ -1,4 +1,4 @@
-use crate::{filter::filter::SqlFilter, join::clause::JoinClause, query::select::SelectField};
+use crate::{filter::SqlFilter, join::clause::JoinClause, query::select::SelectField};
 
 #[derive(Debug, Clone)]
 pub struct FetchRowsRequest {

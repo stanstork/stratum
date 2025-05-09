@@ -1,6 +1,6 @@
 use super::pipeline::Transform;
 use crate::{expr::eval::Evaluator, record::Record};
-use common::mapping::EntityMappingContext;
+use common::mapping::EntityMapping;
 use smql::statements::expr::Expression;
 use sql_adapter::{
     metadata::column::value::{ColumnData, ColumnValue},
@@ -9,11 +9,11 @@ use sql_adapter::{
 use tracing::warn;
 
 pub struct ComputedTransform {
-    mapping: EntityMappingContext,
+    mapping: EntityMapping,
 }
 
 impl ComputedTransform {
-    pub fn new(mapping: EntityMappingContext) -> Self {
+    pub fn new(mapping: EntityMapping) -> Self {
         Self { mapping }
     }
 }

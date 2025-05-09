@@ -1,13 +1,13 @@
 use super::pipeline::Transform;
 use crate::record::Record;
-use common::mapping::{FieldMappings, FieldNameMap};
+use common::mapping::{FieldMappings, NameMap};
 
 pub struct ColumnMapper {
     ns_map: FieldMappings,
 }
 
 pub struct TableMapper {
-    name_map: FieldNameMap,
+    name_map: NameMap,
 }
 
 impl ColumnMapper {
@@ -17,7 +17,7 @@ impl ColumnMapper {
 }
 
 impl TableMapper {
-    pub fn new(name_map: FieldNameMap) -> Self {
+    pub fn new(name_map: NameMap) -> Self {
         Self { name_map }
     }
 }

@@ -7,6 +7,7 @@ edition = "2021"
 mysql = { path = "../adapters/sql/mysql" }
 postgres = { path = "../adapters/sql/postgres" }
 sql_adapter = { path = "../adapters/sql/sql_adapter" }
+smql = { path = "../smql" }
 common = { path = "../common" }
 
 async-trait = "0.1.86"
@@ -29,7 +30,7 @@ uuid = { version = "1.13.1", features = ["serde", "v4"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 lazy_static = "1.5.0"
-smql = { path = "../smql" }
 sled = "0.34.7"
 bincode = "1.3.3"
 bitflags = "2.9.0"
+thiserror = "2.0.12"

@@ -1,6 +1,6 @@
 use super::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField};
 use crate::{
-    filter::filter::SqlFilter,
+    filter::SqlFilter,
     join::clause::{JoinClause, JoinType},
 };
 
@@ -259,7 +259,7 @@ impl SqlQueryBuilder {
                 column.char_max_length.unwrap()
             ));
         } else {
-            query.push_str(&format!("{}", column.data_type));
+            query.push_str(&column.data_type.to_string());
         }
         if !column.is_nullable {
             query.push_str(" NOT NULL");

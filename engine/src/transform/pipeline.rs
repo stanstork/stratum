@@ -46,3 +46,9 @@ impl TransformPipelineExt for TransformPipeline {
         self
     }
 }
+
+impl Default for TransformPipeline {
+    fn default() -> Self {
+        Self::new()
+    }
+}

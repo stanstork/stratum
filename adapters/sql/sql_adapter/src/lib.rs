@@ -1,6 +1,7 @@
 pub mod adapter;
 pub mod db_type;
 pub mod destination;
+pub mod error;
 pub mod filter;
 pub mod join;
 pub mod metadata;

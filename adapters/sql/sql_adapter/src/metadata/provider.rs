@@ -1,5 +1,5 @@
 use super::{column::metadata::ColumnMetadata, fk::ForeignKeyMetadata, table::TableMetadata};
-use crate::{adapter::SqlAdapter, schema::plan::SchemaPlan};
+use crate::{adapter::SqlAdapter, error::db::DbError, schema::plan::SchemaPlan};
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
@@ -8,16 +8,15 @@ use std::{
 };
 
 pub trait MetadataHelper {
-    fn get_metadata(&self, table: &str) -> &TableMetadata;
-    fn set_metadata(&mut self, metadata: HashMap<String, TableMetadata>);
+    fn get_metadata(&self) -> &Option<TableMetadata>;
+    fn set_metadata(&mut self, meta: TableMetadata);
     fn get_tables(&self) -> Vec<TableMetadata>;
     fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)>;
 }
 
 // MetadataFuture is a type alias for a Future that returns a Result
 // containing the TableMetadata or an error
-pub type MetadataFuture<'a, T> =
-    Pin<Box<dyn Future<Output = Result<T, Box<dyn std::error::Error>>> + Send + 'a>>;
+pub type MetadataFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, DbError>> + Send + 'a>>;
 
 pub struct MetadataProvider;
 
@@ -26,7 +25,7 @@ impl MetadataProvider {
     pub async fn build_metadata_graph(
         adapter: &(dyn SqlAdapter + Send + Sync),
         tables: &[String],
-    ) -> Result<HashMap<String, TableMetadata>, Box<dyn std::error::Error>> {
+    ) -> Result<HashMap<String, TableMetadata>, DbError> {
         let mut graph = HashMap::new();
         let mut visited = HashSet::new();
 
@@ -40,7 +39,7 @@ impl MetadataProvider {
     pub fn construct_table_metadata(
         table: &str,
         columns: HashMap<String, ColumnMetadata>,
-    ) -> Result<TableMetadata, Box<dyn std::error::Error>> {
+    ) -> Result<TableMetadata, DbError> {
         let primary_keys: Vec<String> = columns
             .values()
             .filter(|col| col.is_primary_key)
@@ -90,7 +89,10 @@ impl MetadataProvider {
             }
 
             if !visited.insert(table_name.to_string()) {
-                return Err("Circular reference detected".into());
+                return Err(DbError::CircularReference(format!(
+                    "Circular reference detected for table: {}",
+                    table_name
+                )));
             }
 
             let mut metadata = adapter.fetch_metadata(table_name).await?;

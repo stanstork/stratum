@@ -1,9 +1,6 @@
 use clap::Parser;
 use commands::Commands;
 use engine::runner;
-use smql::parser::parse;
-use sql_adapter::metadata::table::TableMetadata;
-use std::collections::HashSet;
 use tracing::Level;
 pub mod commands;
 
@@ -24,24 +21,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::Migrate { config } => {
             let source = read_migration_config(&config).expect("Failed to read config file");
-            let plan = parse(&source).expect("Failed to parse config file");
-
+            let plan = smql::parser::parse(&source).expect("Failed to parse config file");
             runner::run(plan).await?;
         }
         Commands::Source { command } => match command {
-            commands::SourceCommand::Info { config, verbose } => {
-                let source = read_migration_config(&config).expect("Failed to read config file");
-                let plan = parse(&source).expect("Failed to parse config file");
-                let metadata = runner::load_src_metadata(&plan).await?;
+            commands::SourceCommand::Info {
+                config: _,
+                verbose: _,
+            } => {
+                // let source = read_migration_config(&config).expect("Failed to read config file");
+                // let plan = parse(&source).expect("Failed to parse config file");
+                // let metadata = runner::load_src_metadata(&plan).await?;
 
-                if verbose {
-                    println!("{:#?}", metadata);
-                } else {
-                    let mut visited = HashSet::new();
-                    for m in metadata.values() {
-                        TableMetadata::print_tables_tree(m, 1, &mut visited);
-                    }
-                }
+                // if verbose {
+                //     println!("{:#?}", metadata);
+                // } else {
+                //     let mut visited = HashSet::new();
+                //     for m in metadata.values() {
+                //         TableMetadata::print_tables_tree(m, 1, &mut visited);
+                //     }
+                // }
+
+                todo!("Implement source info command");
             }
         },
     }

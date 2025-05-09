@@ -18,7 +18,19 @@ pub struct TableMetadata {
 }
 
 impl TableMetadata {
-    pub fn select_fields(&self) -> HashMap<String, Vec<SelectField>> {
+    pub fn select_fields(&self) -> Vec<SelectField> {
+        self.columns
+            .keys()
+            .map(|col_name| SelectField {
+                table: self.name.clone(),
+                alias: Some(col_name.clone()),
+                column: col_name.clone(),
+                data_type: self.columns[col_name].data_type.to_string(),
+            })
+            .collect()
+    }
+
+    pub fn select_fields_rec(&self) -> HashMap<String, Vec<SelectField>> {
         let mut visited = HashSet::new();
         let mut tables = Vec::new();
 
