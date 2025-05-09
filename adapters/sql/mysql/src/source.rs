@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use sql_adapter::{
     adapter::SqlAdapter,
     error::db::DbError,
-    filter::filter::SqlFilter,
+    filter::SqlFilter,
     join::source::JoinSource,
     metadata::{provider::MetadataHelper, table::TableMetadata},
     requests::{FetchRowsRequest, FetchRowsRequestBuilder},

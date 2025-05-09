@@ -1,12 +1,12 @@
 use crate::{
     consumer::Consumer,
     context::{global::GlobalContext, item::ItemContext},
-    destination::{data_dest::DataDestination, destination::Destination},
+    destination::{data::DataDestination, Destination},
     error::MigrationError,
-    filter::{compiler::FilterCompiler, filter::Filter, sql::SqlFilterCompiler},
+    filter::{compiler::FilterCompiler, sql::SqlFilterCompiler, Filter},
     producer::Producer,
     settings::collect_settings,
-    source::{data_source::DataSource, linked_source::LinkedSource, source::Source},
+    source::{data::DataSource, linked::LinkedSource, Source},
     state::MigrationState,
 };
 use common::mapping::EntityMapping;
@@ -136,7 +136,7 @@ async fn create_destination(
 async fn apply_settings(ctx: &mut ItemContext, settings: &Settings) -> Result<(), MigrationError> {
     info!("Applying migration settings");
 
-    let settings = collect_settings(&settings, &ctx).await;
+    let settings = collect_settings(settings, ctx).await;
     for setting in settings.iter() {
         setting.apply(ctx).await?;
     }

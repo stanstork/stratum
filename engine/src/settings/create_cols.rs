@@ -4,10 +4,10 @@ use super::{
 };
 use crate::{
     context::item::ItemContext,
-    destination::{data_dest::DataDestination, destination::Destination},
+    destination::{data::DataDestination, Destination},
     error::MigrationError,
     expr::types::ExpressionWrapper,
-    source::source::Source,
+    source::Source,
     state::MigrationState,
 };
 use async_trait::async_trait;
@@ -127,14 +127,9 @@ impl CreateMissingColumnsSetting {
 
     /// issue the ALTER TABLE … ADD COLUMN statement
     async fn add_column(&self, table: &str, column: &ColumnDef) -> Result<(), SettingsError> {
-        if let DataDestination::Database(db) = &self.context.destination.data_dest {
-            db.lock().await.add_column(table, column).await?;
-            Ok(())
-        } else {
-            Err(SettingsError::UnsupportedDestination(
-                "CreateMissingColumnsSetting only supports Database destinations".to_string(),
-            ))
-        }
+        let DataDestination::Database(db) = &self.context.destination.data_dest;
+        db.lock().await.add_column(table, column).await?;
+        Ok(())
     }
 }
 

@@ -23,7 +23,7 @@ pub async fn infer_computed_type(
     let data_type = expr.infer_type(columns, mapping, adapter).await;
 
     if let Some(data_type) = data_type {
-        return Some(data_type);
+        Some(data_type)
     } else {
         match computed.expression {
             Expression::Lookup { .. } => None,
@@ -43,6 +43,7 @@ pub async fn infer_computed_type(
 ///    heap-allocated trait object.
 /// 2. Gives the function a concrete, nameable return type that exactly matches
 ///    `InferComputedTypeFn` alias.
+///
 /// Without this boxing shim, there’s no way to coerce the raw `async fn` into
 /// a plain function-pointer signature, because its real future type is anonymous.
 pub fn boxed_infer_computed_type<'a>(

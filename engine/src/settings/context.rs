@@ -1,9 +1,9 @@
 use super::error::SettingsError;
 use crate::{
     context::item::ItemContext,
-    destination::{data_dest::DataDestination, destination::Destination},
+    destination::{data::DataDestination, Destination},
     expr::types::boxed_infer_computed_type,
-    source::{data_source::DataSource, source::Source},
+    source::{data::DataSource, Source},
     state::MigrationState,
 };
 use common::mapping::EntityMapping;
@@ -66,10 +66,9 @@ impl SchemaSettingContext {
             .format
             .intersects(ItemContext::sql_databases())
         {
-            if let DataDestination::Database(dest) = &self.destination.data_dest {
-                dest.lock().await.infer_schema(&schema_plan).await?;
-                return Ok(());
-            }
+            let DataDestination::Database(dest) = &self.destination.data_dest;
+            dest.lock().await.infer_schema(&schema_plan).await?;
+            return Ok(());
         }
         Err(SettingsError::UnsupportedDestinationFormat(
             self.destination.format.to_string(),

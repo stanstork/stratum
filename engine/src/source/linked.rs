@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub enum LinkedSource {
-    Table(JoinSource),
+    Table(Box<JoinSource>),
     File { path: String, format: String },
 }
 
@@ -41,12 +41,12 @@ impl LinkedSource {
             meta.insert(table.clone(), table_meta);
         }
 
-        Ok(LinkedSource::Table(JoinSource::new(
+        Ok(LinkedSource::Table(Box::new(JoinSource::new(
             meta,
             join_clauses,
             projection,
             mapping.clone(),
-        )))
+        ))))
     }
 
     fn build_join_clauses(matches: &[MatchPair]) -> Vec<JoinClause> {

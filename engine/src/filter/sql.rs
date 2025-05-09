@@ -1,10 +1,10 @@
-use super::{compiler::FilterCompiler, filter::expr_to_string};
+use super::{compiler::FilterCompiler, expr_to_string};
 use smql::statements::{
     self,
     expr::Expression,
     filter::{Comparator, FilterExpression},
 };
-use sql_adapter::filter::{condition::Condition, expr::SqlFilterExpr, filter::SqlFilter};
+use sql_adapter::filter::{condition::Condition, expr::SqlFilterExpr, SqlFilter};
 
 pub struct SqlFilterCompiler;
 
@@ -29,9 +29,6 @@ fn compile_sql_expr(expr: &FilterExpression) -> SqlFilterExpr {
             match name.to_ascii_uppercase().as_str() {
                 "AND" => SqlFilterExpr::and(children),
                 "OR" => SqlFilterExpr::or(children),
-                "NOT" if children.len() == 1 => {
-                    SqlFilterExpr::not(children.into_iter().next().unwrap())
-                }
                 _ => panic!("Unsupported function call: {}", name),
             }
         }

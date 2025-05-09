@@ -73,7 +73,7 @@ impl<'a> TypeEngine<'a> {
         columns: &[ColumnMetadata],
         mapping: &EntityMapping,
     ) -> Option<ColumnDataType> {
-        E::infer_type(&expr, columns, mapping, &self.adapter).await
+        E::infer_type(expr, columns, mapping, &self.adapter).await
     }
 
     pub fn type_converter(&self) -> &TypeConverter {

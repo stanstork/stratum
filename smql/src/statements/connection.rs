@@ -1,8 +1,6 @@
-use core::fmt;
-use std::path::Display;
-
 use crate::parser::{Rule, StatementParser};
 use bitflags::bitflags;
+use core::fmt;
 use pest::iterators::Pair;
 
 // ─────────────────────────────────────────────────────────────

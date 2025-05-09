@@ -30,3 +30,9 @@ impl MigrationState {
         }
     }
 }
+
+impl Default for MigrationState {
+    fn default() -> Self {
+        MigrationState::new()
+    }
+}

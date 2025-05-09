@@ -37,16 +37,18 @@ impl SledBuffer {
     }
 
     pub fn read_next(&self) -> Option<Vec<u8>> {
-        let iter = self.db.scan_prefix(Self::RECORD_PREFIX);
-
-        for item in iter {
-            if let Ok((key, value)) = item {
-                let _ = self.db.remove(&key); // Remove after reading
-                return Some(value.to_vec());
-            }
-        }
-
-        None
+        self.db
+            // scan all keys starting with our prefix
+            .scan_prefix(Self::RECORD_PREFIX)
+            // take only the first entry, if any
+            .next()
+            // drop it if it was an Err(_)
+            .and_then(Result::ok)
+            // remove the key and return the bytes
+            .map(|(key, value)| {
+                let _ = self.db.remove(&key);
+                value.to_vec()
+            })
     }
 
     pub fn read_last_offset(&self) -> usize {

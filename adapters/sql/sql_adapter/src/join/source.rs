@@ -29,7 +29,7 @@ impl JoinSource {
     pub fn fields(&self) -> Vec<SelectField> {
         self.clauses
             .iter()
-            .map(|clause| {
+            .flat_map(|clause| {
                 let left_alias = clause.left.alias.clone();
 
                 // fetch the map of table -> fields, then get table’s Vec<SelectField>
@@ -75,7 +75,6 @@ impl JoinSource {
                     })
                     .collect::<Vec<SelectField>>()
             })
-            .flatten()
             .collect()
     }
 

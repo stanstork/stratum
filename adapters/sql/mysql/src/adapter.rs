@@ -17,7 +17,7 @@ use sql_adapter::{
 };
 use sqlx::{MySql, Pool, Row};
 use std::collections::HashMap;
-use tracing::{debug, info};
+use tracing::info;
 
 #[derive(Clone)]
 pub struct MySqlAdapter {

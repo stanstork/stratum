@@ -1,5 +1,5 @@
-use super::linked_source::LinkedSource;
-use crate::{adapter::Adapter, error::MigrationError, filter::filter::Filter};
+use super::linked::LinkedSource;
+use crate::{adapter::Adapter, error::MigrationError, filter::Filter};
 use mysql::source::MySqlDataSource;
 use smql::statements::connection::DataFormat;
 use sql_adapter::{error::db::DbError, metadata::table::TableMetadata, source::DbDataSource};
@@ -21,16 +21,13 @@ impl DataSource {
         match (format, adapter) {
             // MySQL + MySqlAdapter -> build a MySqlDataSource
             (DataFormat::MySql, Adapter::MySql(mysql_adapter)) => {
-                let sql_filter = filter.as_ref().and_then(|f| {
-                    if let Filter::Sql(sf) = f {
-                        Some(sf.clone())
-                    } else {
-                        None
-                    }
+                let sql_filter = filter.as_ref().map(|f| {
+                    let Filter::Sql(sf) = f;
+                    sf.clone()
                 });
                 let join = linked.as_ref().and_then(|ls| {
                     if let LinkedSource::Table(j) = ls {
-                        Some(j.clone())
+                        Some((**j).clone())
                     } else {
                         None
                     }

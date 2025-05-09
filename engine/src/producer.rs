@@ -1,7 +1,7 @@
 use crate::{
     buffer::SledBuffer,
     context::item::ItemContext,
-    source::source::Source,
+    source::Source,
     transform::{
         computed::ComputedTransform,
         mapping::{ColumnMapper, TableMapper},

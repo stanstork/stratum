@@ -1,7 +1,7 @@
 use crate::{
     buffer::SledBuffer,
-    destination::{data_dest::DataDestination, destination::Destination},
-    source::{data_source::DataSource, source::Source},
+    destination::{data::DataDestination, Destination},
+    source::{data::DataSource, Source},
     state::MigrationState,
 };
 use common::mapping::EntityMapping;
@@ -62,7 +62,6 @@ impl ItemContext {
         let name = &self.source.name;
         let db = match &self.source.primary {
             DataSource::Database(db) => Some(db),
-            _ => None,
         };
 
         let fetch_meta_fn = |tbl: String| self.source.primary.fetch_meta(tbl);
@@ -75,7 +74,6 @@ impl ItemContext {
         let name = &self.destination.name;
         let db = match &self.destination.data_dest {
             DataDestination::Database(db) => Some(db),
-            _ => None,
         };
 
         let fetch_meta_fn = |tbl: String| self.destination.data_dest.fetch_meta(tbl);

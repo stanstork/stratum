@@ -1,7 +1,7 @@
 use super::{context::SchemaSettingContext, phase::MigrationSettingsPhase, MigrationSetting};
 use crate::{
-    context::item::ItemContext, destination::destination::Destination, error::MigrationError,
-    source::source::Source, state::MigrationState,
+    context::item::ItemContext, destination::Destination, error::MigrationError, source::Source,
+    state::MigrationState,
 };
 use async_trait::async_trait;
 use common::mapping::EntityMapping;

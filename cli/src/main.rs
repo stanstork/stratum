@@ -25,7 +25,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             runner::run(plan).await?;
         }
         Commands::Source { command } => match command {
-            commands::SourceCommand::Info { config, verbose } => {
+            commands::SourceCommand::Info {
+                config: _,
+                verbose: _,
+            } => {
                 // let source = read_migration_config(&config).expect("Failed to read config file");
                 // let plan = parse(&source).expect("Failed to parse config file");
                 // let metadata = runner::load_src_metadata(&plan).await?;
@@ -38,6 +41,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 //         TableMetadata::print_tables_tree(m, 1, &mut visited);
                 //     }
                 // }
+
+                todo!("Implement source info command");
             }
         },
     }

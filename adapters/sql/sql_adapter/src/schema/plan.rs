@@ -158,7 +158,7 @@ impl<'a> SchemaPlan<'a> {
     pub fn add_fk_def(&mut self, table_name: &str, fk_def: ForeignKeyDef) {
         self.fk_definitions
             .entry(table_name.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(fk_def);
     }
 
@@ -209,7 +209,7 @@ impl<'a> SchemaPlan<'a> {
 
             if let Some(inferred_type) = self
                 .type_engine
-                .infer_computed_type(&computed, &metadata.columns(), &self.mapping)
+                .infer_computed_type(computed, &metadata.columns(), &self.mapping)
                 .await
             {
                 defs.push(ColumnDef {

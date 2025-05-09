@@ -1,7 +1,7 @@
 use crate::{
     buffer::SledBuffer,
     context::item::ItemContext,
-    destination::{data_dest::DataDestination, destination::Destination},
+    destination::{data::DataDestination, Destination},
     record::{DataRecord, Record},
 };
 use common::mapping::EntityMapping;
@@ -78,7 +78,7 @@ impl Consumer {
         &self,
         record: Vec<u8>,
         batch_map: &mut HashMap<String, Vec<Record>>,
-        tables: &Vec<TableMetadata>,
+        tables: &[TableMetadata],
     ) {
         let row_data = RowData::deserialize(record);
         let table_name = row_data.table.clone(); //self.table_name_map.resolve(&row_data.table);
@@ -94,7 +94,7 @@ impl Consumer {
     async fn flush_all(
         &self,
         batch_map: &mut HashMap<String, Vec<Record>>,
-        tables: &Vec<TableMetadata>,
+        tables: &[TableMetadata],
     ) {
         for table in tables.iter() {
             // Get the table name from the map or use the original name if no mapping is found
