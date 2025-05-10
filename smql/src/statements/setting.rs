@@ -9,6 +9,7 @@ pub struct Settings {
     pub create_missing_tables: bool,
     pub copy_columns: CopyColumns,
     pub batch_size: usize,
+    pub cascade_schema: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -30,6 +31,7 @@ const KEY_CREATE_MISSING_COLUMNS: &str = "CREATE_MISSING_COLUMNS";
 const KEY_CREATE_MISSING_TABLES: &str = "CREATE_MISSING_TABLES";
 const KEY_COPY_COLUMNS: &str = "COPY_COLUMNS";
 const KEY_BATCH_SIZE: &str = "BATCH_SIZE";
+const KEY_CASCADE_SCHEMA: &str = "CASCADE_SCHEMA";
 const KEY_TRUE: &str = "TRUE";
 const KEY_ALL: &str = "ALL";
 const KEY_MAP_ONLY: &str = "MAP_ONLY";
@@ -75,6 +77,7 @@ impl Settings {
                 KEY_CREATE_MISSING_TABLES => settings.create_missing_tables = pair.to_bool(),
                 KEY_COPY_COLUMNS => settings.copy_columns = pair.to_copy_columns(),
                 KEY_BATCH_SIZE => settings.batch_size = pair.to_usize(),
+                KEY_CASCADE_SCHEMA => settings.cascade_schema = pair.to_bool(),
                 _ => {}
             }
         }
@@ -92,6 +95,7 @@ impl Default for Settings {
             create_missing_tables: false,
             copy_columns: CopyColumns::All,
             batch_size: 1000,
+            cascade_schema: false,
         }
     }
 }

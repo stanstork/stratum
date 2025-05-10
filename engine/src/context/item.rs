@@ -8,7 +8,10 @@ use common::mapping::EntityMapping;
 use smql::statements::connection::DataFormat;
 use sql_adapter::{
     error::db::DbError,
-    metadata::{provider::MetadataHelper, table::TableMetadata},
+    metadata::{
+        provider::{MetadataHelper, MetadataProvider},
+        table::TableMetadata,
+    },
 };
 use std::{future::Future, sync::Arc};
 use tokio::sync::Mutex;
@@ -59,13 +62,32 @@ impl ItemContext {
     }
 
     pub async fn set_src_meta(&self) -> Result<(), DbError> {
-        let name = &self.source.name;
-        let db = match &self.source.primary {
-            DataSource::Database(db) => Some(db),
+        // Extract the table name and flags
+        let name = self.source.name.clone();
+        let cascade_schema = {
+            let state = self.state.lock().await;
+            state.cascade_schema
         };
 
-        let fetch_meta_fn = |tbl: String| self.source.primary.fetch_meta(tbl);
-        Self::set_meta(name, db, fetch_meta_fn).await?;
+        // Only proceed if primary source is a Database
+        let db_opt = match &self.source.primary {
+            DataSource::Database(db) => Some(db.clone()),
+        };
+
+        let fetch_meta = move |tbl: String| self.source.primary.fetch_meta(tbl);
+        Self::set_meta(&name.clone(), db_opt.as_ref(), fetch_meta).await?;
+
+        // If cascade_schema is enabled, build the metadata graph and set it
+        if cascade_schema {
+            if let Some(db_mutex) = db_opt {
+                let mut db_src = db_mutex.lock().await;
+                let adapter = db_src.adapter();
+                let graph =
+                    MetadataProvider::build_metadata_graph(adapter.as_ref(), &[name.clone()])
+                        .await?;
+                db_src.set_related_meta(graph);
+            }
+        }
 
         Ok(())
     }

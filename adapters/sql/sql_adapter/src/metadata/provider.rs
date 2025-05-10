@@ -10,6 +10,7 @@ use std::{
 pub trait MetadataHelper {
     fn get_metadata(&self) -> &Option<TableMetadata>;
     fn set_metadata(&mut self, meta: TableMetadata);
+    fn set_related_meta(&mut self, meta: HashMap<String, TableMetadata>);
     fn get_tables(&self) -> Vec<TableMetadata>;
     fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)>;
 }
