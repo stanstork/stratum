@@ -4,19 +4,36 @@ use sql_adapter::{
     adapter::SqlAdapter,
     error::db::DbError,
     filter::SqlFilter,
-    join::source::JoinSource,
-    metadata::{provider::MetadataHelper, table::TableMetadata},
+    join::{
+        clause::{JoinClause, JoinColumn, JoinCondition, JoinType, JoinedTable},
+        join_path_clauses,
+        source::JoinSource,
+    },
+    metadata::{fk::ForeignKeyMetadata, provider::MetadataHelper, table::TableMetadata},
     requests::{FetchRowsRequest, FetchRowsRequestBuilder},
     row::row_data::RowData,
     source::DbDataSource,
 };
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    sync::Arc,
+};
 
 #[derive(Clone)]
 pub struct MySqlDataSource {
+    /// The MySQL adapter used to interact with the database.
     adapter: MySqlAdapter,
-    meta: Option<TableMetadata>,
+
+    /// The metadata for the primary source table
+    primary_meta: Option<TableMetadata>,
+
+    /// Metadata for any child tables (via FKs) when cascading
+    related_meta: HashMap<String, TableMetadata>,
+
+    /// Optional JOIN graph to be applied to the primary table
     join: Option<JoinSource>,
+
+    /// Optional row‐filter pushed down to the source
     filter: Option<SqlFilter>,
 }
 
@@ -26,13 +43,14 @@ impl MySqlDataSource {
             adapter,
             join,
             filter,
-            meta: None,
+            primary_meta: None,
+            related_meta: HashMap::new(),
         }
     }
 
     fn build_fetch_request(&self, batch_size: usize, offset: Option<usize>) -> FetchRowsRequest {
         let meta = self
-            .meta
+            .primary_meta
             .as_ref()
             .expect("MySqlDataSource: Metadata is not set");
 
@@ -65,6 +83,101 @@ impl MySqlDataSource {
             .offset(offset)
             .build()
     }
+
+    fn build_related_fetch_requests(
+        &self,
+        batch_size: usize,
+        offset: Option<usize>,
+    ) -> Vec<FetchRowsRequest> {
+        let join_src = match &self.join {
+            Some(js) => js,
+            None => return vec![],
+        };
+
+        // For each related table
+        self.related_meta
+            .iter()
+            .map(|(tbl_name, meta)| {
+                let cols = meta.select_fields();
+                let table_joins = join_src.related_joins(tbl_name.clone());
+                let filter = self
+                    .filter
+                    .as_ref()
+                    .map(|f| f.for_table(&tbl_name, &table_joins));
+                FetchRowsRequestBuilder::new(tbl_name.clone())
+                    .alias(tbl_name.clone())
+                    .columns(cols)
+                    .joins(table_joins)
+                    .filter(filter)
+                    .limit(batch_size)
+                    .offset(offset)
+                    .build()
+            })
+            .collect()
+    }
+
+    fn collect_tables(graph: &HashMap<String, TableMetadata>, root: &str) -> HashSet<String> {
+        let mut seen = HashSet::new();
+        let mut queue = VecDeque::new();
+        seen.insert(root.to_string());
+        queue.push_back(root.to_string());
+
+        while let Some(tbl) = queue.pop_front() {
+            for fk in &graph[&tbl].foreign_keys {
+                let child = fk.referenced_table.clone();
+                if seen.insert(child.clone()) {
+                    queue.push_back(child);
+                }
+            }
+            for (t, meta) in graph {
+                if meta
+                    .foreign_keys
+                    .iter()
+                    .any(|fk| fk.referenced_table.eq_ignore_ascii_case(&tbl))
+                {
+                    if seen.insert(t.clone()) {
+                        queue.push_back(t.clone());
+                    }
+                }
+            }
+        }
+        seen
+    }
+
+    fn join_path(
+        graph: &HashMap<String, TableMetadata>,
+        root: &str,
+        target: &str,
+    ) -> HashSet<String> {
+        let mut seen = HashSet::new();
+        let mut queue = VecDeque::new();
+        seen.insert(root.to_string());
+        queue.push_back(root.to_string());
+
+        while let Some(tbl) = queue.pop_front() {
+            if tbl.eq_ignore_ascii_case(target) {
+                return seen;
+            }
+            for fk in &graph[&tbl].foreign_keys {
+                let child = fk.referenced_table.clone();
+                if seen.insert(child.clone()) {
+                    queue.push_back(child);
+                }
+            }
+            for (t, meta) in graph {
+                if meta
+                    .foreign_keys
+                    .iter()
+                    .any(|fk| fk.referenced_table.eq_ignore_ascii_case(&tbl))
+                {
+                    if seen.insert(t.clone()) {
+                        queue.push_back(t.clone());
+                    }
+                }
+            }
+        }
+        seen
+    }
 }
 
 #[async_trait]
@@ -76,19 +189,45 @@ impl DbDataSource for MySqlDataSource {
         batch_size: usize,
         offset: Option<usize>,
     ) -> Result<Vec<RowData>, DbError> {
+        for meta in self.related_meta.values() {
+            let tables = Self::collect_tables(&self.related_meta, &meta.name);
+            // println!("Related tables for {}: {:?}", meta.name, tables);
+            for table in tables {
+                if table.eq_ignore_ascii_case(&meta.name) {
+                    continue;
+                }
+                let jp = join_path_clauses(&self.related_meta, &meta.name, &table);
+                if let Some(clauses) = jp {
+                    println!("Join path from {} to {}: {:?}", meta.name, table, clauses);
+                }
+            }
+        }
+
+        todo!("Implement fetch method for MySqlDataSource");
+
         // Build fetch request
         let request = self.build_fetch_request(batch_size, offset);
-        self.adapter.fetch_rows(request).await
+        // Build related fetch requests
+        let related_requests = self.build_related_fetch_requests(batch_size, offset);
+
+        let mut rows = self.adapter.fetch_rows(request).await?;
+
+        for related_request in related_requests {
+            let related_rows = self.adapter.fetch_rows(related_request).await?;
+            rows.extend(related_rows);
+        }
+
+        Ok(rows)
     }
 }
 
 impl MetadataHelper for MySqlDataSource {
     fn get_metadata(&self) -> &Option<TableMetadata> {
-        &self.meta
+        &self.primary_meta
     }
 
     fn set_metadata(&mut self, meta: TableMetadata) {
-        self.meta = Some(meta);
+        self.primary_meta = Some(meta);
     }
 
     fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)> {
@@ -96,9 +235,13 @@ impl MetadataHelper for MySqlDataSource {
     }
 
     fn get_tables(&self) -> Vec<TableMetadata> {
-        self.meta
+        self.primary_meta
             .as_ref()
             .map(|meta| vec![meta.clone()])
             .unwrap_or_default()
+    }
+
+    fn set_related_meta(&mut self, meta: HashMap<String, TableMetadata>) {
+        self.related_meta = meta;
     }
 }

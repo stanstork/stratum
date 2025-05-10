@@ -9,7 +9,7 @@ use sql_adapter::{
     row::row_data::RowData,
     schema::plan::SchemaPlan,
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tracing::{error, info};
 
 pub struct PgDestination {
@@ -135,5 +135,10 @@ impl MetadataHelper for PgDestination {
 
     fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)> {
         Arc::new(self.adapter.clone())
+    }
+
+    fn set_related_meta(&mut self, meta: HashMap<String, TableMetadata>) {
+        let _ = meta;
+        // No-op for now
     }
 }

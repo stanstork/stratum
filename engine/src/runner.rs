@@ -149,6 +149,7 @@ async fn apply_settings(ctx: &mut ItemContext, settings: &Settings) -> Result<()
 async fn set_meta(ctx: &mut ItemContext) -> Result<(), MigrationError> {
     ctx.set_src_meta().await?;
     ctx.set_dest_meta().await?;
+
     Ok(())
 }
 

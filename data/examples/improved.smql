@@ -6,7 +6,8 @@ CONNECTIONS (
 MIGRATE (
     SOURCE(TABLE, orders) -> DEST(TABLE, orders_flat) [
         SETTINGS (
-            INFER_SCHEMA           = FALSE,
+            INFER_SCHEMA           = TRUE,
+            CASCADE_SCHEMA         = TRUE,
             IGNORE_CONSTRAINTS     = TRUE,
             CREATE_MISSING_TABLES  = TRUE,
             CREATE_MISSING_COLUMNS = TRUE,
@@ -25,7 +26,7 @@ MIGRATE (
             MATCH(
                 ON(users[id]             -> orders[user_id]),
                 ON(order_items[order_id] -> orders[id]),
-                ON(products[id]  -> order_items[id])
+                ON(products[id]          -> order_items[id])
             )
         ),
 
