@@ -5,11 +5,11 @@ use sql_adapter::{
     error::db::DbError,
     filter::SqlFilter,
     join::{
-        clause::{JoinClause, JoinColumn, JoinCondition, JoinType, JoinedTable},
-        join_path_clauses,
+        clause::JoinType,
         source::JoinSource,
+        utils::{build_join_clauses, combine_join_paths, find_join_path},
     },
-    metadata::{fk::ForeignKeyMetadata, provider::MetadataHelper, table::TableMetadata},
+    metadata::{provider::MetadataHelper, table::TableMetadata},
     requests::{FetchRowsRequest, FetchRowsRequestBuilder},
     row::row_data::RowData,
     source::DbDataSource,
@@ -143,41 +143,6 @@ impl MySqlDataSource {
         }
         seen
     }
-
-    fn join_path(
-        graph: &HashMap<String, TableMetadata>,
-        root: &str,
-        target: &str,
-    ) -> HashSet<String> {
-        let mut seen = HashSet::new();
-        let mut queue = VecDeque::new();
-        seen.insert(root.to_string());
-        queue.push_back(root.to_string());
-
-        while let Some(tbl) = queue.pop_front() {
-            if tbl.eq_ignore_ascii_case(target) {
-                return seen;
-            }
-            for fk in &graph[&tbl].foreign_keys {
-                let child = fk.referenced_table.clone();
-                if seen.insert(child.clone()) {
-                    queue.push_back(child);
-                }
-            }
-            for (t, meta) in graph {
-                if meta
-                    .foreign_keys
-                    .iter()
-                    .any(|fk| fk.referenced_table.eq_ignore_ascii_case(&tbl))
-                {
-                    if seen.insert(t.clone()) {
-                        queue.push_back(t.clone());
-                    }
-                }
-            }
-        }
-        seen
-    }
 }
 
 #[async_trait]
@@ -191,32 +156,24 @@ impl DbDataSource for MySqlDataSource {
     ) -> Result<Vec<RowData>, DbError> {
         for meta in self.related_meta.values() {
             let tables = Self::collect_tables(&self.related_meta, &meta.name);
-            println!("Related tables: {:?} for {}", tables, meta.name);
-
             let filter_tables = self.filter.as_ref().map(|f| f.tables()).unwrap_or_default();
-            println!("Filter tables: {:?}", filter_tables);
-
             let joins = filter_tables
                 .iter()
-                .map(|t| join_path_clauses(&self.related_meta, &meta.name, t))
-                .filter(|jp| jp.is_some())
-                .map(|jp| jp.unwrap())
+                .map(|t| find_join_path(&self.related_meta, &meta.name, t))
+                .filter(|p| p.is_some())
                 .flatten()
-                .collect::<Vec<JoinClause>>();
+                .collect::<Vec<_>>();
+            let paths = combine_join_paths(joins, &meta.name);
+            let join_clauses =
+                build_join_clauses(&meta.name, &paths, &self.related_meta, JoinType::Inner);
 
-            let mut seen = HashSet::new();
-            let deduped: Vec<JoinClause> = joins
-                .into_iter()
-                .filter(|jc| seen.insert(jc.clone()))
-                .collect();
-
-            println!("Join clauses: {:?}", deduped);
+            println!("Join clauses: {:?}", join_clauses);
 
             let select_fields = meta.select_fields();
             let request = FetchRowsRequestBuilder::new(meta.name.clone())
                 .alias(meta.name.clone())
                 .columns(select_fields)
-                .joins(deduped)
+                .joins(join_clauses)
                 .filter(self.filter.clone())
                 .limit(batch_size)
                 .offset(offset)
