@@ -1,5 +1,7 @@
 use super::{column::metadata::ColumnMetadata, fk::ForeignKeyMetadata, table::TableMetadata};
-use crate::{adapter::SqlAdapter, error::db::DbError, schema::plan::SchemaPlan};
+use crate::{
+    adapter::SqlAdapter, error::db::DbError, join::clause::JoinClause, schema::plan::SchemaPlan,
+};
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
@@ -11,7 +13,9 @@ pub trait MetadataHelper {
     fn get_metadata(&self) -> &Option<TableMetadata>;
     fn set_metadata(&mut self, meta: TableMetadata);
     fn set_related_meta(&mut self, meta: HashMap<String, TableMetadata>);
-    fn get_tables(&self) -> Vec<TableMetadata>;
+    fn set_cascade_joins(&mut self, table: String, joins: Vec<JoinClause>);
+
+    fn tables(&self) -> Vec<TableMetadata>;
     fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)>;
 }
 

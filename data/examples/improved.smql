@@ -8,7 +8,7 @@ MIGRATE (
         SETTINGS (
             INFER_SCHEMA           = TRUE,
             CASCADE_SCHEMA         = TRUE,
-            IGNORE_CONSTRAINTS     = TRUE,
+            IGNORE_CONSTRAINTS     = FALSE,
             CREATE_MISSING_TABLES  = TRUE,
             CREATE_MISSING_COLUMNS = TRUE,
             COPY_COLUMNS           = MAP_ONLY
@@ -17,7 +17,7 @@ MIGRATE (
         FILTER(
             AND(
                 orders[total]  > 400,
-                users[id]      < 4
+                users[id]      != 1
             )
         ),
 

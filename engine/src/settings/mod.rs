@@ -57,7 +57,7 @@ pub async fn collect_settings(cfg: &Settings, ctx: &ItemContext) -> Vec<Box<dyn 
             .then(|| Box::new(InferSchemaSetting::new(&src, &dest, &mapping, &state)) as _),
         // cascade schema?
         cfg.cascade_schema
-            .then(|| Box::new(CascadeSchemaSetting(true)) as _),
+            .then(|| Box::new(CascadeSchemaSetting::new(&src, &dest, &mapping, &state)) as _),
     ]
     .into_iter()
     .flatten()

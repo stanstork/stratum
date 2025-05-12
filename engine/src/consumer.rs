@@ -41,7 +41,7 @@ impl Consumer {
 
     async fn run(self) {
         let tables = match &self.destination.data_dest {
-            DataDestination::Database(db) => db.lock().await.get_tables(),
+            DataDestination::Database(db) => db.lock().await.tables(),
         };
 
         info!("Disabling triggers for all tables");

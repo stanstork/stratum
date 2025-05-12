@@ -2,8 +2,8 @@
 pub enum MigrationSettingsPhase {
     BatchSize,
     IgnoreConstraints,
-    CascadeSchema,
     InferSchema,
     CreateMissingTables,
     CreateMissingColumns,
+    CascadeSchema,
 }
