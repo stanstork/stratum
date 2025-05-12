@@ -191,16 +191,38 @@ impl DbDataSource for MySqlDataSource {
     ) -> Result<Vec<RowData>, DbError> {
         for meta in self.related_meta.values() {
             let tables = Self::collect_tables(&self.related_meta, &meta.name);
-            // println!("Related tables for {}: {:?}", meta.name, tables);
-            for table in tables {
-                if table.eq_ignore_ascii_case(&meta.name) {
-                    continue;
-                }
-                let jp = join_path_clauses(&self.related_meta, &meta.name, &table);
-                if let Some(clauses) = jp {
-                    println!("Join path from {} to {}: {:?}", meta.name, table, clauses);
-                }
-            }
+            println!("Related tables: {:?} for {}", tables, meta.name);
+
+            let filter_tables = self.filter.as_ref().map(|f| f.tables()).unwrap_or_default();
+            println!("Filter tables: {:?}", filter_tables);
+
+            let joins = filter_tables
+                .iter()
+                .map(|t| join_path_clauses(&self.related_meta, &meta.name, t))
+                .filter(|jp| jp.is_some())
+                .map(|jp| jp.unwrap())
+                .flatten()
+                .collect::<Vec<JoinClause>>();
+
+            let mut seen = HashSet::new();
+            let deduped: Vec<JoinClause> = joins
+                .into_iter()
+                .filter(|jc| seen.insert(jc.clone()))
+                .collect();
+
+            println!("Join clauses: {:?}", deduped);
+
+            let select_fields = meta.select_fields();
+            let request = FetchRowsRequestBuilder::new(meta.name.clone())
+                .alias(meta.name.clone())
+                .columns(select_fields)
+                .joins(deduped)
+                .filter(self.filter.clone())
+                .limit(batch_size)
+                .offset(offset)
+                .build();
+
+            let mut rows = self.adapter.fetch_rows(request).await?;
         }
 
         todo!("Implement fetch method for MySqlDataSource");

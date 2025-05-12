@@ -1,4 +1,4 @@
-use crate::metadata::table::TableMetadata;
+use crate::metadata::{fk::ForeignKeyMetadata, table::TableMetadata};
 use clause::{JoinClause, JoinColumn, JoinCondition, JoinType, JoinedTable};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -6,44 +6,69 @@ pub mod clause;
 pub mod field;
 pub mod source;
 
+struct PrevRec {
+    /// The table we came _from_ (parent in the join path).
+    parent: String,
+    /// The table we discovered (the referencing side of the FK).
+    child: String,
+    /// The FK metadata we used to traverse.
+    fk: ForeignKeyMetadata,
+}
+
 pub fn join_path_clauses(
     graph: &HashMap<String, TableMetadata>,
     root: &str,
     target: &str,
 ) -> Option<Vec<JoinClause>> {
+    let root_lc = root.to_lowercase();
+    let target_lc = target.to_lowercase();
+
+    // BFS state: visited set, queue, and backpointers
     let mut seen = HashSet::new();
     let mut queue = VecDeque::new();
-
-    // For each discovered table, remember (parent_table, fk)
     let mut prev = HashMap::new();
 
-    seen.insert(root.to_lowercase());
-    queue.push_back(root.to_lowercase());
+    seen.insert(root_lc.clone());
+    queue.push_back(root_lc.clone());
 
+    // 1) BFS until we find `target`
     while let Some(curr) = queue.pop_front() {
-        if curr.eq_ignore_ascii_case(target) {
+        if curr == target_lc {
             break;
         }
 
-        // Outgoing edges: curr -> fk.referenced_table
+        // (a) Traverse outgoing FKs: curr → referenced_table
         if let Some(meta) = graph.get(&curr) {
             for fk in &meta.foreign_keys {
                 let child = fk.referenced_table.to_lowercase();
                 if seen.insert(child.clone()) {
-                    prev.insert(child.clone(), (curr.clone(), fk.clone()));
+                    prev.insert(
+                        child.clone(),
+                        PrevRec {
+                            parent: curr.clone(),
+                            child: child.clone(),
+                            fk: fk.clone(),
+                        },
+                    );
                     queue.push_back(child);
                 }
             }
         }
 
-        // Incoming edges: for every table that references curr
+        // (b) Traverse incoming FKs: tables that reference `curr`
         for (tbl, meta) in graph {
             for fk in &meta.foreign_keys {
                 if fk.referenced_table.eq_ignore_ascii_case(&curr) {
                     let child = tbl.to_lowercase();
                     if seen.insert(child.clone()) {
-                        // note: parent = `curr`, fk comes from `tbl`
-                        prev.insert(child.clone(), (curr.clone(), fk.clone()));
+                        prev.insert(
+                            child.clone(),
+                            PrevRec {
+                                parent: curr.clone(),
+                                child: child.clone(),
+                                fk: fk.clone(),
+                            },
+                        );
                         queue.push_back(child);
                     }
                 }
@@ -51,46 +76,45 @@ pub fn join_path_clauses(
         }
     }
 
-    // If we never reached `target`, no path exists
-    if !seen.contains(&target.to_lowercase()) {
+    // If we never discovered `target`, there is no path
+    if !seen.contains(&target_lc) {
         return None;
     }
 
-    let mut clauses = Vec::new();
-    let mut table = target.to_lowercase();
+    // 2) Reconstruct the path of JoinClauses from `target` back to `root`
+    let mut path = Vec::new();
+    let mut node = target_lc.clone();
+    while node != root_lc {
+        let rec = prev.remove(&node).unwrap();
 
-    while table != root.to_lowercase() {
-        let (parent, fk) = prev.remove(&table).unwrap();
-
-        let parent_alias = parent.clone();
-        let child_alias = table.clone();
-
+        // Build the clause: left = parent table, right = child table
         let clause = JoinClause {
             left: JoinedTable {
-                table: parent.clone(),
-                alias: parent_alias.clone(),
+                table: rec.parent.clone(),
+                alias: rec.parent.clone(),
             },
             right: JoinedTable {
-                table: child_alias.clone(),
-                alias: child_alias.clone(),
+                table: rec.child.clone(),
+                alias: rec.child.clone(),
             },
             join_type: JoinType::Inner,
             conditions: vec![JoinCondition {
                 left: JoinColumn {
-                    alias: parent_alias.clone(),
-                    column: fk.referenced_column.clone(),
+                    alias: rec.parent.clone(),
+                    column: rec.fk.column.clone(),
                 },
                 right: JoinColumn {
-                    alias: child_alias.clone(),
-                    column: fk.column.clone(),
+                    alias: rec.child.clone(),
+                    column: rec.fk.referenced_column.clone(),
                 },
             }],
         };
 
-        clauses.push(clause);
-        table = parent;
+        path.push(clause);
+        node = rec.parent;
     }
 
-    clauses.reverse();
-    Some(clauses)
+    // 3) Reverse so the clauses go root→...→target
+    path.reverse();
+    Some(path)
 }
