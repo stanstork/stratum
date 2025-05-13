@@ -1,6 +1,7 @@
 use super::clause::{JoinClause, JoinColumn, JoinCondition, JoinType, JoinedTable};
 use crate::metadata::table::TableMetadata;
 use std::collections::{HashMap, HashSet, VecDeque};
+use tracing::warn;
 
 /// Given a graph of TableMetadata keyed by table‐name, find a path
 /// (as a Vec of table‐names) from `start` to `target`, traversing
@@ -130,7 +131,7 @@ pub fn build_join_clauses(
         }
 
         if conditions.is_empty() {
-            println!(
+            warn!(
                 "No FK relation between `{}` and `{}` in schema",
                 current_table, next_table
             );

@@ -1,6 +1,7 @@
 use common::mapping::EntityMapping;
 use smql::statements::expr::{Expression, Literal, Operator};
 use sql_adapter::{metadata::column::value::ColumnValue, row::row_data::RowData};
+use tracing::warn;
 
 pub trait Evaluator {
     fn evaluate(&self, row: &RowData, mapping: &EntityMapping) -> Option<ColumnValue>;
@@ -56,7 +57,7 @@ impl Evaluator for Expression {
                     })
                     // If anything was missing, log and return None
                     .or_else(|| {
-                        eprintln!("Lookup failed for entity='{}', key='{}'", entity, key);
+                        warn!("Lookup failed for entity='{}', key='{}'", entity, key);
                         None
                     })
             }
@@ -129,7 +130,7 @@ fn eval_function(name: &str, args: &[ColumnValue]) -> Option<ColumnValue> {
         }
 
         _ => {
-            eprintln!("Unsupported function: {}", name);
+            warn!("Unsupported function: {}", name);
             None
         }
     }
