@@ -1,6 +1,6 @@
 use common::mapping::EntityMapping;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JoinClause {
     pub left: JoinedTable,
     pub right: JoinedTable,
@@ -8,13 +8,13 @@ pub struct JoinClause {
     pub conditions: Vec<JoinCondition>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JoinedTable {
     pub table: String,
     pub alias: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum JoinType {
     Inner,
     Left,
@@ -22,13 +22,13 @@ pub enum JoinType {
     Full,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JoinCondition {
     pub left: JoinColumn,
     pub right: JoinColumn,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JoinColumn {
     pub alias: String,
     pub column: String,

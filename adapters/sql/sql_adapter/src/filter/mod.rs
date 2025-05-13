@@ -36,4 +36,8 @@ impl SqlFilter {
             .and_then(|e| e.filter_for_table(table, joins));
         SqlFilter { expr }
     }
+
+    pub fn tables(&self) -> Vec<String> {
+        self.expr.as_ref().map(|e| e.tables()).unwrap_or_default()
+    }
 }

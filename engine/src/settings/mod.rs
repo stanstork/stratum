@@ -1,6 +1,7 @@
 use crate::{context::item::ItemContext, error::MigrationError};
 use async_trait::async_trait;
 use batch_size::BatchSizeSetting;
+use cascade::CascadeSchemaSetting;
 use constraints::IgnoreConstraintsSettings;
 use create_cols::CreateMissingColumnsSetting;
 use create_tables::CreateMissingTablesSetting;
@@ -9,6 +10,7 @@ use phase::MigrationSettingsPhase;
 use smql::statements::setting::Settings;
 
 pub mod batch_size;
+pub mod cascade;
 pub mod constraints;
 pub mod context;
 pub mod create_cols;
@@ -53,6 +55,9 @@ pub async fn collect_settings(cfg: &Settings, ctx: &ItemContext) -> Vec<Box<dyn 
         // infer schema?
         cfg.infer_schema
             .then(|| Box::new(InferSchemaSetting::new(&src, &dest, &mapping, &state)) as _),
+        // cascade schema?
+        cfg.cascade_schema
+            .then(|| Box::new(CascadeSchemaSetting::new(&src, &dest, &mapping, &state)) as _),
     ]
     .into_iter()
     .flatten()

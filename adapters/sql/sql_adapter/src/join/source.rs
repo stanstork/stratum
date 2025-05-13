@@ -1,7 +1,7 @@
 use super::clause::JoinClause;
 use crate::{metadata::table::TableMetadata, query::select::SelectField};
 use common::mapping::EntityMapping;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Debug, Clone)]
 pub struct JoinSource {
@@ -78,57 +78,55 @@ impl JoinSource {
             .collect()
     }
 
-    pub fn select_fields(&self, table: &str) -> Vec<SelectField> {
-        self.clauses
-            // find the first join‐clause matching table
-            .iter()
-            .find(|clause| clause.left.table.eq_ignore_ascii_case(table))
-            // if none, return empty Vec
-            .map_or_else(Vec::new, |clause| {
-                let left_alias = clause.left.alias.clone();
+    pub fn related_joins(&self, root_table: String) -> Vec<JoinClause> {
+        let mut visited = HashSet::new();
+        let mut result_joins = Vec::new();
+        let mut queue = VecDeque::new();
 
-                // fetch the map of table -> fields, then get table’s Vec<SelectField>
-                let source_fields = self
-                    .meta
-                    .get(&clause.left.table)
-                    .map(|m| m.select_fields_rec())
-                    .unwrap_or_default()
-                    .get(table)
-                    .cloned()
-                    .unwrap_or_default();
+        visited.insert(root_table.clone());
+        queue.push_back(root_table.clone());
 
-                source_fields
-                    .into_iter()
-                    .map(|mut field| {
-                        // override the field’s table with alias
-                        field.table = left_alias.clone();
+        let mut remaining = self.clauses.to_vec();
 
-                        // apply any lookup aliases
-                        if let Some(alias) = self
-                            .mapping
-                            .get_lookups_for(&field.table)
-                            .iter()
-                            .find_map(|lk| {
-                                (lk.key.eq_ignore_ascii_case(&field.column))
-                                    .then(|| lk.target.clone())
-                            })
-                        {
-                            field.alias = Some(alias);
+        while let Some(current) = queue.pop_front() {
+            let mut unprocessed = Vec::new();
+
+            for join in remaining.into_iter() {
+                let (next_table, matches) = if join.left.table.eq_ignore_ascii_case(&current)
+                    && !visited.contains(&join.right.table)
+                {
+                    (Some(join.right.clone()), true)
+                } else if join.right.table.eq_ignore_ascii_case(&current)
+                    && !visited.contains(&join.left.table)
+                {
+                    (Some(join.left.clone()), true)
+                } else if visited.contains(&join.left.table) && visited.contains(&join.right.table)
+                {
+                    // Already visited both sides, still valid join
+                    (None, true)
+                } else {
+                    (None, false)
+                };
+
+                if matches {
+                    if !join.left.table.eq_ignore_ascii_case(&root_table) {
+                        // Only add joins that are not the root table
+                        result_joins.push(join.clone());
+                    }
+
+                    if let Some(next) = next_table {
+                        if visited.insert(next.table.clone()) {
+                            queue.push_back(next.table);
                         }
+                    }
+                } else {
+                    unprocessed.push(join);
+                }
+            }
 
-                        field
-                    })
-                    // filter out anything not explicitly projected
-                    .filter(|field| {
-                        self.projection
-                            .get(&clause.left.table)
-                            .map_or(false, |fields| {
-                                fields
-                                    .iter()
-                                    .any(|col| col.eq_ignore_ascii_case(&field.column))
-                            })
-                    })
-                    .collect()
-            })
+            remaining = unprocessed;
+        }
+
+        result_joins
     }
 }

@@ -10,6 +10,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
+use tracing::warn;
 
 /// Represents the schema migration plan from source to target, including type conversion,
 /// name mapping, and metadata relationships.
@@ -196,7 +197,7 @@ impl<'a> SchemaPlan<'a> {
         let metadata = match self.metadata_graph.get(table) {
             Some(m) => m,
             None => {
-                eprintln!("Missing metadata for table: {}", table);
+                warn!("Missing metadata for table: {}", table);
                 return defs;
             }
         };

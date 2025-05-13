@@ -7,6 +7,7 @@ pub struct MigrationState {
     pub infer_schema: bool,
     pub create_missing_columns: bool,
     pub create_missing_tables: bool,
+    pub cascade_schema: bool,
 }
 
 impl MigrationState {
@@ -17,6 +18,7 @@ impl MigrationState {
             infer_schema: false,
             create_missing_columns: false,
             create_missing_tables: false,
+            cascade_schema: false,
         }
     }
 
@@ -27,6 +29,7 @@ impl MigrationState {
             infer_schema: settings.infer_schema,
             create_missing_columns: settings.create_missing_columns,
             create_missing_tables: settings.create_missing_tables,
+            cascade_schema: settings.cascade_schema,
         }
     }
 }

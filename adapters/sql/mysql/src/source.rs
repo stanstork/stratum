@@ -4,20 +4,34 @@ use sql_adapter::{
     adapter::SqlAdapter,
     error::db::DbError,
     filter::SqlFilter,
-    join::source::JoinSource,
+    join::{clause::JoinClause, source::JoinSource},
     metadata::{provider::MetadataHelper, table::TableMetadata},
     requests::{FetchRowsRequest, FetchRowsRequestBuilder},
     row::row_data::RowData,
     source::DbDataSource,
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(Clone)]
 pub struct MySqlDataSource {
+    /// The MySQL adapter used to interact with the database.
     adapter: MySqlAdapter,
-    meta: Option<TableMetadata>,
+
+    /// The metadata for the primary source table
+    primary_meta: Option<TableMetadata>,
+
+    /// Metadata for any child tables (via FKs) when cascading
+    related_meta: HashMap<String, TableMetadata>,
+
+    /// Optional JOIN graph to be applied to the primary table
     join: Option<JoinSource>,
+
+    /// Optional row‐filter pushed down to the source
     filter: Option<SqlFilter>,
+
+    /// Optional JOIN graph to be applied to the related tables
+    /// (if any) when cascading
+    cascade_joins: HashMap<String, Vec<JoinClause>>,
 }
 
 impl MySqlDataSource {
@@ -26,44 +40,72 @@ impl MySqlDataSource {
             adapter,
             join,
             filter,
-            meta: None,
+            primary_meta: None,
+            related_meta: HashMap::new(),
+            cascade_joins: HashMap::new(),
         }
     }
 
-    fn build_fetch_request(&self, batch_size: usize, offset: Option<usize>) -> FetchRowsRequest {
-        let meta = self
-            .meta
-            .as_ref()
-            .expect("MySqlDataSource: Metadata is not set");
-
-        // Precompute the JOIN clauses (if any) and any extra fields they bring in
-        let join_clauses = self
-            .join
-            .as_ref()
-            .map(|j| j.clauses.clone())
-            .unwrap_or_default();
-        let extra_fields = self.join.as_ref().map(|j| j.fields()).unwrap_or_default();
-
-        // Base table name and its own metadata‐driven columns
-        let table_name = meta.name.clone();
+    /// Build a request for ANY table.  If `include_join_fields` is true,
+    /// we also merge in `join.fields()` (used only for the primary table).
+    fn build_request_for(
+        &self,
+        table_name: &str,
+        meta: &TableMetadata,
+        join_clauses: &[JoinClause],
+        batch_size: usize,
+        offset: Option<usize>,
+        include_join_fields: bool,
+    ) -> FetchRowsRequest {
+        // base columns
         let mut columns = meta.select_fields();
-        // merge in the JOIN‐generated columns
-        columns.extend(extra_fields);
 
-        // Build the optional filter for this table
-        let filter = self
+        // optionally merge in the JoinSource's extra fields
+        if include_join_fields {
+            if let Some(join_source) = &self.join {
+                columns.extend(join_source.fields());
+            }
+        }
+
+        // optional filter scoped to this table + these clauses
+        let filter_clause = self
             .filter
             .as_ref()
-            .map(|f| f.for_table(&table_name, &join_clauses));
+            .map(|f| f.for_table(table_name, join_clauses));
 
-        FetchRowsRequestBuilder::new(table_name.clone())
-            .alias(table_name.clone())
+        FetchRowsRequestBuilder::new(table_name.to_string())
+            .alias(table_name.to_string())
             .columns(columns)
-            .joins(join_clauses)
-            .filter(filter)
+            .joins(join_clauses.to_vec())
+            .filter(filter_clause)
             .limit(batch_size)
             .offset(offset)
             .build()
+    }
+
+    /// Build all requests: primary with join-fields, then the related ones without them.
+    fn build_requests(&self, batch_size: usize, offset: Option<usize>) -> Vec<FetchRowsRequest> {
+        let mut reqs = Vec::new();
+
+        // primary table
+        if let Some(meta) = &self.primary_meta {
+            let joins = self
+                .join
+                .as_ref()
+                .map(|j| j.clauses.clone())
+                .unwrap_or_default();
+
+            reqs.push(self.build_request_for(&meta.name, meta, &joins, batch_size, offset, true));
+        }
+
+        // related tables (cascade_joins)
+        for (table, meta) in &self.related_meta {
+            if let Some(joins) = self.cascade_joins.get(table) {
+                reqs.push(self.build_request_for(table, meta, joins, batch_size, offset, false));
+            }
+        }
+
+        reqs
     }
 }
 
@@ -76,29 +118,43 @@ impl DbDataSource for MySqlDataSource {
         batch_size: usize,
         offset: Option<usize>,
     ) -> Result<Vec<RowData>, DbError> {
-        // Build fetch request
-        let request = self.build_fetch_request(batch_size, offset);
-        self.adapter.fetch_rows(request).await
+        let requests = self.build_requests(batch_size, offset);
+
+        // fetch & concatenate
+        let mut rows = Vec::new();
+        for req in requests {
+            let mut fetched = self.adapter.fetch_rows(req).await?;
+            rows.append(&mut fetched);
+        }
+        Ok(rows)
     }
 }
 
 impl MetadataHelper for MySqlDataSource {
     fn get_metadata(&self) -> &Option<TableMetadata> {
-        &self.meta
+        &self.primary_meta
     }
 
     fn set_metadata(&mut self, meta: TableMetadata) {
-        self.meta = Some(meta);
+        self.primary_meta = Some(meta);
     }
 
     fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)> {
         Arc::new(self.adapter.clone())
     }
 
-    fn get_tables(&self) -> Vec<TableMetadata> {
-        self.meta
+    fn tables(&self) -> Vec<TableMetadata> {
+        self.primary_meta
             .as_ref()
             .map(|meta| vec![meta.clone()])
             .unwrap_or_default()
+    }
+
+    fn set_related_meta(&mut self, meta: HashMap<String, TableMetadata>) {
+        self.related_meta = meta;
+    }
+
+    fn set_cascade_joins(&mut self, table: String, joins: Vec<JoinClause>) {
+        self.cascade_joins.insert(table, joins);
     }
 }

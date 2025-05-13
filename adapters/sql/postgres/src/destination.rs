@@ -4,24 +4,31 @@ use sql_adapter::{
     adapter::SqlAdapter,
     destination::DbDataDestination,
     error::db::DbError,
+    join::clause::JoinClause,
     metadata::{provider::MetadataHelper, table::TableMetadata},
     query::{builder::SqlQueryBuilder, column::ColumnDef},
     row::row_data::RowData,
     schema::plan::SchemaPlan,
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tracing::{error, info};
 
 pub struct PgDestination {
     pub adapter: PgAdapter,
-    pub meta: Option<TableMetadata>,
+
+    /// The metadata for the primary source table
+    pub primary_meta: Option<TableMetadata>,
+
+    /// Metadata for any child tables (via FKs) when cascading
+    related_meta: HashMap<String, TableMetadata>,
 }
 
 impl PgDestination {
     pub fn new(adapter: PgAdapter) -> Self {
         Self {
             adapter,
-            meta: None,
+            primary_meta: None,
+            related_meta: HashMap::new(),
         }
     }
 }
@@ -119,21 +126,45 @@ impl DbDataDestination for PgDestination {
 
 impl MetadataHelper for PgDestination {
     fn get_metadata(&self) -> &Option<TableMetadata> {
-        &self.meta
+        &self.primary_meta
     }
 
     fn set_metadata(&mut self, meta: TableMetadata) {
-        self.meta = Some(meta);
+        self.primary_meta = Some(meta);
     }
 
-    fn get_tables(&self) -> Vec<TableMetadata> {
-        self.meta
+    fn tables(&self) -> Vec<TableMetadata> {
+        // pull out the primary table metadata
+        let primary = self
+            .primary_meta
             .as_ref()
             .map(|meta| vec![meta.clone()])
-            .unwrap_or_default()
+            .unwrap_or_default();
+
+        // include related tables
+        let related = self
+            .related_meta
+            .values()
+            .filter(|meta| {
+                self.primary_meta
+                    .as_ref()
+                    .map_or(true, |p| !p.name.eq_ignore_ascii_case(&meta.name))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        primary.into_iter().chain(related).collect()
     }
 
     fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)> {
         Arc::new(self.adapter.clone())
+    }
+
+    fn set_related_meta(&mut self, meta: HashMap<String, TableMetadata>) {
+        self.related_meta = meta;
+    }
+
+    fn set_cascade_joins(&mut self, _table: String, _joins: Vec<JoinClause>) {
+        // No-op for now
     }
 }

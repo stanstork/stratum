@@ -83,6 +83,24 @@ impl SqlFilterExpr {
             }
         }
     }
+
+    /// Return a deduplicated list of all tables referenced in this filter.
+    pub fn tables(&self) -> Vec<String> {
+        let mut tables: Vec<String> = match self {
+            SqlFilterExpr::Leaf(cond) => {
+                // Single‐table leaf
+                vec![cond.table.clone()]
+            }
+            SqlFilterExpr::And(exprs) | SqlFilterExpr::Or(exprs) => {
+                // Recursively collect from children
+                exprs.iter().flat_map(|e| e.tables()).collect()
+            }
+        };
+        // Remove duplicates in‐place
+        tables.sort_unstable();
+        tables.dedup();
+        tables
+    }
 }
 
 impl fmt::Display for SqlFilterExpr {

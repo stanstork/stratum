@@ -4,6 +4,7 @@ use crate::metadata::column::{
     value::{ColumnData, ColumnValue},
 };
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RowData {
@@ -26,7 +27,7 @@ impl RowData {
             .map(|column| {
                 let column_type =
                     ColumnDataType::try_from(row.column_type(column)).unwrap_or_else(|_| {
-                        eprintln!("Unknown column type: {}", row.column_type(column));
+                        warn!("Unknown column type: {}", row.column_type(column));
                         ColumnDataType::String
                     });
 

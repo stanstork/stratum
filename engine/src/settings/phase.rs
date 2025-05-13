@@ -5,4 +5,5 @@ pub enum MigrationSettingsPhase {
     InferSchema,
     CreateMissingTables,
     CreateMissingColumns,
+    CascadeSchema,
 }

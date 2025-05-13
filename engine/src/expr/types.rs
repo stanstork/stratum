@@ -6,6 +6,7 @@ use sql_adapter::{
     schema::types::{AdapterRef, TypeInferencer},
 };
 use std::{future::Future, pin::Pin};
+use tracing::warn;
 
 /// A thin newtype wrapper around `Expression` to implement
 /// `TypeInferencer` without touching the SMQL crate.
@@ -117,7 +118,7 @@ fn get_numeric_type(left: ColumnDataType, right: ColumnDataType) -> ColumnDataTy
         (ColumnDataType::Float, ColumnDataType::Decimal) => ColumnDataType::Decimal,
         (ColumnDataType::Decimal, ColumnDataType::Float) => ColumnDataType::Decimal,
         _ => {
-            eprintln!(
+            warn!(
                 "Incompatible types for arithmetic operation: {:?} and {:?}",
                 left, right
             );

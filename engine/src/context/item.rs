@@ -59,13 +59,13 @@ impl ItemContext {
     }
 
     pub async fn set_src_meta(&self) -> Result<(), DbError> {
-        let name = &self.source.name;
-        let db = match &self.source.primary {
-            DataSource::Database(db) => Some(db),
+        let name = self.source.name.clone();
+        let db_opt = match &self.source.primary {
+            DataSource::Database(db) => Some(db.clone()),
         };
 
-        let fetch_meta_fn = |tbl: String| self.source.primary.fetch_meta(tbl);
-        Self::set_meta(name, db, fetch_meta_fn).await?;
+        let fetch_meta = move |tbl: String| self.source.primary.fetch_meta(tbl);
+        Self::set_meta(&name.clone(), db_opt.as_ref(), fetch_meta).await?;
 
         Ok(())
     }
