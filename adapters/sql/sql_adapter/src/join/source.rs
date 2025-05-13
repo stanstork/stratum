@@ -26,58 +26,6 @@ impl JoinSource {
         }
     }
 
-    pub fn fields2(&self, clauses: &Vec<JoinClause>) -> Vec<SelectField> {
-        clauses
-            .iter()
-            .flat_map(|clause| {
-                let left_alias = clause.left.alias.clone();
-
-                // fetch the map of table -> fields, then get table’s Vec<SelectField>
-                let source_fields = self
-                    .meta
-                    .get(&clause.left.table)
-                    .map(|m| m.select_fields_rec())
-                    .unwrap_or_default()
-                    .get(&clause.left.table)
-                    .cloned()
-                    .unwrap_or_default();
-
-                source_fields
-                    .into_iter()
-                    .map(|mut field| {
-                        // override the field’s table with alias
-                        field.table = left_alias.clone();
-
-                        // apply any lookup aliases
-                        if let Some(alias) = self
-                            .mapping
-                            .get_lookups_for(&field.table)
-                            .iter()
-                            .find_map(|lk| {
-                                (lk.key.eq_ignore_ascii_case(&field.column))
-                                    .then(|| lk.target.clone())
-                            })
-                        {
-                            field.alias = Some(alias);
-                        }
-
-                        field
-                    })
-                    // filter out anything not explicitly projected
-                    .filter(|field| {
-                        self.projection
-                            .get(&clause.left.table)
-                            .map_or(false, |fields| {
-                                fields
-                                    .iter()
-                                    .any(|col| col.eq_ignore_ascii_case(&field.column))
-                            })
-                    })
-                    .collect::<Vec<SelectField>>()
-            })
-            .collect()
-    }
-
     pub fn fields(&self) -> Vec<SelectField> {
         self.clauses
             .iter()

@@ -71,7 +71,7 @@ impl MySqlDataSource {
         let filter_clause = self
             .filter
             .as_ref()
-            .and_then(|f| Some(f.for_table(table_name, join_clauses)));
+            .map(|f| f.for_table(table_name, join_clauses));
 
         FetchRowsRequestBuilder::new(table_name.to_string())
             .alias(table_name.to_string())

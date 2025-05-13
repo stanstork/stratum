@@ -107,10 +107,7 @@ impl CascadeSchemaSetting {
     ) -> Result<(), MigrationError> {
         let root_table = self.context.source.name.clone();
 
-        // Only database sources can receive cascade_joins
-        let db_mutex = match primary {
-            DataSource::Database(db) => db,
-        };
+        let DataSource::Database(db_mutex) = primary;
         let mut db = db_mutex.lock().await;
 
         for meta in meta_graph.values() {
