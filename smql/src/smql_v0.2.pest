@@ -76,7 +76,7 @@ dest_type = { ^"TABLE" | ^"FILE" }
 
 inner_clauses = {
     "[" ~ WHITESPACE*
-      ~ migrate_clause 
+      ~ migrate_clause? 
       ~ ("," ~ WHITESPACE* ~ migrate_clause)*
     ~ WHITESPACE* ~ "]"
 }

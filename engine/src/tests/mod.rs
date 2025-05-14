@@ -1,0 +1,46 @@
+use sqlx::{Executor, MySqlPool, PgPool};
+use tokio::sync::OnceCell;
+
+pub mod integration;
+
+// Lazily initialize pools once per test run
+static MYSQL_POOL: OnceCell<MySqlPool> = OnceCell::const_new();
+static PG_POOL: OnceCell<PgPool> = OnceCell::const_new();
+
+// Test database URLs
+const TEST_MYSQL_URL: &str = "mysql://sakila_user:qwerty123@localhost:3306/sakila";
+const TEST_PG_URL: &str = "postgres://user:password@localhost:5432/testdb";
+
+async fn mysql_pool() -> MySqlPool {
+    MYSQL_POOL
+        .get_or_init(|| async {
+            let url = TEST_MYSQL_URL;
+            MySqlPool::connect(&url).await.expect("connect mysql")
+        })
+        .await
+        .clone()
+}
+
+async fn pg_pool() -> PgPool {
+    PG_POOL
+        .get_or_init(|| async {
+            let url = TEST_PG_URL;
+            PgPool::connect(&url).await.expect("connect pg")
+        })
+        .await
+        .clone()
+}
+
+/// Drop & recreate the public schema in Postgres so it's empty.
+async fn reset_postgres_schema() {
+    let pool = pg_pool().await;
+    // This will drop all tables, types, etc. in `public` and re-create it.
+    pool.execute(
+        r#"
+        DROP SCHEMA public CASCADE;
+        CREATE SCHEMA public;
+    "#,
+    )
+    .await
+    .expect("reset postgres schema");
+}
