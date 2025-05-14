@@ -11,7 +11,6 @@ use sql_adapter::{
         provider::MetadataProvider,
         table::TableMetadata,
     },
-    query::loader::QueryLoader,
     requests::FetchRowsRequest,
     row::{db_row::DbRow, row_data::RowData},
 };
@@ -23,11 +22,10 @@ pub struct PgAdapter {
     pool: Pool<Postgres>,
 }
 
-const QUERY_TABLE_EXISTS: &str = "queries/pg/table_exists.sql";
-const QUERY_TRUNCATE_TABLE: &str = "queries/pg/truncate_table.sql";
-const QUERY_TABLE_METADATA: &str = "queries/pg/table_metadata.sql";
-const QUERY_TABLE_REFERENCING: &str = "queries/pg/table_referencing.sql";
-const QUERY_COLUMN_TYPE: &str = "queries/pg/column_type.sql";
+const QUERY_TABLE_EXISTS_SQL: &str = include_str!("../sql/table_exists.sql");
+const QUERY_TRUNCATE_TABLE_SQL: &str = include_str!("../sql/table_truncate.sql");
+const QUERY_TABLE_METADATA_SQL: &str = include_str!("../sql/table_metadata.sql");
+const QUERY_TABLE_REFERENCING_SQL: &str = include_str!("../sql/table_referencing.sql");
 
 #[async_trait]
 impl SqlAdapter for PgAdapter {
@@ -37,8 +35,7 @@ impl SqlAdapter for PgAdapter {
     }
 
     async fn table_exists(&self, table: &str) -> Result<bool, DbError> {
-        let query = QueryLoader::load_query(QUERY_TABLE_EXISTS)?;
-        let row = sqlx::query(&query)
+        let row = sqlx::query(QUERY_TABLE_EXISTS_SQL)
             .bind(table)
             .fetch_one(&self.pool)
             .await?;
@@ -46,8 +43,10 @@ impl SqlAdapter for PgAdapter {
     }
 
     async fn truncate_table(&self, table: &str) -> Result<(), DbError> {
-        let query = QueryLoader::load_query(QUERY_TRUNCATE_TABLE)?;
-        sqlx::query(&query).bind(table).execute(&self.pool).await?;
+        sqlx::query(QUERY_TRUNCATE_TABLE_SQL)
+            .bind(table)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -57,7 +56,7 @@ impl SqlAdapter for PgAdapter {
     }
 
     async fn fetch_metadata(&self, table: &str) -> Result<TableMetadata, DbError> {
-        let query = QueryLoader::load_query(QUERY_TABLE_METADATA)?.replace("{table}", table);
+        let query = QUERY_TABLE_METADATA_SQL.replace("{table}", table);
         let rows = sqlx::query(&query).fetch_all(&self.pool).await?;
         let columns = rows
             .iter()
@@ -72,8 +71,7 @@ impl SqlAdapter for PgAdapter {
     }
 
     async fn fetch_referencing_tables(&self, table: &str) -> Result<Vec<String>, DbError> {
-        let query = QueryLoader::load_query(QUERY_TABLE_REFERENCING)?;
-        let rows = sqlx::query(&query)
+        let rows = sqlx::query(QUERY_TABLE_REFERENCING_SQL)
             .bind(table)
             .fetch_all(&self.pool)
             .await?;
@@ -90,14 +88,7 @@ impl SqlAdapter for PgAdapter {
         todo!("Implement fetch_all for Postgres")
     }
 
-    async fn fetch_column_type(&self, table: &str, column: &str) -> Result<String, DbError> {
-        let query = QueryLoader::load_query(QUERY_COLUMN_TYPE)?;
-        let row = sqlx::query(&query)
-            .bind(table)
-            .bind(column)
-            .fetch_one(&self.pool)
-            .await?;
-        let data_type = row.try_get::<String, _>("column_type")?;
-        Ok(data_type)
+    async fn fetch_column_type(&self, _table: &str, _column: &str) -> Result<String, DbError> {
+        todo!("Implement fetch_column_type for Postgres");
     }
 }

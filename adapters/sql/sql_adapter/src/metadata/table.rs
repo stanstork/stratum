@@ -141,6 +141,10 @@ impl TableMetadata {
         self.columns.get(name)
     }
 
+    pub fn is_valid(&self) -> bool {
+        !self.name.is_empty() && !self.columns.is_empty()
+    }
+
     fn collect_recursive_tables(
         metadata: &TableMetadata,
         visited: &mut HashSet<String>,

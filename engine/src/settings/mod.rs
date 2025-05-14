@@ -25,7 +25,7 @@ pub trait MigrationSetting: Send + Sync {
     async fn apply(&self, ctx: &mut ItemContext) -> Result<(), MigrationError>;
 }
 
-pub async fn collect_settings(cfg: &Settings, ctx: &ItemContext) -> Vec<Box<dyn MigrationSetting>> {
+pub fn collect_settings(cfg: &Settings, ctx: &ItemContext) -> Vec<Box<dyn MigrationSetting>> {
     let src = ctx.source.clone();
     let dest = ctx.destination.clone();
     let state = ctx.state.clone();

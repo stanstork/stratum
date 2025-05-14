@@ -2,6 +2,7 @@ use sqlx::{Executor, MySqlPool, PgPool};
 use tokio::sync::OnceCell;
 
 pub mod integration;
+pub mod utils;
 
 // Lazily initialize pools once per test run
 static MYSQL_POOL: OnceCell<MySqlPool> = OnceCell::const_new();
