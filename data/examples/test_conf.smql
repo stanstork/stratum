@@ -4,7 +4,13 @@ CONNECTIONS(
 );
 
 MIGRATE(
-    SOURCE(TABLE, actor) -> DEST(TABLE, actor) [
-        SETTINGS(CREATE_MISSING_TABLES=TRUE)
+    SOURCE(TABLE, payment) -> DEST(TABLE, payment) [
+        SETTINGS(
+            CREATE_MISSING_TABLES = TRUE
+        ),
+
+        MAP (
+            payment[amount] * 1.4 -> amount_with_tax
+        )
     ]
 );

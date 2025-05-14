@@ -2,7 +2,7 @@
 mod tests {
     use crate::tests::{
         reset_postgres_schema,
-        utils::{assert_row_count, assert_table_exists, run_smql},
+        utils::{assert_table_exists, get_row_count, run_smql, DbType},
     };
     use tracing_test::traced_test;
 
@@ -53,6 +53,34 @@ mod tests {
 
         run_smql(tmpl).await;
         assert_table_exists("actor", true).await;
-        assert_row_count("actor", 200).await;
+
+        let source_count = get_row_count("actor", DbType::MySql).await;
+        let dest_count = get_row_count("actor", DbType::Postgres).await;
+
+        assert_eq!(
+            source_count, dest_count,
+            "expected row count in source and destination to match"
+        );
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn tc03() {
+        reset_postgres_schema().await;
+
+        let tmpl = r#"
+            CONNECTIONS(
+                SOURCE(MYSQL,  "{mysq_url}"),
+                DESTINATION(POSTGRES, "{pg_url}")
+            );
+            MIGRATE(
+                SOURCE(TABLE, actor) -> DEST(TABLE, actor) [
+                    SETTINGS(
+                        CREATE_MISSING_TABLES=TRUE,
+                        CREATE_MISSING_COLUMNS=TRUE
+                    )
+                ]
+            );
+        "#;
     }
 }

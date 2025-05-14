@@ -1,6 +1,11 @@
-use super::{TEST_MYSQL_URL, TEST_PG_URL};
+use super::{mysql_pool, TEST_MYSQL_URL, TEST_PG_URL};
 use crate::{runner::run, tests::pg_pool};
 use smql::parser::parse;
+
+pub enum DbType {
+    MySql,
+    Postgres,
+}
 
 /// Parse & run the SMQL plan, panicking on any error
 pub async fn run_smql(template: &str) {
@@ -31,6 +36,26 @@ pub async fn assert_table_exists(table: &str, should: bool) {
         "expected table '{}' existence == {}",
         table, should
     );
+}
+
+/// Get the row count of a table in either MySQL or Postgres
+/// depending on the `db` parameter
+pub async fn get_row_count(table: &str, db: DbType) -> i64 {
+    let query = format!("SELECT COUNT(*) FROM {};", table);
+
+    // Use the appropriate database connection based on the `db` parameter
+    match db {
+        DbType::MySql => {
+            let mysql = mysql_pool().await;
+            let (count,): (i64,) = sqlx::query_as(&query).fetch_one(&mysql).await.unwrap();
+            count
+        }
+        DbType::Postgres => {
+            let pg = pg_pool().await;
+            let (count,): (i64,) = sqlx::query_as(&query).fetch_one(&pg).await.unwrap();
+            count
+        }
+    }
 }
 
 /// Assert that a Postgres table has exactly `expected` rows
