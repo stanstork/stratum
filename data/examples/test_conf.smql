@@ -4,11 +4,10 @@ CONNECTIONS(
 );
 
 MIGRATE(
-    SOURCE(TABLE, actor) -> DEST(TABLE, actor) [
+    SOURCE(TABLE, film) -> DEST(TABLE, film) [
         SETTINGS(
-            CREATE_MISSING_TABLES  = TRUE,
-            CREATE_MISSING_COLUMNS=TRUE
-        ),
-        MAP(CONCAT(actor[first_name], actor[last_name]) -> full_name)
+            INFER_SCHEMA           = TRUE,
+            CASCADE_SCHEMA         = TRUE
+        )
     ]
 );

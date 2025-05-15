@@ -1,6 +1,7 @@
-use super::{mysql_pool, TEST_MYSQL_URL, TEST_PG_URL};
+use super::{mysql_pool, TEST_MYSQL_URL_ORDERS, TEST_MYSQL_URL_SAKILA, TEST_PG_URL};
 use crate::{runner::run, tests::pg_pool};
 use smql::parser::parse;
+use sqlx::{mysql::MySqlRow, Row};
 
 /// DDL statement to precreate the `actor` table in Postgres for testing various scenarios involving existing tables.
 pub const ACTORS_TABLE_DDL: &str = r#"CREATE TABLE actor (
@@ -17,8 +18,8 @@ pub enum DbType {
 }
 
 /// Parse & run the SMQL plan, panicking on any error
-pub async fn run_smql(template: &str) {
-    let smql = templated_smql(template);
+pub async fn run_smql(template: &str, source_db: &str) {
+    let smql = templated_smql(template, source_db);
     let plan = parse(&smql).expect("parse smql");
     run(plan).await.expect("migration ran");
 }
@@ -72,15 +73,23 @@ pub async fn assert_column_exists(table: &str, column: &str, should: bool) {
     );
 }
 
+/// Assert that a Postgres table has exactly `expected` rows
+pub async fn assert_row_count(table: &str, expected: i64) {
+    let pg = pg_pool().await;
+    let query = format!("SELECT COUNT(*) FROM {};", table);
+    let (count,): (i64,) = sqlx::query_as(&query).fetch_one(&pg).await.unwrap();
+    assert_eq!(count, expected, "row count mismatch for '{}'", table);
+}
+
 /// Get the row count of a table in either MySQL or Postgres
 /// depending on the `db` parameter
-pub async fn get_row_count(table: &str, db: DbType) -> i64 {
+pub async fn get_row_count(table: &str, source_db: &str, db: DbType) -> i64 {
     let query = format!("SELECT COUNT(*) FROM {};", table);
 
     // Use the appropriate database connection based on the `db` parameter
     match db {
         DbType::MySql => {
-            let mysql = mysql_pool().await;
+            let mysql = mysql_pool(source_db).await;
             let (count,): (i64,) = sqlx::query_as(&query).fetch_one(&mysql).await.unwrap();
             count
         }
@@ -92,12 +101,47 @@ pub async fn get_row_count(table: &str, db: DbType) -> i64 {
     }
 }
 
-/// Assert that a Postgres table has exactly `expected` rows
-pub async fn assert_row_count(table: &str, expected: i64) {
-    let pg = pg_pool().await;
-    let query = format!("SELECT COUNT(*) FROM {};", table);
-    let (count,): (i64,) = sqlx::query_as(&query).fetch_one(&pg).await.unwrap();
-    assert_eq!(count, expected, "row count mismatch for '{}'", table);
+pub async fn get_table_names(db: DbType, source_db: &str) -> Result<Vec<String>, sqlx::Error> {
+    match db {
+        DbType::MySql => {
+            let pool = mysql_pool(source_db).await;
+            // SHOW TABLES can return VARBINARY -> decode to Vec<u8> first
+            let sql = r#"
+                SELECT table_name
+                  FROM information_schema.tables
+                 WHERE table_schema = DATABASE()
+                   AND table_type   = 'BASE TABLE';
+            "#;
+            let raw_names: Vec<Vec<u8>> = sqlx::query(sql)
+                .map(|row: MySqlRow| row.get::<Vec<u8>, _>(0))
+                .fetch_all(&pool)
+                .await?;
+
+            // Convert each raw Vec<u8> into a String
+            let names = raw_names
+                .into_iter()
+                .map(|bytes| String::from_utf8(bytes).expect("table name was not valid UTF-8"))
+                .collect();
+
+            Ok(names)
+        }
+
+        DbType::Postgres => {
+            let pool = pg_pool().await;
+            let names: Vec<String> = sqlx::query_scalar(
+                r#"
+                SELECT table_name
+                  FROM information_schema.tables
+                 WHERE table_schema = 'public'
+                   AND table_type   = 'BASE TABLE';
+                "#,
+            )
+            .fetch_all(&pool)
+            .await?;
+
+            Ok(names)
+        }
+    }
 }
 
 /// Execute a SQL statement in Postgres, panicking on any error
@@ -107,8 +151,15 @@ pub async fn execute(sql: &str) {
 }
 
 /// Fill in the two `{mysq_url}` / `{pg_url}` placeholders
-fn templated_smql(template: &str) -> String {
+fn templated_smql(template: &str, source_db: &str) -> String {
     template
-        .replace("{mysq_url}", TEST_MYSQL_URL)
+        .replace(
+            "{mysq_url}",
+            match source_db {
+                "sakila" => TEST_MYSQL_URL_SAKILA,
+                "orders" => TEST_MYSQL_URL_ORDERS,
+                _ => panic!("Unknown source database: {}", source_db),
+            },
+        )
         .replace("{pg_url}", TEST_PG_URL)
 }
