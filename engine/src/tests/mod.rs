@@ -1,3 +1,5 @@
+use std::{env, fs, io, path::PathBuf};
+
 use sqlx::{Executor, MySqlPool, PgPool};
 use tokio::sync::OnceCell;
 
@@ -44,4 +46,30 @@ async fn reset_postgres_schema() {
     )
     .await
     .expect("reset postgres schema");
+}
+
+/// Remove all on-disk Sled buffers named `migration_buffer_<…>`
+/// in the current directory.
+pub fn reset_migration_buffer() -> io::Result<()> {
+    // Get working dir
+    let base: PathBuf = env::current_dir()?;
+
+    // Read every entry in that dir
+    for entry in fs::read_dir(&base)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        // Check if it's a directory whose name starts with "migration_buffer_"
+        if path.is_dir() {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.starts_with("migration_buffer_") {
+                    // Recursively delete it
+                    fs::remove_dir_all(&path)?;
+                    println!("Removed buffer directory: {}", path.display());
+                }
+            }
+        }
+    }
+
+    Ok(())
 }

@@ -43,8 +43,7 @@ impl Evaluator for Expression {
             }
 
             Expression::Lookup { entity, key, .. } => {
-                // Find the LookupField for this entity+key
-                mapping
+                let mapped = mapping
                     .lookups
                     .get(entity)
                     .and_then(|fields| fields.iter().find(|lk| lk.key.eq_ignore_ascii_case(key)))
@@ -54,12 +53,21 @@ impl Evaluator for Expression {
                             .iter()
                             .find(|col| col.name.eq_ignore_ascii_case(&lk.target))
                             .and_then(|col| col.value.clone())
-                    })
-                    // If anything was missing, log and return None
-                    .or_else(|| {
-                        warn!("Lookup failed for entity='{}', key='{}'", entity, key);
-                        None
-                    })
+                    });
+
+                let raw = row
+                    .columns
+                    .iter()
+                    .find(|col| col.name.eq_ignore_ascii_case(key))
+                    .and_then(|col| col.value.clone());
+
+                // If a mapped value is found, return it. Otherwise, return the raw value.
+                // Note: When the mapping contains lookups from joined tables, it generates a select with the mapped name.
+                // However, if there is no join, no additional fields are included in the select.
+                mapped.or(raw).or_else(|| {
+                    warn!("Lookup failed for {}[{}]", entity, key);
+                    None
+                })
             }
         }
     }

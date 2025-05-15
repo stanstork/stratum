@@ -4,13 +4,11 @@ CONNECTIONS(
 );
 
 MIGRATE(
-    SOURCE(TABLE, payment) -> DEST(TABLE, payment) [
+    SOURCE(TABLE, actor) -> DEST(TABLE, actor) [
         SETTINGS(
-            CREATE_MISSING_TABLES = TRUE
+            CREATE_MISSING_TABLES  = TRUE,
+            CREATE_MISSING_COLUMNS=TRUE
         ),
-
-        MAP (
-            payment[amount] * 1.4 -> amount_with_tax
-        )
+        MAP(CONCAT(actor[first_name], actor[last_name]) -> full_name)
     ]
 );
