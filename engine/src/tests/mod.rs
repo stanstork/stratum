@@ -1,37 +1,29 @@
+use sqlx::{mysql::MySqlPoolOptions, postgres::PgPoolOptions, Executor, MySqlPool, PgPool};
 use std::{env, fs, io, path::PathBuf};
-
-use sqlx::{Executor, MySqlPool, PgPool};
-use tokio::sync::OnceCell;
 
 pub mod integration;
 pub mod utils;
-
-// Lazily initialize pools once per test run
-static MYSQL_POOL: OnceCell<MySqlPool> = OnceCell::const_new();
-static PG_POOL: OnceCell<PgPool> = OnceCell::const_new();
 
 // Test database URLs
 const TEST_MYSQL_URL: &str = "mysql://sakila_user:qwerty123@localhost:3306/sakila";
 const TEST_PG_URL: &str = "postgres://user:password@localhost:5432/testdb";
 
 async fn mysql_pool() -> MySqlPool {
-    MYSQL_POOL
-        .get_or_init(|| async {
-            let url = TEST_MYSQL_URL;
-            MySqlPool::connect(&url).await.expect("connect mysql")
-        })
+    MySqlPoolOptions::new()
+        .max_connections(5)
+        .acquire_timeout(std::time::Duration::from_secs(10))
+        .connect(TEST_MYSQL_URL)
         .await
-        .clone()
+        .expect("connect mysql")
 }
 
 async fn pg_pool() -> PgPool {
-    PG_POOL
-        .get_or_init(|| async {
-            let url = TEST_PG_URL;
-            PgPool::connect(&url).await.expect("connect pg")
-        })
+    PgPoolOptions::new()
+        .max_connections(5)
+        .acquire_timeout(std::time::Duration::from_secs(10))
+        .connect(TEST_PG_URL)
         .await
-        .clone()
+        .expect("connect postgres")
 }
 
 /// Drop & recreate the public schema in Postgres so it's empty.
