@@ -105,7 +105,6 @@ impl SqlAdapter for MySqlAdapter {
 
         // Log the generated SQL query for debugging
         info!("Generated SQL query: {:#?}", query.0);
-        println!("Generated SQL query: {:#?}", query.0);
 
         // Execute the query and fetch the rows
         let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
