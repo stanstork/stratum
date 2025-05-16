@@ -3,8 +3,8 @@ mod tests {
     use crate::tests::{
         reset_migration_buffer, reset_postgres_schema,
         utils::{
-            assert_column_exists, assert_table_exists, execute, get_row_count, get_table_names,
-            run_smql, DbType, ACTORS_TABLE_DDL,
+            assert_column_exists, assert_row_count, assert_table_exists, execute, get_column_names,
+            get_row_count, get_table_names, run_smql, DbType, ACTORS_TABLE_DDL,
         },
     };
     use tracing_test::traced_test;
@@ -56,15 +56,9 @@ mod tests {
         "#;
 
         run_smql(tmpl, "sakila").await;
+
         assert_table_exists("actor", true).await;
-
-        let source_count = get_row_count("actor", "sakila", DbType::MySql).await;
-        let dest_count = get_row_count("actor", "sakila", DbType::Postgres).await;
-
-        assert_eq!(
-            source_count, dest_count,
-            "expected row count in source and destination to match"
-        );
+        assert_row_count("actor", "sakila", "actor").await;
     }
 
     // Test Settings: CREATE_MISSING_COLUMNS = TRUE.
@@ -99,14 +93,8 @@ mod tests {
 
         run_smql(tmpl, "sakila").await;
 
-        let source_count = get_row_count("actor", "sakila", DbType::MySql).await;
-        let dest_count = get_row_count("actor", "sakila", DbType::Postgres).await;
-
-        assert_eq!(
-            source_count, dest_count,
-            "expected row count in source and destination to match"
-        );
-
+        assert_table_exists("actor", true).await;
+        assert_row_count("actor", "sakila", "actor").await;
         assert_column_exists("actor", "full_name", true).await;
     }
 
@@ -187,15 +175,7 @@ mod tests {
             if table.eq("film_text") {
                 continue;
             }
-
-            let source_count = get_row_count(table, "sakila", DbType::MySql).await;
-            let dest_count = get_row_count(table, "sakila", DbType::Postgres).await;
-
-            assert_eq!(
-                source_count, dest_count,
-                "expected row count in source and destination to match for table {}",
-                table
-            );
+            assert_row_count(table, "sakila", table).await;
         }
     }
 
@@ -225,14 +205,7 @@ mod tests {
         "#;
 
         run_smql(tmpl, "orders").await;
-
-        let source_count = get_row_count("orders", "orders", DbType::MySql).await;
-        let dest_count = get_row_count("orders", "orders", DbType::Postgres).await;
-
-        assert_eq!(
-            source_count, dest_count,
-            "expected row count in source and destination to match for table actor"
-        );
+        assert_row_count("orders", "orders", "orders").await;
 
         let depndent_tables = vec!["order_items", "products", "users"];
         for table in depndent_tables.iter() {
@@ -244,5 +217,47 @@ mod tests {
                 table
             );
         }
+    }
+
+    // Test Settings: CREATE_MISSING_TABLES=TRUE, IGNORE_CONSTRAINTS=TRUE, COPY_COLUMNS=MAP_ONLY.
+    // Scenario:
+    // - The target table does not exist in Postgres.
+    // - The settings to create missing tables, ignore constraints, and copy columns (map only) are specified.
+    // Expected Outcome:
+    // - The table should be created in Postgres.
+    // - The destination table should have only one column (`order_id`).
+    // - Data should be copied, and the row count should match between the source and destination tables.
+    #[traced_test]
+    #[tokio::test]
+    async fn tc07() {
+        reset_migration_buffer().expect("reset migration buffer");
+        reset_postgres_schema().await;
+
+        let tmpl = r#"
+            CONNECTIONS(
+                SOURCE(MYSQL,  "{mysq_url}"),
+                DESTINATION(POSTGRES, "{pg_url}")
+            );
+            MIGRATE(
+                SOURCE(TABLE, orders) -> DEST(TABLE, orders_flat) [
+                    SETTINGS(CREATE_MISSING_TABLES=TRUE,IGNORE_CONSTRAINTS=TRUE,COPY_COLUMNS=MAP_ONLY),
+                    MAP(id->order_id)
+                ]
+            );
+        "#;
+
+        run_smql(tmpl, "orders").await;
+
+        let dest_columns = get_column_names(DbType::Postgres, "orders", "orders_flat")
+            .await
+            .unwrap();
+
+        assert_row_count("orders", "orders", "orders_flat").await;
+        assert_column_exists("orders_flat", "order_id", true).await;
+        assert_eq!(
+            1,
+            dest_columns.len(),
+            "expected only one column in destination table"
+        );
     }
 }

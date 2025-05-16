@@ -197,6 +197,10 @@ impl NameMap {
     pub fn contains_key(&self, key: &str) -> bool {
         self.source_to_target.contains_key(key)
     }
+
+    pub fn contains_target_key(&self, key: &str) -> bool {
+        self.target_to_source.contains_key(key)
+    }
 }
 
 impl EntityMapping {
@@ -272,6 +276,15 @@ impl EntityMapping {
 
             // Identifiers and literals never contain nested lookups:
             Expression::Identifier(_) | Expression::Literal(_) => {}
+        }
+    }
+}
+
+impl Default for NameMap {
+    fn default() -> Self {
+        Self {
+            source_to_target: HashMap::new(),
+            target_to_source: HashMap::new(),
         }
     }
 }

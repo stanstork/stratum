@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use batch_size::BatchSizeSetting;
 use cascade::CascadeSchemaSetting;
 use constraints::IgnoreConstraintsSettings;
+use copy_cols::CopyColumnsSetting;
 use create_cols::CreateMissingColumnsSetting;
 use create_tables::CreateMissingTablesSetting;
 use infer_schema::InferSchemaSetting;
@@ -13,6 +14,7 @@ pub mod batch_size;
 pub mod cascade;
 pub mod constraints;
 pub mod context;
+pub mod copy_cols;
 pub mod create_cols;
 pub mod create_tables;
 pub mod error;
@@ -58,6 +60,8 @@ pub fn collect_settings(cfg: &Settings, ctx: &ItemContext) -> Vec<Box<dyn Migrat
         // cascade schema?
         cfg.cascade_schema
             .then(|| Box::new(CascadeSchemaSetting::new(&src, &dest, &mapping, &state)) as _),
+        // copy columns
+        Some(Box::new(CopyColumnsSetting(cfg.copy_columns.clone())) as _),
     ]
     .into_iter()
     .flatten()

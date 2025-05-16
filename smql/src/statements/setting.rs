@@ -18,7 +18,7 @@ pub struct SettingsPair {
     pub value: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CopyColumns {
     All,
     MapOnly,

@@ -73,12 +73,16 @@ pub async fn assert_column_exists(table: &str, column: &str, should: bool) {
     );
 }
 
-/// Assert that a Postgres table has exactly `expected` rows
-pub async fn assert_row_count(table: &str, expected: i64) {
-    let pg = pg_pool().await;
-    let query = format!("SELECT COUNT(*) FROM {};", table);
-    let (count,): (i64,) = sqlx::query_as(&query).fetch_one(&pg).await.unwrap();
-    assert_eq!(count, expected, "row count mismatch for '{}'", table);
+/// Ensure that the row counts of the migrated tables in the source and destination databases are identical
+pub async fn assert_row_count(source_table: &str, source_db: &str, dest_table: &str) {
+    let source_count = get_row_count(source_table, source_db, DbType::MySql).await;
+    let dest_count = get_row_count(dest_table, source_db, DbType::Postgres).await;
+
+    assert_eq!(
+        source_count, dest_count,
+        "expected row count for table '{}' to be {} but got {}",
+        dest_table, source_count, dest_count
+    );
 }
 
 /// Get the row count of a table in either MySQL or Postgres
@@ -138,6 +142,43 @@ pub async fn get_table_names(db: DbType, source_db: &str) -> Result<Vec<String>,
             )
             .fetch_all(&pool)
             .await?;
+
+            Ok(names)
+        }
+    }
+}
+
+pub async fn get_column_names(
+    db: DbType,
+    source_db: &str,
+    table: &str,
+) -> Result<Vec<String>, sqlx::Error> {
+    match db {
+        DbType::MySql => {
+            let pool = mysql_pool(source_db).await;
+            let sql = r#"
+                SELECT column_name
+                  FROM information_schema.columns
+                 WHERE table_schema = DATABASE()
+                   AND table_name   = ?
+            "#;
+
+            // query_scalar will pull out the first column of each row as String
+            let names: Vec<String> = sqlx::query_scalar(sql).bind(table).fetch_all(&pool).await?;
+
+            Ok(names)
+        }
+
+        DbType::Postgres => {
+            let pool = pg_pool().await;
+            let sql = r#"
+                SELECT column_name
+                  FROM information_schema.columns
+                 WHERE table_schema = 'public'
+                   AND table_name   = $1
+            "#;
+
+            let names: Vec<String> = sqlx::query_scalar(sql).bind(table).fetch_all(&pool).await?;
 
             Ok(names)
         }

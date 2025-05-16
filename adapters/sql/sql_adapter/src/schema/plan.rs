@@ -25,6 +25,9 @@ pub struct SchemaPlan<'a> {
     /// Primary keys and foreign keys are not created in the target database.
     ignore_constraints: bool,
 
+    /// Indicates whether to create columns in the target table that are present in the mapping block only.
+    mapped_columns_only: bool,
+
     /// Mapping of table names from source to target database.
     mapping: EntityMapping,
 
@@ -47,12 +50,14 @@ impl<'a> SchemaPlan<'a> {
         source_adapter: Arc<(dyn SqlAdapter + Send + Sync)>,
         type_engine: TypeEngine<'a>,
         ignore_constraints: bool,
+        mapped_columns_only: bool,
         mapping: EntityMapping,
     ) -> Self {
         Self {
             source_adapter,
             type_engine,
             ignore_constraints,
+            mapped_columns_only,
             mapping,
             metadata_graph: HashMap::new(),
             column_definitions: HashMap::new(),
@@ -72,13 +77,21 @@ impl<'a> SchemaPlan<'a> {
             let resolved_table = self.mapping.entity_name_map.resolve(table);
 
             let mut resolved_columns = self.resolve_column_definitions(table, columns);
+
+            // Optionally drop unmapped columns
+            if self.mapped_columns_only {
+                resolved_columns =
+                    self.filter_to_mapped_columns(&resolved_table, resolved_columns.clone());
+            }
+
+            // Always append computed columns
             resolved_columns.extend(self.computed_column_definitions(table).await);
 
             let query = SqlQueryBuilder::new()
                 .create_table(
                     &resolved_table,
                     &resolved_columns,
-                    &[],
+                    &[], // no extra constraints here
                     self.ignore_constraints,
                 )
                 .build()
@@ -234,6 +247,19 @@ impl<'a> SchemaPlan<'a> {
         raw[start..end]
             .split(',')
             .map(|s| s.trim().trim_matches('\'').to_string())
+            .collect()
+    }
+
+    fn filter_to_mapped_columns(&self, table: &str, columns: Vec<ColumnDef>) -> Vec<ColumnDef> {
+        let mapping = &self
+            .mapping
+            .field_mappings
+            .column_mappings
+            .get(table)
+            .expect("Mapping must exist for table");
+        columns
+            .into_iter()
+            .filter(|col| mapping.contains_target_key(&col.name))
             .collect()
     }
 }
