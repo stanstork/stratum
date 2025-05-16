@@ -48,6 +48,34 @@ impl ColumnValue {
             _ => None,
         }
     }
+
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            ColumnValue::Int(v) => Some(*v as f64),
+            ColumnValue::Float(v) => Some(*v),
+            ColumnValue::String(v) => v.parse::<f64>().ok(),
+            ColumnValue::Boolean(v) => Some(if *v { 1.0 } else { 0.0 }),
+            ColumnValue::Json(v) => v.as_f64(),
+            ColumnValue::Uuid(_) => None,
+            ColumnValue::Bytes(_) => None,
+            ColumnValue::Date(_) => None,
+            ColumnValue::Timestamp(_) => None,
+        }
+    }
+
+    pub fn as_string(&self) -> Option<String> {
+        match self {
+            ColumnValue::Int(v) => Some(v.to_string()),
+            ColumnValue::Float(v) => Some(v.to_string()),
+            ColumnValue::String(v) => Some(v.clone()),
+            ColumnValue::Boolean(v) => Some(v.to_string()),
+            ColumnValue::Json(v) => v.as_str().map(|s| s.to_string()),
+            ColumnValue::Uuid(v) => Some(v.to_string()),
+            ColumnValue::Bytes(_) => None,
+            ColumnValue::Date(_) => None,
+            ColumnValue::Timestamp(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

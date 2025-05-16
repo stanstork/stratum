@@ -1,6 +1,7 @@
 use super::{mysql_pool, TEST_MYSQL_URL_ORDERS, TEST_MYSQL_URL_SAKILA, TEST_PG_URL};
 use crate::{runner::run, tests::pg_pool};
 use smql::parser::parse;
+use sql_adapter::row::{db_row::DbRow, row_data::RowData};
 use sqlx::{mysql::MySqlRow, Row};
 
 /// DDL statement to precreate the `actor` table in Postgres for testing various scenarios involving existing tables.
@@ -10,6 +11,23 @@ pub const ACTORS_TABLE_DDL: &str = r#"CREATE TABLE actor (
   last_name VARCHAR(45) NOT NULL,
   last_update TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );"#;
+
+/// A query that performs a multi-table join and selects specific columns.
+/// Primarily used for testing the LOAD statement.
+pub const ORDERS_FLAT_JOIN_QUERY: &str = r#"
+    SELECT orders.id AS id,
+        orders.user_id AS user_id,
+        orders.order_date AS order_date,
+        orders.total AS total,
+        users.email AS user_email,
+        order_items.price AS order_price,
+        products.name AS product_name
+    FROM orders
+    INNER JOIN users        ON users.id           = orders.user_id
+    INNER JOIN order_items  ON order_items.order_id = orders.id
+    INNER JOIN products     ON products.id        = order_items.id
+    LIMIT 1000 OFFSET 0
+"#;
 
 /// The type of database to use for the test
 pub enum DbType {
@@ -183,6 +201,69 @@ pub async fn get_column_names(
             Ok(names)
         }
     }
+}
+
+pub async fn fetch_rows(
+    query: &str,
+    source_db: &str,
+    db: DbType,
+) -> Result<Vec<RowData>, sqlx::Error> {
+    match db {
+        DbType::MySql => {
+            let mysql = mysql_pool(source_db).await;
+            let rows = sqlx::query(query).fetch_all(&mysql).await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| RowData::from_db_row("source_table", &DbRow::MySqlRow(&row)))
+                .collect())
+        }
+        DbType::Postgres => {
+            let pg = pg_pool().await;
+            let rows = sqlx::query(query).fetch_all(&pg).await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| RowData::from_db_row("source_table", &DbRow::PostgresRow(&row)))
+                .collect())
+        }
+    }
+}
+
+/// Fetch a single cell from the first row of `query`,
+/// and return it as a String (panicking if anything is missing).
+pub async fn get_cell_as_string(query: &str, schema: &str, db: DbType, column: &str) -> String {
+    let rows = fetch_rows(query, schema, db)
+        .await
+        .expect("fetch_rows failed");
+    let row = rows
+        .first()
+        .unwrap_or_else(|| panic!("no rows returned for query `{}`", query));
+    let col = row
+        .get(column)
+        .unwrap_or_else(|| panic!("column `{}` not found in row", column));
+    col.value
+        .as_ref()
+        .unwrap_or_else(|| panic!("column `{}` was NULL", column))
+        .as_string()
+        .unwrap_or_else(|| panic!("column `{}` was not a string", column))
+}
+
+/// Fetch a single cell from the first row of `query`,
+/// and return it as an f64 (panicking if anything is missing).
+pub async fn get_cell_as_f64(query: &str, schema: &str, db: DbType, column: &str) -> f64 {
+    let rows = fetch_rows(query, schema, db)
+        .await
+        .expect("fetch_rows failed");
+    let row = rows
+        .first()
+        .unwrap_or_else(|| panic!("no rows returned for query `{}`", query));
+    let col = row
+        .get(column)
+        .unwrap_or_else(|| panic!("column `{}` not found in row", column));
+    col.value
+        .as_ref()
+        .unwrap_or_else(|| panic!("column `{}` was NULL", column))
+        .as_f64()
+        .unwrap_or_else(|| panic!("column `{}` was not a float", column))
 }
 
 /// Execute a SQL statement in Postgres, panicking on any error
