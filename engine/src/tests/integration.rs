@@ -4,8 +4,9 @@ mod tests {
         reset_migration_buffer, reset_postgres_schema,
         utils::{
             assert_column_exists, assert_row_count, assert_table_exists, execute, fetch_rows,
-            get_cell_as_f64, get_cell_as_string, get_column_names, get_row_count, get_table_names,
-            run_smql, DbType, ACTORS_TABLE_DDL, ORDERS_FLAT_JOIN_QUERY,
+            get_cell_as_f64, get_cell_as_string, get_cell_as_usize, get_column_names,
+            get_row_count, get_table_names, run_smql, DbType, ACTORS_TABLE_DDL,
+            ORDERS_FLAT_FILTER_QUERY, ORDERS_FLAT_JOIN_QUERY,
         },
     };
     use tracing_test::traced_test;
@@ -518,6 +519,94 @@ mod tests {
             src_rows.len(),
             dst_count as usize,
             "expected same number of joined rows"
+        );
+    }
+
+    // Test Settings: CREATE_MISSING_TABLES = TRUE, IGNORE_CONSTRAINTS = TRUE.
+    // Scenario:
+    // - The target table does not exist in Postgres.
+    // - The settings to create missing tables and ignore constraints are specified.
+    // - A filter is applied to copy only rows where `total > 400`.
+    // Expected Outcome:
+    // - The target table should be created in Postgres.
+    // - The destination table should contain only the rows that satisfy the filter condition.
+    #[traced_test]
+    #[tokio::test]
+    async fn tc14() {
+        reset_migration_buffer().expect("reset migration buffer");
+        reset_postgres_schema().await;
+
+        let tmpl = r#"
+            CONNECTIONS(
+                SOURCE(MYSQL,  "{mysq_url}"),
+                DESTINATION(POSTGRES, "{pg_url}")
+            );
+            MIGRATE(
+                SOURCE(TABLE, orders) -> DEST(TABLE, orders) [
+                    SETTINGS(CREATE_MISSING_TABLES=TRUE,IGNORE_CONSTRAINTS=TRUE),
+                    FILTER(orders[total] > 400)
+                ]
+            );
+        "#;
+
+        run_smql(tmpl, "orders").await;
+
+        let query = "SELECT COUNT(*) cnt FROM orders WHERE total > 400";
+        let src_cnt = get_cell_as_usize(query, "orders", DbType::MySql, "cnt").await;
+        let dst_cnt = get_cell_as_usize(query, "orders", DbType::Postgres, "cnt").await;
+
+        assert_eq!(
+            src_cnt, dst_cnt,
+            "expected same number of rows in destination table"
+        );
+    }
+
+    // Test Settings: CREATE_MISSING_TABLES = TRUE, IGNORE_CONSTRAINTS = TRUE.
+    // Scenario:
+    // - The target table does not exist in Postgres.
+    // - The settings to create missing tables and ignore constraints are specified.
+    // - A nested filter is applied by combining multiple conditions based on loaded tables:
+    //     - `total > 400`
+    //     - `user_id != 1` or `price < 1200`.
+    // Expected Outcome:
+    // - The target table should be created in Postgres.
+    // - The destination table should contain only the rows that satisfy the filter condition.
+    #[traced_test]
+    #[tokio::test]
+    async fn tc15() {
+        reset_migration_buffer().expect("reset migration buffer");
+        reset_postgres_schema().await;
+
+        let tmpl = r#"
+            CONNECTIONS(
+                SOURCE(MYSQL,  "{mysq_url}"),
+                DESTINATION(POSTGRES, "{pg_url}")
+            );
+            MIGRATE(
+                SOURCE(TABLE, orders) -> DEST(TABLE, orders) [
+                    SETTINGS(CREATE_MISSING_TABLES=TRUE,IGNORE_CONSTRAINTS=TRUE),
+                    LOAD(TABLES(users,order_items,products),MATCH(
+                        ON(users[id] -> orders[user_id]),
+                        ON(order_items[order_id] -> orders[id]),
+                        ON(products[id] -> order_items[id])
+                    )),
+                    FILTER(AND(orders[total]>400, OR(users[id]!=1, order_items[price]<1200)))
+                ]
+            );
+        "#;
+
+        run_smql(tmpl, "orders").await;
+
+        // Fetch from source and count in dest
+        let src_rows = fetch_rows(ORDERS_FLAT_FILTER_QUERY, "orders", DbType::MySql)
+            .await
+            .expect("fetch source rows");
+        let dst_count = get_row_count("orders", "orders", DbType::Postgres).await;
+
+        assert_eq!(
+            src_rows.len(),
+            dst_count as usize,
+            "expected same number of filtered rows"
         );
     }
 }

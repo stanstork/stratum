@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use sqlx::{mysql::MySqlPoolOptions, postgres::PgPoolOptions, Executor, MySqlPool, PgPool};
 use std::{env, fs, io, path::PathBuf};
 

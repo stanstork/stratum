@@ -63,6 +63,20 @@ impl ColumnValue {
         }
     }
 
+    pub fn as_usize(&self) -> Option<usize> {
+        match self {
+            ColumnValue::Int(v) => Some(*v as usize),
+            ColumnValue::Float(v) => Some(*v as usize),
+            ColumnValue::String(v) => v.parse::<usize>().ok(),
+            ColumnValue::Boolean(v) => Some(if *v { 1 } else { 0 }),
+            ColumnValue::Json(v) => v.as_u64().map(|u| u as usize),
+            ColumnValue::Uuid(_) => None,
+            ColumnValue::Bytes(_) => None,
+            ColumnValue::Date(_) => None,
+            ColumnValue::Timestamp(_) => None,
+        }
+    }
+
     pub fn as_string(&self) -> Option<String> {
         match self {
             ColumnValue::Int(v) => Some(v.to_string()),

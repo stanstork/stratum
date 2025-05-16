@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use super::{mysql_pool, TEST_MYSQL_URL_ORDERS, TEST_MYSQL_URL_SAKILA, TEST_PG_URL};
 use crate::{runner::run, tests::pg_pool};
 use smql::parser::parse;
@@ -26,7 +28,20 @@ pub const ORDERS_FLAT_JOIN_QUERY: &str = r#"
     INNER JOIN users        ON users.id           = orders.user_id
     INNER JOIN order_items  ON order_items.order_id = orders.id
     INNER JOIN products     ON products.id        = order_items.id
-    LIMIT 1000 OFFSET 0
+"#;
+
+/// A query that selects columns from the `orders` table with nested filters applied.
+/// This is primarily used for testing the FILTER statement.
+pub const ORDERS_FLAT_FILTER_QUERY: &str = r#"
+    SELECT orders.user_id AS user_id, 
+        orders.total AS total, 
+        orders.order_date AS order_date, 
+        orders.id AS id 
+    FROM orders AS orders 
+    INNER JOIN users AS users             ON users.id = orders.user_id 
+    INNER JOIN order_items AS order_items ON order_items.order_id = orders.id 
+    INNER JOIN products AS products       ON products.id = order_items.id 
+    WHERE (orders.total > 400 AND (users.id != 1 OR order_items.price < 1200))
 "#;
 
 /// The type of database to use for the test
@@ -263,6 +278,27 @@ pub async fn get_cell_as_f64(query: &str, schema: &str, db: DbType, column: &str
         .as_ref()
         .unwrap_or_else(|| panic!("column `{}` was NULL", column))
         .as_f64()
+        .unwrap_or_else(|| panic!("column `{}` was not a float", column))
+}
+
+/// Fetch a single cell from the first row of `query`,
+/// and return it as an usize (panicking if anything is missing).
+pub async fn get_cell_as_usize(query: &str, schema: &str, db: DbType, column: &str) -> usize {
+    let rows = fetch_rows(query, schema, db)
+        .await
+        .expect("fetch_rows failed");
+
+    println!("rows: {:?}", rows);
+    let row = rows
+        .first()
+        .unwrap_or_else(|| panic!("no rows returned for query `{}`", query));
+    let col = row
+        .get(column)
+        .unwrap_or_else(|| panic!("column `{}` not found in row", column));
+    col.value
+        .as_ref()
+        .unwrap_or_else(|| panic!("column `{}` was NULL", column))
+        .as_usize()
         .unwrap_or_else(|| panic!("column `{}` was not a float", column))
 }
 
