@@ -197,6 +197,10 @@ impl NameMap {
     pub fn contains_key(&self, key: &str) -> bool {
         self.source_to_target.contains_key(key)
     }
+
+    pub fn contains_target_key(&self, key: &str) -> bool {
+        self.target_to_source.contains_key(key)
+    }
 }
 
 impl EntityMapping {
@@ -228,26 +232,59 @@ impl EntityMapping {
         self.lookups.get(entity).map(Vec::as_slice).unwrap_or(&[])
     }
 
+    /// Build a map from “entity name” → all lookups that reference it.
     fn get_lookups(field_mappings: &FieldMappings) -> HashMap<String, Vec<LookupField>> {
         let mut lookups: HashMap<String, Vec<LookupField>> = HashMap::new();
+
         for computed_list in field_mappings.computed_fields.values() {
             for computed in computed_list {
-                if let Expression::Lookup { entity, key, .. } = &computed.expression {
-                    let entity_name = entity.clone();
-                    let key_name = key.clone();
-                    let target_name = computed.name.clone();
+                // collect *all* lookups inside this computed field
+                let mut found = Vec::new();
+                Self::extract_lookups(&computed.expression, &computed.name, &mut found);
 
-                    let lf = LookupField {
-                        entity: entity_name.clone(),
-                        key: key_name,
-                        target: target_name,
-                    };
-
-                    lookups.entry(entity_name).or_default().push(lf);
+                // group them by entity
+                for lf in found {
+                    lookups.entry(lf.entity.clone()).or_default().push(lf);
                 }
             }
         }
 
         lookups
+    }
+
+    /// Walks `expr` and pushes every `Lookup` it finds into `out`.
+    fn extract_lookups(expr: &Expression, target: &str, out: &mut Vec<LookupField>) {
+        match expr {
+            Expression::Lookup { entity, key, .. } => {
+                out.push(LookupField {
+                    entity: entity.clone(),
+                    key: key.clone(),
+                    target: target.to_string(),
+                });
+            }
+
+            Expression::Arithmetic { left, right, .. } => {
+                Self::extract_lookups(left, target, out);
+                Self::extract_lookups(right, target, out);
+            }
+
+            Expression::FunctionCall { arguments, .. } => {
+                for arg in arguments {
+                    Self::extract_lookups(arg, target, out);
+                }
+            }
+
+            // Identifiers and literals never contain nested lookups:
+            Expression::Identifier(_) | Expression::Literal(_) => {}
+        }
+    }
+}
+
+impl Default for NameMap {
+    fn default() -> Self {
+        Self {
+            source_to_target: HashMap::new(),
+            target_to_source: HashMap::new(),
+        }
     }
 }

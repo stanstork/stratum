@@ -8,6 +8,7 @@ use crate::{
 };
 use common::mapping::EntityMapping;
 use postgres::data_type::PgColumnDataType;
+use smql::statements::setting::CopyColumns;
 use sql_adapter::{
     adapter::SqlAdapter,
     metadata::{
@@ -86,6 +87,8 @@ impl SchemaSettingContext {
     pub async fn build_schema_plan(&self) -> Result<SchemaPlan<'_>, SettingsError> {
         let adapter = self.source_adapter().await?;
         let ignore_constraints = self.state.lock().await.ignore_constraints;
+        let mapped_columns_only = self.state.lock().await.copy_columns == CopyColumns::MapOnly;
+
         let type_engine = TypeEngine::new(
             adapter.clone(),
             // converter
@@ -102,6 +105,7 @@ impl SchemaSettingContext {
             adapter,
             type_engine,
             ignore_constraints,
+            mapped_columns_only,
             self.mapping.clone(),
         ))
     }

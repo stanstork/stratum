@@ -49,6 +49,7 @@ lazy_static! {
         m.insert("TINYINT", ColumnDataType::Short);
         m.insert("SMALLINT", ColumnDataType::Short);
         m.insert("INT", ColumnDataType::Int);
+        m.insert("INT8", ColumnDataType::Int);
         m.insert("MEDIUMINT", ColumnDataType::Int);
         m.insert("BIGINT", ColumnDataType::Long);
         m.insert("FLOAT", ColumnDataType::Float);

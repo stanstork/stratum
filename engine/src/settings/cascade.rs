@@ -73,11 +73,13 @@ impl CascadeSchemaSetting {
             MetadataProvider::build_metadata_graph(&*adapter, tables).await?
         };
 
-        // If there's an SQL filter, cascade out
-        if let Some(Filter::Sql(sql_filter)) = &self.context.source.filter {
-            self.apply_cascade(&meta_graph, sql_filter, &self.context.source.primary)
-                .await?;
-        }
+        let sql_filter = match &self.context.source.filter {
+            Some(Filter::Sql(sql_filter)) => Some(sql_filter.clone()),
+            _ => None,
+        };
+
+        self.apply_cascade(&meta_graph, &sql_filter, &self.context.source.primary)
+            .await?;
 
         Ok(())
     }
@@ -102,7 +104,7 @@ impl CascadeSchemaSetting {
     async fn apply_cascade(
         &self,
         meta_graph: &HashMap<String, TableMetadata>,
-        sql_filter: &SqlFilter,
+        sql_filter: &Option<SqlFilter>,
         primary: &DataSource,
     ) -> Result<(), MigrationError> {
         let root_table = self.context.source.name.clone();
@@ -110,25 +112,31 @@ impl CascadeSchemaSetting {
         let DataSource::Database(db_mutex) = primary;
         let mut db = db_mutex.lock().await;
 
-        for meta in meta_graph.values() {
-            // skip the root table
-            if meta.name.eq_ignore_ascii_case(&root_table) {
-                continue;
+        match sql_filter {
+            Some(sql_filter) => {
+                for meta in meta_graph.values() {
+                    // skip the root table
+                    if meta.name.eq_ignore_ascii_case(&root_table) {
+                        continue;
+                    }
+
+                    // find all join‐paths to tables mentioned in the filter
+                    let joins = sql_filter
+                        .tables()
+                        .iter()
+                        .filter_map(|t| find_join_path(meta_graph, &meta.name, t))
+                        .collect::<Vec<_>>();
+
+                    // combine + build clauses
+                    let paths = combine_join_paths(joins, &meta.name);
+                    let clauses =
+                        build_join_clauses(&meta.name, &paths, meta_graph, JoinType::Inner);
+
+                    // push them into the locked DB
+                    db.set_cascade_joins(meta.name.clone(), clauses);
+                }
             }
-
-            // find all join‐paths to tables mentioned in the filter
-            let joins = sql_filter
-                .tables()
-                .iter()
-                .filter_map(|t| find_join_path(meta_graph, &meta.name, t))
-                .collect::<Vec<_>>();
-
-            // combine + build clauses
-            let paths = combine_join_paths(joins, &meta.name);
-            let clauses = build_join_clauses(&meta.name, &paths, meta_graph, JoinType::Inner);
-
-            // push them into the locked DB
-            db.set_cascade_joins(meta.name.clone(), clauses);
+            None => {}
         }
 
         // store the full graph for later use

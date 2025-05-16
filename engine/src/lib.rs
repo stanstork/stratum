@@ -14,3 +14,5 @@ pub mod source;
 pub mod state;
 pub mod transform;
 pub mod validate;
+
+mod tests;

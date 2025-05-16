@@ -10,7 +10,10 @@ use sql_adapter::{
     row::row_data::RowData,
     source::DbDataSource,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 #[derive(Clone)]
 pub struct MySqlDataSource {
@@ -86,6 +89,7 @@ impl MySqlDataSource {
     /// Build all requests: primary with join-fields, then the related ones without them.
     fn build_requests(&self, batch_size: usize, offset: Option<usize>) -> Vec<FetchRowsRequest> {
         let mut reqs = Vec::new();
+        let mut processed_tables = HashSet::new();
 
         // primary table
         if let Some(meta) = &self.primary_meta {
@@ -96,13 +100,22 @@ impl MySqlDataSource {
                 .unwrap_or_default();
 
             reqs.push(self.build_request_for(&meta.name, meta, &joins, batch_size, offset, true));
+            processed_tables.insert(meta.name.clone());
         }
 
         // related tables (cascade_joins)
         for (table, meta) in &self.related_meta {
-            if let Some(joins) = self.cascade_joins.get(table) {
-                reqs.push(self.build_request_for(table, meta, joins, batch_size, offset, false));
+            // skip any tables already processed
+            if !processed_tables.insert(table.clone()) {
+                continue;
             }
+
+            let joins = self
+                .cascade_joins
+                .get(table)
+                .unwrap_or(&Vec::new())
+                .to_vec();
+            reqs.push(self.build_request_for(table, meta, &joins, batch_size, offset, false));
         }
 
         reqs

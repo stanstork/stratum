@@ -109,8 +109,10 @@ impl ItemContext {
         };
 
         let meta = fetch_meta_fn(table.to_string()).await?;
+        if meta.is_valid() {
+            db.lock().await.set_metadata(meta);
+        }
 
-        db.lock().await.set_metadata(meta);
         Ok(())
     }
 }

@@ -1,4 +1,4 @@
-use smql::statements::setting::Settings;
+use smql::statements::setting::{CopyColumns, Settings};
 
 #[derive(Debug)]
 pub struct MigrationState {
@@ -8,6 +8,7 @@ pub struct MigrationState {
     pub create_missing_columns: bool,
     pub create_missing_tables: bool,
     pub cascade_schema: bool,
+    pub copy_columns: CopyColumns,
 }
 
 impl MigrationState {
@@ -19,6 +20,7 @@ impl MigrationState {
             create_missing_columns: false,
             create_missing_tables: false,
             cascade_schema: false,
+            copy_columns: CopyColumns::All,
         }
     }
 
@@ -30,6 +32,7 @@ impl MigrationState {
             create_missing_columns: settings.create_missing_columns,
             create_missing_tables: settings.create_missing_tables,
             cascade_schema: settings.cascade_schema,
+            copy_columns: settings.copy_columns.clone(),
         }
     }
 }
