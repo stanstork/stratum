@@ -1,4 +1,5 @@
 use crate::{
+    adapter::Adapter,
     consumer::Consumer,
     context::{global::GlobalContext, item::ItemContext},
     destination::{data::DataDestination, Destination},
@@ -92,14 +93,29 @@ async fn create_source(
     let name = migrate_item.source.name();
     let format = get_data_format(migrate_item, conn, true);
 
+    // build the optional LinkedSource
     let linked = if let Some(load) = migrate_item.load.as_ref() {
         Some(LinkedSource::new(ctx, format, load, mapping).await?)
     } else {
         None
     };
 
+    // prepare the adapter
+    let adapter = if format.is_sql() {
+        // global context contains sql connections
+        ctx.src_conn.clone()
+    } else if format.is_file() {
+        // for CSV/file spin up a fresh file-backed adapter
+        let path = &name;
+        let settings = migrate_item.settings.clone();
+        Some(Adapter::new_file(path, settings)?)
+    } else {
+        return Err(MigrationError::UnsupportedFormat(format.to_string()));
+    };
+
+    // create filter + primary data source
     let filter = create_filter(migrate_item, format)?;
-    let primary = DataSource::from_adapter(format, &ctx.src_adapter, &linked, &filter)?;
+    let primary = DataSource::from_adapter(format, &adapter, &linked, &filter)?;
 
     Ok(Source::new(name, format, primary, linked, filter))
 }
@@ -132,7 +148,7 @@ async fn create_destination(
 ) -> Result<Destination, MigrationError> {
     let name = migrate_item.destination.name();
     let format = get_data_format(migrate_item, conn, false);
-    let data_dest = DataDestination::from_adapter(format, &ctx.dst_adapter)?;
+    let data_dest = DataDestination::from_adapter(format, &ctx.dst_conn)?;
     Ok(Destination::new(name, format, data_dest))
 }
 

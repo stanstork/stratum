@@ -103,7 +103,7 @@ migrate_settings = {
     ~ WHITESPACE* ~ ")"
 }
 setting_pair = {
-    ident ~ WHITESPACE* ~ "=" ~ WHITESPACE* ~ (boolean | decimal | integer | ident)
+    ident ~ WHITESPACE* ~ "=" ~ WHITESPACE* ~ (boolean | decimal | integer | ident | string)
 }
 
 // ==============================

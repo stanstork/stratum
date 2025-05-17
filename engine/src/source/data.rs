@@ -1,5 +1,6 @@
 use super::linked::LinkedSource;
 use crate::{adapter::Adapter, error::MigrationError, filter::Filter};
+use csv::{error::FileError, source::FileDataSource};
 use mysql::source::MySqlDataSource;
 use smql::statements::connection::DataFormat;
 use sql_adapter::{error::db::DbError, metadata::table::TableMetadata, source::DbDataSource};
@@ -9,6 +10,7 @@ use tokio::sync::Mutex;
 #[derive(Clone)]
 pub enum DataSource {
     Database(Arc<Mutex<dyn DbDataSource<Error = DbError>>>),
+    File(Arc<Mutex<dyn FileDataSource<Error = FileError>>>),
 }
 
 impl DataSource {
@@ -43,17 +45,23 @@ impl DataSource {
                 panic!("Postgres data source is not implemented yet")
             }
 
-            // Format says MySql but adapter is wrong
-            (DataFormat::MySql, _) => Err(DbError::InvalidAdapter(
-                "Adapter mismatch: expected MySql adapter".to_string(),
-            )
-            .into()),
+            // CSV + FileAdapter -> build a FileDataSource
+            (DataFormat::Csv, Some(Adapter::Csv(file_adapter))) => {
+                let sql_filter = filter.as_ref().map(|f| {
+                    let Filter::Sql(sf) = f;
+                    sf.clone()
+                });
+                let join = linked.as_ref().and_then(|ls| {
+                    if let LinkedSource::Table(j) = ls {
+                        Some((**j).clone())
+                    } else {
+                        None
+                    }
+                });
 
-            // Format says Postgres but adapter is wrong
-            (DataFormat::Postgres, _) => Err(DbError::InvalidAdapter(
-                "Adapter mismatch: expected Postgres adapter".to_string(),
-            )
-            .into()),
+                let ds = FileDataSource::new(file_adapter.clone(), join, sql_filter);
+                Ok(DataSource::File(Arc::new(Mutex::new(ds))))
+            }
 
             // Anything else isn’t a SQL format we support
             (fmt, _) => Err(MigrationError::UnsupportedFormat(fmt.to_string())),

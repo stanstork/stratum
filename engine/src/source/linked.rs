@@ -31,7 +31,7 @@ impl LinkedSource {
         // check if the source adapter is available
         // if not, return an error
         let src_adapter = ctx
-            .src_adapter
+            .src_conn
             .as_ref()
             .ok_or(MigrationError::AdapterNotFound(format.to_string()))?;
 
@@ -43,7 +43,7 @@ impl LinkedSource {
         // fetch metadata for all tables
         let mut meta = HashMap::new();
         for table in &load.entities {
-            let table_meta = src_adapter.get_adapter().fetch_metadata(table).await?;
+            let table_meta = src_adapter.get_sql_adapter().fetch_metadata(table).await?;
             meta.insert(table.clone(), table_meta);
         }
 

@@ -3,7 +3,10 @@ CONNECTIONS (
 );
 
 MIGRATE(
-    SOURCE(CSV, "path/file.csv") -> DEST(TABLE, orders) [
-        SETTINGS(CREATE_MISSING_TABLES=TRUE)
+    SOURCE(CSV, "/home/stan/repos/data/movies.csv") -> DEST(TABLE, orders) [
+        SETTINGS(
+            CSV_HEADER    = TRUE,
+            CSV_DELIMITER = ","
+        )
     ]
 );

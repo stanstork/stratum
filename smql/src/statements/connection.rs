@@ -128,3 +128,15 @@ impl Default for ConnectionPair {
         }
     }
 }
+
+impl DataFormat {
+    pub fn is_file(&self) -> bool {
+        self.contains(DataFormat::Csv)
+    }
+
+    pub fn is_sql(&self) -> bool {
+        self.contains(DataFormat::MySql)
+            || self.contains(DataFormat::Postgres)
+            || self.contains(DataFormat::Sqlite)
+    }
+}

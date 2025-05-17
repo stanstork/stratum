@@ -1,4 +1,5 @@
 use crate::settings::error::SettingsError;
+use csv::error::FileError;
 use sql_adapter::error::{adapter::ConnectorError, db::DbError};
 use thiserror::Error;
 
@@ -29,4 +30,7 @@ pub enum MigrationError {
     /// Error occurred while retrieving the adapter from the context for the database source.
     #[error("Adapter not found: {0}")]
     AdapterNotFound(String),
+
+    #[error("File error: {0}")]
+    FileError(#[from] FileError),
 }
