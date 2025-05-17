@@ -1,14 +1,10 @@
-CONNECTIONS(
-    SOURCE(MYSQL,  "mysql://user:password@localhost:3306/testdb"),
+CONNECTIONS (
+    SOURCE(MYSQL,         "mysql://user:password@localhost:3306/testdb"),
     DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/testdb")
 );
 
 MIGRATE(
     SOURCE(TABLE, orders) -> DEST(TABLE, orders) [
-        SETTINGS(CREATE_MISSING_TABLES=TRUE,IGNORE_CONSTRAINTS=TRUE),
-        LOAD(
-            TABLES(users),
-            MATCH(ON(users[id] -> orders[user_id]))
-        )
+        SETTINGS(INFER_SCHEMA=TRUE,CASCADE_SCHEMA=TRUE,IGNORE_CONSTRAINTS=TRUE)
     ]
 );

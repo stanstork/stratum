@@ -12,8 +12,8 @@ use pest::iterators::Pair;
 // ─────────────────────────────────────────────────────────────
 #[derive(Debug, Clone)]
 pub struct Connection {
-    pub source: ConnectionPair,
-    pub dest: ConnectionPair,
+    pub source: Option<ConnectionPair>,
+    pub dest: Option<ConnectionPair>,
 }
 
 #[derive(Debug, Clone)]
@@ -32,10 +32,12 @@ pub enum ConnectionType {
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct DataFormat: u8 {
-        const MySql    = 0b0001;
-        const Postgres = 0b0010;
-        const Sqlite   = 0b0100;
-        const Mongo    = 0b1000;
+        const MySql    = 0b0000_0001; // 1
+        const Postgres = 0b0000_0010; // 2
+        const Sqlite   = 0b0000_0100; // 4
+        const Mongo    = 0b0000_1000; // 8
+        const Csv      = 0b0001_0000; // 16
+        const Api      = 0b0010_0000; // 32
     }
 }
 
@@ -59,10 +61,7 @@ impl StatementParser for Connection {
             }
         }
 
-        Connection {
-            source: source.expect("Expected a source connection"),
-            dest: dest.expect("Expected a destination connection"),
-        }
+        Connection { source, dest }
     }
 }
 
@@ -114,5 +113,15 @@ impl fmt::Display for DataFormat {
             formats.push("MongoDB");
         }
         write!(f, "{}", formats.join(", "))
+    }
+}
+
+impl Default for ConnectionPair {
+    fn default() -> Self {
+        ConnectionPair {
+            conn_type: ConnectionType::Source,
+            format: DataFormat::empty(),
+            conn_str: String::new(),
+        }
     }
 }

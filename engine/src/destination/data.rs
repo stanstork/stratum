@@ -13,10 +13,10 @@ pub enum DataDestination {
 }
 
 impl DataDestination {
-    pub fn from_adapter(format: DataFormat, adapter: &Adapter) -> Result<Self, DbError> {
+    pub fn from_adapter(format: DataFormat, adapter: &Option<Adapter>) -> Result<Self, DbError> {
         match format {
             DataFormat::Postgres => match adapter {
-                Adapter::Postgres(adapter) => {
+                Some(Adapter::Postgres(adapter)) => {
                     let destination = PgDestination::new(adapter.clone());
                     Ok(DataDestination::Database(Arc::new(Mutex::new(destination))))
                 }
