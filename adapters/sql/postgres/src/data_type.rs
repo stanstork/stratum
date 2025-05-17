@@ -1,5 +1,5 @@
 use common::types::DataType;
-use sql_adapter::metadata::column::metadata::ColumnMetadata;
+use sql_adapter::metadata::column::ColumnMetadata;
 use sqlx::postgres::PgRow;
 use sqlx::Row;
 

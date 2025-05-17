@@ -1,20 +1,19 @@
+use crate::data_type::PgDataType;
 use async_trait::async_trait;
-use common::types::DataType;
+use common::{row_data::RowData, types::DataType};
 use sql_adapter::{
     adapter::SqlAdapter,
     error::{adapter::ConnectorError, db::DbError},
     metadata::{
-        column::metadata::{ColumnMetadata, COL_REFERENCING_TABLE},
+        column::{ColumnMetadata, COL_REFERENCING_TABLE},
         provider::MetadataProvider,
         table::TableMetadata,
     },
     requests::FetchRowsRequest,
-    row::{db_row::DbRow, row_data::RowData},
+    row::DbRow,
 };
 use sqlx::{Pool, Postgres, Row};
 use std::collections::HashMap;
-
-use crate::data_type::PgDataType;
 
 #[derive(Clone)]
 pub struct PgAdapter {

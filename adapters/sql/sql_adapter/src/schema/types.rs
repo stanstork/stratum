@@ -1,6 +1,6 @@
 use crate::{
     adapter::SqlAdapter,
-    metadata::{column::metadata::ColumnMetadata, table::TableMetadata},
+    metadata::{column::ColumnMetadata, table::TableMetadata},
 };
 use async_trait::async_trait;
 use common::{computed::ComputedField, mapping::EntityMapping, types::DataType};

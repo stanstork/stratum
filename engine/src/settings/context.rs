@@ -11,7 +11,7 @@ use postgres::data_type::PgDataType;
 use smql::statements::setting::CopyColumns;
 use sql_adapter::{
     adapter::SqlAdapter,
-    metadata::{column::metadata::ColumnMetadata, table::TableMetadata},
+    metadata::{column::ColumnMetadata, table::TableMetadata},
     schema::{plan::SchemaPlan, types::TypeEngine},
 };
 use std::sync::Arc;

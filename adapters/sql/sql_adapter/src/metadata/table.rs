@@ -1,4 +1,4 @@
-use super::{column::metadata::ColumnMetadata, fk::ForeignKeyMetadata};
+use super::{column::ColumnMetadata, fk::ForeignKeyMetadata};
 use crate::{
     query::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField},
     schema::types::TypeConverter,

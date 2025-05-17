@@ -2,10 +2,13 @@ use crate::{
     buffer::SledBuffer,
     context::item::ItemContext,
     destination::{data::DataDestination, Destination},
-    record::Record,
 };
-use common::{mapping::EntityMapping, record::DataRecord};
-use sql_adapter::{metadata::table::TableMetadata, row::row_data::RowData};
+use common::{
+    mapping::EntityMapping,
+    record::{DataRecord, Record},
+    row_data::RowData,
+};
+use sql_adapter::metadata::table::TableMetadata;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::sync::{watch::Receiver, Mutex};
 use tracing::{error, info};
@@ -81,7 +84,7 @@ impl Consumer {
         tables: &[TableMetadata],
     ) {
         let row_data = RowData::deserialize(record);
-        let table_name = row_data.table.clone(); //self.table_name_map.resolve(&row_data.table);
+        let table_name = row_data.entity.clone(); //self.table_name_map.resolve(&row_data.table);
 
         let batch = batch_map.entry(table_name.clone()).or_default();
         batch.push(Record::RowData(row_data));

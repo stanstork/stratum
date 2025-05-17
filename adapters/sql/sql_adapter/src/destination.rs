@@ -1,10 +1,10 @@
 use crate::{
     metadata::{provider::MetadataHelper, table::TableMetadata},
     query::column::ColumnDef,
-    row::row_data::RowData,
     schema::plan::SchemaPlan,
 };
 use async_trait::async_trait;
+use common::row_data::RowData;
 
 #[async_trait]
 pub trait DbDataDestination: MetadataHelper + Send + Sync {

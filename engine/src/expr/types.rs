@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use common::{computed::ComputedField, mapping::EntityMapping, types::DataType};
 use smql::statements::expr::{Expression, Literal};
 use sql_adapter::{
-    metadata::column::metadata::ColumnMetadata,
+    metadata::column::ColumnMetadata,
     schema::types::{AdapterRef, TypeInferencer},
 };
 use std::{future::Future, pin::Pin};

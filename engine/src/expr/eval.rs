@@ -1,6 +1,5 @@
-use common::{mapping::EntityMapping, value::Value};
+use common::{mapping::EntityMapping, row_data::RowData, value::Value};
 use smql::statements::expr::{Expression, Literal, Operator};
-use sql_adapter::row::row_data::RowData;
 use tracing::warn;
 
 pub trait Evaluator {
@@ -11,7 +10,7 @@ impl Evaluator for Expression {
     fn evaluate(&self, row: &RowData, mapping: &EntityMapping) -> Option<Value> {
         match self {
             Expression::Identifier(identifier) => row
-                .columns
+                .field_values
                 .iter()
                 .find(|col| col.name.eq_ignore_ascii_case(identifier))
                 .map(|col| col.value.clone())
@@ -49,14 +48,14 @@ impl Evaluator for Expression {
                     .and_then(|fields| fields.iter().find(|lk| lk.key.eq_ignore_ascii_case(key)))
                     // Given the LookupField, find the matching column in the current row
                     .and_then(|lk| {
-                        row.columns
+                        row.field_values
                             .iter()
                             .find(|col| col.name.eq_ignore_ascii_case(&lk.target))
                             .and_then(|col| col.value.clone())
                     });
 
                 let raw = row
-                    .columns
+                    .field_values
                     .iter()
                     .find(|col| col.name.eq_ignore_ascii_case(key))
                     .and_then(|col| col.value.clone());

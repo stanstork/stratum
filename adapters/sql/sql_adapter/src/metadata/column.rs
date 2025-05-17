@@ -1,5 +1,4 @@
-use crate::row::db_row::DbRow;
-use bigdecimal::ToPrimitive;
+use crate::row::DbRow;
 use common::{types::DataType, value::Value};
 
 const COL_ORDINAL_POSITION: &str = "ordinal_position";
@@ -47,7 +46,7 @@ impl ColumnMetadata {
             data_type,
             is_nullable: row.try_get_string(COL_IS_NULLABLE).unwrap_or_default() == "YES",
             has_default: row.try_get_string(COL_COLUMN_DEFAULT).is_some(),
-            default_value: from_row(row, data_type, COL_COLUMN_DEFAULT),
+            default_value: row.get_value(data_type, COL_COLUMN_DEFAULT),
             char_max_length: row.try_get_i64(COL_CHAR_MAX_LENGTH).map(|v| v as usize),
             num_precision: row.try_get_i32(COL_NUMERIC_PRECISION).map(|v| v as u32),
             num_scale: row.try_get_i32(COL_NUMERIC_SCALE).map(|v| v as u32),
@@ -59,31 +58,5 @@ impl ColumnMetadata {
             on_delete: row.try_get_string(COL_ON_DELETE),
             on_update: row.try_get_string(COL_ON_UPDATE),
         }
-    }
-}
-
-pub fn from_row(row: &DbRow, data_type: DataType, name: &str) -> Option<Value> {
-    match data_type {
-        DataType::Int | DataType::Long | DataType::Short => row.try_get_i64(name).map(Value::Int),
-        DataType::IntUnsigned | DataType::ShortUnsigned | DataType::Year => {
-            row.try_get_u64(name).map(|v| Value::Int(v as i64))
-        }
-        DataType::Float => row.try_get_f64(name).map(Value::Float),
-        DataType::Decimal => row
-            .try_get_bigdecimal(name)
-            .and_then(|v| v.to_f64().map(Value::Float)),
-        DataType::String | DataType::VarChar | DataType::Char => {
-            row.try_get_string(name).map(Value::String)
-        }
-        DataType::Boolean => row.try_get_bool(name).map(Value::Boolean),
-        DataType::Json => row.try_get_json(name).map(Value::Json),
-        DataType::Timestamp => row.try_get_timestamp(name).map(Value::Timestamp),
-        DataType::Date => row.try_get_date(name).map(Value::Date),
-        DataType::Enum => row.try_get_string(name).map(Value::String),
-        DataType::Bytea => row.try_get_bytes(name).map(Value::Bytes),
-        DataType::Blob | DataType::TinyBlob | DataType::MediumBlob | DataType::LongBlob => {
-            row.try_get_bytes(name).map(Value::Bytes)
-        }
-        _ => None,
     }
 }

@@ -15,7 +15,7 @@ use common::{mapping::EntityMapping, types::DataType};
 use postgres::data_type::PgDataType;
 use smql::statements::expr::Expression;
 use sql_adapter::{
-    metadata::{column::metadata::ColumnMetadata, table::TableMetadata},
+    metadata::{column::ColumnMetadata, table::TableMetadata},
     query::column::ColumnDef,
     schema::types::TypeInferencer,
 };

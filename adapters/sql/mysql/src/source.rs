@@ -1,5 +1,6 @@
 use crate::adapter::MySqlAdapter;
 use async_trait::async_trait;
+use common::row_data::RowData;
 use sql_adapter::{
     adapter::SqlAdapter,
     error::db::DbError,
@@ -7,7 +8,6 @@ use sql_adapter::{
     join::{clause::JoinClause, source::JoinSource},
     metadata::{provider::MetadataHelper, table::TableMetadata},
     requests::{FetchRowsRequest, FetchRowsRequestBuilder},
-    row::row_data::RowData,
     source::DbDataSource,
 };
 use std::{

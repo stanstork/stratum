@@ -2,8 +2,9 @@
 
 use super::{mysql_pool, TEST_MYSQL_URL_ORDERS, TEST_MYSQL_URL_SAKILA, TEST_PG_URL};
 use crate::{runner::run, tests::pg_pool};
+use common::row_data::RowData;
 use smql::parser::parse;
-use sql_adapter::row::{db_row::DbRow, row_data::RowData};
+use sql_adapter::row::DbRow;
 use sqlx::{mysql::MySqlRow, Row};
 
 /// DDL statement to precreate the `actor` table in Postgres for testing various scenarios involving existing tables.
@@ -229,7 +230,7 @@ pub async fn fetch_rows(
             let rows = sqlx::query(query).fetch_all(&mysql).await?;
             Ok(rows
                 .into_iter()
-                .map(|row| RowData::from_db_row("source_table", &DbRow::MySqlRow(&row)))
+                .map(|row| DbRow::MySqlRow(&row).get_row_data("source_table"))
                 .collect())
         }
         DbType::Postgres => {
@@ -237,7 +238,7 @@ pub async fn fetch_rows(
             let rows = sqlx::query(query).fetch_all(&pg).await?;
             Ok(rows
                 .into_iter()
-                .map(|row| RowData::from_db_row("source_table", &DbRow::PostgresRow(&row)))
+                .map(|row| DbRow::PostgresRow(&row).get_row_data("source_table"))
                 .collect())
         }
     }

@@ -1,7 +1,6 @@
 use crate::data_type::PgDataType;
 use common::types::DataType;
-use sql_adapter::metadata::column::metadata::ColumnMetadata;
-use sql_adapter::row::db_row::DbRow;
+use sql_adapter::{metadata::column::ColumnMetadata, row::DbRow};
 use sqlx::postgres::PgRow;
 
 pub trait ColumnMetadataMapper {

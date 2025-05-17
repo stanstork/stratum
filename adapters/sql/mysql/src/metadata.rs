@@ -1,7 +1,7 @@
 use crate::data_type::MySqlColumnDataType;
 use common::types::DataType;
-use sql_adapter::metadata::column::metadata::ColumnMetadata;
-use sql_adapter::row::db_row::DbRow;
+use sql_adapter::metadata::column::ColumnMetadata;
+use sql_adapter::row::DbRow;
 use sqlx::mysql::MySqlRow;
 
 pub trait ColumnMetadataMapper {
