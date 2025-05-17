@@ -6,15 +6,12 @@ use crate::{
     source::{data::DataSource, Source},
     state::MigrationState,
 };
-use common::mapping::EntityMapping;
-use postgres::data_type::PgColumnDataType;
+use common::{mapping::EntityMapping, types::DataType};
+use postgres::data_type::PgDataType;
 use smql::statements::setting::CopyColumns;
 use sql_adapter::{
     adapter::SqlAdapter,
-    metadata::{
-        column::{data_type::ColumnDataType, metadata::ColumnMetadata},
-        table::TableMetadata,
-    },
+    metadata::{column::metadata::ColumnMetadata, table::TableMetadata},
     schema::{plan::SchemaPlan, types::TypeEngine},
 };
 use std::sync::Arc;
@@ -92,9 +89,7 @@ impl SchemaSettingContext {
         let type_engine = TypeEngine::new(
             adapter.clone(),
             // converter
-            &|meta: &ColumnMetadata| -> (String, Option<usize>) {
-                ColumnDataType::to_pg_type(meta)
-            },
+            &|meta: &ColumnMetadata| -> (String, Option<usize>) { DataType::to_pg_type(meta) },
             // extractor
             &|meta: &TableMetadata| -> Vec<ColumnMetadata> { TableMetadata::enums(meta) },
             // INFERENCER → just the function pointer

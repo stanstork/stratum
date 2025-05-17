@@ -1,13 +1,11 @@
 use crate::data_type::MySqlColumnDataType;
 use async_trait::async_trait;
+use common::types::DataType;
 use sql_adapter::{
     adapter::SqlAdapter,
     error::{adapter::ConnectorError, db::DbError},
     metadata::{
-        column::{
-            data_type::ColumnDataType,
-            metadata::{ColumnMetadata, COL_REFERENCING_TABLE},
-        },
+        column::metadata::{ColumnMetadata, COL_REFERENCING_TABLE},
         provider::MetadataProvider,
         table::TableMetadata,
     },
@@ -69,7 +67,7 @@ impl SqlAdapter for MySqlAdapter {
         let columns = rows
             .iter()
             .map(|row| {
-                let data_type = ColumnDataType::from_mysql_row(row);
+                let data_type = DataType::from_mysql_row(row);
                 let column_metadata = ColumnMetadata::from_row(&DbRow::MySqlRow(row), data_type);
                 Ok((column_metadata.name.clone(), column_metadata))
             })

@@ -2,9 +2,9 @@ use crate::{
     buffer::SledBuffer,
     context::item::ItemContext,
     destination::{data::DataDestination, Destination},
-    record::{DataRecord, Record},
+    record::Record,
 };
-use common::mapping::EntityMapping;
+use common::{mapping::EntityMapping, record::DataRecord};
 use sql_adapter::{metadata::table::TableMetadata, row::row_data::RowData};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::sync::{watch::Receiver, Mutex};

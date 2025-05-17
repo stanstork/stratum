@@ -112,6 +112,9 @@ impl fmt::Display for DataFormat {
         if self.contains(DataFormat::Mongo) {
             formats.push("MongoDB");
         }
+        if self.contains(DataFormat::Csv) {
+            formats.push("CSV");
+        }
         write!(f, "{}", formats.join(", "))
     }
 }

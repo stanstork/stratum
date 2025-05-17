@@ -11,14 +11,11 @@ use crate::{
     state::MigrationState,
 };
 use async_trait::async_trait;
-use common::mapping::EntityMapping;
-use postgres::data_type::PgColumnDataType;
+use common::{mapping::EntityMapping, types::DataType};
+use postgres::data_type::PgDataType;
 use smql::statements::expr::Expression;
 use sql_adapter::{
-    metadata::{
-        column::{data_type::ColumnDataType, metadata::ColumnMetadata},
-        table::TableMetadata,
-    },
+    metadata::{column::metadata::ColumnMetadata, table::TableMetadata},
     query::column::ColumnDef,
     schema::types::TypeInferencer,
 };
@@ -72,7 +69,7 @@ impl CreateMissingColumnsSetting {
         dest_meta: &TableMetadata,
     ) -> Result<(), SettingsError> {
         if let Some(columns) = self.context.mapping.field_mappings.get_entity(table) {
-            let type_conv = |meta: &ColumnMetadata| ColumnDataType::to_pg_type(meta); // Currently only Postgres
+            let type_conv = |meta: &ColumnMetadata| DataType::to_pg_type(meta); // Currently only Postgres
             for (src_col, dst_col) in columns.forward_map() {
                 if dest_meta.get_column(&dst_col).is_none() {
                     let meta = source_meta.get_column(&src_col).ok_or_else(|| {

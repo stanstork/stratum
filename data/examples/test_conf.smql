@@ -1,10 +1,9 @@
 CONNECTIONS (
-    SOURCE(MYSQL,         "mysql://user:password@localhost:3306/testdb"),
     DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/testdb")
 );
 
 MIGRATE(
-    SOURCE(TABLE, orders) -> DEST(TABLE, orders) [
-        SETTINGS(INFER_SCHEMA=TRUE,CASCADE_SCHEMA=TRUE,IGNORE_CONSTRAINTS=TRUE)
+    SOURCE(CSV, "path/file.csv") -> DEST(TABLE, orders) [
+        SETTINGS(CREATE_MISSING_TABLES=TRUE)
     ]
 );

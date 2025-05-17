@@ -1,8 +1,8 @@
 use async_trait::async_trait;
-use common::{computed::ComputedField, mapping::EntityMapping};
+use common::{computed::ComputedField, mapping::EntityMapping, types::DataType};
 use smql::statements::expr::{Expression, Literal};
 use sql_adapter::{
-    metadata::column::{data_type::ColumnDataType, metadata::ColumnMetadata},
+    metadata::column::metadata::ColumnMetadata,
     schema::types::{AdapterRef, TypeInferencer},
 };
 use std::{future::Future, pin::Pin};
@@ -18,7 +18,7 @@ pub async fn infer_computed_type(
     columns: &[ColumnMetadata],
     mapping: &EntityMapping,
     adapter: &AdapterRef,
-) -> Option<ColumnDataType> {
+) -> Option<DataType> {
     // Clone the expression node into wrapper and run inference.
     let expr = ExpressionWrapper(computed.expression.clone());
     let data_type = expr.infer_type(columns, mapping, adapter).await;
@@ -39,7 +39,7 @@ pub async fn infer_computed_type(
 }
 
 /// Boxes the anonymous future returned by `infer_computed_type` into a
-/// `Pin<Box<dyn Future<Output = Option<ColumnDataType>> + Send + 'a>>`. This:
+/// `Pin<Box<dyn Future<Output = Option<DataType>> + Send + 'a>>`. This:
 /// 1. Erases the compiler-generated, unnamed `impl Future` type into a single,
 ///    heap-allocated trait object.
 /// 2. Gives the function a concrete, nameable return type that exactly matches
@@ -52,20 +52,20 @@ pub fn boxed_infer_computed_type<'a>(
     columns: &'a [ColumnMetadata],
     mapping: &'a EntityMapping,
     adapter: &'a AdapterRef,
-) -> Pin<Box<dyn Future<Output = Option<ColumnDataType>> + Send + 'a>> {
+) -> Pin<Box<dyn Future<Output = Option<DataType>> + Send + 'a>> {
     // Box the future returned by async fn
     Box::pin(infer_computed_type(computed, columns, mapping, adapter))
 }
 
 #[async_trait]
 impl TypeInferencer for ExpressionWrapper {
-    /// Inspect the wrapped `Expression` and produce a SQL-like `ColumnDataType`.
+    /// Inspect the wrapped `Expression` and produce a SQL-like `DataType`.
     async fn infer_type(
         &self,
         columns: &[ColumnMetadata],
         mapping: &EntityMapping,
         adapter: &AdapterRef,
-    ) -> Option<ColumnDataType> {
+    ) -> Option<DataType> {
         match &self.0 {
             Expression::Identifier(identifier) => columns
                 .iter()
@@ -73,10 +73,10 @@ impl TypeInferencer for ExpressionWrapper {
                 .map(|col| col.data_type),
 
             Expression::Literal(literal) => Some(match literal {
-                Literal::String(_) => ColumnDataType::String,
-                Literal::Integer(_) => ColumnDataType::Int,
-                Literal::Float(_) => ColumnDataType::Float,
-                Literal::Boolean(_) => ColumnDataType::Boolean,
+                Literal::String(_) => DataType::String,
+                Literal::Integer(_) => DataType::Int,
+                Literal::Float(_) => DataType::Float,
+                Literal::Boolean(_) => DataType::Boolean,
             }),
 
             Expression::Arithmetic { left, right, .. } => {
@@ -90,7 +90,7 @@ impl TypeInferencer for ExpressionWrapper {
             }
 
             Expression::FunctionCall { name, .. } => match name.to_ascii_lowercase().as_str() {
-                "lower" | "upper" | "concat" => Some(ColumnDataType::VarChar),
+                "lower" | "upper" | "concat" => Some(DataType::VarChar),
                 _ => None,
             },
 
@@ -106,23 +106,23 @@ impl TypeInferencer for ExpressionWrapper {
     }
 }
 
-fn get_numeric_type(left: ColumnDataType, right: ColumnDataType) -> ColumnDataType {
+fn get_numeric_type(left: DataType, right: DataType) -> DataType {
     match (left, right) {
-        (ColumnDataType::Int, ColumnDataType::Int) => ColumnDataType::Int,
-        (ColumnDataType::Float, ColumnDataType::Float) => ColumnDataType::Float,
-        (ColumnDataType::Int, ColumnDataType::Float) => ColumnDataType::Float,
-        (ColumnDataType::Float, ColumnDataType::Int) => ColumnDataType::Float,
-        (ColumnDataType::Decimal, ColumnDataType::Decimal) => ColumnDataType::Decimal,
-        (ColumnDataType::Int, ColumnDataType::Decimal) => ColumnDataType::Decimal,
-        (ColumnDataType::Decimal, ColumnDataType::Int) => ColumnDataType::Decimal,
-        (ColumnDataType::Float, ColumnDataType::Decimal) => ColumnDataType::Decimal,
-        (ColumnDataType::Decimal, ColumnDataType::Float) => ColumnDataType::Decimal,
+        (DataType::Int, DataType::Int) => DataType::Int,
+        (DataType::Float, DataType::Float) => DataType::Float,
+        (DataType::Int, DataType::Float) => DataType::Float,
+        (DataType::Float, DataType::Int) => DataType::Float,
+        (DataType::Decimal, DataType::Decimal) => DataType::Decimal,
+        (DataType::Int, DataType::Decimal) => DataType::Decimal,
+        (DataType::Decimal, DataType::Int) => DataType::Decimal,
+        (DataType::Float, DataType::Decimal) => DataType::Decimal,
+        (DataType::Decimal, DataType::Float) => DataType::Decimal,
         _ => {
             warn!(
                 "Incompatible types for arithmetic operation: {:?} and {:?}",
                 left, right
             );
-            ColumnDataType::String // Fallback to String for unsupported types
+            DataType::String // Fallback to String for unsupported types
         }
     }
 }

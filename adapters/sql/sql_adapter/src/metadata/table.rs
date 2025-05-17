@@ -1,9 +1,9 @@
 use super::{column::metadata::ColumnMetadata, fk::ForeignKeyMetadata};
 use crate::{
-    metadata::column::data_type::ColumnDataType,
     query::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField},
     schema::types::TypeConverter,
 };
+use common::types::DataType;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -60,7 +60,7 @@ impl TableMetadata {
         table
             .columns
             .iter()
-            .filter(|(_name, col)| col.data_type == ColumnDataType::Enum)
+            .filter(|(_name, col)| col.data_type == DataType::Enum)
             .map(|(_name, col)| col.clone())
             .collect()
     }

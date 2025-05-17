@@ -1,11 +1,11 @@
 use super::pipeline::Transform;
 use crate::{expr::eval::Evaluator, record::Record};
-use common::mapping::EntityMapping;
-use smql::statements::expr::Expression;
-use sql_adapter::{
-    metadata::column::value::{ColumnData, ColumnValue},
-    row::row_data::RowData,
+use common::{
+    mapping::EntityMapping,
+    value::{FieldValue, Value},
 };
+use smql::statements::expr::Expression;
+use sql_adapter::row::row_data::RowData;
 use tracing::warn;
 
 pub struct ComputedTransform {
@@ -51,7 +51,7 @@ impl Transform for ComputedTransform {
 
 // TODO: Optimize this function to avoid searching for the column multiple times
 // and to handle the case where the column is not found.
-fn update_row(row: &mut RowData, column: &str, column_value: &ColumnValue) {
+fn update_row(row: &mut RowData, column: &str, column_value: &Value) {
     if let Some(col) = row
         .columns
         .iter_mut()
@@ -59,7 +59,7 @@ fn update_row(row: &mut RowData, column: &str, column_value: &ColumnValue) {
     {
         col.value = Some(column_value.clone());
     } else {
-        row.columns.push(ColumnData {
+        row.columns.push(FieldValue {
             name: column.to_string(),
             value: Some(column_value.clone()),
         });

@@ -1,12 +1,9 @@
 use crate::{
     adapter::SqlAdapter,
-    metadata::{
-        column::{data_type::ColumnDataType, metadata::ColumnMetadata},
-        table::TableMetadata,
-    },
+    metadata::{column::metadata::ColumnMetadata, table::TableMetadata},
 };
 use async_trait::async_trait;
-use common::{computed::ComputedField, mapping::EntityMapping};
+use common::{computed::ComputedField, mapping::EntityMapping, types::DataType};
 use std::{future::Future, pin::Pin, sync::Arc};
 
 // Alias for the SQL adapter reference
@@ -26,7 +23,7 @@ pub type InferComputedTypeFn =
         &'a [ColumnMetadata],
         &'a EntityMapping,
         &'a AdapterRef,
-    ) -> Pin<Box<dyn Future<Output = Option<ColumnDataType>> + Send + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Option<DataType>> + Send + 'a>>;
 
 pub struct TypeEngine<'a> {
     /// Adapter for the source database; used to read metadata.
@@ -49,7 +46,7 @@ pub trait TypeInferencer {
         columns: &[ColumnMetadata],
         mapping: &EntityMapping,
         adapter: &AdapterRef,
-    ) -> Option<ColumnDataType>;
+    ) -> Option<DataType>;
 }
 
 impl<'a> TypeEngine<'a> {
@@ -72,7 +69,7 @@ impl<'a> TypeEngine<'a> {
         expr: &E,
         columns: &[ColumnMetadata],
         mapping: &EntityMapping,
-    ) -> Option<ColumnDataType> {
+    ) -> Option<DataType> {
         E::infer_type(expr, columns, mapping, &self.adapter).await
     }
 
@@ -89,7 +86,7 @@ impl<'a> TypeEngine<'a> {
         computed: &ComputedField,
         columns: &[ColumnMetadata],
         mapping: &EntityMapping,
-    ) -> Option<ColumnDataType> {
+    ) -> Option<DataType> {
         (self.type_inferencer)(computed, columns, mapping, &self.adapter).await
     }
 }
