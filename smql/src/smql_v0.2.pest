@@ -60,7 +60,7 @@ source_clause = {
       ~ WHITESPACE* ~ ")"
 }
 
-source_type = { ^"TABLE" | ^"API" }
+source_type = { ^"TABLE" | ^"API" | ^"CSV" }
 
 dest_clause = {
     ^"DEST" ~ WHITESPACE* ~ "("

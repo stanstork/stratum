@@ -1,4 +1,4 @@
-use crate::record::Record;
+use common::record::Record;
 use data::DataDestination;
 use smql::statements::connection::DataFormat;
 use sql_adapter::{error::db::DbError, metadata::table::TableMetadata};

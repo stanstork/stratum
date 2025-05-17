@@ -1,4 +1,4 @@
-use super::{column::metadata::ColumnMetadata, fk::ForeignKeyMetadata, table::TableMetadata};
+use super::{column::ColumnMetadata, fk::ForeignKeyMetadata, table::TableMetadata};
 use crate::{
     adapter::SqlAdapter, error::db::DbError, join::clause::JoinClause, schema::plan::SchemaPlan,
 };

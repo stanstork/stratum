@@ -1,14 +1,14 @@
-use sql_adapter::metadata::column::data_type::ColumnDataType;
+use common::types::DataType;
 use sqlx::mysql::MySqlRow;
 use sqlx::Row;
 
 pub trait MySqlColumnDataType {
-    fn from_mysql_row(row: &MySqlRow) -> ColumnDataType;
+    fn from_mysql_row(row: &MySqlRow) -> DataType;
 }
 
-impl MySqlColumnDataType for ColumnDataType {
-    fn from_mysql_row(row: &MySqlRow) -> ColumnDataType {
+impl MySqlColumnDataType for DataType {
+    fn from_mysql_row(row: &MySqlRow) -> DataType {
         let data_type_str: String = row.try_get("data_type").unwrap_or_default();
-        ColumnDataType::try_from(data_type_str.as_str()).unwrap_or(ColumnDataType::String)
+        DataType::try_from(data_type_str.as_str()).unwrap_or(DataType::String)
     }
 }

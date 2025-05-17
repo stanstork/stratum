@@ -28,11 +28,12 @@ pub struct Spec {
 pub enum SpecKind {
     Table,
     Api,
-    File,
+    Csv,
 }
 
 const KEY_TABLE: &str = "TABLE";
 const KEY_API: &str = "API";
+const KEY_CSV: &str = "CSV";
 
 impl StatementParser for MigrateBlock {
     fn parse(pair: Pair<Rule>) -> Self {
@@ -102,11 +103,21 @@ impl StatementParser for Spec {
                     kind = match inner.as_str().to_ascii_uppercase().as_str() {
                         KEY_TABLE => SpecKind::Table,
                         KEY_API => SpecKind::Api,
+                        KEY_CSV => SpecKind::Csv,
                         _ => panic!("Unknown source type: {}", inner.as_str()),
                     };
                 }
                 Rule::ident => {
                     names.push(inner.as_str().to_string());
+                }
+                Rule::string => {
+                    names.push(
+                        inner
+                            .as_str()
+                            .trim_start_matches('"')
+                            .trim_end_matches('"')
+                            .to_string(),
+                    );
                 }
                 _ => {}
             }

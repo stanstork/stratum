@@ -25,4 +25,8 @@ pub enum MigrationError {
     /// This usually indicates that the task was cancelled or panicked.
     #[error("Task join error: {0}")]
     TaskJoin(#[from] tokio::task::JoinError),
+
+    /// Error occurred while retrieving the adapter from the context for the database source.
+    #[error("Adapter not found: {0}")]
+    AdapterNotFound(String),
 }

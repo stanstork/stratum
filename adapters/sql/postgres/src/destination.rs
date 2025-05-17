@@ -1,5 +1,6 @@
 use crate::adapter::PgAdapter;
 use async_trait::async_trait;
+use common::row_data::RowData;
 use sql_adapter::{
     adapter::SqlAdapter,
     destination::DbDataDestination,
@@ -7,7 +8,6 @@ use sql_adapter::{
     join::clause::JoinClause,
     metadata::{provider::MetadataHelper, table::TableMetadata},
     query::{builder::SqlQueryBuilder, column::ColumnDef},
-    row::row_data::RowData,
     schema::plan::SchemaPlan,
 };
 use std::{collections::HashMap, sync::Arc};
@@ -58,7 +58,7 @@ impl DbDataDestination for PgDestination {
                 columns
                     .iter()
                     .map(|col| {
-                        row.columns
+                        row.field_values
                             .iter()
                             .find(|rc| rc.name.eq_ignore_ascii_case(&col.name))
                             .and_then(|rc| rc.value.clone())

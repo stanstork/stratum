@@ -14,13 +14,13 @@ pub enum DataSource {
 impl DataSource {
     pub fn from_adapter(
         format: DataFormat,
-        adapter: &Adapter,
+        adapter: &Option<Adapter>,
         linked: &Option<LinkedSource>,
         filter: &Option<Filter>,
     ) -> Result<Self, MigrationError> {
         match (format, adapter) {
             // MySQL + MySqlAdapter -> build a MySqlDataSource
-            (DataFormat::MySql, Adapter::MySql(mysql_adapter)) => {
+            (DataFormat::MySql, Some(Adapter::MySql(mysql_adapter))) => {
                 let sql_filter = filter.as_ref().map(|f| {
                     let Filter::Sql(sf) = f;
                     sf.clone()
@@ -38,7 +38,7 @@ impl DataSource {
             }
 
             // Postgres + PostgresAdapter -> stub for future implementation
-            (DataFormat::Postgres, Adapter::Postgres(_pg_adapter)) => {
+            (DataFormat::Postgres, Some(Adapter::Postgres(_pg_adapter))) => {
                 // TODO: implement PostgresDataSource
                 panic!("Postgres data source is not implemented yet")
             }

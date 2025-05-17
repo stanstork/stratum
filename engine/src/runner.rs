@@ -13,7 +13,11 @@ use common::mapping::EntityMapping;
 use futures::{stream::FuturesUnordered, StreamExt};
 use smql::{
     plan::MigrationPlan,
-    statements::{connection::DataFormat, migrate::MigrateItem, setting::Settings},
+    statements::{
+        connection::{Connection, DataFormat},
+        migrate::{MigrateItem, SpecKind},
+        setting::Settings,
+    },
 };
 use std::sync::Arc;
 use tokio::{
@@ -34,11 +38,13 @@ pub async fn run(plan: MigrationPlan) -> Result<(), MigrationError> {
 
     for mi in plan.migration.migrate_items {
         let gc = global_ctx.clone();
+        let conn = plan.connections.clone();
+
         handles.push(tokio::spawn(async move {
             // Prepare per-item state
             let mapping = EntityMapping::new(&mi);
-            let source = create_source(&gc, &mapping, &mi).await?;
-            let destination = create_destination(&gc, &mi).await?;
+            let source = create_source(&gc, &conn, &mapping, &mi).await?;
+            let destination = create_destination(&gc, &conn, &mi).await?;
             let mut item_ctx = ItemContext::new(
                 source,
                 destination,
@@ -79,25 +85,23 @@ pub async fn run(plan: MigrationPlan) -> Result<(), MigrationError> {
 
 async fn create_source(
     ctx: &GlobalContext,
+    conn: &Connection,
     mapping: &EntityMapping,
     migrate_item: &MigrateItem,
 ) -> Result<Source, MigrationError> {
+    let name = migrate_item.source.name();
+    let format = get_data_format(migrate_item, conn, true);
+
     let linked = if let Some(load) = migrate_item.load.as_ref() {
-        Some(LinkedSource::new(ctx, load, mapping).await?)
+        Some(LinkedSource::new(ctx, format, load, mapping).await?)
     } else {
         None
     };
 
-    let filter = create_filter(migrate_item, ctx.src_format)?;
-    let primary = DataSource::from_adapter(ctx.src_format, &ctx.src_adapter, &linked, &filter)?;
+    let filter = create_filter(migrate_item, format)?;
+    let primary = DataSource::from_adapter(format, &ctx.src_adapter, &linked, &filter)?;
 
-    Ok(Source::new(
-        migrate_item.source.name(),
-        ctx.src_format,
-        primary,
-        linked,
-        filter,
-    ))
+    Ok(Source::new(name, format, primary, linked, filter))
 }
 
 fn create_filter(
@@ -123,14 +127,13 @@ fn create_filter(
 
 async fn create_destination(
     ctx: &GlobalContext,
+    conn: &Connection,
     migrate_item: &MigrateItem,
 ) -> Result<Destination, MigrationError> {
-    let data_dest = DataDestination::from_adapter(ctx.dest_format, &ctx.dest_adapter)?;
-    Ok(Destination::new(
-        migrate_item.destination.name(),
-        ctx.dest_format,
-        data_dest,
-    ))
+    let name = migrate_item.destination.name();
+    let format = get_data_format(migrate_item, conn, false);
+    let data_dest = DataDestination::from_adapter(format, &ctx.dst_adapter)?;
+    Ok(Destination::new(name, format, data_dest))
 }
 
 async fn apply_settings(ctx: &mut ItemContext, settings: &Settings) -> Result<(), MigrationError> {
@@ -151,6 +154,20 @@ async fn set_meta(ctx: &mut ItemContext) -> Result<(), MigrationError> {
     ctx.set_dest_meta().await?;
 
     Ok(())
+}
+
+fn get_data_format(item: &MigrateItem, conn: &Connection, src: bool) -> DataFormat {
+    match item.source.kind {
+        SpecKind::Table => {
+            let conn_pair = if src { &conn.source } else { &conn.dest };
+            conn_pair
+                .as_ref()
+                .expect("Connection source is required")
+                .format
+        }
+        SpecKind::Api => DataFormat::Api,
+        SpecKind::Csv => DataFormat::Csv,
+    }
 }
 
 // pub async fn load_src_metadata(

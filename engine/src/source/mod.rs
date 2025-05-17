@@ -1,4 +1,5 @@
-use crate::{filter::Filter, record::Record};
+use crate::filter::Filter;
+use common::record::Record;
 use data::DataSource;
 use linked::LinkedSource;
 use smql::statements::connection::DataFormat;

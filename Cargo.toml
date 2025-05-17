@@ -1,5 +1,5 @@
 [workspace]
-members = [
+members = [ "adapters/csv",
     "adapters/sql/mysql",
     "adapters/sql/postgres",
     "adapters/sql/sql_adapter",

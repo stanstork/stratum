@@ -2,9 +2,9 @@ use crate::{
     error::{adapter::ConnectorError, db::DbError},
     metadata::table::TableMetadata,
     requests::FetchRowsRequest,
-    row::row_data::RowData,
 };
 use async_trait::async_trait;
+use common::row_data::RowData;
 
 #[async_trait]
 pub trait SqlAdapter {

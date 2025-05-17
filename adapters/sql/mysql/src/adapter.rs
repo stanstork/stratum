@@ -1,19 +1,17 @@
 use crate::data_type::MySqlColumnDataType;
 use async_trait::async_trait;
+use common::{row_data::RowData, types::DataType};
 use sql_adapter::{
     adapter::SqlAdapter,
     error::{adapter::ConnectorError, db::DbError},
     metadata::{
-        column::{
-            data_type::ColumnDataType,
-            metadata::{ColumnMetadata, COL_REFERENCING_TABLE},
-        },
+        column::{ColumnMetadata, COL_REFERENCING_TABLE},
         provider::MetadataProvider,
         table::TableMetadata,
     },
     query::builder::SqlQueryBuilder,
     requests::FetchRowsRequest,
-    row::{db_row::DbRow, row_data::RowData},
+    row::DbRow,
 };
 use sqlx::{MySql, Pool, Row};
 use std::collections::HashMap;
@@ -69,7 +67,7 @@ impl SqlAdapter for MySqlAdapter {
         let columns = rows
             .iter()
             .map(|row| {
-                let data_type = ColumnDataType::from_mysql_row(row);
+                let data_type = DataType::from_mysql_row(row);
                 let column_metadata = ColumnMetadata::from_row(&DbRow::MySqlRow(row), data_type);
                 Ok((column_metadata.name.clone(), column_metadata))
             })
@@ -110,7 +108,7 @@ impl SqlAdapter for MySqlAdapter {
         let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
         let result = rows
             .into_iter()
-            .map(|row| RowData::from_db_row(&request.table, &DbRow::MySqlRow(&row)))
+            .map(|row| DbRow::MySqlRow(&row).get_row_data(&request.table))
             .collect();
 
         Ok(result)
