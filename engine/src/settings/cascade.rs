@@ -109,7 +109,10 @@ impl CascadeSchemaSetting {
     ) -> Result<(), MigrationError> {
         let root_table = self.context.source.name.clone();
 
-        let DataSource::Database(db_mutex) = primary;
+        let db_mutex = match primary {
+            DataSource::Database(db) => db,
+            _ => panic!("Expected a database data source"),
+        };
         let mut db = db_mutex.lock().await;
 
         match sql_filter {

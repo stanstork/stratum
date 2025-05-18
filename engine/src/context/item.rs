@@ -62,6 +62,7 @@ impl ItemContext {
         let name = self.source.name.clone();
         let db_opt = match &self.source.primary {
             DataSource::Database(db) => Some(db.clone()),
+            _ => None,
         };
 
         let fetch_meta = move |tbl: String| self.source.primary.fetch_meta(tbl);

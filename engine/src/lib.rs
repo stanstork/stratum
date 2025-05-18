@@ -6,6 +6,7 @@ pub mod destination;
 pub mod error;
 pub mod expr;
 pub mod filter;
+pub mod metadata;
 pub mod producer;
 pub mod runner;
 pub mod settings;

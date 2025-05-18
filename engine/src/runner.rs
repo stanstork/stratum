@@ -1,5 +1,4 @@
 use crate::{
-    adapter::Adapter,
     consumer::Consumer,
     context::{global::GlobalContext, item::ItemContext},
     destination::{data::DataDestination, Destination},
@@ -15,7 +14,7 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use smql::{
     plan::MigrationPlan,
     statements::{
-        connection::{Connection, DataFormat},
+        connection::{Connection, ConnectionPair, DataFormat},
         migrate::{MigrateItem, SpecKind},
         setting::Settings,
     },
@@ -91,7 +90,7 @@ async fn create_source(
     migrate_item: &MigrateItem,
 ) -> Result<Source, MigrationError> {
     let name = migrate_item.source.name();
-    let format = get_data_format(migrate_item, conn, true);
+    let format = get_data_format(migrate_item, conn).0;
 
     // build the optional LinkedSource
     let linked = if let Some(load) = migrate_item.load.as_ref() {
@@ -102,13 +101,9 @@ async fn create_source(
 
     // prepare the adapter
     let adapter = if format.is_sql() {
-        // global context contains sql connections
         ctx.src_conn.clone()
     } else if format.is_file() {
-        // for CSV/file spin up a fresh file-backed adapter
-        let path = &name;
-        let settings = migrate_item.settings.clone();
-        Some(Adapter::new_file(path, settings)?)
+        Some(ctx.get_file_adapter(&name).await?)
     } else {
         return Err(MigrationError::UnsupportedFormat(format.to_string()));
     };
@@ -147,7 +142,7 @@ async fn create_destination(
     migrate_item: &MigrateItem,
 ) -> Result<Destination, MigrationError> {
     let name = migrate_item.destination.name();
-    let format = get_data_format(migrate_item, conn, false);
+    let format = get_data_format(migrate_item, conn).1;
     let data_dest = DataDestination::from_adapter(format, &ctx.dst_conn)?;
     Ok(Destination::new(name, format, data_dest))
 }
@@ -172,18 +167,23 @@ async fn set_meta(ctx: &mut ItemContext) -> Result<(), MigrationError> {
     Ok(())
 }
 
-fn get_data_format(item: &MigrateItem, conn: &Connection, src: bool) -> DataFormat {
-    match item.source.kind {
-        SpecKind::Table => {
-            let conn_pair = if src { &conn.source } else { &conn.dest };
-            conn_pair
-                .as_ref()
-                .expect("Connection source is required")
-                .format
+fn get_data_format(item: &MigrateItem, conn: &Connection) -> (DataFormat, DataFormat) {
+    // helper for one side (source or destination)
+    fn format_for(kind: &SpecKind, conn: &Option<ConnectionPair>, label: &str) -> DataFormat {
+        match kind {
+            SpecKind::Table => {
+                conn.as_ref()
+                    .unwrap_or_else(|| panic!("Connection {} is required", label))
+                    .format
+            }
+            SpecKind::Api => DataFormat::Api,
+            SpecKind::Csv => DataFormat::Csv,
         }
-        SpecKind::Api => DataFormat::Api,
-        SpecKind::Csv => DataFormat::Csv,
     }
+
+    let source_format = format_for(&item.source.kind, &conn.source, "source");
+    let dest_format = format_for(&item.destination.kind, &conn.dest, "destination");
+    (source_format, dest_format)
 }
 
 // pub async fn load_src_metadata(

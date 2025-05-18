@@ -1,6 +1,9 @@
 use super::linked::LinkedSource;
 use crate::{adapter::Adapter, error::MigrationError, filter::Filter};
-use csv::{error::FileError, source::FileDataSource};
+use csv::{
+    error::FileError,
+    source::{CsvDataSource, FileDataSource},
+};
 use mysql::source::MySqlDataSource;
 use smql::statements::connection::DataFormat;
 use sql_adapter::{error::db::DbError, metadata::table::TableMetadata, source::DbDataSource};
@@ -45,21 +48,9 @@ impl DataSource {
                 panic!("Postgres data source is not implemented yet")
             }
 
-            // CSV + FileAdapter -> build a FileDataSource
+            // CSV + FileAdapter -> build a CsvDataSource
             (DataFormat::Csv, Some(Adapter::Csv(file_adapter))) => {
-                let sql_filter = filter.as_ref().map(|f| {
-                    let Filter::Sql(sf) = f;
-                    sf.clone()
-                });
-                let join = linked.as_ref().and_then(|ls| {
-                    if let LinkedSource::Table(j) = ls {
-                        Some((**j).clone())
-                    } else {
-                        None
-                    }
-                });
-
-                let ds = FileDataSource::new(file_adapter.clone(), join, sql_filter);
+                let ds = CsvDataSource::new(file_adapter.clone());
                 Ok(DataSource::File(Arc::new(Mutex::new(ds))))
             }
 
@@ -74,6 +65,9 @@ impl DataSource {
                 let db = db.lock().await.adapter();
                 let metadata = db.fetch_metadata(&table).await?;
                 Ok(metadata)
+            }
+            DataSource::File(_file) => {
+                unimplemented!("File data source metadata fetching is not implemented yet")
             }
         }
     }

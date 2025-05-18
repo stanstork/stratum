@@ -42,6 +42,9 @@ impl SchemaSettingContext {
     pub async fn source_adapter(&self) -> Result<Arc<dyn SqlAdapter + Send + Sync>, SettingsError> {
         match &self.source.primary {
             DataSource::Database(src) => Ok(src.lock().await.adapter()),
+            DataSource::File(_) => Err(SettingsError::UnsupportedSource(
+                self.source.format.to_string(),
+            )),
         }
     }
 
