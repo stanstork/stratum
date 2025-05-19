@@ -1,12 +1,11 @@
 use async_trait::async_trait;
 use common::{computed::ComputedField, mapping::EntityMapping, types::DataType};
 use smql::statements::expr::{Expression, Literal};
-use sql_adapter::{
-    metadata::column::ColumnMetadata,
-    schema::types::{AdapterRef, TypeInferencer},
-};
+use sql_adapter::metadata::column::ColumnMetadata;
 use std::{future::Future, pin::Pin};
 use tracing::warn;
+
+use crate::schema::types::{AdapterRef, TypeInferencer};
 
 /// A thin newtype wrapper around `Expression` to implement
 /// `TypeInferencer` without touching the SMQL crate.

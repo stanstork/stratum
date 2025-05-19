@@ -2,7 +2,8 @@ use crate::adapter::Adapter;
 use postgres::destination::PgDestination;
 use smql::statements::connection::DataFormat;
 use sql_adapter::{
-    destination::DbDataDestination, error::db::DbError, metadata::table::TableMetadata,
+    adapter::SqlAdapter, destination::DbDataDestination, error::db::DbError,
+    metadata::table::TableMetadata,
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -39,6 +40,12 @@ impl DataDestination {
                 let metadata = db.fetch_metadata(&table).await?;
                 Ok(metadata)
             }
+        }
+    }
+
+    pub async fn adapter(&self) -> Arc<(dyn SqlAdapter + Send + Sync)> {
+        match &self {
+            DataDestination::Database(db) => db.lock().await.adapter(),
         }
     }
 }

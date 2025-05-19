@@ -1,9 +1,9 @@
-use crate::{
+use async_trait::async_trait;
+use common::{computed::ComputedField, mapping::EntityMapping, types::DataType};
+use sql_adapter::{
     adapter::SqlAdapter,
     metadata::{column::ColumnMetadata, table::TableMetadata},
 };
-use async_trait::async_trait;
-use common::{computed::ComputedField, mapping::EntityMapping, types::DataType};
 use std::{future::Future, pin::Pin, sync::Arc};
 
 // Alias for the SQL adapter reference

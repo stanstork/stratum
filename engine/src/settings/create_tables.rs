@@ -37,7 +37,7 @@ impl MigrationSetting for CreateMissingTablesSetting {
         // add columns, FKs, enums into plan
         schema_plan.add_column_defs(
             &meta.name,
-            meta.column_defs(schema_plan.type_engine().type_converter()),
+            meta.column_defs(&schema_plan.type_engine().type_converter()),
         );
 
         // add foreign keys

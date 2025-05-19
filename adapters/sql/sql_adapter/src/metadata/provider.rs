@@ -1,7 +1,5 @@
 use super::{column::ColumnMetadata, fk::ForeignKeyMetadata, table::TableMetadata};
-use crate::{
-    adapter::SqlAdapter, error::db::DbError, join::clause::JoinClause, schema::plan::SchemaPlan,
-};
+use crate::{adapter::SqlAdapter, error::db::DbError, join::clause::JoinClause};
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
@@ -75,11 +73,6 @@ impl MetadataProvider {
             referenced_tables: HashMap::new(),
             referencing_tables: HashMap::new(),
         })
-    }
-
-    pub fn collect_schema_deps(metadata: &TableMetadata, plan: &mut SchemaPlan) {
-        let mut visited = HashSet::new();
-        Self::visit_schema_deps(metadata, plan, &mut visited);
     }
 
     fn build_metadata_graph_recursive<'a>(
@@ -184,33 +177,5 @@ impl MetadataProvider {
             }
             Ok(())
         })
-    }
-
-    fn visit_schema_deps(
-        metadata: &TableMetadata,
-        plan: &mut SchemaPlan<'_>,
-        visited: &mut HashSet<String>,
-    ) {
-        if !visited.insert(metadata.name.clone()) || plan.metadata_exists(&metadata.name) {
-            return;
-        }
-
-        metadata
-            .referenced_tables
-            .values()
-            .chain(metadata.referencing_tables.values())
-            .for_each(|related| {
-                Self::visit_schema_deps(related, plan, visited);
-            });
-
-        plan.add_column_defs(
-            &metadata.name,
-            metadata.column_defs(plan.type_engine().type_converter()),
-        );
-        plan.add_fk_defs(&metadata.name, metadata.fk_defs());
-
-        for col in (plan.type_engine().type_extractor())(metadata) {
-            plan.add_enum_def(&metadata.name, &col.name);
-        }
     }
 }

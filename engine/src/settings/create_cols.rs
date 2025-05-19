@@ -7,6 +7,7 @@ use crate::{
     destination::{data::DataDestination, Destination},
     error::MigrationError,
     expr::types::ExpressionWrapper,
+    schema::types::TypeInferencer,
     source::Source,
     state::MigrationState,
 };
@@ -17,7 +18,6 @@ use smql::statements::expr::Expression;
 use sql_adapter::{
     metadata::{column::ColumnMetadata, table::TableMetadata},
     query::column::ColumnDef,
-    schema::types::TypeInferencer,
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;

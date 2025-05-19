@@ -9,6 +9,7 @@ pub mod filter;
 pub mod metadata;
 pub mod producer;
 pub mod runner;
+pub mod schema;
 pub mod settings;
 pub mod source;
 pub mod state;

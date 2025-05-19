@@ -1,4 +1,4 @@
-use crate::{metadata::column::ColumnMetadata, schema::types::TypeConverter};
+use crate::metadata::column::ColumnMetadata;
 
 #[derive(Debug, Clone)]
 pub struct ColumnDef {
@@ -33,9 +33,9 @@ impl ColumnDef {
         }
     }
 
-    pub fn with_type_convertor(
+    pub fn with_type_convertor<T: Fn(&ColumnMetadata) -> (String, Option<usize>)>(
         name: &str,
-        type_converter: &TypeConverter,
+        type_converter: &T,
         metadata: &ColumnMetadata,
     ) -> Self {
         let (data_type, char_max_length) = type_converter(metadata);

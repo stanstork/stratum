@@ -8,10 +8,9 @@ use sql_adapter::{
     join::clause::JoinClause,
     metadata::{provider::MetadataHelper, table::TableMetadata},
     query::{builder::SqlQueryBuilder, column::ColumnDef},
-    schema::plan::SchemaPlan,
 };
 use std::{collections::HashMap, sync::Arc};
-use tracing::{error, info};
+use tracing::info;
 
 pub struct PgDestination {
     pub adapter: PgAdapter,
@@ -75,29 +74,6 @@ impl DbDataDestination for PgDestination {
         info!("Executing insert into `{}`", meta.name);
         self.adapter.execute(&query.0).await?;
 
-        Ok(())
-    }
-
-    async fn infer_schema(&self, schema_plan: &SchemaPlan<'_>) -> Result<(), DbError> {
-        let enum_queries = schema_plan.enum_queries().await?;
-        let table_queries = schema_plan.table_queries().await;
-        let fk_queries = schema_plan.fk_queries();
-
-        let all_queries = enum_queries
-            .iter()
-            .chain(&table_queries)
-            .chain(&fk_queries)
-            .cloned();
-
-        for query in all_queries {
-            info!("Executing query: {}", query);
-            if let Err(err) = self.adapter.execute(&query).await {
-                error!("Failed to execute query: {}\nError: {:?}", query, err);
-                return Err(err);
-            }
-        }
-
-        info!("Schema inference completed");
         Ok(())
     }
 

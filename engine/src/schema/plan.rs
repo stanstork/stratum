@@ -1,11 +1,11 @@
 use super::types::TypeEngine;
-use crate::{
+use common::mapping::EntityMapping;
+use sql_adapter::{
     adapter::SqlAdapter,
     error::db::DbError,
     metadata::table::TableMetadata,
     query::{builder::SqlQueryBuilder, column::ColumnDef, fk::ForeignKeyDef},
 };
-use common::mapping::EntityMapping;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -184,6 +184,11 @@ impl<'a> SchemaPlan<'a> {
         self.metadata_graph.contains_key(table_name)
     }
 
+    pub fn collect_schema_deps(metadata: &TableMetadata, plan: &mut SchemaPlan) {
+        let mut visited = HashSet::new();
+        Self::visit_schema_deps(metadata, plan, &mut visited);
+    }
+
     fn resolve_column_definitions(&self, table: &str, columns: &[ColumnDef]) -> Vec<ColumnDef> {
         let resolved_table = self.mapping.entity_name_map.resolve(table);
         columns
@@ -261,5 +266,33 @@ impl<'a> SchemaPlan<'a> {
             .into_iter()
             .filter(|col| mapping.contains_target_key(&col.name))
             .collect()
+    }
+
+    fn visit_schema_deps(
+        metadata: &TableMetadata,
+        plan: &mut SchemaPlan<'_>,
+        visited: &mut HashSet<String>,
+    ) {
+        if !visited.insert(metadata.name.clone()) || plan.metadata_exists(&metadata.name) {
+            return;
+        }
+
+        metadata
+            .referenced_tables
+            .values()
+            .chain(metadata.referencing_tables.values())
+            .for_each(|related| {
+                Self::visit_schema_deps(related, plan, visited);
+            });
+
+        plan.add_column_defs(
+            &metadata.name,
+            metadata.column_defs(&plan.type_engine.type_converter()),
+        );
+        plan.add_fk_defs(&metadata.name, metadata.fk_defs());
+
+        for col in (plan.type_engine().type_extractor())(metadata) {
+            plan.add_enum_def(&metadata.name, &col.name);
+        }
     }
 }

@@ -3,6 +3,7 @@ use crate::{
     context::item::ItemContext,
     destination::{data::DataDestination, Destination},
     expr::types::boxed_infer_computed_type,
+    schema::{plan::SchemaPlan, types::TypeEngine},
     source::{data::DataSource, Source},
     state::MigrationState,
 };
@@ -11,11 +12,12 @@ use postgres::data_type::PgDataType;
 use smql::statements::setting::CopyColumns;
 use sql_adapter::{
     adapter::SqlAdapter,
+    error::db::DbError,
     metadata::{column::ColumnMetadata, table::TableMetadata},
-    schema::{plan::SchemaPlan, types::TypeEngine},
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::{error, info};
 
 pub struct SchemaSettingContext {
     pub source: Source,
@@ -75,8 +77,7 @@ impl SchemaSettingContext {
             .format
             .intersects(ItemContext::sql_databases())
         {
-            let DataDestination::Database(dest) = &self.destination.data_dest;
-            dest.lock().await.infer_schema(&schema_plan).await?;
+            Self::infer_schema(&self.destination.data_dest, &schema_plan).await?;
             return Ok(());
         }
         Err(SettingsError::UnsupportedDestinationFormat(
@@ -106,5 +107,31 @@ impl SchemaSettingContext {
             mapped_columns_only,
             self.mapping.clone(),
         ))
+    }
+
+    async fn infer_schema(
+        dest: &DataDestination,
+        schema_plan: &SchemaPlan<'_>,
+    ) -> Result<(), DbError> {
+        let enum_queries = schema_plan.enum_queries().await?;
+        let table_queries = schema_plan.table_queries().await;
+        let fk_queries = schema_plan.fk_queries();
+
+        let all_queries = enum_queries
+            .iter()
+            .chain(&table_queries)
+            .chain(&fk_queries)
+            .cloned();
+
+        for query in all_queries {
+            info!("Executing query: {}", query);
+            if let Err(err) = dest.adapter().await.execute(&query).await {
+                error!("Failed to execute query: {}\nError: {:?}", query, err);
+                return Err(err);
+            }
+        }
+
+        info!("Schema inference completed");
+        Ok(())
     }
 }
