@@ -1,4 +1,4 @@
-use crate::filter::Filter;
+use crate::{filter::Filter, metadata::entity::EntityMetadata};
 use common::record::Record;
 use data::DataSource;
 use linked::LinkedSource;

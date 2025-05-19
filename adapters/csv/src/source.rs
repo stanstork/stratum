@@ -1,6 +1,7 @@
-use crate::{adapter::CsvAdapter, error::FileError};
+use crate::{adapter::CsvAdapter, error::FileError, metadata::MetadataHelper};
+use std::sync::Arc;
 
-pub trait FileDataSource: Send + Sync {
+pub trait FileDataSource: MetadataHelper + Send + Sync {
     type Error;
 
     fn fetch(
@@ -47,5 +48,11 @@ impl FileDataSource for CsvDataSource {
         println!("Rows fetched: {:?}", result);
 
         todo!("Implement the fetch method for CSV data source");
+    }
+}
+
+impl MetadataHelper for CsvDataSource {
+    fn adapter(&self) -> Arc<CsvAdapter> {
+        Arc::new(self.adapter.clone())
     }
 }

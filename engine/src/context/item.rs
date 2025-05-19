@@ -1,6 +1,8 @@
 use crate::{
     buffer::SledBuffer,
     destination::{data::DataDestination, Destination},
+    error::MigrationError,
+    metadata::entity::EntityMetadata,
     source::{data::DataSource, Source},
     state::MigrationState,
 };
@@ -58,15 +60,30 @@ impl ItemContext {
         }
     }
 
-    pub async fn set_src_meta(&self) -> Result<(), DbError> {
+    pub async fn set_src_meta(&self) -> Result<(), MigrationError> {
         let name = self.source.name.clone();
         let db_opt = match &self.source.primary {
             DataSource::Database(db) => Some(db.clone()),
             _ => None,
         };
 
-        let fetch_meta = move |tbl: String| self.source.primary.fetch_meta(tbl);
-        Self::set_meta(&name.clone(), db_opt.as_ref(), fetch_meta).await?;
+        // let fetch_meta = move |tbl: String| self.source.primary.fetch_meta(tbl);
+        // Self::set_meta(&name.clone(), db_opt.as_ref(), fetch_meta).await?;
+
+        let meta = self.source.primary.fetch_meta(name.clone()).await?;
+        let db = match db_opt {
+            Some(db) => db,
+            None => return Ok(()),
+        };
+
+        let meta = match meta {
+            EntityMetadata::Table(meta) => meta,
+            _ => return Ok(()),
+        };
+
+        if meta.is_valid() {
+            db.lock().await.set_metadata(meta);
+        }
 
         Ok(())
     }

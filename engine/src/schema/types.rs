@@ -1,3 +1,8 @@
+use crate::{
+    adapter::Adapter,
+    metadata::field::FieldMetadata,
+    source::{data::DataSource, Source},
+};
 use async_trait::async_trait;
 use common::{computed::ComputedField, mapping::EntityMapping, types::DataType};
 use sql_adapter::{
@@ -11,7 +16,7 @@ pub type AdapterRef = Arc<dyn SqlAdapter + Send + Sync>;
 
 /// A function that converts a source database type to a target database type,
 /// returning the target type name and optional size (e.g., MySQL `blob` → PostgreSQL `bytea`).
-pub type TypeConverter = dyn Fn(&ColumnMetadata) -> (String, Option<usize>) + Send + Sync;
+pub type TypeConverter = dyn Fn(&FieldMetadata) -> (String, Option<usize>) + Send + Sync;
 
 /// A function that extracts custom types (such as enums) from a table’s metadata.
 pub type TypeExtractor = dyn Fn(&TableMetadata) -> Vec<ColumnMetadata> + Send + Sync;
@@ -22,12 +27,11 @@ pub type InferComputedTypeFn =
         &'a ComputedField,
         &'a [ColumnMetadata],
         &'a EntityMapping,
-        &'a AdapterRef,
+        &'a DataSource,
     ) -> Pin<Box<dyn Future<Output = Option<DataType>> + Send + 'a>>;
 
 pub struct TypeEngine<'a> {
-    /// Adapter for the source database; used to read metadata.
-    adapter: Arc<dyn SqlAdapter + Send + Sync>,
+    source: DataSource,
 
     /// Function used to convert column types from source to target database format.
     type_converter: &'a TypeConverter,
@@ -45,19 +49,19 @@ pub trait TypeInferencer {
         &self,
         columns: &[ColumnMetadata],
         mapping: &EntityMapping,
-        adapter: &AdapterRef,
+        source: &DataSource,
     ) -> Option<DataType>;
 }
 
 impl<'a> TypeEngine<'a> {
     pub fn new(
-        adapter: Arc<dyn SqlAdapter + Send + Sync>,
+        source: DataSource,
         type_converter: &'a TypeConverter,
         type_extractor: &'a TypeExtractor,
         type_inferencer: InferComputedTypeFn,
     ) -> Self {
         Self {
-            adapter,
+            source,
             type_converter,
             type_extractor,
             type_inferencer,
@@ -70,7 +74,7 @@ impl<'a> TypeEngine<'a> {
         columns: &[ColumnMetadata],
         mapping: &EntityMapping,
     ) -> Option<DataType> {
-        E::infer_type(expr, columns, mapping, &self.adapter).await
+        E::infer_type(expr, columns, mapping, &self.source).await
     }
 
     pub fn type_converter(&self) -> &TypeConverter {
@@ -87,6 +91,6 @@ impl<'a> TypeEngine<'a> {
         columns: &[ColumnMetadata],
         mapping: &EntityMapping,
     ) -> Option<DataType> {
-        (self.type_inferencer)(computed, columns, mapping, &self.adapter).await
+        (self.type_inferencer)(computed, columns, mapping, &self.source).await
     }
 }

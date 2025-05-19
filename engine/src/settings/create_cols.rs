@@ -7,6 +7,7 @@ use crate::{
     destination::{data::DataDestination, Destination},
     error::MigrationError,
     expr::types::ExpressionWrapper,
+    metadata::entity::EntityMetadata,
     schema::types::TypeInferencer,
     source::Source,
     state::MigrationState,
@@ -48,6 +49,10 @@ impl MigrationSetting for CreateMissingColumnsSetting {
             .reverse_resolve(&dest_name);
         let src_meta = self.context.source.primary.fetch_meta(src_name).await?;
 
+        let src_meta = match src_meta {
+            EntityMetadata::Table(meta) => meta,
+            _ => panic!("Expected table metadata"),
+        };
         self.add_columns(&dest_name, &src_meta, &dest_meta).await?;
         self.add_computed_columns(&dest_name, &src_meta, &dest_meta)
             .await?;
@@ -88,8 +93,8 @@ impl CreateMissingColumnsSetting {
         table: &str,
         source_meta: &TableMetadata,
         dest_meta: &TableMetadata,
-    ) -> Result<(), SettingsError> {
-        let adapter = self.context.source_adapter().await?;
+    ) -> Result<(), MigrationError> {
+        let source = self.context.source.primary.clone();
         if let Some(computed) = self.context.mapping.field_mappings.get_computed(table) {
             for comp in computed.iter() {
                 if dest_meta.get_column(&comp.name).is_none() {
@@ -98,13 +103,17 @@ impl CreateMissingColumnsSetting {
                         Expression::Lookup { entity: alias, .. } => {
                             let table = self.context.mapping.entity_name_map.resolve(alias);
                             let meta = self.context.source.primary.fetch_meta(table).await?;
+                            let meta = match meta {
+                                EntityMetadata::Table(meta) => meta,
+                                _ => panic!("Expected table metadata"),
+                            };
                             ExpressionWrapper(comp.expression.clone())
-                                .infer_type(&meta.columns(), &self.context.mapping, &adapter)
+                                .infer_type(&meta.columns(), &self.context.mapping, &source)
                                 .await
                         }
                         _ => {
                             ExpressionWrapper(comp.expression.clone())
-                                .infer_type(&source_meta.columns(), &self.context.mapping, &adapter)
+                                .infer_type(&source_meta.columns(), &self.context.mapping, &source)
                                 .await
                         }
                     };

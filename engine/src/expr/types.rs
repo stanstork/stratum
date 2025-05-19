@@ -1,11 +1,12 @@
+use crate::{
+    metadata::entity::EntityMetadata, schema::types::TypeInferencer, source::data::DataSource,
+};
 use async_trait::async_trait;
 use common::{computed::ComputedField, mapping::EntityMapping, types::DataType};
 use smql::statements::expr::{Expression, Literal};
 use sql_adapter::metadata::column::ColumnMetadata;
 use std::{future::Future, pin::Pin};
 use tracing::warn;
-
-use crate::schema::types::{AdapterRef, TypeInferencer};
 
 /// A thin newtype wrapper around `Expression` to implement
 /// `TypeInferencer` without touching the SMQL crate.
@@ -16,11 +17,11 @@ pub async fn infer_computed_type(
     computed: &ComputedField,
     columns: &[ColumnMetadata],
     mapping: &EntityMapping,
-    adapter: &AdapterRef,
+    source: &DataSource,
 ) -> Option<DataType> {
     // Clone the expression node into wrapper and run inference.
     let expr = ExpressionWrapper(computed.expression.clone());
-    let data_type = expr.infer_type(columns, mapping, adapter).await;
+    let data_type = expr.infer_type(columns, mapping, source).await;
 
     if let Some(data_type) = data_type {
         Some(data_type)
@@ -50,10 +51,10 @@ pub fn boxed_infer_computed_type<'a>(
     computed: &'a ComputedField,
     columns: &'a [ColumnMetadata],
     mapping: &'a EntityMapping,
-    adapter: &'a AdapterRef,
+    source: &'a DataSource,
 ) -> Pin<Box<dyn Future<Output = Option<DataType>> + Send + 'a>> {
     // Box the future returned by async fn
-    Box::pin(infer_computed_type(computed, columns, mapping, adapter))
+    Box::pin(infer_computed_type(computed, columns, mapping, source))
 }
 
 #[async_trait]
@@ -63,7 +64,7 @@ impl TypeInferencer for ExpressionWrapper {
         &self,
         columns: &[ColumnMetadata],
         mapping: &EntityMapping,
-        adapter: &AdapterRef,
+        source: &DataSource,
     ) -> Option<DataType> {
         match &self.0 {
             Expression::Identifier(identifier) => columns
@@ -80,10 +81,10 @@ impl TypeInferencer for ExpressionWrapper {
 
             Expression::Arithmetic { left, right, .. } => {
                 let lt = ExpressionWrapper((**left).clone())
-                    .infer_type(columns, mapping, adapter)
+                    .infer_type(columns, mapping, source)
                     .await?;
                 let rt = ExpressionWrapper((**right).clone())
-                    .infer_type(columns, mapping, adapter)
+                    .infer_type(columns, mapping, source)
                     .await?;
                 Some(get_numeric_type(lt, rt))
             }
@@ -95,11 +96,19 @@ impl TypeInferencer for ExpressionWrapper {
 
             Expression::Lookup { entity, key, .. } => {
                 let table_name = mapping.entity_name_map.resolve(entity);
-                let meta = adapter.fetch_metadata(&table_name).await.ok()?;
-                meta.columns()
-                    .iter()
-                    .find(|col| col.name.eq_ignore_ascii_case(key))
-                    .map(|col| col.data_type)
+                let meta = source.fetch_meta(table_name).await.ok()?;
+                match meta {
+                    EntityMetadata::Table(meta) => meta
+                        .columns()
+                        .iter()
+                        .find(|col| col.name.eq_ignore_ascii_case(key))
+                        .map(|col| col.data_type),
+                    EntityMetadata::Csv(meta) => meta
+                        .columns
+                        .iter()
+                        .find(|col| col.name.eq_ignore_ascii_case(key))
+                        .map(|col| col.data_type),
+                }
             }
         }
     }

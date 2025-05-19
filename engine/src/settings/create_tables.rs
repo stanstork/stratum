@@ -1,6 +1,7 @@
 use super::{context::SchemaSettingContext, phase::MigrationSettingsPhase, MigrationSetting};
 use crate::{
-    context::item::ItemContext, destination::Destination, error::MigrationError, source::Source,
+    context::item::ItemContext, destination::Destination, error::MigrationError,
+    metadata::entity::EntityMetadata, schema::plan::SchemaPlan, source::Source,
     state::MigrationState,
 };
 use async_trait::async_trait;
@@ -20,8 +21,6 @@ impl MigrationSetting for CreateMissingTablesSetting {
     }
 
     async fn apply(&self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
-        let mut schema_plan = self.context.build_schema_plan().await?;
-
         if self.context.destination_exists().await? {
             info!("Destination table already exists. Create missing tables setting will not be applied");
             return Ok(());
@@ -34,11 +33,15 @@ impl MigrationSetting for CreateMissingTablesSetting {
         let src = self.context.mapping.entity_name_map.reverse_resolve(&dest);
         let meta = self.context.source.primary.fetch_meta(src.clone()).await?;
 
+        let mut schema_plan = self.context.build_schema_plan().await?;
+
         // add columns, FKs, enums into plan
-        schema_plan.add_column_defs(
-            &meta.name,
-            meta.column_defs(&schema_plan.type_engine().type_converter()),
-        );
+        schema_plan.add_column_defs(&meta.name(), SchemaPlan::column_defs(&schema_plan, &meta));
+
+        let meta = match meta {
+            EntityMetadata::Table(meta) => meta,
+            _ => panic!("Expected table metadata"),
+        };
 
         // add foreign keys
         for fk in meta.fk_defs() {

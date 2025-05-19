@@ -1,4 +1,5 @@
 use super::types::TypeEngine;
+use crate::metadata::{entity::EntityMetadata, field::FieldMetadata};
 use common::mapping::EntityMapping;
 use sql_adapter::{
     adapter::SqlAdapter,
@@ -189,6 +190,33 @@ impl<'a> SchemaPlan<'a> {
         Self::visit_schema_deps(metadata, plan, &mut visited);
     }
 
+    pub fn column_defs(plan: &SchemaPlan<'_>, meta: &EntityMetadata) -> Vec<ColumnDef> {
+        // Sort columns by ordinal to ensure consistent order of columns
+        // in the output regardless of the order in which they were added to the HashMap
+        let meta = match meta {
+            EntityMetadata::Table(meta) => meta,
+            _ => panic!("Expected SQL metadata"),
+        };
+        let mut columns = meta.columns.iter().collect::<Vec<_>>();
+        columns.sort_by_key(|(_, col)| col.ordinal);
+
+        columns
+            .into_iter()
+            .map(|(name, col)| {
+                let (data_type, char_max_length) =
+                    plan.type_engine().type_converter()(&FieldMetadata::Sql(col.clone()));
+                ColumnDef {
+                    name: name.clone(),
+                    data_type,
+                    is_nullable: col.is_nullable,
+                    is_primary_key: meta.primary_keys.contains(name),
+                    default: col.default_value.as_ref().map(ToString::to_string),
+                    char_max_length,
+                }
+            })
+            .collect()
+    }
+
     fn resolve_column_definitions(&self, table: &str, columns: &[ColumnDef]) -> Vec<ColumnDef> {
         let resolved_table = self.mapping.entity_name_map.resolve(table);
         columns
@@ -287,7 +315,7 @@ impl<'a> SchemaPlan<'a> {
 
         plan.add_column_defs(
             &metadata.name,
-            metadata.column_defs(&plan.type_engine.type_converter()),
+            Self::column_defs(plan, &EntityMetadata::Table(metadata.clone())),
         );
         plan.add_fk_defs(&metadata.name, metadata.fk_defs());
 

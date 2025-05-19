@@ -1,12 +1,14 @@
 use super::linked::LinkedSource;
-use crate::{adapter::Adapter, error::MigrationError, filter::Filter};
+use crate::{
+    adapter::Adapter, error::MigrationError, filter::Filter, metadata::entity::EntityMetadata,
+};
 use csv::{
     error::FileError,
     source::{CsvDataSource, FileDataSource},
 };
 use mysql::source::MySqlDataSource;
 use smql::statements::connection::DataFormat;
-use sql_adapter::{error::db::DbError, metadata::table::TableMetadata, source::DbDataSource};
+use sql_adapter::{error::db::DbError, source::DbDataSource};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -59,15 +61,17 @@ impl DataSource {
         }
     }
 
-    pub async fn fetch_meta(&self, table: String) -> Result<TableMetadata, DbError> {
+    pub async fn fetch_meta(&self, table: String) -> Result<EntityMetadata, MigrationError> {
         match &self {
             DataSource::Database(db) => {
                 let db = db.lock().await.adapter();
-                let metadata = db.fetch_metadata(&table).await?;
-                Ok(metadata)
+                let meta = db.fetch_metadata(&table).await?;
+                Ok(EntityMetadata::Table(meta))
             }
-            DataSource::File(_file) => {
-                unimplemented!("File data source metadata fetching is not implemented yet")
+            DataSource::File(file) => {
+                let adapter = file.lock().await.adapter();
+                let meta = adapter.fetch_metadata(&table).await?;
+                Ok(EntityMetadata::Csv(meta))
             }
         }
     }

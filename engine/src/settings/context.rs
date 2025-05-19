@@ -3,12 +3,12 @@ use crate::{
     context::item::ItemContext,
     destination::{data::DataDestination, Destination},
     expr::types::boxed_infer_computed_type,
+    metadata::field::FieldMetadata,
     schema::{plan::SchemaPlan, types::TypeEngine},
     source::{data::DataSource, Source},
     state::MigrationState,
 };
-use common::{mapping::EntityMapping, types::DataType};
-use postgres::data_type::PgDataType;
+use common::mapping::EntityMapping;
 use smql::statements::setting::CopyColumns;
 use sql_adapter::{
     adapter::SqlAdapter,
@@ -91,9 +91,9 @@ impl SchemaSettingContext {
         let mapped_columns_only = self.state.lock().await.copy_columns == CopyColumns::MapOnly;
 
         let type_engine = TypeEngine::new(
-            adapter.clone(),
+            self.source.primary.clone(),
             // converter
-            &|meta: &ColumnMetadata| -> (String, Option<usize>) { DataType::to_pg_type(meta) },
+            &|meta: &FieldMetadata| -> (String, Option<usize>) { meta.pg_type() },
             // extractor
             &|meta: &TableMetadata| -> Vec<ColumnMetadata> { TableMetadata::enums(meta) },
             // INFERENCER → just the function pointer

@@ -2,6 +2,7 @@
 pub struct CsvSettings {
     pub delimiter: char,
     pub has_headers: bool,
+    pub sample_size: usize,
 }
 
 impl CsvSettings {
@@ -9,6 +10,7 @@ impl CsvSettings {
         CsvSettings {
             delimiter,
             has_headers,
+            sample_size: 100,
         }
     }
 }

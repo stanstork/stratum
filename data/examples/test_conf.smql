@@ -5,10 +5,10 @@ CONNECTIONS (
 MIGRATE(
     SOURCE(CSV, "/home/stan/repos/data/movies.csv") -> DEST(TABLE, orders) [
         SETTINGS(
-            CSV_HEADER    = TRUE,
-            CSV_DELIMITER = ",",
-            BATCH_SIZE    = 10,
-            INFER_SCHEMA  = TRUE
+            CSV_HEADER            = TRUE,
+            CSV_DELIMITER         = ",",
+            BATCH_SIZE            = 10,
+            CREATE_MISSING_TABLES = TRUE
         )
     ]
 );
