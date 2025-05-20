@@ -3,11 +3,11 @@ CONNECTIONS (
 );
 
 MIGRATE(
-    SOURCE(CSV, "/home/stan/repos/data/movies.csv") -> DEST(TABLE, orders) [
+    SOURCE(CSV, "/home/stan/repos/data/movies.csv") -> DEST(TABLE, movies1) [
         SETTINGS(
             CSV_HEADER            = TRUE,
             CSV_DELIMITER         = ",",
-            BATCH_SIZE            = 10,
+            BATCH_SIZE            = 100,
             CREATE_MISSING_TABLES = TRUE
         )
     ]

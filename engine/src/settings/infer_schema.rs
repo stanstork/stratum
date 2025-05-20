@@ -4,7 +4,8 @@ use super::{
 };
 use crate::{
     context::item::ItemContext, destination::Destination, error::MigrationError,
-    schema::plan::SchemaPlan, source::Source, state::MigrationState,
+    metadata::entity::EntityMetadata, schema::plan::SchemaPlan, source::Source,
+    state::MigrationState,
 };
 use async_trait::async_trait;
 use common::mapping::EntityMapping;
@@ -70,7 +71,7 @@ impl InferSchemaSetting {
         for meta in meta_graph.values() {
             if !schema_plan.metadata_exists(&meta.name) {
                 SchemaPlan::collect_schema_deps(meta, &mut schema_plan);
-                schema_plan.add_metadata(&meta.name, meta.clone());
+                schema_plan.add_metadata(&meta.name, EntityMetadata::Table(meta.clone()));
             }
         }
 

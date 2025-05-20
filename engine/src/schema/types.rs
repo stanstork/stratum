@@ -1,15 +1,14 @@
 use crate::{
-    adapter::Adapter,
-    metadata::field::FieldMetadata,
-    source::{data::DataSource, Source},
+    expr::types::ExpressionWrapper, metadata::field::FieldMetadata, source::data::DataSource,
 };
 use async_trait::async_trait;
 use common::{computed::ComputedField, mapping::EntityMapping, types::DataType};
+use smql::statements::expr::Expression;
 use sql_adapter::{
     adapter::SqlAdapter,
     metadata::{column::ColumnMetadata, table::TableMetadata},
 };
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::sync::Arc;
 
 // Alias for the SQL adapter reference
 pub type AdapterRef = Arc<dyn SqlAdapter + Send + Sync>;
@@ -18,17 +17,8 @@ pub type AdapterRef = Arc<dyn SqlAdapter + Send + Sync>;
 /// returning the target type name and optional size (e.g., MySQL `blob` → PostgreSQL `bytea`).
 pub type TypeConverter = dyn Fn(&FieldMetadata) -> (String, Option<usize>) + Send + Sync;
 
-/// A function that extracts custom types (such as enums) from a table’s metadata.
-pub type TypeExtractor = dyn Fn(&TableMetadata) -> Vec<ColumnMetadata> + Send + Sync;
-
-/// A function that infers the type of computed fields based on the source database metadata.
-pub type InferComputedTypeFn =
-    for<'a> fn(
-        &'a ComputedField,
-        &'a [ColumnMetadata],
-        &'a EntityMapping,
-        &'a DataSource,
-    ) -> Pin<Box<dyn Future<Output = Option<DataType>> + Send + 'a>>;
+/// A function that extracts enums from a table’s metadata.
+pub type EnumExtractor = dyn Fn(&TableMetadata) -> Vec<ColumnMetadata> + Send + Sync;
 
 pub struct TypeEngine<'a> {
     source: DataSource,
@@ -36,11 +26,8 @@ pub struct TypeEngine<'a> {
     /// Function used to convert column types from source to target database format.
     type_converter: &'a TypeConverter,
 
-    /// Function used to extract custom types such as enums from table metadata.
-    type_extractor: &'a TypeExtractor,
-
-    /// Function used to infer the type of computed fields.
-    type_inferencer: InferComputedTypeFn,
+    /// Function used to extract enums from table metadata.
+    enum_extractor: &'a EnumExtractor,
 }
 
 #[async_trait]
@@ -57,32 +44,21 @@ impl<'a> TypeEngine<'a> {
     pub fn new(
         source: DataSource,
         type_converter: &'a TypeConverter,
-        type_extractor: &'a TypeExtractor,
-        type_inferencer: InferComputedTypeFn,
+        enum_extractor: &'a EnumExtractor,
     ) -> Self {
         Self {
             source,
             type_converter,
-            type_extractor,
-            type_inferencer,
+            enum_extractor,
         }
-    }
-
-    pub async fn infer_type<E: TypeInferencer>(
-        &self,
-        expr: &E,
-        columns: &[ColumnMetadata],
-        mapping: &EntityMapping,
-    ) -> Option<DataType> {
-        E::infer_type(expr, columns, mapping, &self.source).await
     }
 
     pub fn type_converter(&self) -> &TypeConverter {
         self.type_converter
     }
 
-    pub fn type_extractor(&self) -> &TypeExtractor {
-        self.type_extractor
+    pub fn enum_extractor(&self) -> &EnumExtractor {
+        self.enum_extractor
     }
 
     pub async fn infer_computed_type(
@@ -91,6 +67,22 @@ impl<'a> TypeEngine<'a> {
         columns: &[ColumnMetadata],
         mapping: &EntityMapping,
     ) -> Option<DataType> {
-        (self.type_inferencer)(computed, columns, mapping, &self.source).await
+        // Clone the expression node into wrapper and run inference.
+        let expr = ExpressionWrapper(computed.expression.clone());
+        let data_type = expr.infer_type(columns, mapping, &self.source).await;
+
+        if let Some(data_type) = data_type {
+            Some(data_type)
+        } else {
+            match computed.expression {
+                Expression::Lookup { .. } => None,
+                _ => {
+                    panic!(
+                        "Failed to infer type for computed column `{}`.",
+                        computed.name
+                    );
+                }
+            }
+        }
     }
 }

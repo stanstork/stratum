@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 pub trait MetadataHelper {
     fn adapter(&self) -> Arc<CsvAdapter>;
+    fn set_metadata(&mut self, meta: CsvMetadata);
 }
 
 #[derive(Debug, Clone)]
@@ -11,6 +12,7 @@ pub struct CsvColumnMetadata {
     pub name: String,
     pub data_type: DataType,
     pub is_nullable: bool,
+    pub ordinal: usize,
 }
 
 #[derive(Debug, Clone)]

@@ -1,4 +1,4 @@
-use crate::{filter::Filter, metadata::entity::EntityMetadata};
+use crate::filter::Filter;
 use common::record::Record;
 use data::DataSource;
 use linked::LinkedSource;
@@ -50,7 +50,8 @@ impl Source {
             DataSource::File(file) => {
                 let mut file = file.lock().await;
                 let rows = file.fetch(batch_size, offset)?;
-                unimplemented!("File data source fetch not implemented yet");
+                let records = rows.into_iter().map(Record::RowData).collect();
+                Ok(records)
             }
         }
     }

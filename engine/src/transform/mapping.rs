@@ -4,7 +4,7 @@ use common::{
     record::Record,
 };
 
-pub struct ColumnMapper {
+pub struct FieldMapper {
     ns_map: FieldMappings,
 }
 
@@ -12,7 +12,7 @@ pub struct TableMapper {
     name_map: NameMap,
 }
 
-impl ColumnMapper {
+impl FieldMapper {
     pub fn new(ns_map: FieldMappings) -> Self {
         Self { ns_map }
     }
@@ -24,7 +24,7 @@ impl TableMapper {
     }
 }
 
-impl Transform for ColumnMapper {
+impl Transform for FieldMapper {
     fn apply(&self, record: &Record) -> Record {
         match record {
             Record::RowData(row) => {

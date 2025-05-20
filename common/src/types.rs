@@ -125,7 +125,7 @@ impl fmt::Display for DataType {
             DataType::LongBlob => write!(f, "LONGBLOB"),
             DataType::Blob => write!(f, "BLOB"),
             DataType::VarString => write!(f, "VARSTRING"),
-            DataType::String => write!(f, "STRING"),
+            DataType::String => write!(f, "VARCHAR"),
             DataType::Geometry => write!(f, "GEOMETRY"),
             DataType::Boolean => write!(f, "BOOLEAN"),
             DataType::ShortUnsigned => write!(f, "SMALLINT UNSIGNED"),

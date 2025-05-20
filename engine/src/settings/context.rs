@@ -86,22 +86,20 @@ impl SchemaSettingContext {
     }
 
     pub async fn build_schema_plan(&self) -> Result<SchemaPlan<'_>, SettingsError> {
-        let adapter = self.source_adapter().await?;
         let ignore_constraints = self.state.lock().await.ignore_constraints;
         let mapped_columns_only = self.state.lock().await.copy_columns == CopyColumns::MapOnly;
+        let source = self.source.primary.clone();
 
         let type_engine = TypeEngine::new(
-            self.source.primary.clone(),
+            source.clone(),
             // converter
             &|meta: &FieldMetadata| -> (String, Option<usize>) { meta.pg_type() },
             // extractor
             &|meta: &TableMetadata| -> Vec<ColumnMetadata> { TableMetadata::enums(meta) },
-            // INFERENCER → just the function pointer
-            boxed_infer_computed_type,
         );
 
         Ok(SchemaPlan::new(
-            adapter,
+            source,
             type_engine,
             ignore_constraints,
             mapped_columns_only,

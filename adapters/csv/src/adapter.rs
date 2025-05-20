@@ -7,7 +7,6 @@ use crate::{
 use common::types::DataType;
 use std::{
     fs::File,
-    path::Path,
     sync::{Arc, Mutex},
 };
 
@@ -15,18 +14,24 @@ use std::{
 pub struct CsvAdapter {
     pub reader: Arc<Mutex<csv::Reader<File>>>,
     pub settings: CsvSettings,
+    pub headers: Vec<String>,
 }
 
 impl CsvAdapter {
     pub fn new(file_path: &str, settings: CsvSettings) -> Result<Self, FileError> {
         let file = File::open(file_path)?;
-        let reader = csv::ReaderBuilder::new()
+        let mut reader = csv::ReaderBuilder::new()
             .delimiter(settings.delimiter as u8)
             .has_headers(settings.has_headers)
             .from_reader(file);
+        let headers = reader.headers()?.iter().map(|s| s.to_string()).collect();
         let reader = Arc::new(Mutex::new(reader));
 
-        Ok(CsvAdapter { reader, settings })
+        Ok(CsvAdapter {
+            reader,
+            settings,
+            headers,
+        })
     }
 
     pub fn read(
@@ -34,15 +39,13 @@ impl CsvAdapter {
         batch_size: usize,
         offset: usize,
     ) -> Result<Vec<csv::StringRecord>, FileError> {
-        let mut reader = self
-            .reader
+        let _ = offset;
+        self.reader
             .lock()
-            .map_err(|_| FileError::LockError("Failed to lock CSV reader".to_string()))?;
-        reader
+            .map_err(|_| FileError::LockError("…".into()))?
             .records()
-            .skip(offset)
             .take(batch_size)
-            .map(|record| record.map_err(|e| e.into()))
+            .map(|r| r.map_err(Into::into))
             .collect()
     }
 
@@ -57,10 +60,12 @@ impl CsvAdapter {
         let headers = reader.headers()?;
         let mut columns: Vec<CsvColumnMetadata> = headers
             .iter()
-            .map(|h| CsvColumnMetadata {
+            .enumerate()
+            .map(|(i, h)| CsvColumnMetadata {
                 name: h.to_string(),
                 data_type: DataType::Short,
                 is_nullable: false,
+                ordinal: i,
             })
             .collect();
 
@@ -75,18 +80,14 @@ impl CsvAdapter {
         }
 
         Ok(CsvMetadata {
-            name: self.get_name(file_path),
+            name: file_path.to_string(),
             columns,
             delimiter: self.settings.delimiter,
             has_header: self.settings.has_headers,
         })
     }
 
-    fn get_name(&self, file_path: &str) -> String {
-        Path::new(file_path)
-            .file_stem()
-            .and_then(|os| os.to_str())
-            .unwrap_or(file_path)
-            .to_string()
+    fn headers(&self) -> &Vec<String> {
+        &self.headers
     }
 }

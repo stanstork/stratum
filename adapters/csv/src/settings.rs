@@ -10,7 +10,7 @@ impl CsvSettings {
         CsvSettings {
             delimiter,
             has_headers,
-            sample_size: 100,
+            sample_size: 1000,
         }
     }
 }

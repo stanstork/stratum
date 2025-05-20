@@ -33,4 +33,7 @@ pub enum MigrationError {
 
     #[error("File error: {0}")]
     FileError(#[from] FileError),
+
+    #[error("Invalid metadata: {0}")]
+    InvalidMetadata(String),
 }
