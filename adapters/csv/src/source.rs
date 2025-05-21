@@ -41,7 +41,7 @@ impl FileDataSource for CsvDataSource {
         offset: Option<usize>,
     ) -> Result<Vec<RowData>, Self::Error> {
         let offset = offset.unwrap_or(0);
-        let records = self.adapter.read(batch_size, offset)?;
+        let records = self.adapter.read(batch_size)?;
 
         let meta = self.primary_meta.clone().expect("Metadata not set");
         let entity_name = meta.name.clone();

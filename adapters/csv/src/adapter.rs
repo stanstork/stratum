@@ -12,47 +12,65 @@ use std::{
 
 #[derive(Clone)]
 pub struct CsvAdapter {
-    pub reader: Arc<Mutex<csv::Reader<File>>>,
+    /// Used only when inferring schema or re-reading headers
+    pub meta_reader: Arc<Mutex<csv::Reader<File>>>,
+
+    /// Used as a one-pass streaming iterator for actual data rows
+    pub data_iter: Arc<Mutex<csv::StringRecordsIntoIter<File>>>,
+
     pub settings: CsvSettings,
     pub headers: Vec<String>,
 }
 
 impl CsvAdapter {
     pub fn new(file_path: &str, settings: CsvSettings) -> Result<Self, FileError> {
-        let file = File::open(file_path)?;
-        let mut reader = csv::ReaderBuilder::new()
+        // Build a shared builder so we don't repeat options
+        let mut builder = csv::ReaderBuilder::new();
+        let builder = builder
             .delimiter(settings.delimiter as u8)
             .has_headers(settings.has_headers)
-            .from_reader(file);
-        let headers = reader.headers()?.iter().map(|s| s.to_string()).collect();
-        let reader = Arc::new(Mutex::new(reader));
+            .flexible(true);
+
+        // Open file + reader for metadata
+        let meta_file = File::open(file_path)?;
+        let mut meta_rdr = builder.from_reader(meta_file);
+        let headers = meta_rdr.headers()?.iter().map(String::from).collect();
+
+        // Open file + into_records iterator for streaming data
+        let data_file = File::open(file_path)?;
+        let data_rdr = builder.from_reader(data_file);
+        let data_iter = data_rdr.into_records();
 
         Ok(CsvAdapter {
-            reader,
-            settings,
+            meta_reader: Arc::new(Mutex::new(meta_rdr)),
+            data_iter: Arc::new(Mutex::new(data_iter)),
             headers,
+            settings,
         })
     }
 
-    pub fn read(
-        &mut self,
-        batch_size: usize,
-        offset: usize,
-    ) -> Result<Vec<csv::StringRecord>, FileError> {
-        let _ = offset;
-        self.reader
+    pub fn read(&mut self, batch_size: usize) -> Result<Vec<csv::StringRecord>, FileError> {
+        let mut records = self
+            .data_iter
             .lock()
-            .map_err(|_| FileError::LockError("…".into()))?
-            .records()
-            .take(batch_size)
-            .map(|r| r.map_err(Into::into))
-            .collect()
+            .map_err(|_| FileError::LockError("Failed to lock CSV reader".into()))?;
+
+        let mut batch = Vec::with_capacity(batch_size);
+        for _ in 0..batch_size {
+            if let Some(record) = records.next() {
+                batch.push(record?);
+            } else {
+                break;
+            }
+        }
+
+        Ok(batch)
     }
 
     pub async fn fetch_metadata(&self, file_path: &str) -> Result<CsvMetadata, FileError> {
         // Lock the reader for the entire sampling process
         let mut reader = self
-            .reader
+            .meta_reader
             .lock()
             .map_err(|_| FileError::LockError("Failed to lock CSV reader".into()))?;
 
