@@ -1,7 +1,7 @@
 use crate::{
     adapter::CsvAdapter,
     error::FileError,
-    metadata::{CsvMetadata, MetadataHelper},
+    metadata::{normalize_col_name, CsvMetadata, MetadataHelper},
     types::CsvType,
 };
 use common::{row_data::RowData, value::FieldValue};
@@ -52,7 +52,7 @@ impl FileDataSource for CsvDataSource {
             let col_meta = meta
                 .columns
                 .iter()
-                .find(|c| c.name.eq_ignore_ascii_case(hdr))
+                .find(|c| c.name.eq_ignore_ascii_case(&normalize_col_name(hdr)))
                 .expect("Column metadata not found")
                 .clone();
             headers_meta.push((hdr.clone(), col_meta));
@@ -63,8 +63,8 @@ impl FileDataSource for CsvDataSource {
             let mut fields = Vec::with_capacity(headers_meta.len());
             let mut skip_row = false;
 
-            for (col_idx, (hdr, col_meta)) in headers_meta.iter().enumerate() {
-                let cell = record.get(col_idx).unwrap_or("");
+            for (hdr, col_meta) in headers_meta.iter() {
+                let cell = record.get(col_meta.ordinal).unwrap_or("");
                 let value = col_meta.data_type.get_value(cell);
 
                 // if value is None but column is not nullable, skip entire row
@@ -79,7 +79,7 @@ impl FileDataSource for CsvDataSource {
                 }
 
                 fields.push(FieldValue {
-                    name: hdr.clone(),
+                    name: col_meta.name.clone(),
                     value,
                 });
             }

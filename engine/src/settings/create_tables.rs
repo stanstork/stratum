@@ -60,7 +60,7 @@ impl MigrationSetting for CreateMissingTablesSetting {
             }
 
             let extract_enums = plan.type_engine().enum_extractor();
-            for col in extract_enums(&table_meta) {
+            for col in extract_enums(table_meta) {
                 plan.add_enum_def(&table_meta.name, &col.name);
             }
         }

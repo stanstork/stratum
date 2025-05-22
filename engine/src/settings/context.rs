@@ -2,7 +2,6 @@ use super::error::SettingsError;
 use crate::{
     context::item::ItemContext,
     destination::{data::DataDestination, Destination},
-    expr::types::boxed_infer_computed_type,
     metadata::field::FieldMetadata,
     schema::{plan::SchemaPlan, types::TypeEngine},
     source::{data::DataSource, Source},

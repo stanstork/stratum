@@ -1,10 +1,11 @@
 use crate::{
     error::FileError,
-    metadata::{CsvColumnMetadata, CsvMetadata},
+    metadata::{normalize_col_name, CsvColumnMetadata, CsvMetadata},
     settings::CsvSettings,
     types::CsvType,
 };
 use common::types::DataType;
+use csv::Position;
 use std::{
     fs::File,
     sync::{Arc, Mutex},
@@ -80,9 +81,10 @@ impl CsvAdapter {
             .iter()
             .enumerate()
             .map(|(i, h)| CsvColumnMetadata {
-                name: h.to_string(),
+                name: normalize_col_name(h),
                 data_type: DataType::Short,
                 is_nullable: false,
+                is_primary_key: self.is_primary_key(h),
                 ordinal: i,
             })
             .collect();
@@ -97,6 +99,11 @@ impl CsvAdapter {
             }
         }
 
+        // Reset the reader to the beginning of the file
+        let mut position = Position::new();
+        position.set_byte(0);
+        reader.seek(position)?;
+
         Ok(CsvMetadata {
             name: file_path.to_string(),
             columns,
@@ -105,7 +112,10 @@ impl CsvAdapter {
         })
     }
 
-    fn headers(&self) -> &Vec<String> {
-        &self.headers
+    fn is_primary_key(&self, col_name: &str) -> bool {
+        self.settings
+            .pk_column
+            .as_ref()
+            .is_some_and(|pk| pk.eq_ignore_ascii_case(col_name))
     }
 }

@@ -20,8 +20,8 @@ impl EntityMetadata {
         match self {
             EntityMetadata::Table(table) => table
                 .columns
-                .iter()
-                .map(|(_, col)| FieldMetadata::Sql(col.clone()))
+                .values()
+                .map(|col| FieldMetadata::Sql(col.clone()))
                 .collect(),
             EntityMetadata::Csv(csv) => csv
                 .columns

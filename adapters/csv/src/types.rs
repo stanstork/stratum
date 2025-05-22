@@ -6,7 +6,7 @@ use common::{types::DataType, value::Value};
 use std::str::FromStr;
 
 /// The promotion sequence: start at the current type and widen until it fits.
-const CHAIN: &'static [DataType] = &[
+const CHAIN: &[DataType] = &[
     DataType::Short,
     DataType::Int,
     DataType::Long,
@@ -55,13 +55,13 @@ impl CsvType for DataType {
         // Find the first type from here onward that can parse the value
         CHAIN[start..]
             .iter()
-            .find(|t| can_parse(&t, value))
+            .find(|t| can_parse(t, value))
             .cloned()
             .unwrap_or(DataType::VarChar)
     }
 
     fn data_type(&self) -> DataType {
-        self.clone()
+        *self
     }
 
     fn get_value(&self, value: &str) -> Option<Value> {

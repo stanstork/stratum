@@ -1,9 +1,8 @@
+use super::entity::EntityMetadata;
 use common::types::DataType;
 use csv::metadata::CsvColumnMetadata;
 use postgres::data_type::PgDataType;
 use sql_adapter::metadata::column::ColumnMetadata;
-
-use super::entity::EntityMetadata;
 
 #[derive(Debug, Clone)]
 pub enum FieldMetadata {
@@ -42,8 +41,8 @@ impl FieldMetadata {
 
     pub fn data_type(&self) -> DataType {
         match self {
-            FieldMetadata::Sql(col) => col.data_type.clone(),
-            FieldMetadata::Csv(col) => col.data_type.clone(),
+            FieldMetadata::Sql(col) => col.data_type,
+            FieldMetadata::Csv(col) => col.data_type,
         }
     }
 
@@ -56,7 +55,7 @@ impl FieldMetadata {
                     false
                 }
             }
-            FieldMetadata::Csv(_col) => false,
+            FieldMetadata::Csv(col) => col.is_primary_key,
         }
     }
 

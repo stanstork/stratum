@@ -68,7 +68,11 @@ impl GlobalContext {
             .filter(|mi| mi.source.kind == SpecKind::Csv)
             .map(|mi| {
                 let path = mi.source.name().clone();
-                let settings = CsvSettings::new(mi.settings.csv_delimiter, mi.settings.csv_header);
+                let settings = CsvSettings::new(
+                    mi.settings.csv_delimiter,
+                    mi.settings.csv_header,
+                    mi.settings.csv_id_column.clone(),
+                );
                 Adapter::file(&path, settings).map(|adapter| (path, adapter))
             })
             .collect()

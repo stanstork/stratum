@@ -28,7 +28,7 @@ impl Adapter {
     }
 
     pub fn file(path: &str, settings: CsvSettings) -> Result<Self, MigrationError> {
-        let adapter = CsvAdapter::new(&path, settings)?;
+        let adapter = CsvAdapter::new(path, settings)?;
         Ok(Adapter::Csv(adapter))
     }
 
