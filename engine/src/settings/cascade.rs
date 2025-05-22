@@ -9,6 +9,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use common::mapping::EntityMapping;
+use smql::statements::connection::DataFormat;
 use sql_adapter::{
     filter::SqlFilter,
     join::{
@@ -29,6 +30,13 @@ pub struct CascadeSchemaSetting {
 impl MigrationSetting for CascadeSchemaSetting {
     fn phase(&self) -> MigrationSettingsPhase {
         MigrationSettingsPhase::CascadeSchema
+    }
+
+    fn can_apply(&self, ctx: &ItemContext) -> bool {
+        match (ctx.source.format, ctx.destination.format) {
+            (DataFormat::MySql, DataFormat::Postgres) => true,
+            _ => false,
+        }
     }
 
     async fn apply(&self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {

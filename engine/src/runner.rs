@@ -152,7 +152,9 @@ async fn apply_settings(ctx: &mut ItemContext, settings: &Settings) -> Result<()
 
     let settings = collect_settings(settings, ctx);
     for setting in settings.iter() {
-        setting.apply(ctx).await?;
+        if setting.can_apply(ctx) {
+            setting.apply(ctx).await?;
+        }
     }
 
     ctx.debug_state().await;
