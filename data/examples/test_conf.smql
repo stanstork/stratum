@@ -5,11 +5,16 @@ CONNECTIONS (
 MIGRATE(
     SOURCE(CSV, "/home/stan/repos/data/customers.csv") -> DEST(TABLE, customers) [
         SETTINGS(
-            CSV_HEADER            = TRUE,
-            CSV_DELIMITER         = ",",
-            CSV_ID_COLUMN         = "index",
-            BATCH_SIZE            = 100,
-            CREATE_MISSING_TABLES = TRUE
+            CSV_HEADER             = TRUE,
+            CSV_DELIMITER          = ",",
+            CSV_ID_COLUMN          = "index",
+            BATCH_SIZE             = 100,
+            CREATE_MISSING_TABLES  = TRUE,
+            CREATE_MISSING_COLUMNS = TRUE
+        ),
+        MAP(
+            index -> id,
+            CONCAT(customers[first_name], " ", customers[last_name]) -> full_name
         )
     ]
 );

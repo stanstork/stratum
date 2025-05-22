@@ -218,7 +218,7 @@ impl<'a> SchemaPlan<'a> {
                     name: col.name(),
                     data_type,
                     is_nullable: col.is_nullable(),
-                    is_primary_key: col.is_primary_key(meta),
+                    is_primary_key: col.is_primary_key(),
                     default: col.default_value(),
                     char_max_length,
                 }
@@ -250,13 +250,7 @@ impl<'a> SchemaPlan<'a> {
         };
 
         let metadata = match self.metadata_graph.get(table) {
-            Some(m) => match m {
-                EntityMetadata::Table(meta) => meta,
-                _ => {
-                    warn!("Expected table metadata for: {}", table);
-                    return defs;
-                }
-            },
+            Some(m) => m,
             None => {
                 warn!("Missing metadata for table: {}", table);
                 return defs;
@@ -265,7 +259,7 @@ impl<'a> SchemaPlan<'a> {
 
         for computed in computed_fields {
             let column_name = &computed.name;
-            if metadata.get_column(column_name).is_some() {
+            if metadata.column(column_name).is_some() {
                 continue;
             }
 

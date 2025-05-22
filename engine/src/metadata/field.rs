@@ -46,15 +46,9 @@ impl FieldMetadata {
         }
     }
 
-    pub fn is_primary_key(&self, meta: &EntityMetadata) -> bool {
+    pub fn is_primary_key(&self) -> bool {
         match self {
-            FieldMetadata::Sql(col) => {
-                if let EntityMetadata::Table(table) = meta {
-                    table.primary_keys.contains(&col.name)
-                } else {
-                    false
-                }
-            }
+            FieldMetadata::Sql(col) => col.is_primary_key,
             FieldMetadata::Csv(col) => col.is_primary_key,
         }
     }

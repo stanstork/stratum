@@ -31,6 +31,20 @@ impl EntityMetadata {
         }
     }
 
+    pub fn column(&self, name: &str) -> Option<FieldMetadata> {
+        match self {
+            EntityMetadata::Table(table) => table
+                .columns
+                .get(name)
+                .map(|col| FieldMetadata::Sql(col.clone())),
+            EntityMetadata::Csv(csv) => csv
+                .columns
+                .iter()
+                .find(|col| col.name.eq_ignore_ascii_case(name))
+                .map(|col| FieldMetadata::Csv(col.clone())),
+        }
+    }
+
     pub fn is_valid(&self) -> bool {
         match self {
             EntityMetadata::Table(table) => table.is_valid(),

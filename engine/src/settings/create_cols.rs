@@ -7,19 +7,15 @@ use crate::{
     destination::{data::DataDestination, Destination},
     error::MigrationError,
     expr::types::ExpressionWrapper,
-    metadata::entity::EntityMetadata,
-    schema::types::TypeInferencer,
+    metadata::{entity::EntityMetadata, field::FieldMetadata},
+    schema::{types::TypeInferencer, with_type_convertor},
     source::Source,
     state::MigrationState,
 };
 use async_trait::async_trait;
-use common::{mapping::EntityMapping, types::DataType};
-use postgres::data_type::PgDataType;
+use common::mapping::EntityMapping;
 use smql::statements::expr::Expression;
-use sql_adapter::{
-    metadata::{column::ColumnMetadata, table::TableMetadata},
-    query::column::ColumnDef,
-};
+use sql_adapter::{metadata::table::TableMetadata, query::column::ColumnDef};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -47,12 +43,13 @@ impl MigrationSetting for CreateMissingColumnsSetting {
             .mapping
             .entity_name_map
             .reverse_resolve(&dest_name);
-        let src_meta = self.context.source.primary.fetch_meta(src_name).await?;
+        let src_meta = self
+            .context
+            .source
+            .primary
+            .fetch_meta(src_name.clone())
+            .await?;
 
-        let src_meta = match src_meta {
-            EntityMetadata::Table(meta) => meta,
-            _ => panic!("Expected table metadata"),
-        };
         self.add_columns(&dest_name, &src_meta, &dest_meta).await?;
         self.add_computed_columns(&dest_name, &src_meta, &dest_meta)
             .await?;
@@ -70,17 +67,17 @@ impl CreateMissingColumnsSetting {
     async fn add_columns(
         &self,
         table: &str,
-        source_meta: &TableMetadata,
+        source_meta: &EntityMetadata,
         dest_meta: &TableMetadata,
     ) -> Result<(), SettingsError> {
         if let Some(columns) = self.context.mapping.field_mappings.get_entity(table) {
-            let type_conv = |meta: &ColumnMetadata| DataType::to_pg_type(meta); // Currently only Postgres
+            let type_conv = |meta: &FieldMetadata| -> (String, Option<usize>) { meta.pg_type() }; // Currently only Postgres
             for (src_col, dst_col) in columns.forward_map() {
                 if dest_meta.get_column(&dst_col).is_none() {
-                    let meta = source_meta.get_column(&src_col).ok_or_else(|| {
+                    let meta = source_meta.column(&src_col).ok_or_else(|| {
                         SettingsError::MissingSourceColumn(format!("{} not in source", src_col))
                     })?;
-                    let def = ColumnDef::with_type_convertor(&dst_col, &type_conv, meta);
+                    let def = with_type_convertor(&dst_col, &type_conv, &meta);
                     self.add_column(table, &def).await?;
                 }
             }
@@ -91,7 +88,7 @@ impl CreateMissingColumnsSetting {
     async fn add_computed_columns(
         &self,
         table: &str,
-        source_meta: &TableMetadata,
+        source_meta: &EntityMetadata,
         dest_meta: &TableMetadata,
     ) -> Result<(), MigrationError> {
         let source = self.context.source.primary.clone();
@@ -103,10 +100,6 @@ impl CreateMissingColumnsSetting {
                         Expression::Lookup { entity: alias, .. } => {
                             let table = self.context.mapping.entity_name_map.resolve(alias);
                             let meta = self.context.source.primary.fetch_meta(table).await?;
-                            let meta = match meta {
-                                EntityMetadata::Table(meta) => meta,
-                                _ => panic!("Expected table metadata"),
-                            };
                             ExpressionWrapper(comp.expression.clone())
                                 .infer_type(&meta.columns(), &self.context.mapping, &source)
                                 .await

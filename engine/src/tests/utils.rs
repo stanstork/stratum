@@ -309,11 +309,11 @@ pub async fn execute(sql: &str) {
     sqlx::query(sql).execute(&pg).await.expect("execute SQL");
 }
 
-/// Fill in the two `{mysq_url}` / `{pg_url}` placeholders
+/// Fill in the two `{mysql_url}` / `{pg_url}` placeholders
 fn templated_smql(template: &str, source_db: &str) -> String {
     template
         .replace(
-            "{mysq_url}",
+            "{mysql_url}",
             match source_db {
                 "sakila" => TEST_MYSQL_URL_SAKILA,
                 "orders" => TEST_MYSQL_URL_ORDERS,

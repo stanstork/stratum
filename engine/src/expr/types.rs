@@ -1,5 +1,7 @@
 use crate::{
-    metadata::entity::EntityMetadata, schema::types::TypeInferencer, source::data::DataSource,
+    metadata::{entity::EntityMetadata, field::FieldMetadata},
+    schema::types::TypeInferencer,
+    source::data::DataSource,
 };
 use async_trait::async_trait;
 use common::{computed::ComputedField, mapping::EntityMapping, types::DataType};
@@ -15,7 +17,7 @@ pub struct ExpressionWrapper(pub Expression);
 /// Helper function to infer the type of a computed field.
 pub async fn infer_computed_type(
     computed: &ComputedField,
-    columns: &[ColumnMetadata],
+    columns: &[FieldMetadata],
     mapping: &EntityMapping,
     source: &DataSource,
 ) -> Option<DataType> {
@@ -49,7 +51,7 @@ pub async fn infer_computed_type(
 /// a plain function-pointer signature, because its real future type is anonymous.
 pub fn boxed_infer_computed_type<'a>(
     computed: &'a ComputedField,
-    columns: &'a [ColumnMetadata],
+    columns: &'a [FieldMetadata],
     mapping: &'a EntityMapping,
     source: &'a DataSource,
 ) -> Pin<Box<dyn Future<Output = Option<DataType>> + Send + 'a>> {
@@ -62,15 +64,15 @@ impl TypeInferencer for ExpressionWrapper {
     /// Inspect the wrapped `Expression` and produce a SQL-like `DataType`.
     async fn infer_type(
         &self,
-        columns: &[ColumnMetadata],
+        columns: &[FieldMetadata],
         mapping: &EntityMapping,
         source: &DataSource,
     ) -> Option<DataType> {
         match &self.0 {
             Expression::Identifier(identifier) => columns
                 .iter()
-                .find(|col| col.name.eq_ignore_ascii_case(identifier))
-                .map(|col| col.data_type),
+                .find(|col| col.name().eq_ignore_ascii_case(identifier))
+                .map(|col| col.data_type()),
 
             Expression::Literal(literal) => Some(match literal {
                 Literal::String(_) => DataType::String,

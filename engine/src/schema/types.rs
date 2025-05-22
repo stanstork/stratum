@@ -34,7 +34,7 @@ pub struct TypeEngine<'a> {
 pub trait TypeInferencer {
     async fn infer_type(
         &self,
-        columns: &[ColumnMetadata],
+        columns: &[FieldMetadata],
         mapping: &EntityMapping,
         source: &DataSource,
     ) -> Option<DataType>;
@@ -64,7 +64,7 @@ impl<'a> TypeEngine<'a> {
     pub async fn infer_computed_type(
         &self,
         computed: &ComputedField,
-        columns: &[ColumnMetadata],
+        columns: &[FieldMetadata],
         mapping: &EntityMapping,
     ) -> Option<DataType> {
         // Clone the expression node into wrapper and run inference.

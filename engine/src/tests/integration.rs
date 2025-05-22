@@ -22,7 +22,7 @@ mod tests {
 
         let tmpl = r#"
             CONNECTIONS(
-                SOURCE(MYSQL,  "{mysq_url}"),
+                SOURCE(MYSQL,  "{mysql_url}"),
                 DESTINATION(POSTGRES, "{pg_url}")
             );
             MIGRATE(
@@ -47,7 +47,7 @@ mod tests {
 
         let tmpl = r#"
             CONNECTIONS(
-                SOURCE(MYSQL,  "{mysq_url}"),
+                SOURCE(MYSQL,  "{mysql_url}"),
                 DESTINATION(POSTGRES, "{pg_url}")
             );
             MIGRATE(
@@ -82,7 +82,7 @@ mod tests {
 
         let tmpl = r#"
             CONNECTIONS(
-                SOURCE(MYSQL,  "{mysq_url}"),
+                SOURCE(MYSQL,  "{mysql_url}"),
                 DESTINATION(POSTGRES, "{pg_url}")
             );
             MIGRATE(
@@ -115,7 +115,7 @@ mod tests {
 
         let tmpl = r#"
             CONNECTIONS(
-                SOURCE(MYSQL,  "{mysq_url}"),
+                SOURCE(MYSQL,  "{mysql_url}"),
                 DESTINATION(POSTGRES, "{pg_url}")
             );
             MIGRATE(
@@ -159,7 +159,7 @@ mod tests {
 
         let tmpl = r#"
             CONNECTIONS(
-                SOURCE(MYSQL,  "{mysq_url}"),
+                SOURCE(MYSQL,  "{mysql_url}"),
                 DESTINATION(POSTGRES, "{pg_url}")
             );
             MIGRATE(
@@ -196,7 +196,7 @@ mod tests {
 
         let tmpl = r#"
             CONNECTIONS(
-                SOURCE(MYSQL,  "{mysq_url}"),
+                SOURCE(MYSQL,  "{mysql_url}"),
                 DESTINATION(POSTGRES, "{pg_url}")
             );
             MIGRATE(
@@ -209,8 +209,8 @@ mod tests {
         run_smql(tmpl, "orders").await;
         assert_row_count("orders", "orders", "orders").await;
 
-        let depndent_tables = vec!["order_items", "products", "users"];
-        for table in depndent_tables.iter() {
+        let dependent_tables = vec!["order_items", "products", "users"];
+        for table in dependent_tables.iter() {
             let dest_count = get_row_count(table, "orders", DbType::Postgres).await;
 
             assert_eq!(
@@ -237,7 +237,7 @@ mod tests {
 
         let tmpl = r#"
             CONNECTIONS(
-                SOURCE(MYSQL,  "{mysq_url}"),
+                SOURCE(MYSQL,  "{mysql_url}"),
                 DESTINATION(POSTGRES, "{pg_url}")
             );
             MIGRATE(
@@ -279,7 +279,7 @@ mod tests {
 
         let tmpl = r#"
             CONNECTIONS(
-                SOURCE(MYSQL,  "{mysq_url}"),
+                SOURCE(MYSQL,  "{mysql_url}"),
                 DESTINATION(POSTGRES, "{pg_url}")
             );
             MIGRATE(
@@ -314,7 +314,7 @@ mod tests {
 
         let tmpl = r#"
             CONNECTIONS(
-                SOURCE(MYSQL,  "{mysq_url}"),
+                SOURCE(MYSQL,  "{mysql_url}"),
                 DESTINATION(POSTGRES, "{pg_url}")
             );
             MIGRATE(
@@ -344,7 +344,7 @@ mod tests {
 
         let tmpl = r#"
             CONNECTIONS(
-                SOURCE(MYSQL,  "{mysq_url}"),
+                SOURCE(MYSQL,  "{mysql_url}"),
                 DESTINATION(POSTGRES, "{pg_url}")
             );
             MIGRATE(
@@ -392,7 +392,7 @@ mod tests {
 
         let tmpl = r#"
             CONNECTIONS(
-                SOURCE(MYSQL,  "{mysq_url}"),
+                SOURCE(MYSQL,  "{mysql_url}"),
                 DESTINATION(POSTGRES, "{pg_url}")
             );
             MIGRATE(
@@ -434,7 +434,7 @@ mod tests {
 
         let tmpl = r#"
             CONNECTIONS(
-                SOURCE(MYSQL,  "{mysq_url}"),
+                SOURCE(MYSQL,  "{mysql_url}"),
                 DESTINATION(POSTGRES, "{pg_url}")
             );
             MIGRATE(
@@ -486,7 +486,7 @@ mod tests {
 
         let tmpl = r#"
             CONNECTIONS(
-                SOURCE(MYSQL,  "{mysq_url}"),
+                SOURCE(MYSQL,  "{mysql_url}"),
                 DESTINATION(POSTGRES, "{pg_url}")
             );
             MIGRATE(
@@ -538,7 +538,7 @@ mod tests {
 
         let tmpl = r#"
             CONNECTIONS(
-                SOURCE(MYSQL,  "{mysq_url}"),
+                SOURCE(MYSQL,  "{mysql_url}"),
                 DESTINATION(POSTGRES, "{pg_url}")
             );
             MIGRATE(
@@ -579,7 +579,7 @@ mod tests {
 
         let tmpl = r#"
             CONNECTIONS(
-                SOURCE(MYSQL,  "{mysq_url}"),
+                SOURCE(MYSQL,  "{mysql_url}"),
                 DESTINATION(POSTGRES, "{pg_url}")
             );
             MIGRATE(
