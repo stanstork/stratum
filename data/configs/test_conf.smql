@@ -3,7 +3,7 @@ CONNECTIONS (
 );
 
 MIGRATE(
-    SOURCE(CSV, "/home/stan/repos/data/customers.csv") -> DEST(TABLE, customers) [
+    SOURCE(CSV, "../data/customers.csv") -> DEST(TABLE, customers) [
         SETTINGS(
             CSV_HEADER             = TRUE,
             CSV_DELIMITER          = ",",
@@ -12,6 +12,7 @@ MIGRATE(
             CREATE_MISSING_TABLES  = TRUE,
             CREATE_MISSING_COLUMNS = TRUE
         ),
+        FILTER(customers[country] = "Poland"),
         MAP(
             index -> id,
             CONCAT(customers[first_name], " ", customers[last_name]) -> full_name

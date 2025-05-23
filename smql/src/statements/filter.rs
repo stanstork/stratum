@@ -1,6 +1,7 @@
 use super::expr::Expression;
 use crate::parser::{Rule, StatementParser};
 use pest::iterators::Pair;
+use std::fmt::Display;
 
 #[derive(Debug, Clone)]
 pub struct Filter {
@@ -86,5 +87,19 @@ impl StatementParser for Comparator {
             "<=" => Comparator::LessThanOrEqual,
             _ => panic!("Invalid comparator: {:?}", pair.as_str()),
         }
+    }
+}
+
+impl Display for Comparator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op = match self {
+            Comparator::Equal => "=",
+            Comparator::NotEqual => "!=",
+            Comparator::GreaterThan => ">",
+            Comparator::GreaterThanOrEqual => ">=",
+            Comparator::LessThan => "<",
+            Comparator::LessThanOrEqual => "<=",
+        };
+        write!(f, "{}", op)
     }
 }

@@ -1,6 +1,0 @@
-source: "mysql://user:password@localhost:3306/testdb"
-destination: "postgres://user:password@localhost:5432/testdb"
-
-mappings:
-  - table: "employees"
-    infer_schema: true # Auto-map all columns

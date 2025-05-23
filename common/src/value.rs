@@ -1,6 +1,6 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::{cmp::Ordering, fmt};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +57,25 @@ impl Value {
             Value::Date(_) => None,
             Value::Timestamp(_) => None,
         }
+    }
+
+    pub fn compare(&self, other: &Value) -> Option<Ordering> {
+        use Value::*;
+        match (self, other) {
+            (Int(a), Int(b)) => Some(a.cmp(b)),
+            (Float(a), Float(b)) => a.partial_cmp(b),
+            (Int(a), Float(b)) => (*a as f64).partial_cmp(b),
+            (Float(a), Int(b)) => a.partial_cmp(&(*b as f64)),
+            (String(a), String(b)) => Some(a.cmp(b)),
+            (Boolean(a), Boolean(b)) => Some(a.cmp(b)),
+            (Date(a), Date(b)) => Some(a.cmp(b)),
+            (Timestamp(a), Timestamp(b)) => Some(a.cmp(b)),
+            _ => None,
+        }
+    }
+
+    pub fn equal(&self, other: &Value) -> bool {
+        self.compare(other).map_or(false, |o| o == Ordering::Equal)
     }
 }
 

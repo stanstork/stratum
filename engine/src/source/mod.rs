@@ -49,7 +49,7 @@ impl Source {
             }
             DataSource::File(file) => {
                 let mut file = file.lock().await;
-                let rows = file.fetch(batch_size, offset)?;
+                let rows = file.fetch(batch_size)?;
                 let records = rows.into_iter().map(Record::RowData).collect();
                 Ok(records)
             }

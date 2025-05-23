@@ -14,4 +14,6 @@ pub enum FileError {
     LockError(String),
     #[error("CSV parsing error: {0}")]
     CsvError(#[from] csv::Error),
+    #[error("Error reading CSV file: {0}")]
+    ReadError(String),
 }

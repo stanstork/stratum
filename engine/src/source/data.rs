@@ -28,9 +28,9 @@ impl DataSource {
         match (format, adapter) {
             // MySQL + MySqlAdapter -> build a MySqlDataSource
             (DataFormat::MySql, Some(Adapter::MySql(mysql_adapter))) => {
-                let sql_filter = filter.as_ref().map(|f| {
-                    let Filter::Sql(sf) = f;
-                    sf.clone()
+                let sql_filter = filter.as_ref().map(|f| match f {
+                    Filter::Sql(sql_filter) => sql_filter.clone(),
+                    _ => panic!("Invalid filter type for MySQL"),
                 });
                 let join = linked.as_ref().and_then(|ls| {
                     if let LinkedSource::Table(j) = ls {
@@ -52,7 +52,11 @@ impl DataSource {
 
             // CSV + FileAdapter -> build a CsvDataSource
             (DataFormat::Csv, Some(Adapter::Csv(file_adapter))) => {
-                let ds = CsvDataSource::new(file_adapter.clone());
+                let csv_filter = filter.as_ref().map(|f| match f {
+                    Filter::Csv(csv_filter) => csv_filter.clone(),
+                    _ => panic!("Invalid filter type for CSV"),
+                });
+                let ds = CsvDataSource::new(file_adapter.clone(), csv_filter);
                 Ok(DataSource::File(Arc::new(Mutex::new(ds))))
             }
 

@@ -3,7 +3,7 @@ use crate::{
     context::{global::GlobalContext, item::ItemContext},
     destination::{data::DataDestination, Destination},
     error::MigrationError,
-    filter::{compiler::FilterCompiler, sql::SqlFilterCompiler, Filter},
+    filter::{compiler::FilterCompiler, csv::CsvFilterCompiler, sql::SqlFilterCompiler, Filter},
     producer::Producer,
     settings::collect_settings,
     source::{data::DataSource, linked::LinkedSource, Source},
@@ -127,6 +127,13 @@ fn create_filter(
                 .filter
                 .as_ref()
                 .map(|ast| Filter::Sql(SqlFilterCompiler::compile(&ast.expression)));
+            Ok(filter)
+        }
+        DataFormat::Csv => {
+            let filter = migrate_item
+                .filter
+                .as_ref()
+                .map(|ast| Filter::Csv(CsvFilterCompiler::compile(&ast.expression)));
             Ok(filter)
         }
         _ => {
