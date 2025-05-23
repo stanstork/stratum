@@ -1,0 +1,21 @@
+CONNECTIONS (
+    DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/testdb")
+);
+
+MIGRATE(
+    SOURCE(CSV, "../data/customers.csv") -> DEST(TABLE, customers) [
+        SETTINGS(
+            CSV_HEADER             = TRUE,
+            CSV_DELIMITER          = ",",
+            CSV_ID_COLUMN          = "index",
+            BATCH_SIZE             = 100,
+            CREATE_MISSING_TABLES  = TRUE,
+            CREATE_MISSING_COLUMNS = TRUE
+        ),
+        FILTER(customers[country] = "Poland"),
+        MAP(
+            index -> id,
+            CONCAT(customers[first_name], " ", customers[last_name]) -> full_name
+        )
+    ]
+);

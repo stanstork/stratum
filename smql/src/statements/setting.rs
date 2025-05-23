@@ -1,5 +1,6 @@
 use crate::parser::{Rule, StatementParser};
 use pest::iterators::Pair;
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -10,6 +11,9 @@ pub struct Settings {
     pub copy_columns: CopyColumns,
     pub batch_size: usize,
     pub cascade_schema: bool,
+    pub csv_header: bool,
+    pub csv_delimiter: char,
+    pub csv_id_column: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +36,9 @@ const KEY_CREATE_MISSING_TABLES: &str = "CREATE_MISSING_TABLES";
 const KEY_COPY_COLUMNS: &str = "COPY_COLUMNS";
 const KEY_BATCH_SIZE: &str = "BATCH_SIZE";
 const KEY_CASCADE_SCHEMA: &str = "CASCADE_SCHEMA";
+const KEY_CSV_HEADER: &str = "CSV_HEADER";
+const KEY_CSV_DELIMITER: &str = "CSV_DELIMITER";
+const KEY_CSV_ID_COLUMN: &str = "CSV_ID_COLUMN";
 const KEY_TRUE: &str = "TRUE";
 const KEY_ALL: &str = "ALL";
 const KEY_MAP_ONLY: &str = "MAP_ONLY";
@@ -78,6 +85,10 @@ impl Settings {
                 KEY_COPY_COLUMNS => settings.copy_columns = pair.to_copy_columns(),
                 KEY_BATCH_SIZE => settings.batch_size = pair.to_usize(),
                 KEY_CASCADE_SCHEMA => settings.cascade_schema = pair.to_bool(),
+                KEY_CSV_HEADER => settings.csv_header = pair.to_bool(),
+                KEY_CSV_DELIMITER => settings.csv_delimiter = pair.to_char(),
+                KEY_CSV_ID_COLUMN => settings.csv_id_column = Some(pair.to_string()),
+
                 _ => {}
             }
         }
@@ -96,6 +107,9 @@ impl Default for Settings {
             copy_columns: CopyColumns::All,
             batch_size: 1000,
             cascade_schema: false,
+            csv_header: false,
+            csv_delimiter: ',',
+            csv_id_column: None,
         }
     }
 }
@@ -115,5 +129,27 @@ impl SettingsPair {
             KEY_MAP_ONLY => CopyColumns::MapOnly,
             _ => CopyColumns::All,
         }
+    }
+
+    pub fn to_char(&self) -> char {
+        self.value
+            .as_str()
+            .trim_start_matches('"')
+            .chars()
+            .next()
+            .unwrap_or('\0')
+    }
+}
+
+impl Display for SettingsPair {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.value
+                .as_str()
+                .trim_start_matches('"')
+                .trim_end_matches('"')
+        )
     }
 }

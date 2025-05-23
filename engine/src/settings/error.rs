@@ -12,6 +12,10 @@ pub enum SettingsError {
     #[error("Unsupported destination: {0}")]
     UnsupportedDestination(String),
 
+    /// The chosen source type isn’t supported.
+    #[error("Unsupported source: {0}")]
+    UnsupportedSource(String),
+
     /// The chosen destination format (e.g. FILE vs TABLE) isn’t supported.
     #[error("Unsupported destination format: {0}")]
     UnsupportedDestinationFormat(String),

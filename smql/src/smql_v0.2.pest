@@ -60,7 +60,7 @@ source_clause = {
       ~ WHITESPACE* ~ ")"
 }
 
-source_type = { ^"TABLE" | ^"API" }
+source_type = { ^"TABLE" | ^"API" | ^"CSV" }
 
 dest_clause = {
     ^"DEST" ~ WHITESPACE* ~ "("
@@ -103,7 +103,7 @@ migrate_settings = {
     ~ WHITESPACE* ~ ")"
 }
 setting_pair = {
-    ident ~ WHITESPACE* ~ "=" ~ WHITESPACE* ~ (boolean | decimal | integer | ident)
+    ident ~ WHITESPACE* ~ "=" ~ WHITESPACE* ~ (boolean | decimal | integer | ident | string)
 }
 
 // ==============================

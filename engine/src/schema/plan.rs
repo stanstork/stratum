@@ -1,22 +1,21 @@
 use super::types::TypeEngine;
 use crate::{
-    adapter::SqlAdapter,
+    metadata::{entity::EntityMetadata, field::FieldMetadata},
+    source::data::DataSource,
+};
+use common::mapping::EntityMapping;
+use sql_adapter::{
     error::db::DbError,
     metadata::table::TableMetadata,
     query::{builder::SqlQueryBuilder, column::ColumnDef, fk::ForeignKeyDef},
 };
-use common::mapping::EntityMapping;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::collections::{HashMap, HashSet};
 use tracing::warn;
 
 /// Represents the schema migration plan from source to target, including type conversion,
 /// name mapping, and metadata relationships.
 pub struct SchemaPlan<'a> {
-    /// Adapter for the source database; used to read metadata.
-    source_adapter: Arc<(dyn SqlAdapter + Send + Sync)>,
+    source: DataSource,
 
     /// Type engine for converting types between source and target databases.
     type_engine: TypeEngine<'a>,
@@ -33,7 +32,7 @@ pub struct SchemaPlan<'a> {
 
     /// Metadata graph containing all source tables and their relationships
     /// (both referencing and referenced dependencies).
-    metadata_graph: HashMap<String, TableMetadata>,
+    metadata_graph: HashMap<String, EntityMetadata>,
 
     /// Definitions of columns collected for each table, used later for generating `CREATE TABLE` queries.
     column_definitions: HashMap<String, Vec<ColumnDef>>,
@@ -47,14 +46,14 @@ pub struct SchemaPlan<'a> {
 
 impl<'a> SchemaPlan<'a> {
     pub fn new(
-        source_adapter: Arc<(dyn SqlAdapter + Send + Sync)>,
+        source: DataSource,
         type_engine: TypeEngine<'a>,
         ignore_constraints: bool,
         mapped_columns_only: bool,
         mapping: EntityMapping,
     ) -> Self {
         Self {
-            source_adapter,
+            source,
             type_engine,
             ignore_constraints,
             mapped_columns_only,
@@ -141,7 +140,12 @@ impl<'a> SchemaPlan<'a> {
         let mut queries = HashSet::new();
 
         for (table, column) in &self.enum_definitions {
-            let enum_type = self.source_adapter.fetch_column_type(table, column).await?;
+            let adapter = match self.source {
+                DataSource::Database(ref db) => db.lock().await.adapter(),
+                _ => panic!("Enum queries are only supported for SQL data sources"),
+            };
+
+            let enum_type = adapter.fetch_column_type(table, column).await?;
             let variants = Self::parse_enum(&enum_type);
 
             let enum_sql = SqlQueryBuilder::new()
@@ -176,12 +180,50 @@ impl<'a> SchemaPlan<'a> {
             .push(fk_def);
     }
 
-    pub fn add_metadata(&mut self, table_name: &str, metadata: TableMetadata) {
+    pub fn add_metadata(&mut self, table_name: &str, metadata: EntityMetadata) {
         self.metadata_graph.insert(table_name.to_string(), metadata);
     }
 
     pub fn metadata_exists(&self, table_name: &str) -> bool {
         self.metadata_graph.contains_key(table_name)
+    }
+
+    pub fn collect_schema_deps(metadata: &TableMetadata, plan: &mut SchemaPlan) {
+        let mut visited = HashSet::new();
+        Self::visit_schema_deps(metadata, plan, &mut visited);
+    }
+
+    /// Build a vector of ColumnDef from EntityMetadata, sorted by ordinal,
+    /// filtering out invalid fields and using the type engine for conversion.
+    pub fn column_defs(&self, meta: &EntityMetadata) -> Vec<ColumnDef> {
+        // Filter only valid fields
+        let mut valid_cols: Vec<_> = meta
+            .columns()
+            .into_iter()
+            .filter(FieldMetadata::is_valid)
+            .collect();
+
+        // Sort by ordinal for stable ordering
+        valid_cols.sort_by_key(|col| col.ordinal());
+
+        // Grab the converter
+        let convert = self.type_engine().type_converter();
+
+        // Map into ColumnDef
+        valid_cols
+            .into_iter()
+            .map(|col| {
+                let (data_type, char_max_length) = convert(&col);
+                ColumnDef {
+                    name: col.name(),
+                    data_type,
+                    is_nullable: col.is_nullable(),
+                    is_primary_key: col.is_primary_key(),
+                    default: col.default_value(),
+                    char_max_length,
+                }
+            })
+            .collect()
     }
 
     fn resolve_column_definitions(&self, table: &str, columns: &[ColumnDef]) -> Vec<ColumnDef> {
@@ -217,7 +259,7 @@ impl<'a> SchemaPlan<'a> {
 
         for computed in computed_fields {
             let column_name = &computed.name;
-            if metadata.get_column(column_name).is_some() {
+            if metadata.column(column_name).is_some() {
                 continue;
             }
 
@@ -261,5 +303,33 @@ impl<'a> SchemaPlan<'a> {
             .into_iter()
             .filter(|col| mapping.contains_target_key(&col.name))
             .collect()
+    }
+
+    fn visit_schema_deps(
+        metadata: &TableMetadata,
+        plan: &mut SchemaPlan<'_>,
+        visited: &mut HashSet<String>,
+    ) {
+        if !visited.insert(metadata.name.clone()) || plan.metadata_exists(&metadata.name) {
+            return;
+        }
+
+        metadata
+            .referenced_tables
+            .values()
+            .chain(metadata.referencing_tables.values())
+            .for_each(|related| {
+                Self::visit_schema_deps(related, plan, visited);
+            });
+
+        plan.add_column_defs(
+            &metadata.name,
+            plan.column_defs(&EntityMetadata::Table(metadata.clone())),
+        );
+        plan.add_fk_defs(&metadata.name, metadata.fk_defs());
+
+        for col in (plan.type_engine().enum_extractor())(metadata) {
+            plan.add_enum_def(&metadata.name, &col.name);
+        }
     }
 }

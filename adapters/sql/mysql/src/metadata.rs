@@ -1,7 +1,7 @@
 use crate::data_type::MySqlColumnDataType;
-use sql_adapter::metadata::column::data_type::ColumnDataType;
-use sql_adapter::metadata::column::metadata::ColumnMetadata;
-use sql_adapter::row::db_row::DbRow;
+use common::types::DataType;
+use sql_adapter::metadata::column::ColumnMetadata;
+use sql_adapter::row::DbRow;
 use sqlx::mysql::MySqlRow;
 
 pub trait ColumnMetadataMapper {
@@ -10,7 +10,7 @@ pub trait ColumnMetadataMapper {
 
 impl ColumnMetadataMapper for ColumnMetadata {
     fn from_mysql_row(row: &MySqlRow) -> ColumnMetadata {
-        let data_type = ColumnDataType::from_mysql_row(row);
+        let data_type = DataType::from_mysql_row(row);
         ColumnMetadata::from_row(&DbRow::MySqlRow(row), data_type)
     }
 }

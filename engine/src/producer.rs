@@ -4,7 +4,7 @@ use crate::{
     source::Source,
     transform::{
         computed::ComputedTransform,
-        mapping::{ColumnMapper, TableMapper},
+        mapping::{FieldMapper, TableMapper},
         pipeline::{TransformPipeline, TransformPipelineExt},
     },
 };
@@ -33,7 +33,7 @@ impl Producer {
                 TableMapper::new(ctx.mapping.entity_name_map.clone())
             })
             .add_if(!ctx.mapping.field_mappings.is_empty(), || {
-                ColumnMapper::new(ctx.mapping.field_mappings.clone())
+                FieldMapper::new(ctx.mapping.field_mappings.clone())
             })
             .add_if(!ctx.mapping.field_mappings.is_empty(), || {
                 ComputedTransform::new(ctx.mapping.clone())

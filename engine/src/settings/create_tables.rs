@@ -1,7 +1,7 @@
 use super::{context::SchemaSettingContext, phase::MigrationSettingsPhase, MigrationSetting};
 use crate::{
-    context::item::ItemContext, destination::Destination, error::MigrationError, source::Source,
-    state::MigrationState,
+    context::item::ItemContext, destination::Destination, error::MigrationError,
+    metadata::entity::EntityMetadata, source::Source, state::MigrationState,
 };
 use async_trait::async_trait;
 use common::mapping::EntityMapping;
@@ -20,47 +20,54 @@ impl MigrationSetting for CreateMissingTablesSetting {
     }
 
     async fn apply(&self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
-        let mut schema_plan = self.context.build_schema_plan().await?;
-
+        // If the table already exists, bail out
         if self.context.destination_exists().await? {
-            info!("Destination table already exists. Create missing tables setting will not be applied");
+            info!("Destination table already exists; skipping schema creation.");
             return Ok(());
         }
 
-        // Target table name
-        let dest = self.context.destination.name.clone();
+        // Resolve source name from the destination
+        let dest_name = &self.context.destination.name;
+        let src_name = self
+            .context
+            .mapping
+            .entity_name_map
+            .reverse_resolve(dest_name);
 
-        // reverse‐map destination -> source
-        let src = self.context.mapping.entity_name_map.reverse_resolve(&dest);
-        let meta = self.context.source.primary.fetch_meta(src.clone()).await?;
+        // Fetch metadata and build an empty plan
+        let meta = self
+            .context
+            .source
+            .primary
+            .fetch_meta(src_name.clone())
+            .await?;
+        let mut plan = self.context.build_schema_plan().await?;
 
-        // add columns, FKs, enums into plan
-        schema_plan.add_column_defs(
-            &meta.name,
-            meta.column_defs(schema_plan.type_engine().type_converter()),
-        );
+        // Add all columns
+        plan.add_column_defs(&meta.name(), plan.column_defs(&meta));
 
-        // add foreign keys
-        for fk in meta.fk_defs() {
-            if self
-                .context
-                .mapping
-                .entity_name_map
-                .contains_key(&fk.referenced_table)
-            {
-                schema_plan.add_fk_def(&meta.name, fk.clone());
+        // If this is SQL table, wire up FKs and enums
+        if let EntityMetadata::Table(table_meta) = &meta {
+            for fk in table_meta.fk_defs() {
+                if self
+                    .context
+                    .mapping
+                    .entity_name_map
+                    .contains_key(&fk.referenced_table)
+                {
+                    plan.add_fk_def(&table_meta.name, fk.clone());
+                }
+            }
+
+            let extract_enums = plan.type_engine().enum_extractor();
+            for col in extract_enums(table_meta) {
+                plan.add_enum_def(&table_meta.name, &col.name);
             }
         }
 
-        // add enums
-        for col in (schema_plan.type_engine().type_extractor())(&meta) {
-            schema_plan.add_enum_def(&meta.name, &col.name);
-        }
-
-        schema_plan.add_metadata(&src, meta);
-
-        // apply the schema plan to the destination
-        self.context.apply_to_destination(schema_plan).await?;
+        // Stamp in the metadata and apply the plan
+        plan.add_metadata(&src_name, meta.clone());
+        self.context.apply_to_destination(plan).await?;
 
         // Set the create missing tables flag to global state
         {

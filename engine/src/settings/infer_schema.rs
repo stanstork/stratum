@@ -3,11 +3,13 @@ use super::{
     MigrationSetting,
 };
 use crate::{
-    context::item::ItemContext, destination::Destination, error::MigrationError, source::Source,
+    context::item::ItemContext, destination::Destination, error::MigrationError,
+    metadata::entity::EntityMetadata, schema::plan::SchemaPlan, source::Source,
     state::MigrationState,
 };
 use async_trait::async_trait;
 use common::mapping::EntityMapping;
+use smql::statements::connection::DataFormat;
 use sql_adapter::metadata::provider::MetadataProvider;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -21,6 +23,13 @@ pub struct InferSchemaSetting {
 impl MigrationSetting for InferSchemaSetting {
     fn phase(&self) -> MigrationSettingsPhase {
         MigrationSettingsPhase::InferSchema
+    }
+
+    fn can_apply(&self, ctx: &ItemContext) -> bool {
+        match (ctx.source.format, ctx.destination.format) {
+            (DataFormat::MySql, DataFormat::Postgres) => true,
+            _ => false,
+        }
     }
 
     async fn apply(&self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
@@ -69,8 +78,8 @@ impl InferSchemaSetting {
         // Add only those metadata entries that aren't already in schema plan
         for meta in meta_graph.values() {
             if !schema_plan.metadata_exists(&meta.name) {
-                MetadataProvider::collect_schema_deps(meta, &mut schema_plan);
-                schema_plan.add_metadata(&meta.name, meta.clone());
+                SchemaPlan::collect_schema_deps(meta, &mut schema_plan);
+                schema_plan.add_metadata(&meta.name, EntityMetadata::Table(meta.clone()));
             }
         }
 

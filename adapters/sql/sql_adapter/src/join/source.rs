@@ -67,7 +67,7 @@ impl JoinSource {
                     .filter(|field| {
                         self.projection
                             .get(&clause.left.table)
-                            .map_or(false, |fields| {
+                            .is_some_and(|fields| {
                                 fields
                                     .iter()
                                     .any(|col| col.eq_ignore_ascii_case(&field.column))

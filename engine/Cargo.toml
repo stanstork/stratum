@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 mysql = { path = "../adapters/sql/mysql" }
 postgres = { path = "../adapters/sql/postgres" }
+csv = { path = "../adapters/csv" }
 sql_adapter = { path = "../adapters/sql/sql_adapter" }
 smql = { path = "../smql" }
 common = { path = "../common" }

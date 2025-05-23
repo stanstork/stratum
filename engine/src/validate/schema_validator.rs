@@ -1,5 +1,5 @@
-use common::mapping::NameMap;
-use sql_adapter::metadata::{column::data_type::ColumnDataType, table::TableMetadata};
+use common::{mapping::NameMap, types::DataType};
+use sql_adapter::metadata::table::TableMetadata;
 use std::collections::HashSet;
 use tracing::error;
 
@@ -17,8 +17,8 @@ pub enum SchemaValidationMode<'a> {
 struct InvalidColumn {
     table: String,
     column: String,
-    source_type: ColumnDataType,
-    destination_type: Option<ColumnDataType>, // None if column is missing
+    source_type: DataType,
+    destination_type: Option<DataType>, // None if column is missing
 }
 
 impl<'a> SchemaValidator<'a> {

@@ -9,6 +9,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use common::mapping::EntityMapping;
+use smql::statements::connection::DataFormat;
 use sql_adapter::{
     filter::SqlFilter,
     join::{
@@ -29,6 +30,13 @@ pub struct CascadeSchemaSetting {
 impl MigrationSetting for CascadeSchemaSetting {
     fn phase(&self) -> MigrationSettingsPhase {
         MigrationSettingsPhase::CascadeSchema
+    }
+
+    fn can_apply(&self, ctx: &ItemContext) -> bool {
+        match (ctx.source.format, ctx.destination.format) {
+            (DataFormat::MySql, DataFormat::Postgres) => true,
+            _ => false,
+        }
     }
 
     async fn apply(&self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
@@ -109,34 +117,33 @@ impl CascadeSchemaSetting {
     ) -> Result<(), MigrationError> {
         let root_table = self.context.source.name.clone();
 
-        let DataSource::Database(db_mutex) = primary;
+        let db_mutex = match primary {
+            DataSource::Database(db) => db,
+            _ => panic!("Expected a database data source"),
+        };
         let mut db = db_mutex.lock().await;
 
-        match sql_filter {
-            Some(sql_filter) => {
-                for meta in meta_graph.values() {
-                    // skip the root table
-                    if meta.name.eq_ignore_ascii_case(&root_table) {
-                        continue;
-                    }
-
-                    // find all join‐paths to tables mentioned in the filter
-                    let joins = sql_filter
-                        .tables()
-                        .iter()
-                        .filter_map(|t| find_join_path(meta_graph, &meta.name, t))
-                        .collect::<Vec<_>>();
-
-                    // combine + build clauses
-                    let paths = combine_join_paths(joins, &meta.name);
-                    let clauses =
-                        build_join_clauses(&meta.name, &paths, meta_graph, JoinType::Inner);
-
-                    // push them into the locked DB
-                    db.set_cascade_joins(meta.name.clone(), clauses);
+        if let Some(sql_filter) = sql_filter {
+            for meta in meta_graph.values() {
+                // skip the root table
+                if meta.name.eq_ignore_ascii_case(&root_table) {
+                    continue;
                 }
+
+                // find all join‐paths to tables mentioned in the filter
+                let joins = sql_filter
+                    .tables()
+                    .iter()
+                    .filter_map(|t| find_join_path(meta_graph, &meta.name, t))
+                    .collect::<Vec<_>>();
+
+                // combine + build clauses
+                let paths = combine_join_paths(joins, &meta.name);
+                let clauses = build_join_clauses(&meta.name, &paths, meta_graph, JoinType::Inner);
+
+                // push them into the locked DB
+                db.set_cascade_joins(meta.name.clone(), clauses);
             }
-            None => {}
         }
 
         // store the full graph for later use

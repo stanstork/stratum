@@ -60,6 +60,6 @@ impl MatchPair {
     pub fn belongs_to(&self, entity: &str) -> bool {
         self.right
             .entity()
-            .map_or(false, |right| right.eq_ignore_ascii_case(entity))
+            .is_some_and(|right| right.eq_ignore_ascii_case(entity))
     }
 }

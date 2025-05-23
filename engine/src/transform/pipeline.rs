@@ -1,4 +1,4 @@
-use crate::record::Record;
+use common::record::Record;
 
 pub trait Transform: Send + Sync {
     fn apply(&self, record: &Record) -> Record;

@@ -1,4 +1,5 @@
-use crate::{filter::Filter, record::Record};
+use crate::filter::Filter;
+use common::record::Record;
 use data::DataSource;
 use linked::LinkedSource;
 use smql::statements::connection::DataFormat;
@@ -43,6 +44,12 @@ impl Source {
             DataSource::Database(db) => {
                 let db = db.lock().await;
                 let rows = db.fetch(batch_size, offset).await?;
+                let records = rows.into_iter().map(Record::RowData).collect();
+                Ok(records)
+            }
+            DataSource::File(file) => {
+                let mut file = file.lock().await;
+                let rows = file.fetch(batch_size)?;
                 let records = rows.into_iter().map(Record::RowData).collect();
                 Ok(records)
             }

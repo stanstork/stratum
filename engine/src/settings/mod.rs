@@ -24,6 +24,13 @@ pub mod phase;
 #[async_trait]
 pub trait MigrationSetting: Send + Sync {
     fn phase(&self) -> MigrationSettingsPhase;
+
+    /// Check whether this setting should be applied in the given context.
+    /// By default, all settings are applicable.
+    fn can_apply(&self, _ctx: &ItemContext) -> bool {
+        true
+    }
+
     async fn apply(&self, ctx: &mut ItemContext) -> Result<(), MigrationError>;
 }
 

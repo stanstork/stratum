@@ -8,5 +8,4 @@ pub mod metadata;
 pub mod query;
 pub mod requests;
 pub mod row;
-pub mod schema;
 pub mod source;

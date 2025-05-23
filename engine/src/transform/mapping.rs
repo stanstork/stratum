@@ -1,8 +1,10 @@
 use super::pipeline::Transform;
-use crate::record::Record;
-use common::mapping::{FieldMappings, NameMap};
+use common::{
+    mapping::{FieldMappings, NameMap},
+    record::Record,
+};
 
-pub struct ColumnMapper {
+pub struct FieldMapper {
     ns_map: FieldMappings,
 }
 
@@ -10,7 +12,7 @@ pub struct TableMapper {
     name_map: NameMap,
 }
 
-impl ColumnMapper {
+impl FieldMapper {
     pub fn new(ns_map: FieldMappings) -> Self {
         Self { ns_map }
     }
@@ -22,13 +24,13 @@ impl TableMapper {
     }
 }
 
-impl Transform for ColumnMapper {
+impl Transform for FieldMapper {
     fn apply(&self, record: &Record) -> Record {
         match record {
             Record::RowData(row) => {
                 let mut new_row = row.clone();
-                let table = new_row.table.clone();
-                for column in &mut new_row.columns {
+                let table = new_row.entity.clone();
+                for column in &mut new_row.field_values {
                     column.name = self.ns_map.resolve(&table, &column.name);
                 }
                 Record::RowData(new_row)
@@ -42,7 +44,7 @@ impl Transform for TableMapper {
         match record {
             Record::RowData(row) => {
                 let mut new_row = row.clone();
-                new_row.table = self.name_map.resolve(&row.table);
+                new_row.entity = self.name_map.resolve(&row.entity);
                 Record::RowData(new_row)
             }
         }

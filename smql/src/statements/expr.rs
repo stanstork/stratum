@@ -91,7 +91,12 @@ impl StatementParser for Expression {
                 Expression::Lookup { entity, key, field }
             }
             Rule::ident => Expression::Identifier(pair.as_str().to_string()),
-            Rule::string => Expression::Literal(Literal::String(pair.as_str().to_string())),
+            Rule::string => Expression::Literal(Literal::String(
+                pair.as_str()
+                    .trim_start_matches('"')
+                    .trim_end_matches('"')
+                    .to_string(),
+            )),
             Rule::integer => Expression::Literal(Literal::Integer(
                 pair.as_str().parse().expect("Invalid integer"),
             )),
