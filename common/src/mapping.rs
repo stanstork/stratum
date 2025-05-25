@@ -11,7 +11,7 @@ pub struct FieldMappings {
     pub computed_fields: HashMap<String, Vec<ComputedField>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct NameMap {
     source_to_target: HashMap<String, String>, // old_name -> new_name
     target_to_source: HashMap<String, String>, // new_name -> old_name
@@ -276,15 +276,6 @@ impl EntityMapping {
 
             // Identifiers and literals never contain nested lookups:
             Expression::Identifier(_) | Expression::Literal(_) => {}
-        }
-    }
-}
-
-impl Default for NameMap {
-    fn default() -> Self {
-        Self {
-            source_to_target: HashMap::new(),
-            target_to_source: HashMap::new(),
         }
     }
 }

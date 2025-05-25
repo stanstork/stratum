@@ -1,9 +1,6 @@
-use super::{column::metadata::ColumnMetadata, fk::ForeignKeyMetadata};
-use crate::{
-    metadata::column::data_type::ColumnDataType,
-    query::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField},
-    schema::types::TypeConverter,
-};
+use super::{column::ColumnMetadata, fk::ForeignKeyMetadata};
+use crate::query::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField};
+use common::types::DataType;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -60,7 +57,7 @@ impl TableMetadata {
         table
             .columns
             .iter()
-            .filter(|(_name, col)| col.data_type == ColumnDataType::Enum)
+            .filter(|(_name, col)| col.data_type == DataType::Enum)
             .map(|(_name, col)| col.clone())
             .collect()
     }
@@ -74,7 +71,10 @@ impl TableMetadata {
         tables
     }
 
-    pub fn column_defs(&self, type_converter: &TypeConverter) -> Vec<ColumnDef> {
+    pub fn column_defs<T: Fn(&ColumnMetadata) -> (String, Option<usize>)>(
+        &self,
+        type_converter: &T,
+    ) -> Vec<ColumnDef> {
         // Sort columns by ordinal to ensure consistent order of columns
         // in the output regardless of the order in which they were added to the HashMap
         let mut columns = self.columns.iter().collect::<Vec<_>>();

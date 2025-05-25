@@ -1,6 +1,8 @@
 use crate::{
     buffer::SledBuffer,
     destination::{data::DataDestination, Destination},
+    error::MigrationError,
+    metadata::entity::EntityMetadata,
     source::{data::DataSource, Source},
     state::MigrationState,
 };
@@ -58,16 +60,31 @@ impl ItemContext {
         }
     }
 
-    pub async fn set_src_meta(&self) -> Result<(), DbError> {
-        let name = self.source.name.clone();
-        let db_opt = match &self.source.primary {
-            DataSource::Database(db) => Some(db.clone()),
-        };
+    /// Fetch and apply source metadata (table or CSV) into the internal state.
+    pub async fn set_src_meta(&self) -> Result<(), MigrationError> {
+        // Fetch metadata by source name
+        let name = &self.source.name;
+        let meta = self.source.primary.fetch_meta(name.clone()).await?;
 
-        let fetch_meta = move |tbl: String| self.source.primary.fetch_meta(tbl);
-        Self::set_meta(&name.clone(), db_opt.as_ref(), fetch_meta).await?;
+        // Do nothing if metadata is not valid
+        if !meta.is_valid() {
+            return Ok(());
+        }
 
-        Ok(())
+        match (&self.source.primary, meta) {
+            (DataSource::Database(db), EntityMetadata::Table(table_meta)) => {
+                db.lock().await.set_metadata(table_meta);
+                Ok(())
+            }
+            (DataSource::File(file), EntityMetadata::Csv(csv_meta)) => {
+                file.lock().await.set_metadata(csv_meta);
+                Ok(())
+            }
+            // Any other combination is an unexpected mismatch
+            _ => Err(MigrationError::InvalidMetadata(
+                "Mismatch between data source and fetched metadata".into(),
+            )),
+        }
     }
 
     pub async fn set_dest_meta(&self) -> Result<(), DbError> {

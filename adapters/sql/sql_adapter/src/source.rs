@@ -1,5 +1,6 @@
-use crate::{metadata::provider::MetadataHelper, row::row_data::RowData};
+use crate::metadata::provider::MetadataHelper;
 use async_trait::async_trait;
+use common::row_data::RowData;
 
 #[async_trait]
 pub trait DbDataSource: MetadataHelper + Send + Sync {

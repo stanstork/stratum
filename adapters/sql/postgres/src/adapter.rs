@@ -1,18 +1,16 @@
-use crate::data_type::PgColumnDataType;
+use crate::data_type::PgDataType;
 use async_trait::async_trait;
+use common::{row_data::RowData, types::DataType};
 use sql_adapter::{
     adapter::SqlAdapter,
     error::{adapter::ConnectorError, db::DbError},
     metadata::{
-        column::{
-            data_type::ColumnDataType,
-            metadata::{ColumnMetadata, COL_REFERENCING_TABLE},
-        },
+        column::{ColumnMetadata, COL_REFERENCING_TABLE},
         provider::MetadataProvider,
         table::TableMetadata,
     },
     requests::FetchRowsRequest,
-    row::{db_row::DbRow, row_data::RowData},
+    row::DbRow,
 };
 use sqlx::{Pool, Postgres, Row};
 use std::collections::HashMap;
@@ -61,7 +59,7 @@ impl SqlAdapter for PgAdapter {
         let columns = rows
             .iter()
             .map(|row| {
-                let data_type = ColumnDataType::from_pg_row(row);
+                let data_type = DataType::from_pg_row(row);
                 let column_metadata = ColumnMetadata::from_row(&DbRow::PostgresRow(row), data_type);
                 Ok((column_metadata.name.clone(), column_metadata))
             })

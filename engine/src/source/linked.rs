@@ -20,14 +20,20 @@ pub enum LinkedSource {
 impl LinkedSource {
     pub async fn new(
         ctx: &GlobalContext,
+        format: DataFormat,
         load: &Load,
         mapping: &EntityMapping,
     ) -> Result<Self, MigrationError> {
-        if !matches!(ctx.src_format, DataFormat::MySql | DataFormat::Postgres) {
-            return Err(MigrationError::UnsupportedFormat(
-                ctx.src_format.to_string(),
-            ));
+        if !matches!(format, DataFormat::MySql | DataFormat::Postgres) {
+            return Err(MigrationError::UnsupportedFormat(format.to_string()));
         }
+
+        // check if the source adapter is available
+        // if not, return an error
+        let src_adapter = ctx
+            .src_conn
+            .as_ref()
+            .ok_or(MigrationError::AdapterNotFound(format.to_string()))?;
 
         // precompute join clauses & projection
         let join_clauses = Self::build_join_clauses(&load.matches);
@@ -37,7 +43,7 @@ impl LinkedSource {
         // fetch metadata for all tables
         let mut meta = HashMap::new();
         for table in &load.entities {
-            let table_meta = ctx.src_adapter.get_adapter().fetch_metadata(table).await?;
+            let table_meta = src_adapter.get_sql().fetch_metadata(table).await?;
             meta.insert(table.clone(), table_meta);
         }
 

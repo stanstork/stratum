@@ -1,4 +1,4 @@
-use sql_adapter::row::row_data::RowData;
+use crate::row_data::RowData;
 
 #[derive(Debug, Clone)]
 pub enum Record {
@@ -36,26 +36,4 @@ pub trait DataRecord: Send + Sync {
     fn as_any(&self) -> &dyn std::any::Any;
     fn serialize(&self) -> Vec<u8>;
     fn deserialize(data: Vec<u8>) -> Self;
-}
-
-impl DataRecord for RowData {
-    fn debug(&self) {
-        println!("{:#?}", self);
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn serialize(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_else(|_| {
-            panic!("Failed to serialize: {:?}", self);
-        })
-    }
-
-    fn deserialize(data: Vec<u8>) -> Self {
-        serde_json::from_slice(&data).unwrap_or_else(|_| {
-            panic!("Failed to deserialize: {:?}", data);
-        })
-    }
 }

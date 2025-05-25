@@ -1,6 +1,13 @@
+use bigdecimal::ToPrimitive;
+use common::{
+    row_data::RowData,
+    types::DataType,
+    value::{FieldValue, Value},
+};
 use core::fmt;
 use sqlx::{Column, Row, TypeInfo};
 use std::fmt::Formatter;
+use tracing::warn;
 
 pub enum DbRow<'a> {
     MySqlRow(&'a sqlx::mysql::MySqlRow),
@@ -8,6 +15,55 @@ pub enum DbRow<'a> {
 }
 
 impl DbRow<'_> {
+    pub fn get_row_data(&self, table: &str) -> RowData {
+        let columns = self
+            .columns()
+            .iter()
+            .map(|column| {
+                let column_type =
+                    DataType::try_from(self.column_type(column)).unwrap_or_else(|_| {
+                        warn!("Unknown column type: {}", self.column_type(column));
+                        DataType::String
+                    });
+
+                FieldValue {
+                    name: column.to_string(),
+                    value: self.get_value(column_type, column),
+                }
+            })
+            .collect();
+
+        RowData::new(table, columns)
+    }
+
+    pub fn get_value(&self, data_type: DataType, name: &str) -> Option<Value> {
+        match data_type {
+            DataType::Int | DataType::Long | DataType::Short => {
+                self.try_get_i64(name).map(Value::Int)
+            }
+            DataType::IntUnsigned | DataType::ShortUnsigned | DataType::Year => {
+                self.try_get_u64(name).map(|v| Value::Int(v as i64))
+            }
+            DataType::Float => self.try_get_f64(name).map(Value::Float),
+            DataType::Decimal => self
+                .try_get_bigdecimal(name)
+                .and_then(|v| v.to_f64().map(Value::Float)),
+            DataType::String | DataType::VarChar | DataType::Char => {
+                self.try_get_string(name).map(Value::String)
+            }
+            DataType::Boolean => self.try_get_bool(name).map(Value::Boolean),
+            DataType::Json => self.try_get_json(name).map(Value::Json),
+            DataType::Timestamp => self.try_get_timestamp(name).map(Value::Timestamp),
+            DataType::Date => self.try_get_date(name).map(Value::Date),
+            DataType::Enum => self.try_get_string(name).map(Value::String),
+            DataType::Bytea => self.try_get_bytes(name).map(Value::Bytes),
+            DataType::Blob | DataType::TinyBlob | DataType::MediumBlob | DataType::LongBlob => {
+                self.try_get_bytes(name).map(Value::Bytes)
+            }
+            _ => None,
+        }
+    }
+
     pub fn columns(&self) -> Vec<&str> {
         match self {
             DbRow::MySqlRow(row) => row.columns().iter().map(|col| col.name()).collect(),

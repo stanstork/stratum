@@ -1,27 +1,26 @@
-use common::mapping::EntityMapping;
+use common::{mapping::EntityMapping, row_data::RowData, value::Value};
 use smql::statements::expr::{Expression, Literal, Operator};
-use sql_adapter::{metadata::column::value::ColumnValue, row::row_data::RowData};
 use tracing::warn;
 
 pub trait Evaluator {
-    fn evaluate(&self, row: &RowData, mapping: &EntityMapping) -> Option<ColumnValue>;
+    fn evaluate(&self, row: &RowData, mapping: &EntityMapping) -> Option<Value>;
 }
 
 impl Evaluator for Expression {
-    fn evaluate(&self, row: &RowData, mapping: &EntityMapping) -> Option<ColumnValue> {
+    fn evaluate(&self, row: &RowData, mapping: &EntityMapping) -> Option<Value> {
         match self {
             Expression::Identifier(identifier) => row
-                .columns
+                .field_values
                 .iter()
                 .find(|col| col.name.eq_ignore_ascii_case(identifier))
                 .map(|col| col.value.clone())
                 .unwrap_or(None),
 
             Expression::Literal(literal) => Some(match literal {
-                Literal::String(s) => ColumnValue::String(s.clone()),
-                Literal::Integer(i) => ColumnValue::Int(*i),
-                Literal::Float(f) => ColumnValue::Float(*f),
-                Literal::Boolean(b) => ColumnValue::Boolean(*b),
+                Literal::String(s) => Value::String(s.clone()),
+                Literal::Integer(i) => Value::Int(*i),
+                Literal::Float(f) => Value::Float(*f),
+                Literal::Boolean(b) => Value::Boolean(*b),
             }),
 
             Expression::Arithmetic {
@@ -35,7 +34,7 @@ impl Evaluator for Expression {
             }
 
             Expression::FunctionCall { name, arguments } => {
-                let evaluated_args: Vec<ColumnValue> = arguments
+                let evaluated_args: Vec<Value> = arguments
                     .iter()
                     .map(|arg| arg.evaluate(row, mapping))
                     .collect::<Option<Vec<_>>>()?;
@@ -49,14 +48,14 @@ impl Evaluator for Expression {
                     .and_then(|fields| fields.iter().find(|lk| lk.key.eq_ignore_ascii_case(key)))
                     // Given the LookupField, find the matching column in the current row
                     .and_then(|lk| {
-                        row.columns
+                        row.field_values
                             .iter()
                             .find(|col| col.name.eq_ignore_ascii_case(&lk.target))
                             .and_then(|col| col.value.clone())
                     });
 
                 let raw = row
-                    .columns
+                    .field_values
                     .iter()
                     .find(|col| col.name.eq_ignore_ascii_case(key))
                     .and_then(|col| col.value.clone());
@@ -73,10 +72,10 @@ impl Evaluator for Expression {
     }
 }
 
-fn eval_arithmetic(left: &ColumnValue, right: &ColumnValue, op: &Operator) -> Option<ColumnValue> {
-    use ColumnValue::*;
+fn eval_arithmetic(left: &Value, right: &Value, op: &Operator) -> Option<Value> {
+    use Value::*;
 
-    let as_float = |v: &ColumnValue| match v {
+    let as_float = |v: &Value| match v {
         Int(i) => Some(*i as f64),
         Float(f) => Some(*f),
         _ => None,
@@ -105,36 +104,36 @@ fn eval_arithmetic(left: &ColumnValue, right: &ColumnValue, op: &Operator) -> Op
     }
 }
 
-fn eval_function(name: &str, args: &[ColumnValue]) -> Option<ColumnValue> {
+fn eval_function(name: &str, args: &[Value]) -> Option<Value> {
     match name.to_ascii_lowercase().as_str() {
         "lower" => match args.first()? {
-            ColumnValue::String(s) => Some(ColumnValue::String(s.to_lowercase())),
+            Value::String(s) => Some(Value::String(s.to_lowercase())),
             _ => None,
         },
         "upper" => match args.first()? {
-            ColumnValue::String(s) => Some(ColumnValue::String(s.to_uppercase())),
+            Value::String(s) => Some(Value::String(s.to_uppercase())),
             _ => None,
         },
         "concat" => {
             let concatenated = args
                 .iter()
                 .map(|arg| match arg {
-                    ColumnValue::String(s) => s
+                    Value::String(s) => s
                         .trim_start_matches('\"')
                         .trim_end_matches('\"')
                         .to_string(),
-                    ColumnValue::Int(i) => i.to_string(),
-                    ColumnValue::Float(f) => f.to_string(),
-                    ColumnValue::Boolean(b) => b.to_string(),
-                    ColumnValue::Uuid(u) => u.to_string(),
-                    ColumnValue::Date(d) => d.to_string(),
-                    ColumnValue::Timestamp(t) => t.to_rfc3339(),
-                    ColumnValue::Bytes(b) => String::from_utf8_lossy(b).to_string(),
-                    ColumnValue::Json(v) => v.to_string(),
+                    Value::Int(i) => i.to_string(),
+                    Value::Float(f) => f.to_string(),
+                    Value::Boolean(b) => b.to_string(),
+                    Value::Uuid(u) => u.to_string(),
+                    Value::Date(d) => d.to_string(),
+                    Value::Timestamp(t) => t.to_rfc3339(),
+                    Value::Bytes(b) => String::from_utf8_lossy(b).to_string(),
+                    Value::Json(v) => v.to_string(),
                 })
                 .collect::<Vec<_>>()
                 .join("");
-            Some(ColumnValue::String(concatenated))
+            Some(Value::String(concatenated))
         }
 
         _ => {
