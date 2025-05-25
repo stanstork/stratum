@@ -4,9 +4,9 @@ mod tests {
         reset_migration_buffer, reset_postgres_schema,
         utils::{
             assert_column_exists, assert_row_count, assert_table_exists, execute, fetch_rows,
-            get_cell_as_f64, get_cell_as_string, get_cell_as_usize, get_column_names,
-            get_row_count, get_table_names, run_smql, DbType, ACTORS_TABLE_DDL,
-            ORDERS_FLAT_FILTER_QUERY, ORDERS_FLAT_JOIN_QUERY,
+            file_row_count, get_cell_as_f64, get_cell_as_string, get_cell_as_usize,
+            get_column_names, get_row_count, get_table_names, run_smql, DbType, ACTORS_TABLE_DDL,
+            CUSTOMERS_TABLE_DDL, ORDERS_FLAT_FILTER_QUERY, ORDERS_FLAT_JOIN_QUERY,
         },
     };
     use tracing_test::traced_test;
@@ -608,5 +608,215 @@ mod tests {
             dst_count as usize,
             "expected same number of filtered rows"
         );
+    }
+
+    // Test Settings: Default (no special flags).
+    // Scenario: The source is a CSV file, and the target table does not exist in Postgres.
+    // Expected Outcome: The test should pass without creating the table in Postgres.
+    #[traced_test]
+    #[tokio::test]
+    async fn tc16() {
+        reset_migration_buffer().expect("reset migration buffer");
+        reset_postgres_schema().await;
+
+        let csv_path = "src/tests/data/customers.csv";
+        let tmpl = r#"
+            CONNECTIONS(
+                DESTINATION(POSTGRES, "{pg_url}")
+            );
+            MIGRATE(
+                SOURCE(CSV, "{csv_path}") -> DEST(TABLE, customers) []
+            );
+        "#
+        .replace("{csv_path}", csv_path)
+        .to_string();
+
+        run_smql(&tmpl, "").await;
+        assert_table_exists("customers", false).await;
+    }
+
+    // Test Settings: CREATE_MISSING_TABLES = TRUE.
+    // Scenario:
+    // - The source is a CSV file.
+    // - The target table does not exist in Postgres.
+    // Expected Outcome:
+    // - The table should be created in Postgres.
+    // - Data should be copied, and the row count should match the source CSV file.
+    // - The new table should have the same schema as the CSV file.
+    #[traced_test]
+    #[tokio::test]
+    async fn tc17() {
+        reset_migration_buffer().expect("reset migration buffer");
+        reset_postgres_schema().await;
+
+        let csv_path = "src/tests/data/customers.csv";
+        let tmpl = r#"
+            CONNECTIONS(
+                DESTINATION(POSTGRES, "{pg_url}")
+            );
+            MIGRATE(
+                SOURCE(CSV, "{csv_path}") -> DEST(TABLE, customers) [
+                    SETTINGS(CREATE_MISSING_TABLES=TRUE,CSV_HEADER=TRUE)
+                ]
+            );
+        "#
+        .replace("{csv_path}", csv_path)
+        .to_string();
+
+        run_smql(&tmpl, "").await;
+
+        // Verify table exists
+        assert_table_exists("customers", true).await;
+
+        // Compare row counts
+        let actual = get_row_count("customers", "", DbType::Postgres).await as usize;
+        let expected = file_row_count(csv_path, true).unwrap();
+        assert_eq!(
+            actual, expected,
+            "Expected {} rows in `customers`, got {}",
+            expected, actual
+        );
+    }
+
+    // Test Settings: CREATE_MISSING_COLUMNS = TRUE.
+    // Scenario:
+    // - The source is a CSV file.
+    // - The target table exists in Postgres but does not have the `full_name` column.
+    // Expected Outcome:
+    // - The `full_name` column should be created in Postgres.
+    // - Data should be copied, and the row count should match the source CSV file.
+    // - The `full_name` column should be populated with the concatenated values of `first_name` and `last_name`.
+    #[traced_test]
+    #[tokio::test]
+    async fn tc18() {
+        reset_migration_buffer().expect("reset migration buffer");
+        reset_postgres_schema().await;
+
+        // Create the customers table in Postgres without the full_name column
+        execute(CUSTOMERS_TABLE_DDL).await;
+
+        let csv_path = "src/tests/data/customers.csv";
+        let tmpl = r#"
+            CONNECTIONS(
+                DESTINATION(POSTGRES, "{pg_url}")
+            );
+            MIGRATE(
+                SOURCE(CSV, "{csv_path}") -> DEST(TABLE, customers) [
+                    SETTINGS(CREATE_MISSING_COLUMNS=TRUE,CSV_HEADER=TRUE),
+                    MAP(
+                        CONCAT(customers[first_name], customers[last_name]) -> full_name
+                    )
+                ]
+            );
+        "#
+        .replace("{csv_path}", csv_path)
+        .to_string();
+
+        run_smql(&tmpl, "").await;
+
+        // Verify table exists
+        assert_table_exists("customers", true).await;
+
+        // Compare row counts
+        let actual = get_row_count("customers", "", DbType::Postgres).await as usize;
+        let expected = file_row_count(csv_path, true).unwrap();
+        assert_eq!(
+            actual, expected,
+            "Expected {} rows in `customers`, got {}",
+            expected, actual
+        );
+
+        // Verify the full_name column exists and is populated
+        assert_column_exists("customers", "full_name", true).await;
+    }
+
+    // Test Settings: CREATE_MISSING_TABLES = TRUE, CREATE_MISSING_COLUMNS = TRUE, MAP.
+    // Scenario:
+    // - The source is a CSV file.
+    // - The target table does not exist in Postgres.
+    // - The settings to create missing tables and columns are specified.
+    // - Mapping includes:
+    //   - `index -> id`.
+    //   - `CONCAT(customers[first_name], customers[last_name]) -> full_name`.
+    // Expected Outcome:
+    // - The table should be created in Postgres.
+    // - The destination table should include the new column `full_name`.
+    // - Data should be copied, and the row count should match the source CSV file.
+    // - The `full_name` column should be populated with the concatenated values of `first_name` and `last_name`.
+    #[traced_test]
+    #[tokio::test]
+    async fn tc19() {
+        reset_migration_buffer().expect("reset migration buffer");
+        reset_postgres_schema().await;
+
+        let csv_path = "src/tests/data/customers.csv";
+        let tmpl = r#"
+            CONNECTIONS(
+                DESTINATION(POSTGRES, "{pg_url}")
+            );
+            MIGRATE(
+                SOURCE(CSV, "{csv_path}") -> DEST(TABLE, customers) [
+                    SETTINGS(CREATE_MISSING_TABLES=TRUE,CREATE_MISSING_COLUMNS=TRUE,CSV_HEADER=TRUE),
+                    MAP(
+                        index -> id,
+                        CONCAT(customers[first_name], customers[last_name]) -> full_name
+                    )
+                ]
+            );
+        "#
+        .replace("{csv_path}", csv_path)
+        .to_string();
+
+        run_smql(&tmpl, "").await;
+
+        // Verify table exists
+        assert_table_exists("customers", true).await;
+
+        let query = "SELECT * FROM customers WHERE id = 1";
+
+        let first = get_cell_as_string(query, "customers", DbType::Postgres, "first_name").await;
+        let last = get_cell_as_string(query, "customers", DbType::Postgres, "last_name").await;
+        let full = get_cell_as_string(query, "customers", DbType::Postgres, "full_name").await;
+
+        assert_eq!(full, format!("{}{}", first, last));
+    }
+
+    // Test Settings: CREATE_MISSING_TABLES = TRUE, CREATE_MISSING_COLUMNS = TRUE, FILTER.
+    // Scenario:
+    // - The source is a CSV file.
+    // - The target table does not exist in Postgres.
+    // - The settings to create missing tables and columns are specified.
+    // - A filter is applied to copy only rows where `country = 'Poland'`.
+    // Expected Outcome:
+    // - The table should be created in Postgres.
+    // - The destination table should contain only the rows that satisfy the filter condition.
+    // - The row count in the destination table should match the number of rows in the source CSV file that satisfy the filter condition.
+    #[traced_test]
+    #[tokio::test]
+    async fn tc20() {
+        reset_migration_buffer().expect("reset migration buffer");
+        reset_postgres_schema().await;
+
+        let csv_path = "src/tests/data/customers.csv";
+        let tmpl = r#"
+            CONNECTIONS(
+                DESTINATION(POSTGRES, "{pg_url}")
+            );
+            MIGRATE(
+                SOURCE(CSV, "{csv_path}") -> DEST(TABLE, customers) [
+                    SETTINGS(CREATE_MISSING_TABLES=TRUE,CREATE_MISSING_COLUMNS=TRUE,CSV_HEADER=TRUE),
+                    FILTER(customers[country] = "Poland")
+                ]
+            );
+        "#
+        .replace("{csv_path}", csv_path)
+        .to_string();
+
+        run_smql(&tmpl, "").await;
+
+        let query = "SELECT COUNT(*) cnt FROM customers WHERE country = 'Poland'";
+        let cnt = get_cell_as_usize(query, "orders", DbType::Postgres, "cnt").await;
+
+        assert_eq!(1, cnt, "expected same number of rows in destination table");
     }
 }

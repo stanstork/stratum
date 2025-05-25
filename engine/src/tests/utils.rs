@@ -1,8 +1,14 @@
 #![allow(dead_code)]
 
+use std::{
+    fs::File,
+    io::{BufRead, BufReader},
+};
+
 use super::{mysql_pool, TEST_MYSQL_URL_ORDERS, TEST_MYSQL_URL_SAKILA, TEST_PG_URL};
 use crate::{runner::run, tests::pg_pool};
 use common::row_data::RowData;
+use csv::error::FileError;
 use smql::parser::parse;
 use sql_adapter::row::DbRow;
 use sqlx::{mysql::MySqlRow, Row};
@@ -43,6 +49,25 @@ pub const ORDERS_FLAT_FILTER_QUERY: &str = r#"
     INNER JOIN order_items AS order_items ON order_items.order_id = orders.id 
     INNER JOIN products AS products       ON products.id = order_items.id 
     WHERE (orders.total > 400 AND (users.id != 1 OR order_items.price < 1200))
+"#;
+
+/// DDL statement to precreate the `customers` table in Postgres.
+/// This is used for testing CSV data loading and transformations.
+pub const CUSTOMERS_TABLE_DDL: &str = r#"
+    CREATE TABLE public.customers (
+        "index" varchar NOT NULL,
+        customer_id varchar NOT NULL,
+        first_name varchar NOT NULL,
+        last_name varchar NOT NULL,
+        company varchar NOT NULL,
+        city varchar NOT NULL,
+        country varchar NOT NULL,
+        phone_1 varchar NOT NULL,
+        phone_2 varchar NOT NULL,
+        email varchar NOT NULL,
+        subscription_date varchar NOT NULL,
+        website varchar NOT NULL
+    );
 "#;
 
 /// The type of database to use for the test
@@ -309,6 +334,30 @@ pub async fn execute(sql: &str) {
     sqlx::query(sql).execute(&pg).await.expect("execute SQL");
 }
 
+/// Count the number of data rows in a CSV file, optionally excluding the header row
+pub fn file_row_count(file_path: &str, has_headers: bool) -> Result<usize, FileError> {
+    let f = File::open(file_path).map_err(|e| FileError::IoError(e))?;
+    let reader = BufReader::new(f);
+
+    // Count all the lines
+    let total_lines = reader.lines().map(|r| r.map_err(FileError::IoError)).fold(
+        Ok(0usize),
+        |acc, line| match (acc, line) {
+            (Ok(n), Ok(_)) => Ok(n + 1),
+            (Err(e), _) | (_, Err(e)) => Err(e),
+        },
+    )?;
+
+    // Subtract the header if present
+    let data_rows = if has_headers && total_lines > 0 {
+        total_lines - 1
+    } else {
+        total_lines
+    };
+
+    Ok(data_rows)
+}
+
 /// Fill in the two `{mysql_url}` / `{pg_url}` placeholders
 fn templated_smql(template: &str, source_db: &str) -> String {
     template
@@ -317,7 +366,7 @@ fn templated_smql(template: &str, source_db: &str) -> String {
             match source_db {
                 "sakila" => TEST_MYSQL_URL_SAKILA,
                 "orders" => TEST_MYSQL_URL_ORDERS,
-                _ => panic!("Unknown source database: {}", source_db),
+                _ => "",
             },
         )
         .replace("{pg_url}", TEST_PG_URL)

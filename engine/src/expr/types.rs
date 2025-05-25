@@ -6,7 +6,6 @@ use crate::{
 use async_trait::async_trait;
 use common::{computed::ComputedField, mapping::EntityMapping, types::DataType};
 use smql::statements::expr::{Expression, Literal};
-use sql_adapter::metadata::column::ColumnMetadata;
 use std::{future::Future, pin::Pin};
 use tracing::warn;
 

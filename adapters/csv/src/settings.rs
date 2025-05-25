@@ -12,7 +12,7 @@ impl CsvSettings {
             delimiter,
             has_headers,
             pk_column,
-            sample_size: 1000,
+            sample_size: 50, // Default sample size
         }
     }
 }

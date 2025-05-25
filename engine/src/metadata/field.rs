@@ -1,4 +1,3 @@
-use super::entity::EntityMetadata;
 use common::types::DataType;
 use csv::metadata::CsvColumnMetadata;
 use postgres::data_type::PgDataType;
