@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use super::compiler::FilterCompiler;
 use crate::filter::expr_to_string;
 use csv::filter::{CsvComparator, CsvCondition, CsvFilter, CsvFilterExpr};

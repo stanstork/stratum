@@ -65,16 +65,16 @@ impl DataSource {
         }
     }
 
-    pub async fn fetch_meta(&self, table: String) -> Result<EntityMetadata, MigrationError> {
+    pub async fn fetch_meta(&self, entity: String) -> Result<EntityMetadata, MigrationError> {
         match &self {
             DataSource::Database(db) => {
                 let db = db.lock().await.adapter();
-                let meta = db.fetch_metadata(&table).await?;
+                let meta = db.fetch_metadata(&entity).await?;
                 Ok(EntityMetadata::Table(meta))
             }
             DataSource::File(file) => {
                 let adapter = file.lock().await.adapter();
-                let meta = adapter.fetch_metadata(&table).await?;
+                let meta = adapter.fetch_metadata(&entity).await?;
                 Ok(EntityMetadata::Csv(meta))
             }
         }

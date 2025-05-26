@@ -336,17 +336,14 @@ pub async fn execute(sql: &str) {
 
 /// Count the number of data rows in a CSV file, optionally excluding the header row
 pub fn file_row_count(file_path: &str, has_headers: bool) -> Result<usize, FileError> {
-    let f = File::open(file_path).map_err(|e| FileError::IoError(e))?;
+    let f = File::open(file_path).map_err(FileError::IoError)?;
     let reader = BufReader::new(f);
 
     // Count all the lines
-    let total_lines = reader.lines().map(|r| r.map_err(FileError::IoError)).fold(
-        Ok(0usize),
-        |acc, line| match (acc, line) {
-            (Ok(n), Ok(_)) => Ok(n + 1),
-            (Err(e), _) | (_, Err(e)) => Err(e),
-        },
-    )?;
+    let total_lines = reader
+        .lines()
+        .map(|r| r.map_err(FileError::IoError))
+        .try_fold(0, |acc, line| line.map(|_| acc + 1))?;
 
     // Subtract the header if present
     let data_rows = if has_headers && total_lines > 0 {

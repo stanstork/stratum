@@ -33,10 +33,10 @@ impl MigrationSetting for CascadeSchemaSetting {
     }
 
     fn can_apply(&self, ctx: &ItemContext) -> bool {
-        match (ctx.source.format, ctx.destination.format) {
-            (DataFormat::MySql, DataFormat::Postgres) => true,
-            _ => false,
-        }
+        matches!(
+            (ctx.source.format, ctx.destination.format),
+            (DataFormat::MySql, DataFormat::Postgres)
+        )
     }
 
     async fn apply(&self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {

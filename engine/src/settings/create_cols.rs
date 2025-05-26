@@ -8,7 +8,7 @@ use crate::{
     error::MigrationError,
     expr::types::ExpressionWrapper,
     metadata::{entity::EntityMetadata, field::FieldMetadata},
-    schema::{types::TypeInferencer, with_type_convertor},
+    schema::{types::TypeInferencer, utils::create_column_def},
     source::Source,
     state::MigrationState,
 };
@@ -77,7 +77,7 @@ impl CreateMissingColumnsSetting {
                     let meta = source_meta.column(&src_col).ok_or_else(|| {
                         SettingsError::MissingSourceColumn(format!("{} not in source", src_col))
                     })?;
-                    let def = with_type_convertor(&dst_col, &type_conv, &meta);
+                    let def = create_column_def(&dst_col, &type_conv, &meta);
                     self.add_column(table, &def).await?;
                 }
             }

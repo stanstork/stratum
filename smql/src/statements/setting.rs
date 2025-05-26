@@ -107,7 +107,7 @@ impl Default for Settings {
             copy_columns: CopyColumns::All,
             batch_size: 1000,
             cascade_schema: false,
-            csv_header: false,
+            csv_header: true,
             csv_delimiter: ',',
             csv_id_column: None,
         }

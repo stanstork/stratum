@@ -1,7 +1,7 @@
 use crate::{metadata::CsvColumnMetadata, types::CsvType};
 use common::value::Value;
 use csv::StringRecord;
-use std::cmp::Ordering;
+use std::{cmp::Ordering, str::FromStr};
 
 /// A CSV‐side filter: holds an optional expression tree.
 #[derive(Clone, Debug, Default)]
@@ -35,39 +35,37 @@ pub enum CsvComparator {
 }
 
 impl CsvComparator {
-    pub fn from_str(op: &str) -> Option<Self> {
-        match op {
-            "=" => Some(CsvComparator::Equal),
-            "!=" => Some(CsvComparator::NotEqual),
-            ">" => Some(CsvComparator::GreaterThan),
-            ">=" => Some(CsvComparator::GreaterThanOrEqual),
-            "<" => Some(CsvComparator::LessThan),
-            "<=" => Some(CsvComparator::LessThanOrEqual),
-            _ => None,
-        }
-    }
-
     pub fn test(&self, actual: &Value, target: &Value) -> bool {
         match self {
             CsvComparator::Equal => actual.equal(target),
             CsvComparator::NotEqual => !actual.equal(target),
 
-            CsvComparator::GreaterThan => match actual.compare(target) {
-                Some(Ordering::Greater) => true,
-                _ => false,
-            },
-            CsvComparator::GreaterThanOrEqual => match actual.compare(target) {
-                Some(Ordering::Greater) | Some(Ordering::Equal) => true,
-                _ => false,
-            },
-            CsvComparator::LessThan => match actual.compare(target) {
-                Some(Ordering::Less) => true,
-                _ => false,
-            },
-            CsvComparator::LessThanOrEqual => match actual.compare(target) {
-                Some(Ordering::Less) | Some(Ordering::Equal) => true,
-                _ => false,
-            },
+            CsvComparator::GreaterThan => matches!(actual.compare(target), Some(Ordering::Greater)),
+            CsvComparator::GreaterThanOrEqual => matches!(
+                actual.compare(target),
+                Some(Ordering::Greater) | Some(Ordering::Equal)
+            ),
+            CsvComparator::LessThan => matches!(actual.compare(target), Some(Ordering::Less)),
+            CsvComparator::LessThanOrEqual => matches!(
+                actual.compare(target),
+                Some(Ordering::Less) | Some(Ordering::Equal)
+            ),
+        }
+    }
+}
+
+impl FromStr for CsvComparator {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "=" => Ok(CsvComparator::Equal),
+            "!=" => Ok(CsvComparator::NotEqual),
+            ">" => Ok(CsvComparator::GreaterThan),
+            ">=" => Ok(CsvComparator::GreaterThanOrEqual),
+            "<" => Ok(CsvComparator::LessThan),
+            "<=" => Ok(CsvComparator::LessThanOrEqual),
+            _ => Err(format!("Unsupported comparator: {}", s)),
         }
     }
 }

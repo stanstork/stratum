@@ -25,24 +25,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             runner::run(plan).await?;
         }
         Commands::Source { command } => match command {
-            commands::SourceCommand::Info {
-                config: _,
-                verbose: _,
-            } => {
-                // let source = read_migration_config(&config).expect("Failed to read config file");
-                // let plan = parse(&source).expect("Failed to parse config file");
-                // let metadata = runner::load_src_metadata(&plan).await?;
+            commands::SourceCommand::Info { config, verbose: _ } => {
+                let source = read_migration_config(&config).expect("Failed to read config file");
+                let plan = smql::parser::parse(&source).expect("Failed to parse config file");
+                let metadata = runner::load_src_metadata(&plan).await?;
 
-                // if verbose {
-                //     println!("{:#?}", metadata);
-                // } else {
-                //     let mut visited = HashSet::new();
-                //     for m in metadata.values() {
-                //         TableMetadata::print_tables_tree(m, 1, &mut visited);
-                //     }
-                // }
-
-                todo!("Implement source info command");
+                for (name, meta) in metadata {
+                    println!("Source: {} - Metadata: {:#?}", name, meta);
+                }
             }
         },
     }
