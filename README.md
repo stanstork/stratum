@@ -19,7 +19,6 @@ If they are not, you can use the Docker host IP (e.g. 172.17.0.1) to access them
 ```bash
 docker run \
   --rm \
-  --network stratum-net \
   -v "$(pwd)/data/configs/single_table.smql:/home/stratum/config.smql:ro" \
   stratum-engine:latest \
   migrate --config /home/stratum/config.smql
