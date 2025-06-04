@@ -1,7 +1,8 @@
 use crate::parser::{Rule, StatementParser};
 use pest::iterators::Pair;
+use serde::Serialize;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum Expression {
     Arithmetic {
         left: Box<Expression>,
@@ -21,7 +22,7 @@ pub enum Expression {
     Identifier(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum Operator {
     Add,
     Subtract,
@@ -29,7 +30,7 @@ pub enum Operator {
     Divide,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum Literal {
     String(String),
     Integer(i64),

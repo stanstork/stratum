@@ -1,6 +1,8 @@
+use serde::Serialize;
+
 use crate::statements::{connection::Connection, migrate::MigrateBlock, statement::Statement};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct MigrationPlan {
     pub connections: Connection,
     pub migration: MigrateBlock,

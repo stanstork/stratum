@@ -1,14 +1,15 @@
 use super::expr::Expression;
 use crate::parser::{Rule, StatementParser};
 use pest::iterators::Pair;
+use serde::Serialize;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Load {
     pub entities: Vec<String>,
     pub matches: Vec<MatchPair>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct MatchPair {
     pub left: Expression,
     pub right: Expression,

@@ -35,6 +35,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         },
+        Commands::Ast { config } => {
+            let source = read_migration_config(&config).expect("Failed to read config file");
+            let plan = smql::parser::parse(&source).expect("Failed to parse config file");
+            let json =
+                serde_json::to_string_pretty(&plan).expect("Failed to serialize plan to JSON");
+            println!("{}", json);
+        }
     }
 
     Ok(())

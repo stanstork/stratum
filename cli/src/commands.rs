@@ -10,6 +10,10 @@ pub enum Commands {
         #[command(subcommand)]
         command: SourceCommand,
     },
+    Ast {
+        #[arg(long, help = "Config file path")]
+        config: String,
+    },
 }
 
 #[derive(Subcommand)]

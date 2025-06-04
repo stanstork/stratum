@@ -4,59 +4,13 @@ use crate::{
     source::data::DataSource,
 };
 use async_trait::async_trait;
-use common::{computed::ComputedField, mapping::EntityMapping, types::DataType};
+use common::{mapping::EntityMapping, types::DataType};
 use smql::statements::expr::{Expression, Literal};
-use std::{future::Future, pin::Pin};
 use tracing::warn;
 
 /// A thin newtype wrapper around `Expression` to implement
 /// `TypeInferencer` without touching the SMQL crate.
 pub struct ExpressionWrapper(pub Expression);
-
-/// Helper function to infer the type of a computed field.
-pub async fn infer_computed_type(
-    computed: &ComputedField,
-    columns: &[FieldMetadata],
-    mapping: &EntityMapping,
-    source: &DataSource,
-) -> Option<DataType> {
-    // Clone the expression node into wrapper and run inference.
-    let expr = ExpressionWrapper(computed.expression.clone());
-    let data_type = expr.infer_type(columns, mapping, source).await;
-
-    if let Some(data_type) = data_type {
-        Some(data_type)
-    } else {
-        match computed.expression {
-            Expression::Lookup { .. } => None,
-            _ => {
-                panic!(
-                    "Failed to infer type for computed column `{}`.",
-                    computed.name
-                );
-            }
-        }
-    }
-}
-
-/// Boxes the anonymous future returned by `infer_computed_type` into a
-/// `Pin<Box<dyn Future<Output = Option<DataType>> + Send + 'a>>`. This:
-/// 1. Erases the compiler-generated, unnamed `impl Future` type into a single,
-///    heap-allocated trait object.
-/// 2. Gives the function a concrete, nameable return type that exactly matches
-///    `InferComputedTypeFn` alias.
-///
-/// Without this boxing shim, there’s no way to coerce the raw `async fn` into
-/// a plain function-pointer signature, because its real future type is anonymous.
-pub fn boxed_infer_computed_type<'a>(
-    computed: &'a ComputedField,
-    columns: &'a [FieldMetadata],
-    mapping: &'a EntityMapping,
-    source: &'a DataSource,
-) -> Pin<Box<dyn Future<Output = Option<DataType>> + Send + 'a>> {
-    // Box the future returned by async fn
-    Box::pin(infer_computed_type(computed, columns, mapping, source))
-}
 
 #[async_trait]
 impl TypeInferencer for ExpressionWrapper {

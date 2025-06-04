@@ -1,14 +1,15 @@
 use super::expr::Expression;
 use crate::parser::{Rule, StatementParser};
 use pest::iterators::Pair;
+use serde::Serialize;
 use std::fmt::Display;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Filter {
     pub expression: FilterExpression,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum FilterExpression {
     /// e.g. table[col] > 3
     Condition(Condition),
@@ -17,14 +18,14 @@ pub enum FilterExpression {
     FunctionCall(String, Vec<FilterExpression>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Condition {
     pub left: Expression,
     pub op: Comparator,
     pub right: Expression,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum Comparator {
     Equal,
     NotEqual,

@@ -1,12 +1,14 @@
+use serde::Serialize;
+
 use super::expr::Expression;
 use crate::parser::{Rule, StatementParser};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct MapSpec {
     pub mappings: Vec<Mapping>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Mapping {
     pub source: Expression,
     pub target: String,
