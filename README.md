@@ -22,5 +22,5 @@ docker run \
   --network stratum-net \
   -v "$(pwd)/data/configs/single_table.smql:/home/stratum/config.smql:ro" \
   stratum-engine:latest \
-  --config /home/stratum/config.smql
+  migrate --config /home/stratum/config.smql
 ```
