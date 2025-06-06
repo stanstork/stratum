@@ -10,8 +10,7 @@ MIGRATE (
             CASCADE_SCHEMA         = TRUE,
             IGNORE_CONSTRAINTS     = FALSE,
             CREATE_MISSING_TABLES  = TRUE,
-            CREATE_MISSING_COLUMNS = TRUE,
-            COPY_COLUMNS           = MAP_ONLY
+            CREATE_MISSING_COLUMNS = TRUE
         ),
 
         FILTER(

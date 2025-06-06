@@ -1,15 +1,15 @@
 use super::{filter::Filter, load::Load, mapping::MapSpec, setting::Settings};
 use crate::parser::{Rule, StatementParser};
 use pest::iterators::Pair;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Default, Debug, Clone, Serialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct MigrateBlock {
     pub migrate_items: Vec<MigrateItem>,
     pub settings: Settings,
 }
 
-#[derive(Default, Debug, Clone, Serialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct MigrateItem {
     pub source: Spec,
     pub destination: Spec,
@@ -19,13 +19,13 @@ pub struct MigrateItem {
     pub map: Option<MapSpec>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Spec {
     pub kind: SpecKind,
     pub names: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SpecKind {
     Table,
     Api,

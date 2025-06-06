@@ -2,7 +2,7 @@ use crate::parser::{Rule, StatementParser};
 use bitflags::bitflags;
 use core::fmt;
 use pest::iterators::Pair;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 // ─────────────────────────────────────────────────────────────
 // CONNECTION statement
@@ -11,27 +11,27 @@ use serde::Serialize;
 //    DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/testdb")
 //  );
 // ─────────────────────────────────────────────────────────────
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Connection {
     pub source: Option<ConnectionPair>,
     pub dest: Option<ConnectionPair>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionPair {
     pub conn_type: ConnectionType,
     pub format: DataFormat,
     pub conn_str: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ConnectionType {
     Source,
     Dest,
 }
 
 bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     pub struct DataFormat: u8 {
         const MySql    = 0b0000_0001; // 1
         const Postgres = 0b0000_0010; // 2

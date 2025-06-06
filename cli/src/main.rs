@@ -19,9 +19,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Migrate { config } => {
-            let source = read_migration_config(&config).expect("Failed to read config file");
-            let plan = smql::parser::parse(&source).expect("Failed to parse config file");
+        Commands::Migrate { config, from_ast } => {
+            let plan = if from_ast {
+                // If `from_ast` is true, read the config file as a pre-parsed AST
+                let source = read_migration_config(&config).expect("Failed to read config file");
+                serde_json::from_str(&source)
+                    .expect("Failed to deserialize config file into MigrationConfig")
+            } else {
+                // Otherwise, read the config file and parse it
+                let source = read_migration_config(&config).expect("Failed to read config file");
+                smql::parser::parse(&source).expect("Failed to parse config file")
+            };
+
             runner::run(plan).await?;
         }
         Commands::Source { command } => match command {

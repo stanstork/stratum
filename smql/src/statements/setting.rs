@@ -1,9 +1,9 @@
 use crate::parser::{Rule, StatementParser};
 use pest::iterators::Pair;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub infer_schema: bool,
     pub ignore_constraints: bool,
@@ -23,7 +23,7 @@ pub struct SettingsPair {
     pub value: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CopyColumns {
     All,
     MapOnly,

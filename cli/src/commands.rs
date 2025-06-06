@@ -5,6 +5,12 @@ pub enum Commands {
     Migrate {
         #[arg(long, help = "Config file path")]
         config: String,
+
+        #[arg(
+            long,
+            help = "Treat the config file as already parsed AST, skipping parsing step"
+        )]
+        from_ast: bool,
     },
     Source {
         #[command(subcommand)]
