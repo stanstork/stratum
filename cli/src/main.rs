@@ -1,7 +1,12 @@
 use clap::Parser;
 use commands::Commands;
-use engine::runner;
+use engine::{
+    conn::{ConnectionKind, ConnectionPinger, MySqlConnectionPinger, PostgresConnectionPinger},
+    runner,
+};
+use std::str::FromStr;
 use tracing::Level;
+
 pub mod commands;
 
 #[derive(Parser)]
@@ -50,6 +55,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let json =
                 serde_json::to_string_pretty(&plan).expect("Failed to serialize plan to JSON");
             println!("{}", json);
+        }
+        Commands::TestConn { format, conn_str } => {
+            let kind = ConnectionKind::from_str(&format).expect("Failed to parse connection kind");
+            match kind {
+                ConnectionKind::MySql => {
+                    let pinger = MySqlConnectionPinger { conn_str };
+                    pinger.ping().await?;
+                }
+                ConnectionKind::Postgres => {
+                    let pinger = PostgresConnectionPinger { conn_str };
+                    pinger.ping().await?;
+                }
+                _ => panic!("Unsupported connection kind for testing"),
+            }
         }
     }
 

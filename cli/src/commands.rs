@@ -20,6 +20,16 @@ pub enum Commands {
         #[arg(long, help = "Config file path")]
         config: String,
     },
+    /// Test a connection string against a given format
+    TestConn {
+        /// Data format: "mysql", "pg", "ftp", …
+        #[arg(long)]
+        format: String,
+
+        /// Connection string or address
+        #[arg(long)]
+        conn_str: String,
+    },
 }
 
 #[derive(Subcommand)]
