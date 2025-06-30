@@ -27,4 +27,7 @@ pub enum DbError {
     /// A mis-configured or unsupported database adapter was specified.
     #[error("Invalid adapter: {0}")]
     InvalidAdapter(String),
+
+    #[error("Unknown error: {0}")]
+    Unknown(String),
 }

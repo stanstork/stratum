@@ -20,6 +20,7 @@ use smql::{
         setting::Settings,
     },
 };
+use sql_adapter::metadata::provider::MetadataProvider;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{watch, Mutex};
 use tracing::{error, info};
@@ -74,30 +75,27 @@ pub async fn run(plan: MigrationPlan) -> Result<(), MigrationError> {
 }
 
 pub async fn load_src_metadata(
-    plan: &MigrationPlan,
+    conn_str: &str,
+    format: DataFormat,
 ) -> Result<HashMap<String, EntityMetadata>, MigrationError> {
     info!("Loading source metadata");
 
-    let global_ctx = GlobalContext::new(plan).await?;
-    let mut src_meta = HashMap::new();
+    let adapter = Adapter::sql(format, conn_str).await?;
+    let names = adapter.get_sql().list_tables().await?;
 
-    for mi in plan.migration.migrate_items.iter() {
-        let name = mi.source.name();
-        let format = get_data_format(mi, &plan.connections).0;
+    info!("Found {} source tables: {:?}", names.len(), names);
 
-        info!(
-            "Loading metadata for source: {} (format: {:?})",
-            name, format
-        );
+    let meta_graph = MetadataProvider::build_metadata_graph(adapter.get_sql(), &names).await?;
 
-        let adapter = get_adapter(&global_ctx, &format, &name).await?;
-        let source = DataSource::from_adapter(format, &adapter, &None, &None)?;
-        let meta = source.fetch_meta(name.clone()).await?;
+    info!(
+        "Source metadata graph built with {} tables",
+        meta_graph.len()
+    );
 
-        src_meta.insert(name.clone(), meta);
-    }
-
-    Ok(src_meta)
+    return Ok(meta_graph
+        .iter()
+        .map(|(name, meta)| (name.clone(), EntityMetadata::Table(meta.clone())))
+        .collect());
 }
 
 async fn create_source(

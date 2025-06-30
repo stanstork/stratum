@@ -15,6 +15,7 @@ pub trait SqlAdapter {
     async fn table_exists(&self, table: &str) -> Result<bool, DbError>;
     async fn truncate_table(&self, table: &str) -> Result<(), DbError>;
     async fn execute(&self, query: &str) -> Result<(), DbError>;
+    async fn list_tables(&self) -> Result<Vec<String>, DbError>;
 
     async fn fetch_metadata(&self, table: &str) -> Result<TableMetadata, DbError>;
     async fn fetch_referencing_tables(&self, table: &str) -> Result<Vec<String>, DbError>;

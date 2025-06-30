@@ -32,7 +32,7 @@ impl Adapter {
         Ok(Adapter::Csv(adapter))
     }
 
-    pub fn get_sql(&self) -> &dyn SqlAdapter {
+    pub fn get_sql(&self) -> &(dyn SqlAdapter + Send + Sync) {
         match self {
             Adapter::MySql(adapter) => adapter,
             Adapter::Postgres(adapter) => adapter,

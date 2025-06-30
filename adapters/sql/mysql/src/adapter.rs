@@ -123,4 +123,23 @@ impl SqlAdapter for MySqlAdapter {
         let data_type = row.try_get::<Vec<u8>, _>("column_type")?;
         String::from_utf8(data_type).map_err(|err| err.into())
     }
+
+    async fn list_tables(&self) -> Result<Vec<String>, DbError> {
+        let rows = sqlx::query("SHOW TABLES").fetch_all(&self.pool).await?;
+
+        // extract each row’s first column as Vec<u8> and then utf8‐decode
+        let tables = rows
+            .into_iter()
+            .map(|row| {
+                // get the VARBINARY column as Vec<u8>
+                let raw: Vec<u8> = row.try_get(0)?;
+                // convert to String
+                String::from_utf8(raw).map_err(|e| {
+                    DbError::Unknown(format!("invalid UTF-8 in table name: {}", e).into())
+                })
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(tables)
+    }
 }

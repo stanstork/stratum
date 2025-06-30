@@ -49,7 +49,7 @@ impl GlobalContext {
     }
 
     /// Create an SQL adapter if configured, or None otherwise.
-    async fn create_sql_adapter(
+    pub async fn create_sql_adapter(
         conn: &Option<ConnectionPair>,
     ) -> Result<Option<Adapter>, MigrationError> {
         match conn {

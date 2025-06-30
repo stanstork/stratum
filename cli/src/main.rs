@@ -39,13 +39,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             runner::run(plan).await?;
         }
         Commands::Source { command } => match command {
-            commands::SourceCommand::Info { config, verbose: _ } => {
-                let source = read_migration_config(&config).expect("Failed to read config file");
-                let plan = smql::parser::parse(&source).expect("Failed to parse config file");
-                let metadata = runner::load_src_metadata(&plan).await?;
+            commands::SourceCommand::Info {
+                conn_str,
+                format,
+                output,
+            } => {
+                let kind =
+                    ConnectionKind::from_str(&format).expect("Failed to parse connection kind");
+                let metadata = runner::load_src_metadata(&conn_str, kind.data_format())
+                    .await
+                    .expect("Failed to load source metadata");
 
-                for (name, meta) in metadata {
-                    println!("Source: {} - Metadata: {:#?}", name, meta);
+                // If an output file is specified, write metadata to it
+                if let Some(output_file) = output {
+                    std::fs::write(output_file, serde_json::to_string_pretty(&metadata)?)
+                        .expect("Failed to write metadata to file");
+                } else {
+                    // Otherwise, print metadata to stdout
+                    println!("{}", serde_json::to_string_pretty(&metadata)?);
                 }
             }
         },

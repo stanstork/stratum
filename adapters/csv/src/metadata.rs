@@ -1,5 +1,6 @@
 use crate::adapter::CsvAdapter;
 use common::types::DataType;
+use serde::Serialize;
 use std::sync::Arc;
 
 pub trait MetadataHelper {
@@ -7,7 +8,7 @@ pub trait MetadataHelper {
     fn set_metadata(&mut self, meta: CsvMetadata);
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CsvColumnMetadata {
     pub name: String,
     pub data_type: DataType,
@@ -16,7 +17,7 @@ pub struct CsvColumnMetadata {
     pub ordinal: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CsvMetadata {
     pub name: String,
     pub columns: Vec<CsvColumnMetadata>,

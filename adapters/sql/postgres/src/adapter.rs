@@ -89,4 +89,8 @@ impl SqlAdapter for PgAdapter {
     async fn fetch_column_type(&self, _table: &str, _column: &str) -> Result<String, DbError> {
         todo!("Implement fetch_column_type for Postgres");
     }
+
+    async fn list_tables(&self) -> Result<Vec<String>, DbError> {
+        todo!("Implement list_tables for Postgres");
+    }
 }

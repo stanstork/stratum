@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use smql::statements::connection::DataFormat;
 use sqlx::{MySql, Pool};
 use sqlx::{Postgres, Row};
 use std::str::FromStr;
@@ -21,6 +22,16 @@ impl FromStr for ConnectionKind {
             "pg" | "postgres" | "postgresql" => Ok(ConnectionKind::Postgres),
             "ftp" => Ok(ConnectionKind::Ftp),
             other => Err(format!("Unknown connection kind: {}", other)),
+        }
+    }
+}
+
+impl ConnectionKind {
+    pub fn data_format(&self) -> DataFormat {
+        match self {
+            ConnectionKind::MySql => DataFormat::MySql,
+            ConnectionKind::Postgres => DataFormat::Postgres,
+            ConnectionKind::Ftp => DataFormat::Csv,
         }
     }
 }

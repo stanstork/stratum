@@ -35,10 +35,16 @@ pub enum Commands {
 #[derive(Subcommand)]
 pub enum SourceCommand {
     Info {
-        #[arg(long, help = "Config file path")]
-        config: String,
+        #[arg(short, long, help = "Connection string")]
+        conn_str: String,
 
-        #[arg(short, long, help = "Show verbose metadata information")]
-        verbose: bool,
+        #[arg(short, long, help = "Data format")]
+        format: String,
+
+        #[arg(
+            long,
+            help = "If specified, writes metadata to this file instead of stdout"
+        )]
+        output: Option<String>,
     },
 }

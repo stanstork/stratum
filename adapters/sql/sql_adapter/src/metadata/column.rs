@@ -1,5 +1,6 @@
 use crate::row::DbRow;
 use common::{types::DataType, value::Value};
+use serde::Serialize;
 
 const COL_ORDINAL_POSITION: &str = "ordinal_position";
 const COL_COLUMN_NAME: &str = "column_name";
@@ -18,7 +19,7 @@ const COL_ON_UPDATE: &str = "on_update";
 
 pub const COL_REFERENCING_TABLE: &str = "referencing_table";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ColumnMetadata {
     pub ordinal: usize,
     pub name: String,

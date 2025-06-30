@@ -1,8 +1,9 @@
 use super::field::FieldMetadata;
 use csv::metadata::CsvMetadata;
+use serde::Serialize;
 use sql_adapter::metadata::table::TableMetadata;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum EntityMetadata {
     Table(TableMetadata),
     Csv(CsvMetadata),

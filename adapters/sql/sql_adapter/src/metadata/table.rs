@@ -1,9 +1,10 @@
 use super::{column::ColumnMetadata, fk::ForeignKeyMetadata};
 use crate::query::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField};
 use common::types::DataType;
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TableMetadata {
     pub name: String,
     pub schema: Option<String>,
