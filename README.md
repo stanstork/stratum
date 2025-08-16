@@ -58,3 +58,12 @@ Example:
 ```bash
 export REPORT_CALLBACK_URL="http://your-backend-service:8080/api/migrations/report"
 ```
+
+#### AUTH_TOKEN
+
+Purpose: This token is used to authenticate requests sent to the REPORT_CALLBACK_URL.
+
+Example:
+
+```bash
+export AUTH_TOKEN="your-secure-auth-token"

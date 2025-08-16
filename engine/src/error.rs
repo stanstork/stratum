@@ -42,4 +42,7 @@ pub enum MigrationError {
 
     #[error("Failed to send report")]
     ReportFailed,
+
+    #[error("Missing AUTH_TOKEN environment variable")]
+    MissingAuthToken,
 }

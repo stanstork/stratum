@@ -29,6 +29,14 @@ pub async fn send_report(report: FinalReport) -> Result<(), MigrationError> {
         }
     };
 
+    let auth_token = match std::env::var("AUTH_TOKEN") {
+        Ok(token) => token,
+        Err(_) => {
+            error!("AUTH_TOKEN environment variable not set. Cannot send authenticated report.");
+            return Err(MigrationError::MissingAuthToken);
+        }
+    };
+
     let client = reqwest::Client::new();
     let mut attempts = 0;
     let max_attempts = 5; // Maximum number of retry attempts. TODO: Move to env
@@ -36,7 +44,12 @@ pub async fn send_report(report: FinalReport) -> Result<(), MigrationError> {
 
     while attempts < max_attempts {
         info!("Attempt {} to send final report...", attempts);
-        let response = client.post(&callback_url).json(&report).send().await;
+        let response = client
+            .post(&callback_url)
+            .bearer_auth(&auth_token)
+            .json(&report)
+            .send()
+            .await;
 
         match response {
             Ok(resp) if resp.status().is_success() => {
