@@ -36,4 +36,13 @@ pub enum MigrationError {
 
     #[error("Invalid metadata: {0}")]
     InvalidMetadata(String),
+
+    #[error("Missing REPORT_CALLBACK_URL environment variable")]
+    MissingCallbackUrl,
+
+    #[error("Failed to send report")]
+    ReportFailed,
+
+    #[error("Missing AUTH_TOKEN environment variable")]
+    MissingAuthToken,
 }

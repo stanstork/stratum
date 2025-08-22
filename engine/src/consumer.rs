@@ -2,6 +2,8 @@ use crate::{
     buffer::SledBuffer,
     context::item::ItemContext,
     destination::{data::DataDestination, Destination},
+    metrics::Metrics,
+    report::{send_report, FinalReport},
 };
 use common::{
     mapping::EntityMapping,
@@ -51,11 +53,13 @@ impl Consumer {
         self.toggle_trigger(&tables, false).await;
 
         let mut batch_map = HashMap::new();
+        let metrics = Metrics::new();
 
         loop {
             match self.buffer.read_next() {
                 Some(record) => {
-                    self.process_record(record, &mut batch_map, &tables).await;
+                    self.process_record(record, &mut batch_map, &tables, &metrics)
+                        .await;
                 }
                 None => {
                     self.flush_all(&mut batch_map, &tables).await;
@@ -74,6 +78,8 @@ impl Consumer {
         info!("Enabling triggers for all tables");
         self.toggle_trigger(&tables, true).await;
 
+        self.send_final_report(&metrics).await;
+
         info!("Consumer finished");
     }
 
@@ -82,7 +88,11 @@ impl Consumer {
         record: Vec<u8>,
         batch_map: &mut HashMap<String, Vec<Record>>,
         tables: &[TableMetadata],
+        metrics: &Metrics,
     ) {
+        metrics.increment_records(1).await;
+        metrics.increment_bytes(record.len() as u64).await;
+
         let row_data = RowData::deserialize(record);
         let table_name = row_data.entity.clone(); //self.table_name_map.resolve(&row_data.table);
 
@@ -131,6 +141,20 @@ impl Consumer {
             if let Err(e) = self.destination.toggle_trigger(&table.name, enable).await {
                 error!("Failed to toggle trigger for table {}: {}", table.name, e);
             }
+        }
+    }
+
+    async fn send_final_report(&self, metrics: &Metrics) {
+        let (records_processed, bytes_transferred) = metrics.get_metrics().await;
+        let report = FinalReport::new(records_processed, bytes_transferred, "succeeded".into());
+        if let Err(e) = send_report(report.clone()).await {
+            error!("Failed to send final report: {}", e);
+            let report_json = serde_json::to_string(&report)
+                .unwrap_or_else(|_| "Failed to serialize report".to_string());
+            error!(
+                "All attempts to send report failed. Final Report: {}",
+                report_json
+            );
         }
     }
 }
