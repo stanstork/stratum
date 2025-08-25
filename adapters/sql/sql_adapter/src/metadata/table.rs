@@ -4,6 +4,16 @@ use common::types::DataType;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
+/// Creates a `TableRef` from a `TableMetadata` instance.
+macro_rules! table_ref {
+    ($meta:expr) => {
+        TableRef {
+            schema: $meta.schema.clone(),
+            name: $meta.name.clone(),
+        }
+    };
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TableMetadata {
     pub name: String,
