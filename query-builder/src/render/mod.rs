@@ -3,7 +3,11 @@
 use crate::dialect::Dialect;
 use serde_json::Value;
 
+pub mod alter_table;
+pub mod create_enum;
+pub mod create_table;
 pub mod expr;
+pub mod insert;
 pub mod select;
 
 /// A trait for any AST node that can be rendered into a SQL string.

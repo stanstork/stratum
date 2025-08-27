@@ -1,6 +1,6 @@
 //! Defines common, reusable AST nodes for building SQL queries.
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct TableRef {
     pub schema: Option<String>,
     pub name: String,
@@ -18,4 +18,10 @@ pub enum JoinKind {
 pub enum OrderDir {
     Asc,
     Desc,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeName {
+    pub schema: Option<String>,
+    pub name: String,
 }
