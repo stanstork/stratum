@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 sql_adapter = { path = "../sql_adapter" }
 common = { path = "../../../common" }
+query-builder = { path = "../../../query-builder" }
 
 async-trait = "0.1.86"
 sqlx = { version = "0.8.3", features = [

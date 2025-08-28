@@ -1,9 +1,18 @@
 use crate::data_type::MySqlColumnDataType;
 use async_trait::async_trait;
 use common::{row_data::RowData, types::DataType};
+use query_builder::{
+    ast::common::JoinKind,
+    build::select::SelectBuilder,
+    dialect::{self},
+    ident_as,
+    render::{Render, Renderer},
+    table_ref,
+};
 use sql_adapter::{
     adapter::SqlAdapter,
     error::{adapter::ConnectorError, db::DbError},
+    ident, join_on_expr,
     metadata::{
         column::{ColumnMetadata, COL_REFERENCING_TABLE},
         provider::MetadataProvider,
@@ -91,7 +100,36 @@ impl SqlAdapter for MySqlAdapter {
     }
 
     async fn fetch_rows(&self, request: FetchRowsRequest) -> Result<Vec<RowData>, DbError> {
+        println!("FetchRowsRequest: {:#?}", request);
+
         let alias = request.alias.as_deref().unwrap_or(&request.table);
+        let table = table_ref!(&request.table);
+        let builder = SelectBuilder::new();
+        let columns = request
+            .columns
+            .iter()
+            .map(|c| ident!(c))
+            .collect::<Vec<_>>();
+
+        let mut select = builder.select(columns).from(table.clone(), Some(alias));
+
+        for join in request.joins.iter() {
+            select = select.join(
+                JoinKind::Left,
+                table_ref!(join.left.table),
+                Some(&join.left.alias.clone()),
+                join_on_expr!(join),
+            );
+        }
+
+        let select = select.build();
+        let mut renderer = Renderer::new(&dialect::MySql);
+
+        select.render(&mut renderer);
+        let (sql, params) = renderer.finish();
+        println!("Generated SQL: {}", sql);
+        println!("Generated Params: {:?}", params);
+
         let query = SqlQueryBuilder::new()
             .select(&request.columns)
             .from(&request.table, alias)
@@ -103,6 +141,8 @@ impl SqlAdapter for MySqlAdapter {
 
         // Log the generated SQL query for debugging
         info!("Generated SQL query: {:#?}", query.0);
+
+        todo!("Implement parameter binding if needed");
 
         // Execute the query and fetch the rows
         let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
