@@ -37,7 +37,7 @@ impl InsertBuilder {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use common::value::Value;
 
     use crate::{
         ast::{common::TableRef, expr::Expr},
@@ -51,7 +51,7 @@ mod tests {
         }
     }
 
-    fn value(val: serde_json::Value) -> Expr {
+    fn value(val: Value) -> Expr {
         Expr::Value(val)
     }
 
@@ -60,7 +60,10 @@ mod tests {
         let builder = InsertBuilder::new(table("users"));
         let ast = builder
             .columns(&["name", "email"])
-            .values(vec![value(json!("Alice")), value(json!("a@test.com"))])
+            .values(vec![
+                value(Value::String("Alice".to_string())),
+                value(Value::String("a@test.com".to_string())),
+            ])
             .build();
 
         assert_eq!(ast.table.name, "users");
@@ -74,11 +77,17 @@ mod tests {
         let builder = InsertBuilder::new(table("logs"));
         let ast = builder
             .columns(&["level", "message"])
-            .values(vec![value(json!("info")), value(json!("started"))])
-            .values(vec![value(json!("warn")), value(json!("deprecated"))])
+            .values(vec![
+                value(Value::String("info".to_string())),
+                value(Value::String("started".to_string())),
+            ])
+            .values(vec![
+                value(Value::String("warn".to_string())),
+                value(Value::String("deprecated".to_string())),
+            ])
             .build();
 
         assert_eq!(ast.values.len(), 2);
-        assert_eq!(ast.values[1][0], value(json!("warn")));
+        assert_eq!(ast.values[1][0], value(Value::String("warn".to_string())));
     }
 }

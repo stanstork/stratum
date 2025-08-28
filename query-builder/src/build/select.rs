@@ -112,7 +112,7 @@ impl SelectBuilder<FromState> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use common::value::Value;
 
     use crate::{
         ast::{
@@ -136,7 +136,7 @@ mod tests {
         })
     }
 
-    fn value(val: serde_json::Value) -> Expr {
+    fn value(val: Value) -> Expr {
         Expr::Value(val)
     }
 
@@ -169,7 +169,7 @@ mod tests {
             .where_clause(Expr::BinaryOp(Box::new(BinaryOp {
                 left: qual_ident("u", "status"),
                 op: BinaryOperator::Eq,
-                right: value(json!("active")),
+                right: value(Value::String("active".to_string())),
             })))
             .build();
 
@@ -208,11 +208,11 @@ mod tests {
         let ast = builder
             .select(vec![ident("id")])
             .from(table("products"), None)
-            .limit(value(json!(50)))
-            .offset(value(json!(100)))
+            .limit(value(Value::Int(50)))
+            .offset(value(Value::Int(100)))
             .build();
 
-        assert_eq!(ast.limit, Some(value(json!(50))));
-        assert_eq!(ast.offset, Some(value(json!(100))));
+        assert_eq!(ast.limit, Some(value(Value::Int(50))));
+        assert_eq!(ast.offset, Some(value(Value::Int(100))));
     }
 }

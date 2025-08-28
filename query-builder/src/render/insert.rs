@@ -38,7 +38,7 @@ impl Render for Insert {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use common::value::Value;
 
     use crate::{
         ast::{common::TableRef, expr::Expr, insert::Insert},
@@ -46,7 +46,7 @@ mod tests {
         render::{Render, Renderer},
     };
 
-    fn value(val: serde_json::Value) -> Expr {
+    fn value(val: Value) -> Expr {
         Expr::Value(val)
     }
 
@@ -59,8 +59,14 @@ mod tests {
             },
             columns: vec!["name".to_string(), "is_active".to_string()],
             values: vec![
-                vec![value(json!("Alice")), value(json!(true))],
-                vec![value(json!("Bob")), value(json!(false))],
+                vec![
+                    value(Value::String("Alice".to_string())),
+                    value(Value::Boolean(true)),
+                ],
+                vec![
+                    value(Value::String("Bob".to_string())),
+                    value(Value::Boolean(false)),
+                ],
             ],
         };
 
@@ -74,7 +80,12 @@ mod tests {
         assert_eq!(sql, expected_sql);
         assert_eq!(
             params,
-            vec![json!("Alice"), json!(true), json!("Bob"), json!(false)]
+            vec![
+                Value::String("Alice".to_string()),
+                Value::Boolean(true),
+                Value::String("Bob".to_string()),
+                Value::Boolean(false)
+            ]
         );
     }
 
@@ -87,8 +98,14 @@ mod tests {
             },
             columns: vec!["name".to_string(), "is_active".to_string()],
             values: vec![
-                vec![value(json!("Alice")), value(json!(true))],
-                vec![value(json!("Bob")), value(json!(false))],
+                vec![
+                    value(Value::String("Alice".to_string())),
+                    value(Value::Boolean(true)),
+                ],
+                vec![
+                    value(Value::String("Bob".to_string())),
+                    value(Value::Boolean(false)),
+                ],
             ],
         };
 
@@ -101,7 +118,12 @@ mod tests {
         assert_eq!(sql, expected_sql);
         assert_eq!(
             params,
-            vec![json!("Alice"), json!(true), json!("Bob"), json!(false)]
+            vec![
+                Value::String("Alice".to_string()),
+                Value::Boolean(true),
+                Value::String("Bob".to_string()),
+                Value::Boolean(false)
+            ]
         );
     }
 }

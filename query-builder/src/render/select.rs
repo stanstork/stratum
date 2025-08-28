@@ -108,7 +108,7 @@ impl Render for OrderByExpr {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use common::value::Value;
 
     use crate::{
         ast::{
@@ -134,7 +134,7 @@ mod tests {
         })
     }
 
-    fn value(val: serde_json::Value) -> Expr {
+    fn value(val: Value) -> Expr {
         Expr::Value(val)
     }
 
@@ -152,7 +152,7 @@ mod tests {
             where_clause: Some(Expr::BinaryOp(Box::new(BinaryOp {
                 left: ident("id"),
                 op: BinaryOperator::Eq,
-                right: value(json!(123)),
+                right: value(Value::Int(123)),
             }))),
             ..Default::default()
         };
@@ -163,7 +163,7 @@ mod tests {
         let (sql, params) = renderer.finish();
 
         assert_eq!(sql, r#"SELECT "id", "name" FROM "users" WHERE ("id" = $1)"#);
-        assert_eq!(params, vec![json!(123)]);
+        assert_eq!(params, vec![Value::Int(123)]);
     }
 
     #[test]
@@ -180,7 +180,7 @@ mod tests {
             where_clause: Some(Expr::BinaryOp(Box::new(BinaryOp {
                 left: ident("id"),
                 op: BinaryOperator::Eq,
-                right: value(json!("abc")),
+                right: value(Value::String("abc".to_string())),
             }))),
             ..Default::default()
         };
@@ -191,7 +191,7 @@ mod tests {
         let (sql, params) = renderer.finish();
 
         assert_eq!(sql, "SELECT `id`, `name` FROM `users` WHERE (`id` = ?)");
-        assert_eq!(params, vec![json!("abc")]);
+        assert_eq!(params, vec![Value::String("abc".to_string())]);
     }
 
     #[test]
@@ -231,14 +231,14 @@ mod tests {
             where_clause: Some(Expr::BinaryOp(Box::new(BinaryOp {
                 left: qual_ident("u", "status"),
                 op: BinaryOperator::NotEq,
-                right: value(json!("inactive")),
+                right: value(Value::String("inactive".to_string())),
             }))),
             order_by: vec![OrderByExpr {
                 expr: qual_ident("u", "created_at"),
                 direction: Some(OrderDir::Desc),
             }],
-            limit: Some(value(json!(10))),
-            offset: Some(value(json!(20))),
+            limit: Some(value(Value::Int(10))),
+            offset: Some(value(Value::Int(20))),
         };
 
         let dialect = Postgres;
@@ -248,6 +248,13 @@ mod tests {
 
         let expected_sql = r#"SELECT "u"."id", COUNT("p"."id") AS "post_count" FROM "users" AS "u" LEFT JOIN "posts" AS "p" ON ("u"."id" = "p"."user_id") WHERE ("u"."status" <> $1) ORDER BY "u"."created_at" DESC LIMIT $2 OFFSET $3"#;
         assert_eq!(sql, expected_sql);
-        assert_eq!(params, vec![json!("inactive"), json!(10), json!(20)]);
+        assert_eq!(
+            params,
+            vec![
+                Value::String("inactive".to_string()),
+                Value::Int(10),
+                Value::Int(20)
+            ]
+        );
     }
 }

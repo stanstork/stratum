@@ -1,6 +1,6 @@
 //! Defines the `Dialect` trait for database-specific SQL syntax.
 
-pub trait Dialect {
+pub trait Dialect: Send + Sync {
     /// Wraps an identifier (like a table or column name) in the correct
     /// quotation marks for the dialect.
     ///

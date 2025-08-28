@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Value {
     Int(i64),
     Float(f64),
@@ -107,4 +107,9 @@ impl fmt::Display for Value {
             Value::Timestamp(v) => write!(f, "'{}'", v),
         }
     }
+}
+
+pub trait QueryExt<'q> {
+    /// Binds a slice of `Value` enum to the query.
+    fn bind_values(self, values: &'q [Value]) -> Self;
 }

@@ -1,8 +1,8 @@
 //! Defines the AST for SQL expressions.
 
-use serde_json::Value;
+use common::value::Value;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     /// A column or table identifier, e.g., `users` or `users.id`.
     Identifier(Ident),
@@ -26,14 +26,14 @@ pub struct Ident {
     pub name: String,              // e.g., the 'id' in 'users.id'
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BinaryOp {
     pub left: Expr,
     pub op: BinaryOperator,
     pub right: Expr,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FunctionCall {
     pub name: String,
     pub args: Vec<Expr>,

@@ -1,29 +1,22 @@
-use crate::data_type::MySqlColumnDataType;
+use crate::{bind_values, data_type::MySqlColumnDataType};
 use async_trait::async_trait;
 use common::{row_data::RowData, types::DataType};
-use query_builder::{
-    ast::common::JoinKind,
-    build::select::SelectBuilder,
-    dialect::{self},
-    ident_as,
-    render::{Render, Renderer},
-    table_ref,
-};
+use query_builder::dialect::{self};
 use sql_adapter::{
     adapter::SqlAdapter,
     error::{adapter::ConnectorError, db::DbError},
-    ident, join_on_expr,
     metadata::{
         column::{ColumnMetadata, COL_REFERENCING_TABLE},
         provider::MetadataProvider,
         table::TableMetadata,
     },
-    query::builder::SqlQueryBuilder,
+    query::generator::QueryGenerator,
     requests::FetchRowsRequest,
     row::DbRow,
 };
-use sqlx::{MySql, Pool, Row};
-use std::collections::HashMap;
+use sqlx::ConnectOptions;
+use sqlx::{mysql::MySqlConnectOptions, MySql, Pool, Row};
+use std::{collections::HashMap, str::FromStr};
 use tracing::info;
 
 #[derive(Clone)]
@@ -40,7 +33,10 @@ const QUERY_COLUMN_TYPE_SQL: &str = include_str!("../sql/column_type.sql");
 #[async_trait]
 impl SqlAdapter for MySqlAdapter {
     async fn connect(url: &str) -> Result<Self, ConnectorError> {
-        let pool = Pool::connect(url).await?;
+        let mut opts = MySqlConnectOptions::from_str(&url)?;
+        opts = opts.log_statements(tracing::log::LevelFilter::Debug);
+
+        let pool = Pool::connect_with(opts).await?;
         Ok(MySqlAdapter { pool })
     }
 
@@ -100,52 +96,19 @@ impl SqlAdapter for MySqlAdapter {
     }
 
     async fn fetch_rows(&self, request: FetchRowsRequest) -> Result<Vec<RowData>, DbError> {
-        println!("FetchRowsRequest: {:#?}", request);
-
-        let alias = request.alias.as_deref().unwrap_or(&request.table);
-        let table = table_ref!(&request.table);
-        let builder = SelectBuilder::new();
-        let columns = request
-            .columns
-            .iter()
-            .map(|c| ident!(c))
-            .collect::<Vec<_>>();
-
-        let mut select = builder.select(columns).from(table.clone(), Some(alias));
-
-        for join in request.joins.iter() {
-            select = select.join(
-                JoinKind::Left,
-                table_ref!(join.left.table),
-                Some(&join.left.alias.clone()),
-                join_on_expr!(join),
-            );
-        }
-
-        let select = select.build();
-        let mut renderer = Renderer::new(&dialect::MySql);
-
-        select.render(&mut renderer);
-        let (sql, params) = renderer.finish();
-        println!("Generated SQL: {}", sql);
-        println!("Generated Params: {:?}", params);
-
-        let query = SqlQueryBuilder::new()
-            .select(&request.columns)
-            .from(&request.table, alias)
-            .join(&request.joins)
-            .where_clause(&request.filter)
-            .limit(request.limit)
-            .offset(request.offset.unwrap_or(0))
-            .build();
+        let generator = QueryGenerator::new(&dialect::MySql);
+        let (sql, params) = generator.select(&request);
 
         // Log the generated SQL query for debugging
-        info!("Generated SQL query: {:#?}", query.0);
+        info!("Generated SQL: {}", sql);
+        info!("Parameters: {:?}", params);
 
-        todo!("Implement parameter binding if needed");
+        // 2. Bind parameters and execute
+        let query = sqlx::query(&sql);
+        let bound_query = bind_values(query, &params);
+        let rows = bound_query.fetch_all(&self.pool).await?;
 
-        // Execute the query and fetch the rows
-        let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
+        // Process results
         let result = rows
             .into_iter()
             .map(|row| DbRow::MySqlRow(&row).get_row_data(&request.table))

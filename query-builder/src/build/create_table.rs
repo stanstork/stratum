@@ -84,12 +84,11 @@ impl ColumnBuilder {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use crate::{
         ast::{common::TableRef, create_table::DataType, expr::Expr},
         build::create_table::CreateTableBuilder,
     };
+    use common::value::Value::Boolean;
 
     fn table(name: &str) -> TableRef {
         TableRef {
@@ -110,7 +109,7 @@ mod tests {
             .column("username", DataType::Varchar(255))
             .add()
             .column("is_active", DataType::Boolean)
-            .default_value(Expr::Value(json!(true)))
+            .default_value(Expr::Value(Boolean(true)))
             .add()
             .build();
 
