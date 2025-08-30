@@ -272,7 +272,7 @@ impl<'a> SchemaPlan<'a> {
                     name: (*column_name).clone(),
                     is_nullable: true, // Assuming computed fields are nullable
                     default: None,
-                    data_type: inferred_type.to_string(),
+                    data_type: inferred_type,
                     is_primary_key: false,
                     char_max_length: None,
                 });

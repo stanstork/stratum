@@ -1,14 +1,16 @@
-use common::value::Value;
+use crate::{
+    add_joins, add_where, ident, join_on_expr, metadata::table::TableMetadata,
+    query::column::ColumnDef, requests::FetchRowsRequest, sql_filter_expr,
+};
+use common::{row_data::RowData, value::Value};
 use query_builder::{
-    build::select::SelectBuilder,
+    ast::expr::Expr,
+    build::{alter_table::AlterTableBuilder, insert::InsertBuilder, select::SelectBuilder},
     dialect::Dialect,
     render::{Render, Renderer},
     table_ref, value,
 };
-
-use crate::{
-    add_joins, add_where, ident, join_on_expr, requests::FetchRowsRequest, sql_filter_expr,
-};
+use std::collections::HashMap;
 
 pub struct QueryGenerator<'a> {
     dialect: &'a dyn Dialect,
@@ -27,7 +29,7 @@ impl<'a> QueryGenerator<'a> {
         let columns = request
             .columns
             .iter()
-            .map(|c| ident!(c)) // Assumes `ident!` macro exists
+            .map(|c| ident!(c))
             .collect::<Vec<_>>();
 
         // Start building the query
@@ -47,6 +49,74 @@ impl<'a> QueryGenerator<'a> {
 
         let mut renderer = Renderer::new(self.dialect);
         select_ast.render(&mut renderer);
+        renderer.finish()
+    }
+
+    pub fn insert_batch(&self, meta: &TableMetadata, rows: Vec<RowData>) -> (String, Vec<Value>) {
+        if rows.is_empty() {
+            return (String::new(), Vec::new());
+        }
+
+        // Sorting ensures the column order is always consistent
+        let mut sorted_columns: Vec<_> = meta.columns.values().collect();
+        sorted_columns.sort_by_key(|col| col.ordinal);
+        let col_names = sorted_columns
+            .iter()
+            .map(|col| col.name.clone())
+            .collect::<Vec<_>>();
+
+        let mut builder = InsertBuilder::new(table_ref!(meta.name))
+            .columns(&col_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+
+        for row in rows {
+            // Create a HashMap for efficient, case-insensitive lookup of values by column name
+            let field_map: HashMap<String, Value> = row
+                .field_values
+                .into_iter()
+                .filter_map(|rc| rc.value.map(|v| (rc.name.to_lowercase(), v)))
+                .collect();
+
+            // Map the ordered column names to their corresponding values for the current row
+            let ordered_values: Vec<Expr> = col_names
+                .iter()
+                .map(|col_name| {
+                    let value = field_map
+                        .get(&col_name.to_lowercase())
+                        .cloned()
+                        .unwrap_or(Value::Null); // Use NULL if a value isn't present for a column.
+                    Expr::Value(value)
+                })
+                .collect();
+
+            // Add the row of values to the builder.
+            builder = builder.values(ordered_values);
+        }
+
+        let insert_ast = builder.build();
+
+        let mut renderer = Renderer::new(self.dialect);
+        insert_ast.render(&mut renderer);
+        renderer.finish()
+    }
+
+    pub fn toggle_triggers(&self, table: &str, enable: bool) -> (String, Vec<Value>) {
+        let builder = AlterTableBuilder::new(table_ref!(table)).toggle_triggers(!enable);
+        let query_ast = builder.build();
+
+        let mut renderer = Renderer::new(self.dialect);
+        query_ast.render(&mut renderer);
+        renderer.finish()
+    }
+
+    pub fn add_column(&self, table: &str, column: ColumnDef) -> (String, Vec<Value>) {
+        let builder = AlterTableBuilder::new(table_ref!(table));
+        let query_ast = builder
+            .add_column(&column.name, column.data_type)
+            .add()
+            .build();
+
+        let mut renderer = Renderer::new(self.dialect);
+        query_ast.render(&mut renderer);
         renderer.finish()
     }
 }

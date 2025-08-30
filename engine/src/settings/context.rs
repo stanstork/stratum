@@ -7,7 +7,7 @@ use crate::{
     source::{data::DataSource, Source},
     state::MigrationState,
 };
-use common::mapping::EntityMapping;
+use common::{mapping::EntityMapping, types::DataType};
 use smql::statements::setting::CopyColumns;
 use sql_adapter::{
     adapter::SqlAdapter,
@@ -17,6 +17,7 @@ use sql_adapter::{
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
+use tracing_subscriber::registry::Data;
 
 pub struct SchemaSettingContext {
     pub source: Source,
@@ -92,7 +93,7 @@ impl SchemaSettingContext {
         let type_engine = TypeEngine::new(
             source.clone(),
             // converter
-            &|meta: &FieldMetadata| -> (String, Option<usize>) { meta.pg_type() },
+            &|meta: &FieldMetadata| -> (DataType, Option<usize>) { meta.pg_type() },
             // extractor
             &|meta: &TableMetadata| -> Vec<ColumnMetadata> { TableMetadata::enums(meta) },
         );

@@ -2,46 +2,6 @@ use crate::row::DbRow;
 use common::{types::DataType, value::Value};
 use serde::Serialize;
 
-/// Creates an `Expr::Identifier` from a `ColumnMetadata` instance.
-macro_rules! ident {
-    ($col_meta:expr) => {
-        match $col_meta.data_type {
-            DataType::Geometry => Expr::FunctionCall(FunctionCall {
-                name: "ST_AsBinary".to_string(),
-                args: vec![Expr::Identifier(Ident {
-                    qualifier: None,
-                    name: $col_meta.name.clone(),
-                })],
-                wildcard: false,
-            }),
-            _ => Expr::Identifier(Ident {
-                qualifier: None,
-                name: $col_meta.name.clone(),
-            }),
-        }
-    };
-}
-
-/// Creates a qualified `Expr::Identifier` (table.column) from metadata.
-macro_rules! qual_ident {
-    ($table_meta:expr, $col_meta:expr) => {
-        match $col_meta.data_type {
-            DataType::Geometry => Expr::FunctionCall(FunctionCall {
-                name: "ST_AsBinary".to_string(),
-                args: vec![Expr::Identifier(Ident {
-                    qualifier: Some($table_meta.name.clone()),
-                    name: $col_meta.name.clone(),
-                })],
-                wildcard: false,
-            }),
-            _ => Expr::Identifier(Ident {
-                qualifier: Some($table_meta.name.clone()),
-                name: $col_meta.name.clone(),
-            }),
-        }
-    };
-}
-
 const COL_ORDINAL_POSITION: &str = "ordinal_position";
 const COL_COLUMN_NAME: &str = "column_name";
 const COL_IS_NULLABLE: &str = "is_nullable";

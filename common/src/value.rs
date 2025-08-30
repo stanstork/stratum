@@ -14,6 +14,7 @@ pub enum Value {
     Bytes(Vec<u8>),
     Date(NaiveDate),
     Timestamp(DateTime<Utc>),
+    Null,
 }
 
 impl Value {
@@ -28,6 +29,7 @@ impl Value {
             Value::Bytes(_) => None,
             Value::Date(_) => None,
             Value::Timestamp(_) => None,
+            Value::Null => None,
         }
     }
 
@@ -42,6 +44,7 @@ impl Value {
             Value::Bytes(_) => None,
             Value::Date(_) => None,
             Value::Timestamp(_) => None,
+            Value::Null => None,
         }
     }
 
@@ -56,6 +59,7 @@ impl Value {
             Value::Bytes(_) => None,
             Value::Date(_) => None,
             Value::Timestamp(_) => None,
+            Value::Null => Some("NULL".to_string()),
         }
     }
 
@@ -105,6 +109,7 @@ impl fmt::Display for Value {
             }
             Value::Date(v) => write!(f, "'{}'", v),
             Value::Timestamp(v) => write!(f, "'{}'", v),
+            Value::Null => write!(f, "NULL"),
         }
     }
 }

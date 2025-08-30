@@ -13,7 +13,7 @@ use crate::{
     state::MigrationState,
 };
 use async_trait::async_trait;
-use common::mapping::EntityMapping;
+use common::{mapping::EntityMapping, types::DataType};
 use smql::statements::expr::Expression;
 use sql_adapter::{metadata::table::TableMetadata, query::column::ColumnDef};
 use std::sync::Arc;
@@ -71,7 +71,7 @@ impl CreateMissingColumnsSetting {
         dest_meta: &TableMetadata,
     ) -> Result<(), SettingsError> {
         if let Some(columns) = self.context.mapping.field_mappings.get_entity(table) {
-            let type_conv = |meta: &FieldMetadata| -> (String, Option<usize>) { meta.pg_type() }; // Currently only Postgres
+            let type_conv = |meta: &FieldMetadata| -> (DataType, Option<usize>) { meta.pg_type() }; // Currently only Postgres
             for (src_col, dst_col) in columns.forward_map() {
                 if dest_meta.get_column(&dst_col).is_none() {
                     let meta = source_meta.column(&src_col).ok_or_else(|| {
@@ -116,7 +116,7 @@ impl CreateMissingColumnsSetting {
                             comp.name
                         ))
                     })?;
-                    let def = ColumnDef::from_computed(&comp.name, &data_type.to_string());
+                    let def = ColumnDef::from_computed(&comp.name, &data_type);
                     self.add_column(table, &def).await?;
                 }
             }

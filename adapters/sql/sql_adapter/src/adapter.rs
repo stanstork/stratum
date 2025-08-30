@@ -4,7 +4,7 @@ use crate::{
     requests::FetchRowsRequest,
 };
 use async_trait::async_trait;
-use common::row_data::RowData;
+use common::{row_data::RowData, value::Value};
 
 #[async_trait]
 pub trait SqlAdapter {
@@ -15,6 +15,7 @@ pub trait SqlAdapter {
     async fn table_exists(&self, table: &str) -> Result<bool, DbError>;
     async fn truncate_table(&self, table: &str) -> Result<(), DbError>;
     async fn execute(&self, query: &str) -> Result<(), DbError>;
+    async fn execute_with_params(&self, query: &str, params: Vec<Value>) -> Result<(), DbError>;
     async fn list_tables(&self) -> Result<Vec<String>, DbError>;
 
     async fn fetch_metadata(&self, table: &str) -> Result<TableMetadata, DbError>;

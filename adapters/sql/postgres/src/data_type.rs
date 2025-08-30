@@ -6,7 +6,7 @@ use sqlx::Row;
 pub trait PgDataType {
     fn from_pg_row(row: &PgRow) -> DataType;
     fn to_pg_string(&self) -> String;
-    fn to_pg_type(col: &ColumnMetadata) -> (String, Option<usize>);
+    fn to_pg_type(col: &ColumnMetadata) -> (DataType, Option<usize>);
 }
 
 impl PgDataType for DataType {
@@ -51,22 +51,23 @@ impl PgDataType for DataType {
         }
     }
 
-    fn to_pg_type(col: &ColumnMetadata) -> (String, Option<usize>) {
-        let data_type = match &col.data_type {
-            DataType::Enum => col.name.clone(),
-            DataType::Set => "TEXT[]".to_string(),
-            _ => DataType::to_pg_string(&col.data_type),
-        };
+    fn to_pg_type(col: &ColumnMetadata) -> (DataType, Option<usize>) {
+        // let data_type = match &col.data_type {
+        //     DataType::Enum => col.name.clone(),
+        //     DataType::Set => "TEXT[]".to_string(),
+        //     _ => DataType::to_pg_string(&col.data_type),
+        // };
 
-        let type_len = if col.data_type == DataType::Enum {
-            None
-        } else {
-            match data_type.as_str() {
-                "BYTEA" | "TEXT[]" | "TEXT" => None,
-                _ => col.char_max_length,
-            }
-        };
+        // let type_len = if col.data_type == DataType::Enum {
+        //     None
+        // } else {
+        //     match data_type.as_str() {
+        //         "BYTEA" | "TEXT[]" | "TEXT" => None,
+        //         _ => col.char_max_length,
+        //     }
+        // };
 
-        (data_type, type_len)
+        // (data_type, type_len)
+        todo!("Need to implement PostgreSQL type mapping")
     }
 }

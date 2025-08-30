@@ -1,5 +1,5 @@
 use crate::{
-    ast::create_table::{ColumnDef, CreateTable, DataType, TableConstraint},
+    ast::create_table::{ColumnDef, CreateTable, TableConstraint},
     render::{Render, Renderer},
 };
 
@@ -39,7 +39,7 @@ impl Render for ColumnDef {
         // Name and Type
         r.sql.push_str(&r.dialect.quote_identifier(&self.name));
         r.sql.push(' ');
-        r.sql.push_str(&render_data_type(&self.data_type)); // Simple helper for now
+        r.sql.push_str(&r.dialect.render_data_type(&self.data_type));
 
         // Constraints
         if self.is_primary_key {
@@ -74,29 +74,14 @@ impl Render for TableConstraint {
     }
 }
 
-// A simple, non-dialect-specific renderer for data types.
-// A real implementation would have a method on the `Dialect` trait.
-pub(crate) fn render_data_type(dt: &DataType) -> String {
-    match dt {
-        DataType::Text => "TEXT".to_string(),
-        DataType::Integer => "INTEGER".to_string(),
-        DataType::BigInteger => "BIGINT".to_string(),
-        DataType::Serial => "SERIAL".to_string(),
-        DataType::BigSerial => "BIGSERIAL".to_string(),
-        DataType::Boolean => "BOOLEAN".to_string(),
-        DataType::Geometry => "GEOMETRY".to_string(),
-        DataType::Timestamp => "TIMESTAMP".to_string(),
-        DataType::Jsonb => "JSONB".to_string(),
-        DataType::Varchar(len) => format!("VARCHAR({})", len),
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use common::types::DataType;
+
     use crate::{
         ast::{
             common::TableRef,
-            create_table::{ColumnDef, CreateTable, DataType, TableConstraint},
+            create_table::{ColumnDef, CreateTable, TableConstraint},
         },
         dialect::Postgres,
         render::{Render, Renderer},
@@ -113,14 +98,14 @@ mod tests {
             columns: vec![
                 ColumnDef {
                     name: "id".to_string(),
-                    data_type: DataType::Serial,
+                    data_type: DataType::IntUnsigned,
                     is_primary_key: true,
                     is_nullable: false,
                     default_value: None,
                 },
                 ColumnDef {
                     name: "email".to_string(),
-                    data_type: DataType::Varchar(255),
+                    data_type: DataType::VarChar,
                     is_primary_key: false,
                     is_nullable: false,
                     default_value: None,

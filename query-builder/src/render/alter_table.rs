@@ -3,7 +3,7 @@ use crate::{
         alter_table::{AlterTable, AlterTableOperation},
         create_table::ColumnDef,
     },
-    render::{Render, Renderer, create_table::render_data_type},
+    render::{Render, Renderer},
 };
 
 impl Render for AlterTable {
@@ -49,7 +49,7 @@ fn render_add_column(col: &ColumnDef, r: &mut Renderer) {
     // Name and Type
     r.sql.push_str(&r.dialect.quote_identifier(&col.name));
     r.sql.push(' ');
-    r.sql.push_str(&render_data_type(&col.data_type));
+    r.sql.push_str(&r.dialect.render_data_type(&col.data_type));
 
     // Constraints
     if !col.is_nullable {
@@ -63,11 +63,13 @@ fn render_add_column(col: &ColumnDef, r: &mut Renderer) {
 
 #[cfg(test)]
 mod tests {
+    use common::types::DataType;
+
     use crate::{
         ast::{
             alter_table::{AlterTable, AlterTableOperation},
             common::TableRef,
-            create_table::{ColumnDef, DataType},
+            create_table::ColumnDef,
         },
         dialect::Postgres,
         render::{Render, Renderer},
@@ -83,7 +85,7 @@ mod tests {
             operations: vec![
                 AlterTableOperation::AddColumn(ColumnDef {
                     name: "category".to_string(),
-                    data_type: DataType::Varchar(100),
+                    data_type: DataType::VarChar,
                     is_nullable: true,
                     is_primary_key: false,
                     default_value: None,

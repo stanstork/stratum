@@ -30,7 +30,7 @@ impl InsertBuilder {
         self
     }
 
-    fn build(self) -> Insert {
+    pub fn build(self) -> Insert {
         self.ast
     }
 }

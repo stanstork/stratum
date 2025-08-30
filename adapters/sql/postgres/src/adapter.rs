@@ -1,6 +1,6 @@
-use crate::data_type::PgDataType;
+use crate::{bind_values, data_type::PgDataType};
 use async_trait::async_trait;
-use common::{row_data::RowData, types::DataType};
+use common::{row_data::RowData, types::DataType, value::Value};
 use sql_adapter::{
     adapter::SqlAdapter,
     error::{adapter::ConnectorError, db::DbError},
@@ -50,6 +50,13 @@ impl SqlAdapter for PgAdapter {
 
     async fn execute(&self, query: &str) -> Result<(), DbError> {
         sqlx::query(query).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    async fn execute_with_params(&self, query: &str, params: Vec<Value>) -> Result<(), DbError> {
+        let query = sqlx::query(query);
+        let bound_query = bind_values(query, &params);
+        bound_query.execute(&self.pool).await?;
         Ok(())
     }
 

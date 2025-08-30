@@ -11,6 +11,27 @@ macro_rules! ident {
             alias: $field.alias.clone().unwrap(),
         }
     };
+
+    ($col_meta:expr, $table:expr) => {
+        match $col_meta.data_type {
+            common::types::DataType::Geometry => query_builder::ast::expr::Expr::FunctionCall(
+                query_builder::ast::expr::FunctionCall {
+                    name: "ST_AsBinary".to_string(),
+                    args: vec![query_builder::ast::expr::Expr::Identifier(
+                        query_builder::ast::expr::Ident {
+                            qualifier: Some($table.name.clone()),
+                            name: $col_meta.name.clone(),
+                        },
+                    )],
+                    wildcard: false,
+                },
+            ),
+            _ => query_builder::ast::expr::Expr::Identifier(query_builder::ast::expr::Ident {
+                qualifier: Some($table.name.clone()),
+                name: $col_meta.name.clone(),
+            }),
+        }
+    };
 }
 
 #[macro_export]

@@ -2,9 +2,10 @@
 
 use crate::ast::{
     common::TableRef,
-    create_table::{ColumnDef, CreateTable, DataType, TableConstraint},
+    create_table::{ColumnDef, CreateTable, TableConstraint},
     expr::Expr,
 };
+use common::types::DataType;
 
 #[derive(Debug, Clone)]
 pub struct CreateTableBuilder {
@@ -85,10 +86,10 @@ impl ColumnBuilder {
 #[cfg(test)]
 mod tests {
     use crate::{
-        ast::{common::TableRef, create_table::DataType, expr::Expr},
+        ast::{common::TableRef, expr::Expr},
         build::create_table::CreateTableBuilder,
     };
-    use common::value::Value::Boolean;
+    use common::{types::DataType, value::Value::Boolean};
 
     fn table(name: &str) -> TableRef {
         TableRef {
@@ -103,10 +104,10 @@ mod tests {
 
         let ast = builder
             .if_not_exists()
-            .column("id", DataType::Serial)
+            .column("id", DataType::IntUnsigned)
             .primary_key()
             .add()
-            .column("username", DataType::Varchar(255))
+            .column("username", DataType::VarChar)
             .add()
             .column("is_active", DataType::Boolean)
             .default_value(Expr::Value(Boolean(true)))
@@ -117,7 +118,7 @@ mod tests {
         assert_eq!(ast.table.name, "users");
         assert_eq!(ast.columns.len(), 3);
         assert!(ast.columns[0].is_primary_key);
-        assert_eq!(ast.columns[1].data_type, DataType::Varchar(255));
+        assert_eq!(ast.columns[1].data_type, DataType::VarChar);
         assert!(!ast.columns[2].is_nullable); // Should be NOT NULL by default
         assert!(ast.columns[2].default_value.is_some());
     }

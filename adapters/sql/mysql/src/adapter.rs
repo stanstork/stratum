@@ -1,6 +1,6 @@
 use crate::{bind_values, data_type::MySqlColumnDataType};
 use async_trait::async_trait;
-use common::{row_data::RowData, types::DataType};
+use common::{row_data::RowData, types::DataType, value::Value};
 use query_builder::dialect::{self};
 use sql_adapter::{
     adapter::SqlAdapter,
@@ -14,9 +14,8 @@ use sql_adapter::{
     requests::FetchRowsRequest,
     row::DbRow,
 };
-use sqlx::ConnectOptions;
-use sqlx::{mysql::MySqlConnectOptions, MySql, Pool, Row};
-use std::{collections::HashMap, str::FromStr};
+use sqlx::{MySql, Pool, Row};
+use std::collections::HashMap;
 use tracing::info;
 
 #[derive(Clone)]
@@ -33,10 +32,7 @@ const QUERY_COLUMN_TYPE_SQL: &str = include_str!("../sql/column_type.sql");
 #[async_trait]
 impl SqlAdapter for MySqlAdapter {
     async fn connect(url: &str) -> Result<Self, ConnectorError> {
-        let mut opts = MySqlConnectOptions::from_str(&url)?;
-        opts = opts.log_statements(tracing::log::LevelFilter::Debug);
-
-        let pool = Pool::connect_with(opts).await?;
+        let pool = Pool::connect(url).await?;
         Ok(MySqlAdapter { pool })
     }
 
@@ -58,6 +54,13 @@ impl SqlAdapter for MySqlAdapter {
 
     async fn execute(&self, query: &str) -> Result<(), DbError> {
         sqlx::query(query).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    async fn execute_with_params(&self, query: &str, params: Vec<Value>) -> Result<(), DbError> {
+        let query = sqlx::query(query);
+        let bound_query = bind_values(query, &params);
+        bound_query.execute(&self.pool).await?;
         Ok(())
     }
 

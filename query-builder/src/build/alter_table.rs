@@ -1,13 +1,12 @@
 //! Provides a fluent builder for constructing `AlterTable` ASTs.
 
-use std::ops::Add;
-
 use crate::ast::{
     alter_table::{AlterTable, AlterTableOperation},
     common::TableRef,
-    create_table::{ColumnDef, DataType, TableConstraint},
+    create_table::{ColumnDef, TableConstraint},
     expr::Expr,
 };
+use common::types::DataType;
 
 #[derive(Debug, Clone)]
 pub struct AlterTableBuilder {
@@ -96,8 +95,10 @@ impl AddColumnBuilder {
 
 #[cfg(test)]
 mod tests {
+    use common::types::DataType;
+
     use crate::{
-        ast::{alter_table::AlterTableOperation, common::TableRef, create_table::DataType},
+        ast::{alter_table::AlterTableOperation, common::TableRef},
         build::alter_table::AlterTableBuilder,
     };
 
@@ -113,7 +114,7 @@ mod tests {
         let builder = AlterTableBuilder::new(table("posts"));
 
         let ast = builder
-            .add_column("category_id", DataType::Integer)
+            .add_column("category_id", DataType::Int)
             .add()
             .toggle_triggers(false) // Disable triggers
             .build();

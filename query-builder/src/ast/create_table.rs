@@ -1,6 +1,7 @@
 //! Defines the AST for a CREATE TABLE statement.
 
 use crate::ast::{common::TableRef, expr::Expr};
+use common::types::DataType;
 
 /// Represents a complete CREATE TABLE statement.
 #[derive(Debug, Clone, Default)]
@@ -30,21 +31,4 @@ pub enum TableConstraint {
         references: TableRef,
         referenced_columns: Vec<String>,
     },
-}
-
-/// A simplified representation of common SQL data types.
-/// The renderer is responsible for converting these into dialect-specific strings
-/// (e.g., `Serial` -> `SERIAL` in Postgres, `INTEGER AUTO_INCREMENT` in MySQL).
-#[derive(Debug, Clone, PartialEq)]
-pub enum DataType {
-    Text,
-    Integer,
-    BigInteger,
-    Serial, // Auto-incrementing integer
-    BigSerial,
-    Boolean,
-    Geometry,
-    Timestamp,
-    Jsonb,
-    Varchar(u32),
 }

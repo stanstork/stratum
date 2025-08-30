@@ -1,13 +1,14 @@
 use crate::adapter::PgAdapter;
 use async_trait::async_trait;
 use common::row_data::RowData;
+use query_builder::dialect;
 use sql_adapter::{
     adapter::SqlAdapter,
     destination::DbDataDestination,
     error::db::DbError,
     join::clause::JoinClause,
     metadata::{provider::MetadataHelper, table::TableMetadata},
-    query::{builder::SqlQueryBuilder, column::ColumnDef},
+    query::{column::ColumnDef, generator::QueryGenerator},
 };
 use std::{collections::HashMap, sync::Arc};
 use tracing::info;
@@ -41,47 +42,24 @@ impl DbDataDestination for PgDestination {
             return Ok(());
         }
 
-        let columns = meta
-            .columns
-            .values()
-            .map(ColumnDef::new)
-            .collect::<Vec<_>>();
+        let generator = QueryGenerator::new(&dialect::Postgres);
+        let (sql, params) = generator.insert_batch(meta, rows.clone());
 
-        if columns.is_empty() {
-            return Err(DbError::Write("No columns found in metadata".to_string()));
-        }
-
-        let all_values: Vec<Vec<String>> = rows
-            .into_iter()
-            .map(|row| {
-                columns
-                    .iter()
-                    .map(|col| {
-                        row.field_values
-                            .iter()
-                            .find(|rc| rc.name.eq_ignore_ascii_case(&col.name))
-                            .and_then(|rc| rc.value.clone())
-                            .map_or_else(|| "NULL".to_string(), |val| val.to_string())
-                    })
-                    .collect()
-            })
-            .collect();
-
-        let query = SqlQueryBuilder::new()
-            .insert_batch(&meta.name, columns, all_values)
-            .build();
-
+        println!("Generated SQL: {}", sql);
+        println!("Generated Params: {:?}", params);
         info!("Executing insert into `{}`", meta.name);
-        self.adapter.execute(&query.0).await?;
+
+        todo!("Implement batch insert for PostgreSQL");
+        self.adapter.execute_with_params(&sql, params).await?;
 
         Ok(())
     }
 
     async fn toggle_trigger(&self, table: &str, enable: bool) -> Result<(), DbError> {
-        let query = SqlQueryBuilder::new().toggle_trigger(table, enable).build();
+        let (sql, _params) = QueryGenerator::new(&dialect::Postgres).toggle_triggers(table, enable);
 
-        info!("Executing query: {}", query.0);
-        self.adapter.execute(&query.0).await?;
+        info!("Executing query: {}", sql);
+        self.adapter.execute(&sql).await?;
 
         Ok(())
     }
@@ -91,10 +69,11 @@ impl DbDataDestination for PgDestination {
     }
 
     async fn add_column(&self, table: &str, column: &ColumnDef) -> Result<(), DbError> {
-        let query = SqlQueryBuilder::new().add_column(table, column).build();
+        let (sql, _params) =
+            QueryGenerator::new(&dialect::Postgres).add_column(table, column.clone());
 
-        info!("Executing query: {}", query.0);
-        self.adapter.execute(&query.0).await?;
+        info!("Executing query: {}", sql);
+        self.adapter.execute(&sql).await?;
 
         Ok(())
     }

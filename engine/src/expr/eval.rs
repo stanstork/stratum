@@ -130,6 +130,7 @@ fn eval_function(name: &str, args: &[Value]) -> Option<Value> {
                     Value::Timestamp(t) => t.to_rfc3339(),
                     Value::Bytes(b) => String::from_utf8_lossy(b).to_string(),
                     Value::Json(v) => v.to_string(),
+                    Value::Null => "NULL".to_string(),
                 })
                 .collect::<Vec<_>>()
                 .join("");
