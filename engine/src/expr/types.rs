@@ -41,7 +41,7 @@ impl TypeInferencer for ExpressionWrapper {
                 let rt = ExpressionWrapper((**right).clone())
                     .infer_type(columns, mapping, source)
                     .await?;
-                Some(get_numeric_type(lt, rt))
+                Some(get_numeric_type(&lt, &rt))
             }
 
             Expression::FunctionCall { name, .. } => match name.to_ascii_lowercase().as_str() {
@@ -57,19 +57,19 @@ impl TypeInferencer for ExpressionWrapper {
                         .columns()
                         .iter()
                         .find(|col| col.name.eq_ignore_ascii_case(key))
-                        .map(|col| col.data_type),
+                        .map(|col| col.data_type.clone()),
                     EntityMetadata::Csv(meta) => meta
                         .columns
                         .iter()
                         .find(|col| col.name.eq_ignore_ascii_case(key))
-                        .map(|col| col.data_type),
+                        .map(|col| col.data_type.clone()),
                 }
             }
         }
     }
 }
 
-fn get_numeric_type(left: DataType, right: DataType) -> DataType {
+fn get_numeric_type(left: &DataType, right: &DataType) -> DataType {
     match (left, right) {
         (DataType::Int, DataType::Int) => DataType::Int,
         (DataType::Float, DataType::Float) => DataType::Float,

@@ -2,7 +2,7 @@ use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum DataType {
     Decimal,
     Short,
@@ -35,6 +35,7 @@ pub enum DataType {
     Geometry,
     Array,
     Char,
+    Custom(String),
 }
 
 lazy_static! {
@@ -95,7 +96,7 @@ impl TryFrom<&str> for DataType {
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         TYPE_MAP
             .get(s.to_uppercase().as_str())
-            .copied()
+            .cloned()
             .ok_or_else(|| format!("Unknown column type: {}", s))
     }
 }
@@ -134,6 +135,7 @@ impl fmt::Display for DataType {
             DataType::Array => write!(f, "ARRAY"),
             DataType::Char => write!(f, "CHAR"),
             DataType::Date => write!(f, "DATE"),
+            DataType::Custom(ref name) => write!(f, "{}", name),
         }
     }
 }

@@ -61,7 +61,7 @@ impl CsvType for DataType {
     }
 
     fn data_type(&self) -> DataType {
-        *self
+        self.clone()
     }
 
     fn get_value(&self, value: &str) -> Option<Value> {

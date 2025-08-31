@@ -40,8 +40,8 @@ impl FieldMetadata {
 
     pub fn data_type(&self) -> DataType {
         match self {
-            FieldMetadata::Sql(col) => col.data_type,
-            FieldMetadata::Csv(col) => col.data_type,
+            FieldMetadata::Sql(col) => col.data_type.clone(),
+            FieldMetadata::Csv(col) => col.data_type.clone(),
         }
     }
 

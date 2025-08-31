@@ -1,11 +1,17 @@
 use crate::{
-    add_joins, add_where, ident, join_on_expr, metadata::table::TableMetadata,
-    query::column::ColumnDef, requests::FetchRowsRequest, sql_filter_expr,
+    add_joins, add_where, ident, join_on_expr,
+    metadata::table::TableMetadata,
+    query::{column::ColumnDef, fk::ForeignKeyDef},
+    requests::FetchRowsRequest,
+    sql_filter_expr,
 };
 use common::{row_data::RowData, value::Value};
 use query_builder::{
     ast::expr::Expr,
-    build::{alter_table::AlterTableBuilder, insert::InsertBuilder, select::SelectBuilder},
+    build::{
+        alter_table::AlterTableBuilder, create_table::CreateTableBuilder, insert::InsertBuilder,
+        select::SelectBuilder,
+    },
     dialect::Dialect,
     render::{Render, Renderer},
     table_ref, value,
@@ -117,6 +123,22 @@ impl<'a> QueryGenerator<'a> {
 
         let mut renderer = Renderer::new(self.dialect);
         query_ast.render(&mut renderer);
+        renderer.finish()
+    }
+
+    pub fn create_table(
+        &self,
+        table: &str,
+        columns: &[ColumnDef],
+        foreign_keys: &[ForeignKeyDef],
+        ignore_constraints: bool,
+    ) -> (String, Vec<Value>) {
+        let mut builder = CreateTableBuilder::new(table_ref!(table));
+
+        let create_ast = builder.build();
+
+        let mut renderer = Renderer::new(self.dialect);
+        create_ast.render(&mut renderer);
         renderer.finish()
     }
 }

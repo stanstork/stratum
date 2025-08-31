@@ -44,7 +44,7 @@ impl ColumnMetadata {
         Self {
             ordinal: row.try_get_u32(COL_ORDINAL_POSITION).unwrap_or(0) as usize,
             name: row.try_get_string(COL_COLUMN_NAME).unwrap_or_default(),
-            data_type,
+            data_type: data_type.clone(),
             is_nullable: row.try_get_string(COL_IS_NULLABLE).unwrap_or_default() == "YES",
             has_default: row.try_get_string(COL_COLUMN_DEFAULT).is_some(),
             default_value: row.get_value(data_type, COL_COLUMN_DEFAULT),

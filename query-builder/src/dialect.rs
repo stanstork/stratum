@@ -66,6 +66,7 @@ impl Dialect for Postgres {
             DataType::Array => "ARRAY".into(),
             DataType::Char => "CHAR".into(),
             DataType::Date => "DATE".into(),
+            DataType::Custom(name) => name.clone(),
         }
     }
 }
@@ -116,6 +117,7 @@ impl Dialect for MySql {
             DataType::Array => "ARRAY".into(),
             DataType::Char => "CHAR".into(),
             DataType::Date => "DATE".into(),
+            DataType::Custom(name) => name.clone(),
         }
     }
 }

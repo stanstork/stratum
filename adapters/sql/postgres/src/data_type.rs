@@ -48,26 +48,30 @@ impl PgDataType for DataType {
             DataType::Array => "ARRAY".to_string(),
             DataType::Char => "CHAR".to_string(),
             DataType::Date => "DATE".to_string(),
+            DataType::Custom(name) => name.clone(),
         }
     }
 
     fn to_pg_type(col: &ColumnMetadata) -> (DataType, Option<usize>) {
-        // let data_type = match &col.data_type {
-        //     DataType::Enum => col.name.clone(),
-        //     DataType::Set => "TEXT[]".to_string(),
-        //     _ => DataType::to_pg_string(&col.data_type),
-        // };
+        let data_type = match &col.data_type {
+            DataType::Enum => DataType::Custom(col.name.clone()),
+            DataType::Set => DataType::Custom("TEXT[]".to_string()),
+            _ => col.data_type.clone(),
+        };
 
-        // let type_len = if col.data_type == DataType::Enum {
-        //     None
-        // } else {
-        //     match data_type.as_str() {
-        //         "BYTEA" | "TEXT[]" | "TEXT" => None,
-        //         _ => col.char_max_length,
-        //     }
-        // };
+        let type_len = if col.data_type == DataType::Enum {
+            None
+        } else {
+            match data_type {
+                DataType::Custom(ref s) if s == "TEXT[]" => None,
+                DataType::TinyBlob | DataType::MediumBlob | DataType::LongBlob | DataType::Blob => {
+                    None
+                }
+                DataType::String => None,
+                _ => col.char_max_length,
+            }
+        };
 
-        // (data_type, type_len)
-        todo!("Need to implement PostgreSQL type mapping")
+        (data_type, type_len)
     }
 }

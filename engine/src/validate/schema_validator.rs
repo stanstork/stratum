@@ -101,8 +101,8 @@ impl<'a> SchemaValidator<'a> {
                             invalid_columns.push(InvalidColumn {
                                 table: source_table.name.clone(),
                                 column: mapped_col_name.clone(),
-                                source_type: src_col_meta.data_type,
-                                destination_type: Some(dst_col_meta.data_type),
+                                source_type: src_col_meta.data_type.clone(),
+                                destination_type: Some(dst_col_meta.data_type.clone()),
                             });
                         }
                     }
@@ -110,7 +110,7 @@ impl<'a> SchemaValidator<'a> {
                         invalid_columns.push(InvalidColumn {
                             table: source_table.name.clone(),
                             column: mapped_col_name.clone(),
-                            source_type: src_col_meta.data_type,
+                            source_type: src_col_meta.data_type.clone(),
                             destination_type: None,
                         });
                     }

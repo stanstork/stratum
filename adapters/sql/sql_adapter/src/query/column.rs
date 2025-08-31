@@ -15,7 +15,7 @@ impl ColumnDef {
     pub fn new(metadata: &ColumnMetadata) -> Self {
         Self {
             name: metadata.name.clone(),
-            data_type: metadata.data_type,
+            data_type: metadata.data_type.clone(),
             is_nullable: metadata.is_nullable,
             is_primary_key: metadata.is_primary_key,
             default: metadata.default_value.as_ref().map(|v| v.to_string()),
