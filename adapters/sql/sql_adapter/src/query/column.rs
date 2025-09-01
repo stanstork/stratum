@@ -1,5 +1,5 @@
 use crate::metadata::column::ColumnMetadata;
-use common::types::DataType;
+use common::{types::DataType, value::Value};
 
 #[derive(Debug, Clone)]
 pub struct ColumnDef {
@@ -7,7 +7,7 @@ pub struct ColumnDef {
     pub data_type: DataType,
     pub is_nullable: bool,
     pub is_primary_key: bool,
-    pub default: Option<String>,
+    pub default: Option<Value>,
     pub char_max_length: Option<usize>,
 }
 
@@ -18,7 +18,7 @@ impl ColumnDef {
             data_type: metadata.data_type.clone(),
             is_nullable: metadata.is_nullable,
             is_primary_key: metadata.is_primary_key,
-            default: metadata.default_value.as_ref().map(|v| v.to_string()),
+            default: metadata.default_value.clone(),
             char_max_length: metadata.char_max_length,
         }
     }

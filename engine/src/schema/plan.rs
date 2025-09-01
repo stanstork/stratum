@@ -4,10 +4,11 @@ use crate::{
     source::data::DataSource,
 };
 use common::mapping::EntityMapping;
+use query_builder::dialect;
 use sql_adapter::{
     error::db::DbError,
     metadata::table::TableMetadata,
-    query::{builder::SqlQueryBuilder, column::ColumnDef, fk::ForeignKeyDef},
+    query::{column::ColumnDef, fk::ForeignKeyDef, generator::QueryGenerator},
 };
 use std::collections::{HashMap, HashSet};
 use tracing::warn;
@@ -86,17 +87,13 @@ impl<'a> SchemaPlan<'a> {
             // Always append computed columns
             resolved_columns.extend(self.computed_column_definitions(table).await);
 
-            let query = SqlQueryBuilder::new()
-                .create_table(
-                    &resolved_table,
-                    &resolved_columns,
-                    &[], // no extra constraints here
-                    self.ignore_constraints,
-                )
-                .build()
-                .0;
+            let (sql, _) = QueryGenerator::new(&dialect::Postgres).create_table(
+                &resolved_table,
+                &resolved_columns,
+                self.ignore_constraints,
+            );
 
-            queries.insert(query);
+            queries.insert(sql);
         }
 
         queries
@@ -127,9 +124,8 @@ impl<'a> SchemaPlan<'a> {
                             .resolve(&resolved_table, &fk.column),
                     };
 
-                    SqlQueryBuilder::new()
+                    QueryGenerator::new(&dialect::Postgres)
                         .add_foreign_key(&resolved_table, &resolved_fk)
-                        .build()
                         .0
                 })
             })
@@ -147,13 +143,9 @@ impl<'a> SchemaPlan<'a> {
 
             let enum_type = adapter.fetch_column_type(table, column).await?;
             let variants = Self::parse_enum(&enum_type);
+            let (sql, _) = QueryGenerator::new(&dialect::Postgres).create_enum(column, &variants);
 
-            let enum_sql = SqlQueryBuilder::new()
-                .create_enum(column, &variants)
-                .build()
-                .0;
-
-            queries.insert(enum_sql);
+            queries.insert(sql);
         }
 
         Ok(queries)

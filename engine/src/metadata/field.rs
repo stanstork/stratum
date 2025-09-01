@@ -1,4 +1,4 @@
-use common::types::DataType;
+use common::{types::DataType, value::Value};
 use csv::metadata::CsvColumnMetadata;
 use postgres::data_type::PgDataType;
 use sql_adapter::metadata::column::ColumnMetadata;
@@ -52,9 +52,9 @@ impl FieldMetadata {
         }
     }
 
-    pub fn default_value(&self) -> Option<String> {
+    pub fn default_value(&self) -> Option<Value> {
         match self {
-            FieldMetadata::Sql(col) => col.default_value.as_ref().map(ToString::to_string),
+            FieldMetadata::Sql(col) => col.default_value.as_ref().map(|v| v.clone()),
             FieldMetadata::Csv(_col) => None,
         }
     }

@@ -5,11 +5,11 @@ pub struct CreateEnumBuilder {
 }
 
 impl CreateEnumBuilder {
-    pub fn new(name: TypeName, values: &[&str]) -> Self {
+    pub fn new(name: TypeName, values: &Vec<String>) -> Self {
         Self {
             ast: CreateEnum {
                 name,
-                values: values.iter().map(|s| s.to_string()).collect(),
+                values: values.clone(),
             },
         }
     }
@@ -30,7 +30,11 @@ mod tests {
                 schema: None,
                 name: "mood".to_string(),
             },
-            &["happy", "sad", "neutral"],
+            &vec![
+                "happy".to_string(),
+                "sad".to_string(),
+                "neutral".to_string(),
+            ],
         );
         let ast = builder.build();
         assert_eq!(ast.name.name, "mood");

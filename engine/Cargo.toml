@@ -10,6 +10,7 @@ csv = { path = "../adapters/csv" }
 sql_adapter = { path = "../adapters/sql/sql_adapter" }
 smql = { path = "../smql" }
 common = { path = "../common" }
+query-builder = { path = "../query-builder" }
 
 async-trait = "0.1.86"
 serde = "1.0.217"
