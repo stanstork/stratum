@@ -17,7 +17,6 @@ use sql_adapter::{
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
-use tracing_subscriber::registry::Data;
 
 pub struct SchemaSettingContext {
     pub source: Source,

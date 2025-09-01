@@ -67,8 +67,30 @@ impl Render for TableConstraint {
                 r.sql.push_str(&quoted.join(", "));
                 r.sql.push(')');
             }
-            TableConstraint::ForeignKey { .. } => {
-                // Implementation for foreign keys would go here
+            TableConstraint::ForeignKey {
+                columns,
+                references,
+                referenced_columns,
+            } => {
+                // Generate the FOREIGN KEY (col1, col2) part
+                r.sql.push_str("FOREIGN KEY (");
+                let quoted_columns: Vec<String> = columns
+                    .iter()
+                    .map(|c| r.dialect.quote_identifier(c))
+                    .collect();
+                r.sql.push_str(&quoted_columns.join(", "));
+
+                // Generate the REFERENCES other_table (other_col1, other_col2) part
+                r.sql.push_str(") REFERENCES ");
+                r.sql
+                    .push_str(&r.dialect.quote_identifier(&references.name));
+                r.sql.push_str(" (");
+                let quoted_ref_columns: Vec<String> = referenced_columns
+                    .iter()
+                    .map(|c| r.dialect.quote_identifier(c))
+                    .collect();
+                r.sql.push_str(&quoted_ref_columns.join(", "));
+                r.sql.push(')');
             }
         }
     }

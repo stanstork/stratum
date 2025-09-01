@@ -45,18 +45,15 @@ impl DbDataDestination for PgDestination {
         let generator = QueryGenerator::new(&dialect::Postgres);
         let (sql, params) = generator.insert_batch(meta, rows.clone());
 
-        println!("Generated SQL: {}", sql);
-        println!("Generated Params: {:?}", params);
         info!("Executing insert into `{}`", meta.name);
-
-        todo!("Implement batch insert for PostgreSQL");
         self.adapter.execute_with_params(&sql, params).await?;
 
         Ok(())
     }
 
     async fn toggle_trigger(&self, table: &str, enable: bool) -> Result<(), DbError> {
-        let (sql, _params) = QueryGenerator::new(&dialect::Postgres).toggle_triggers(table, enable);
+        let (sql, _params) =
+            QueryGenerator::new(&dialect::Postgres).toggle_triggers(table, !enable);
 
         info!("Executing query: {}", sql);
         self.adapter.execute(&sql).await?;

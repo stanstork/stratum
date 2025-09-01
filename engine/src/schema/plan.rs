@@ -124,6 +124,8 @@ impl<'a> SchemaPlan<'a> {
                             .resolve(&resolved_table, &fk.column),
                     };
 
+                    println!("Adding FK on table {}: {:?}", resolved_table, resolved_fk);
+
                     QueryGenerator::new(&dialect::Postgres)
                         .add_foreign_key(&resolved_table, &resolved_fk)
                         .0
