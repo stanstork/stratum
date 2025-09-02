@@ -15,7 +15,7 @@ pub enum Filter {
 pub fn expr_to_string(e: &Expression) -> Result<String, Expression> {
     match e {
         Expression::Literal(lit) => Ok(match lit {
-            Literal::String(s) => format!("'{}'", s.trim_start_matches('"').trim_end_matches('"')),
+            Literal::String(s) => format!("{}", s.trim_start_matches('"').trim_end_matches('"')),
             Literal::Integer(i) => i.to_string(),
             Literal::Float(f) => f.to_string(),
             Literal::Boolean(b) => b.to_string(),

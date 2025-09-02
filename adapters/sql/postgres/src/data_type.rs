@@ -12,7 +12,7 @@ pub trait PgDataType {
 impl PgDataType for DataType {
     fn from_pg_row(row: &PgRow) -> DataType {
         let data_type_str: String = row.try_get("data_type").unwrap_or_default();
-        DataType::try_from(data_type_str.as_str()).unwrap_or(DataType::String)
+        DataType::try_from(data_type_str.as_str()).unwrap_or(DataType::Custom(data_type_str))
     }
 
     fn to_pg_string(&self) -> String {

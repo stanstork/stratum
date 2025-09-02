@@ -22,6 +22,8 @@ pub fn bind_values<'q>(
             Value::Date(d) => query.bind(*d),
             Value::Timestamp(t) => query.bind(*t),
             Value::Null => query.bind(None::<i32>), // Binding NULL as an integer; adjust type as needed
+            Value::Enum(_, v) => query.bind(v),
+            Value::StringArray(arr) => query.bind(arr),
         };
     }
     query

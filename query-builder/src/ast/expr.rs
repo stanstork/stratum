@@ -18,6 +18,12 @@ pub enum Expr {
 
     /// An aliased expression, e.g. `COUNT(*) AS total_count`
     Alias { expr: Box<Expr>, alias: String },
+
+    /// Represents a CAST expression, e.g., CAST(value AS type).
+    Cast {
+        expr: Box<Expr>,
+        data_type: String, // The name of the SQL data type
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

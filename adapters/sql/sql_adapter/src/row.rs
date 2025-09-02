@@ -55,7 +55,10 @@ impl DbRow<'_> {
             DataType::Json => self.try_get_json(name).map(Value::Json),
             DataType::Timestamp => self.try_get_timestamp(name).map(Value::Timestamp),
             DataType::Date => self.try_get_date(name).map(Value::Date),
-            DataType::Enum => self.try_get_string(name).map(Value::String),
+            DataType::Enum => {
+                let enum_value = self.try_get_string(name)?;
+                Some(Value::Enum(name.to_string(), enum_value))
+            }
             DataType::Bytea => self.try_get_bytes(name).map(Value::Bytes),
             DataType::Blob | DataType::TinyBlob | DataType::MediumBlob | DataType::LongBlob => {
                 self.try_get_bytes(name).map(Value::Bytes)

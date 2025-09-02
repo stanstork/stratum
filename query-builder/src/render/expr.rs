@@ -15,6 +15,13 @@ impl Render for Expr {
                 r.sql.push_str(" AS ");
                 r.sql.push_str(&r.dialect.quote_identifier(alias));
             }
+            Expr::Cast { expr, data_type } => {
+                r.sql.push_str("CAST(");
+                expr.render(r); // Render the inner expression (e.g., the placeholder)
+                r.sql.push_str(" AS ");
+                r.sql.push_str(data_type);
+                r.sql.push(')');
+            }
         }
     }
 }

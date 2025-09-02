@@ -14,6 +14,8 @@ pub enum Value {
     Bytes(Vec<u8>),
     Date(NaiveDate),
     Timestamp(DateTime<Utc>),
+    Enum(String, String),
+    StringArray(Vec<String>),
     Null,
 }
 
@@ -30,6 +32,8 @@ impl Value {
             Value::Date(_) => None,
             Value::Timestamp(_) => None,
             Value::Null => None,
+            Value::Enum(_, _) => None,
+            Value::StringArray(_) => None,
         }
     }
 
@@ -45,6 +49,8 @@ impl Value {
             Value::Date(_) => None,
             Value::Timestamp(_) => None,
             Value::Null => None,
+            Value::Enum(_, _) => None,
+            Value::StringArray(_) => None,
         }
     }
 
@@ -60,6 +66,8 @@ impl Value {
             Value::Date(_) => None,
             Value::Timestamp(_) => None,
             Value::Null => Some("NULL".to_string()),
+            Value::Enum(_, v) => Some(v.clone()),
+            Value::StringArray(v) => Some(format!("{:?}", v)),
         }
     }
 
@@ -102,14 +110,23 @@ impl fmt::Display for Value {
             }
             Value::Uuid(v) => write!(f, "{}", v),
             Value::Bytes(v) => {
-                let hex = v
-                    .iter()
-                    .fold(String::new(), |acc, byte| acc + &format!("{:02x}", byte));
+                let hex = v.iter().fold(String::new(), |acc, byte: &u8| {
+                    acc + &format!("{:02x}", byte)
+                });
                 write!(f, "E'\\\\x{}'", hex)
             }
             Value::Date(v) => write!(f, "'{}'", v),
             Value::Timestamp(v) => write!(f, "'{}'", v),
             Value::Null => write!(f, "NULL"),
+            Value::Enum(_, v) => write!(f, "'{}'", v.replace("'", "''")),
+            Value::StringArray(v) => {
+                let array_str = v
+                    .iter()
+                    .map(|s| format!("\"{}\"", s.replace('\"', "\\\"")))
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                write!(f, "'{{{}}}'", array_str)
+            }
         }
     }
 }

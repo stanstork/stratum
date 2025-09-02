@@ -1,11 +1,11 @@
 use crate::{
     add_joins, add_where, ident, join_on_expr,
-    metadata::table::TableMetadata,
+    metadata::{column::ColumnMetadata, table::TableMetadata},
     query::{column::ColumnDef, fk::ForeignKeyDef},
     requests::FetchRowsRequest,
     sql_filter_expr,
 };
-use common::{row_data::RowData, value::Value};
+use common::{row_data::RowData, types::DataType, value::Value};
 use query_builder::{
     ast::{common::TypeName, expr::Expr},
     build::{
@@ -81,14 +81,14 @@ impl<'a> QueryGenerator<'a> {
                 .collect();
 
             // Map the ordered column names to their corresponding values for the current row
-            let ordered_values: Vec<Expr> = col_names
+            let ordered_values: Vec<Expr> = sorted_columns
                 .iter()
-                .map(|col_name| {
+                .map(|col_meta| {
                     let value = field_map
-                        .get(&col_name.to_lowercase())
+                        .get(&col_meta.name.to_lowercase())
                         .cloned()
-                        .unwrap_or(Value::Null); // Use NULL if a value isn't present for a column.
-                    Expr::Value(value)
+                        .unwrap_or(Value::Null);
+                    map_value_to_expr(value, col_meta)
                 })
                 .collect();
 
@@ -198,5 +198,36 @@ impl<'a> QueryGenerator<'a> {
         let mut renderer = Renderer::new(self.dialect);
         ast.render(&mut renderer);
         renderer.finish()
+    }
+}
+
+/// Maps a `Value` to a query `Expr` based on column metadata.
+///
+/// This function contains all the specific logic for handling different data types,
+/// like casting enums or parsing string representations of arrays.
+fn map_value_to_expr(value: Value, col_meta: &ColumnMetadata) -> Expr {
+    match col_meta.data_type {
+        // For array types, check if the value is already an array or if it's a
+        // string that needs to be parsed.
+        DataType::Array => {
+            let string_array = match value {
+                Value::String(s) => s.split(',').map(|item| item.trim().to_string()).collect(),
+                Value::StringArray(arr) => arr,
+                _ => vec![], // Default to an empty array if the type is unexpected
+            };
+            Expr::Value(Value::StringArray(string_array))
+        }
+
+        // For custom types like enums, wrap the value in a CAST expression.
+        DataType::Custom(_) => match value {
+            Value::Enum(n, v) => Expr::Cast {
+                expr: Box::new(Expr::Value(Value::String(v))),
+                data_type: n, // Use the enum name as the SQL type
+            },
+            _ => Expr::Value(value),
+        },
+
+        // For all other standard data types, just use the value directly.
+        _ => Expr::Value(value),
     }
 }

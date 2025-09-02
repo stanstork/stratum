@@ -131,6 +131,8 @@ fn eval_function(name: &str, args: &[Value]) -> Option<Value> {
                     Value::Bytes(b) => String::from_utf8_lossy(b).to_string(),
                     Value::Json(v) => v.to_string(),
                     Value::Null => "NULL".to_string(),
+                    Value::Enum(_, v) => v.clone(),
+                    Value::StringArray(v) => format!("{:?}", v),
                 })
                 .collect::<Vec<_>>()
                 .join("");
