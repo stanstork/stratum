@@ -1,7 +1,8 @@
 use super::{context::SchemaSettingContext, phase::MigrationSettingsPhase, MigrationSetting};
 use crate::{
     context::item::ItemContext, destination::Destination, error::MigrationError,
-    metadata::entity::EntityMetadata, source::Source, state::MigrationState,
+    metadata::entity::EntityMetadata, report::validation::SchemaWarning, source::Source,
+    state::MigrationState,
 };
 use async_trait::async_trait;
 use common::mapping::EntityMapping;
@@ -22,6 +23,18 @@ impl MigrationSetting for CreateMissingTablesSetting {
     async fn apply(&self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
         // If the table already exists, bail out
         if self.context.destination_exists().await? {
+            let mut state = self.context.state.lock().await;
+            if let Some(report) = state.validation_report.as_mut() {
+                report
+                    .schema_analysis
+                    .destination_warnings
+                    .push(SchemaWarning {
+                        code: "ACTION_SKIPPED_TABLE_EXISTS".to_string(),
+                        message: format!("Destination table '{}' already exists. The CREATE TABLE step will be skipped.", self.context.destination.name),
+                        column: None,
+                    });
+            }
+
             info!("Destination table already exists; skipping schema creation.");
             return Ok(());
         }

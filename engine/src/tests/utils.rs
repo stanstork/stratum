@@ -80,7 +80,7 @@ pub enum DbType {
 pub async fn run_smql(template: &str, source_db: &str) {
     let smql = templated_smql(template, source_db);
     let plan = parse(&smql).expect("parse smql");
-    run(plan).await.expect("migration ran");
+    run(plan, false).await.expect("migration ran");
 }
 
 /// Assert that a table exists (or not) in Postgres

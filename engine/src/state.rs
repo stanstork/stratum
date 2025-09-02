@@ -1,6 +1,7 @@
+use crate::report::validation::ValidationReport;
 use smql::statements::setting::{CopyColumns, Settings};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MigrationState {
     pub batch_size: usize,
     pub ignore_constraints: bool,
@@ -9,19 +10,16 @@ pub struct MigrationState {
     pub create_missing_tables: bool,
     pub cascade_schema: bool,
     pub copy_columns: CopyColumns,
+    pub is_validation_run: bool,
+    pub validation_report: Option<ValidationReport>,
 }
 
 impl MigrationState {
-    pub fn new() -> Self {
-        MigrationState {
-            batch_size: 100,
-            ignore_constraints: false,
-            infer_schema: false,
-            create_missing_columns: false,
-            create_missing_tables: false,
-            cascade_schema: false,
-            copy_columns: CopyColumns::All,
-        }
+    pub fn new(settings: &Settings, is_validation_run: bool) -> Self {
+        let mut state = Self::from_settings(settings);
+        state.is_validation_run = is_validation_run;
+        state.validation_report = Some(ValidationReport::default());
+        state
     }
 
     pub fn from_settings(settings: &Settings) -> Self {
@@ -33,12 +31,16 @@ impl MigrationState {
             create_missing_tables: settings.create_missing_tables,
             cascade_schema: settings.cascade_schema,
             copy_columns: settings.copy_columns.clone(),
+            is_validation_run: false,
+            validation_report: None,
         }
     }
-}
 
-impl Default for MigrationState {
-    fn default() -> Self {
-        MigrationState::new()
+    pub fn mark_validation_run(&mut self) {
+        self.is_validation_run = true;
+    }
+
+    pub fn set_validation_report(&mut self, report: ValidationReport) {
+        self.validation_report = Some(report);
     }
 }

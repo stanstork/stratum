@@ -25,7 +25,7 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{watch, Mutex};
 use tracing::{error, info};
 
-pub async fn run(plan: MigrationPlan) -> Result<(), MigrationError> {
+pub async fn run(plan: MigrationPlan, dry_run: bool) -> Result<(), MigrationError> {
     info!("Running migration v2");
 
     // Build the shared context
@@ -40,12 +40,8 @@ pub async fn run(plan: MigrationPlan) -> Result<(), MigrationError> {
         let mapping = EntityMapping::new(&mi);
         let source = create_source(&gc, &conn, &mapping, &mi).await?;
         let destination = create_destination(&gc, &conn, &mi).await?;
-        let mut item_ctx = ItemContext::new(
-            source,
-            destination,
-            mapping.clone(),
-            MigrationState::from_settings(&mi.settings),
-        );
+        let state = MigrationState::new(&mi.settings, dry_run);
+        let mut item_ctx = ItemContext::new(source, destination, mapping.clone(), state);
 
         // Apply all settings
         apply_settings(&mut item_ctx, &mi.settings).await?;
@@ -188,6 +184,11 @@ async fn apply_settings(ctx: &mut ItemContext, settings: &Settings) -> Result<()
             setting.apply(ctx).await?;
         }
     }
+
+    let state = ctx.state.lock().await;
+    println!("Report: {:#?}", state.validation_report);
+
+    todo!("Implement validation report handling");
 
     ctx.debug_state().await;
 

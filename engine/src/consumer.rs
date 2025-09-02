@@ -3,7 +3,7 @@ use crate::{
     context::item::ItemContext,
     destination::{data::DataDestination, Destination},
     metrics::Metrics,
-    report::{send_report, FinalReport},
+    report::metrics::{send_report, MetricsReport},
 };
 use common::{
     mapping::EntityMapping,
@@ -146,7 +146,7 @@ impl Consumer {
 
     async fn send_final_report(&self, metrics: &Metrics) {
         let (records_processed, bytes_transferred) = metrics.get_metrics().await;
-        let report = FinalReport::new(records_processed, bytes_transferred, "succeeded".into());
+        let report = MetricsReport::new(records_processed, bytes_transferred, "succeeded".into());
         if let Err(e) = send_report(report.clone()).await {
             error!("Failed to send final report: {}", e);
             let report_json = serde_json::to_string(&report)

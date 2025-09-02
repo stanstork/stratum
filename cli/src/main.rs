@@ -5,7 +5,7 @@ use engine::{
     runner,
 };
 use std::str::FromStr;
-use tracing::Level;
+use tracing::{info, Level};
 
 pub mod commands;
 
@@ -36,7 +36,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 smql::parser::parse(&source).expect("Failed to parse config file")
             };
 
-            runner::run(plan).await?;
+            runner::run(plan, false).await?;
+        }
+        Commands::Validate {
+            config,
+            from_ast,
+            output,
+        } => {
+            info!(
+                "Validating migration config: {}, from_ast: {}, output: {:?}",
+                config, from_ast, output
+            );
+
+            let plan = if from_ast {
+                // If `from_ast` is true, read the config file as a pre-parsed AST
+                let source = read_migration_config(&config).expect("Failed to read config file");
+                serde_json::from_str(&source)
+                    .expect("Failed to deserialize config file into MigrationConfig")
+            } else {
+                // Otherwise, read the config file and parse it
+                let source = read_migration_config(&config).expect("Failed to read config file");
+                smql::parser::parse(&source).expect("Failed to parse config file")
+            };
+
+            runner::run(plan, true).await?;
+
+            todo!("Implement validation report output");
         }
         Commands::Source { command } => match command {
             commands::SourceCommand::Info {

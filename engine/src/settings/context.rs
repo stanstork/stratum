@@ -76,7 +76,7 @@ impl SchemaSettingContext {
             .format
             .intersects(ItemContext::sql_databases())
         {
-            Self::infer_schema(&self.destination.data_dest, &schema_plan).await?;
+            self.infer_schema(&schema_plan).await?;
             return Ok(());
         }
         Err(SettingsError::UnsupportedDestinationFormat(
@@ -106,10 +106,8 @@ impl SchemaSettingContext {
         ))
     }
 
-    async fn infer_schema(
-        dest: &DataDestination,
-        schema_plan: &SchemaPlan<'_>,
-    ) -> Result<(), DbError> {
+    async fn infer_schema(&self, schema_plan: &SchemaPlan<'_>) -> Result<(), DbError> {
+        let mut state = self.state.lock().await;
         let enum_queries = schema_plan.enum_queries().await?;
         let table_queries = schema_plan.table_queries().await;
         let fk_queries = schema_plan.fk_queries();
@@ -121,8 +119,24 @@ impl SchemaSettingContext {
             .cloned();
 
         for query in all_queries {
+            if let Some(report) = state.validation_report.as_mut() {
+                report.generated_queries.ddl.push((query.clone(), None));
+            }
+
+            if state.is_validation_run {
+                info!("Validation run - skipping execution of query: {}", query);
+                continue;
+            }
+
             info!("Executing query: {}", query);
-            if let Err(err) = dest.adapter().await.execute(&query).await {
+            if let Err(err) = self
+                .destination
+                .data_dest
+                .adapter()
+                .await
+                .execute(&query)
+                .await
+            {
                 error!("Failed to execute query: {}\nError: {:?}", query, err);
                 return Err(err);
             }

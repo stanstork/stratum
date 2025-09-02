@@ -16,6 +16,22 @@ pub enum Commands {
         #[command(subcommand)]
         command: SourceCommand,
     },
+    Validate {
+        #[arg(long, help = "Config file path")]
+        config: String,
+
+        #[arg(
+            long,
+            help = "Treat the config file as already parsed AST, skipping parsing step"
+        )]
+        from_ast: bool,
+
+        #[arg(
+            long,
+            help = "If specified, writes the JSON report to this file instead of stdout"
+        )]
+        output: Option<String>,
+    },
     Ast {
         #[arg(long, help = "Config file path")]
         config: String,

@@ -15,7 +15,7 @@ impl MigrationSetting for CopyColumnsSetting {
     async fn apply(&self, ctx: &mut ItemContext) -> Result<(), MigrationError> {
         let mut state = ctx.state.lock().await;
         state.copy_columns = self.0.clone();
-        info!("Batch size setting applied");
+        info!("Copy columns setting applied");
         Ok(())
     }
 }
