@@ -1,6 +1,5 @@
 //! Defines the `Dialect` trait for database-specific SQL syntax.
 
-use crate::ast::create_table::ColumnDef;
 use common::types::DataType;
 
 pub trait Dialect: Send + Sync {
@@ -18,7 +17,7 @@ pub trait Dialect: Send + Sync {
     fn get_placeholder(&self, index: usize) -> String;
 
     /// Renders a generic `DataType` into a database-specific SQL type string.
-    fn render_data_type(&self, col_def: &ColumnDef) -> String;
+    fn render_data_type(&self, data_type: &DataType, max_length: Option<usize>) -> String;
 }
 
 #[derive(Debug, Clone)]
@@ -34,8 +33,8 @@ impl Dialect for Postgres {
         format!("${}", index + 1)
     }
 
-    fn render_data_type(&self, col_def: &ColumnDef) -> String {
-        let type_name = match &col_def.data_type {
+    fn render_data_type(&self, data_type: &DataType, max_length: Option<usize>) -> String {
+        let type_name = match data_type {
             DataType::Decimal => "DECIMAL".into(),
             DataType::Short => "SMALLINT".into(),
             DataType::Long => "INTEGER".into(),
@@ -70,7 +69,7 @@ impl Dialect for Postgres {
             DataType::Custom(name) => name.clone(),
         };
 
-        if let Some(max_len) = col_def.max_length {
+        if let Some(max_len) = max_length {
             format!("{}({})", type_name, max_len)
         } else {
             type_name
@@ -91,8 +90,8 @@ impl Dialect for MySql {
         "?".into()
     }
 
-    fn render_data_type(&self, col_def: &ColumnDef) -> String {
-        let type_name = match &col_def.data_type {
+    fn render_data_type(&self, data_type: &DataType, max_length: Option<usize>) -> String {
+        let type_name = match data_type {
             DataType::Decimal => "DECIMAL".into(),
             DataType::Short => "SMALLINT".into(),
             DataType::Long => "INT".into(),
@@ -127,7 +126,7 @@ impl Dialect for MySql {
             DataType::Custom(name) => name.clone(),
         };
 
-        if let Some(max_len) = col_def.max_length {
+        if let Some(max_len) = max_length {
             format!("{}({})", type_name, max_len)
         } else {
             type_name

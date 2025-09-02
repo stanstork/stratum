@@ -27,8 +27,13 @@ impl CreateTableBuilder {
         self
     }
 
-    pub fn column(self, name: &str, data_type: DataType) -> ColumnBuilder {
-        ColumnBuilder::new(self, name, data_type)
+    pub fn column(
+        self,
+        name: &str,
+        data_type: DataType,
+        max_length: Option<usize>,
+    ) -> ColumnBuilder {
+        ColumnBuilder::new(self, name, data_type, max_length)
     }
 
     pub fn primary_key(mut self, columns: Vec<String>) -> Self {
@@ -49,7 +54,12 @@ pub struct ColumnBuilder {
 }
 
 impl ColumnBuilder {
-    pub fn new(table_builder: CreateTableBuilder, name: &str, data_type: DataType) -> Self {
+    pub fn new(
+        table_builder: CreateTableBuilder,
+        name: &str,
+        data_type: DataType,
+        max_length: Option<usize>,
+    ) -> Self {
         Self {
             table_builder,
             column: ColumnDef {
@@ -58,7 +68,7 @@ impl ColumnBuilder {
                 is_nullable: false, // Columns are NOT NULL by default
                 is_primary_key: false,
                 default_value: None,
-                max_length: None,
+                max_length,
             },
         }
     }
@@ -105,12 +115,12 @@ mod tests {
 
         let ast = builder
             .if_not_exists()
-            .column("id", DataType::IntUnsigned)
+            .column("id", DataType::IntUnsigned, None)
             .primary_key()
             .add()
-            .column("username", DataType::VarChar)
+            .column("username", DataType::VarChar, Some(255))
             .add()
-            .column("is_active", DataType::Boolean)
+            .column("is_active", DataType::Boolean, None)
             .default_value(Expr::Value(Boolean(true)))
             .add()
             .build();

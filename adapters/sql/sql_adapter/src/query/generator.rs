@@ -141,7 +141,8 @@ impl<'a> QueryGenerator<'a> {
         let builder_with_cols = columns.iter().fold(
             CreateTableBuilder::new(table_ref!(table)),
             |builder, col| {
-                let mut col_builder = builder.column(&col.name, col.data_type.clone());
+                let mut col_builder =
+                    builder.column(&col.name, col.data_type.clone(), col.char_max_length);
 
                 // Only add PRIMARY KEY to the column definition if it's the *only* primary key.
                 if primary_keys.len() == 1 && primary_keys[0] == col.name.as_str() {
@@ -216,7 +217,7 @@ fn map_value_to_expr(value: Value, col_meta: &ColumnMetadata) -> Expr {
 
         return Expr::Cast {
             expr: Box::new(Expr::Literal("NULL".to_string())), // Generate the literal NULL keyword
-            data_type: dialect.render_data_type(&col_meta),    // Render the SQL type name
+            data_type: dialect.render_data_type(&col_meta.data_type, col_meta.char_max_length), // Render the SQL type name
         };
     }
 

@@ -39,7 +39,8 @@ impl Render for ColumnDef {
         // Name and Type
         r.sql.push_str(&r.dialect.quote_identifier(&self.name));
         r.sql.push(' ');
-        r.sql.push_str(&r.dialect.render_data_type(self));
+        r.sql
+            .push_str(&r.dialect.render_data_type(&self.data_type, self.max_length));
 
         // Constraints
         if self.is_primary_key {
@@ -146,7 +147,7 @@ mod tests {
         let (sql, _) = renderer.finish();
 
         let expected_sql = r#"CREATE TABLE IF NOT EXISTS "users" (
-	"id" SERIAL PRIMARY KEY NOT NULL,
+	"id" INTEGER PRIMARY KEY NOT NULL,
 	"email" VARCHAR(255) NOT NULL,
 	PRIMARY KEY ("id")
 );"#;
