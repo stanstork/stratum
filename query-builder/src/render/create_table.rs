@@ -39,7 +39,7 @@ impl Render for ColumnDef {
         // Name and Type
         r.sql.push_str(&r.dialect.quote_identifier(&self.name));
         r.sql.push(' ');
-        r.sql.push_str(&r.dialect.render_data_type(&self.data_type));
+        r.sql.push_str(&r.dialect.render_data_type(self));
 
         // Constraints
         if self.is_primary_key {
@@ -124,6 +124,7 @@ mod tests {
                     is_primary_key: true,
                     is_nullable: false,
                     default_value: None,
+                    max_length: None,
                 },
                 ColumnDef {
                     name: "email".to_string(),
@@ -131,6 +132,7 @@ mod tests {
                     is_primary_key: false,
                     is_nullable: false,
                     default_value: None,
+                    max_length: Some(255),
                 },
             ],
             constraints: vec![TableConstraint::PrimaryKey {

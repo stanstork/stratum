@@ -3,8 +3,7 @@ CONNECTIONS(
     DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/testdb")
 );
 MIGRATE(
-    SOURCE(TABLE, film) -> DEST(TABLE, film) [
-        SETTINGS(CREATE_MISSING_TABLES=TRUE,IGNORE_CONSTRAINTS = TRUE),
-        FILTER(film[title] = "CLOCKWORK PARADISE")
+    SOURCE(TABLE, language) -> DEST(TABLE, language) [
+        SETTINGS(CREATE_MISSING_TABLES=TRUE,IGNORE_CONSTRAINTS = TRUE)
     ]
 );

@@ -58,6 +58,7 @@ impl ColumnBuilder {
                 is_nullable: false, // Columns are NOT NULL by default
                 is_primary_key: false,
                 default_value: None,
+                max_length: None,
             },
         }
     }

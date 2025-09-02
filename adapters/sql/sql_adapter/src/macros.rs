@@ -1,14 +1,37 @@
 #[macro_export]
 macro_rules! ident {
     ($field:expr) => {
-        query_builder::ast::expr::Expr::Alias {
-            expr: Box::new(query_builder::ast::expr::Expr::Identifier(
-                query_builder::ast::expr::Ident {
-                    qualifier: Some($field.table.clone()),
-                    name: $field.column.clone(),
-                },
-            )),
-            alias: $field.alias.clone().unwrap(),
+        if $field.is_geometry() {
+            query_builder::ast::expr::Expr::Alias {
+                expr: Box::new(query_builder::ast::expr::Expr::FunctionCall(
+                    query_builder::ast::expr::FunctionCall {
+                        name: "ST_AsBinary".to_string(),
+                        args: vec![query_builder::ast::expr::Expr::Identifier(
+                            query_builder::ast::expr::Ident {
+                                qualifier: Some($field.table.clone()),
+                                name: $field.column.clone(),
+                            },
+                        )],
+                        wildcard: false,
+                    },
+                )),
+                alias: $field.alias.clone().unwrap().clone(),
+            }
+        } else if let Some(alias) = &$field.alias {
+            query_builder::ast::expr::Expr::Alias {
+                expr: Box::new(query_builder::ast::expr::Expr::Identifier(
+                    query_builder::ast::expr::Ident {
+                        qualifier: Some($field.table.clone()),
+                        name: $field.column.clone(),
+                    },
+                )),
+                alias: alias.clone(),
+            }
+        } else {
+            query_builder::ast::expr::Expr::Identifier(query_builder::ast::expr::Ident {
+                qualifier: Some($field.table.clone()),
+                name: $field.column.clone(),
+            })
         }
     };
 

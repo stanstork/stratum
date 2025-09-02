@@ -70,6 +70,7 @@ impl AddColumnBuilder {
                 is_nullable: false,
                 is_primary_key: false, // Cannot add PK via ADD COLUMN
                 default_value: None,
+                max_length: None,
             },
         }
     }

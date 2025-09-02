@@ -49,7 +49,7 @@ fn render_add_column(col: &ColumnDef, r: &mut Renderer) {
     // Name and Type
     r.sql.push_str(&r.dialect.quote_identifier(&col.name));
     r.sql.push(' ');
-    r.sql.push_str(&r.dialect.render_data_type(&col.data_type));
+    r.sql.push_str(&r.dialect.render_data_type(col));
 
     // Constraints
     if !col.is_nullable {
@@ -89,6 +89,7 @@ mod tests {
                     is_nullable: true,
                     is_primary_key: false,
                     default_value: None,
+                    max_length: Some(100),
                 }),
                 AlterTableOperation::ToggleTriggers { enabled: false },
                 AlterTableOperation::ToggleTriggers { enabled: true },

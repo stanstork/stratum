@@ -12,7 +12,7 @@ use query_builder::{
         alter_table::AlterTableBuilder, create_enum::CreateEnumBuilder,
         create_table::CreateTableBuilder, insert::InsertBuilder, select::SelectBuilder,
     },
-    dialect::Dialect,
+    dialect::{self, Dialect},
     render::{Render, Renderer},
     table_ref, value,
 };
@@ -71,6 +71,9 @@ impl<'a> QueryGenerator<'a> {
 
         let mut builder = InsertBuilder::new(table_ref!(meta.name))
             .columns(&col_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+
+        // println!("Rows: {:?}", rows);
+        // println!("Sorted Columns: {:?}", sorted_columns);
 
         for row in rows {
             // Create a HashMap for efficient, case-insensitive lookup of values by column name
@@ -206,6 +209,17 @@ impl<'a> QueryGenerator<'a> {
 /// This function contains all the specific logic for handling different data types,
 /// like casting enums or parsing string representations of arrays.
 fn map_value_to_expr(value: Value, col_meta: &ColumnMetadata) -> Expr {
+    // If the value is NULL, generate a CAST to ensure the database knows the correct type.
+    // This avoids the "expression is of type ..." error for bytea and other columns.
+    if let Value::Null = value {
+        let dialect = dialect::Postgres; // Postgres is only supported for now
+
+        return Expr::Cast {
+            expr: Box::new(Expr::Literal("NULL".to_string())), // Generate the literal NULL keyword
+            data_type: dialect.render_data_type(&col_meta),    // Render the SQL type name
+        };
+    }
+
     match col_meta.data_type {
         // For array types, check if the value is already an array or if it's a
         // string that needs to be parsed.

@@ -19,6 +19,7 @@ pub struct ColumnDef {
     pub is_nullable: bool,
     pub is_primary_key: bool,
     pub default_value: Option<Expr>,
+    pub max_length: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -59,7 +59,7 @@ impl DbRow<'_> {
                 let enum_value = self.try_get_string(name)?;
                 Some(Value::Enum(name.to_string(), enum_value))
             }
-            DataType::Bytea => self.try_get_bytes(name).map(Value::Bytes),
+            DataType::Bytea | DataType::Geometry => self.try_get_bytes(name).map(Value::Bytes),
             DataType::Blob | DataType::TinyBlob | DataType::MediumBlob | DataType::LongBlob => {
                 self.try_get_bytes(name).map(Value::Bytes)
             }

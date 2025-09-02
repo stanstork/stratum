@@ -24,6 +24,9 @@ pub enum Expr {
         expr: Box<Expr>,
         data_type: String, // The name of the SQL data type
     },
+
+    /// A raw SQL literal, e.g., `NULL` or `CURRENT_TIMESTAMP`.
+    Literal(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

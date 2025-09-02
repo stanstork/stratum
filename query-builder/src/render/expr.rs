@@ -22,6 +22,9 @@ impl Render for Expr {
                 r.sql.push_str(data_type);
                 r.sql.push(')');
             }
+            Expr::Literal(lit) => {
+                r.sql.push_str(lit);
+            }
         }
     }
 }
