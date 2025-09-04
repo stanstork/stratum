@@ -11,7 +11,7 @@ impl MigrationSetting for IgnoreConstraintsSettings {
         MigrationSettingsPhase::IgnoreConstraints
     }
 
-    async fn apply(&self, ctx: &mut ItemContext) -> Result<(), MigrationError> {
+    async fn apply(&mut self, ctx: &mut ItemContext) -> Result<(), MigrationError> {
         let mut state = ctx.state.lock().await;
         state.ignore_constraints = self.0;
         info!("Ignore constraints setting applied");

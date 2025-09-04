@@ -3,7 +3,8 @@ CONNECTIONS(
     DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/testdb")
 );
 MIGRATE(
-    SOURCE(TABLE, language) -> DEST(TABLE, language) [
-        SETTINGS(CREATE_MISSING_TABLES=TRUE,IGNORE_CONSTRAINTS = TRUE)
-    ]
-);
+                SOURCE(TABLE, actor) -> DEST(TABLE, actor) [
+                    SETTINGS(CREATE_MISSING_COLUMNS=TRUE),
+                    MAP(CONCAT(actor[first_name], actor[last_name]) -> full_name)
+                ]
+            );

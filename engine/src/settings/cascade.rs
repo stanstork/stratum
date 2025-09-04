@@ -39,7 +39,7 @@ impl MigrationSetting for CascadeSchemaSetting {
         )
     }
 
-    async fn apply(&self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
+    async fn apply(&mut self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
         // Handle source metadata & cascade‐joins
         self.apply_source().await?;
 
@@ -58,14 +58,14 @@ impl MigrationSetting for CascadeSchemaSetting {
 }
 
 impl CascadeSchemaSetting {
-    pub fn new(
+    pub async fn new(
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
         state: &Arc<Mutex<MigrationState>>,
     ) -> Self {
         Self {
-            context: SchemaSettingContext::new(src, dest, mapping, state),
+            context: SchemaSettingContext::new(src, dest, mapping, state).await,
         }
     }
 

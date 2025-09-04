@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     context::item::ItemContext,
-    destination::{data::DataDestination, Destination},
+    destination::Destination,
     error::MigrationError,
     expr::types::ExpressionWrapper,
     metadata::{entity::EntityMetadata, field::FieldMetadata},
@@ -29,7 +29,7 @@ impl MigrationSetting for CreateMissingColumnsSetting {
         MigrationSettingsPhase::CreateMissingColumns
     }
 
-    async fn apply(&self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
+    async fn apply(&mut self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
         let dest_name = self.context.destination.name.clone();
         let dest_meta = self
             .context
@@ -65,7 +65,7 @@ impl MigrationSetting for CreateMissingColumnsSetting {
 
 impl CreateMissingColumnsSetting {
     async fn add_columns(
-        &self,
+        &mut self,
         table: &str,
         source_meta: &EntityMetadata,
         dest_meta: &TableMetadata,
@@ -78,7 +78,10 @@ impl CreateMissingColumnsSetting {
                         SettingsError::MissingSourceColumn(format!("{} not in source", src_col))
                     })?;
                     let def = create_column_def(&dst_col, &type_conv, &meta);
-                    self.add_column(table, &def).await?;
+                    self.context
+                        .schema_manager
+                        .add_column(&self.context.destination, table, &def)
+                        .await?;
                 }
             }
         }
@@ -86,7 +89,7 @@ impl CreateMissingColumnsSetting {
     }
 
     async fn add_computed_columns(
-        &self,
+        &mut self,
         table: &str,
         source_meta: &EntityMetadata,
         dest_meta: &TableMetadata,
@@ -112,35 +115,31 @@ impl CreateMissingColumnsSetting {
                     };
                     let data_type = col_type.ok_or_else(|| {
                         SettingsError::DataTypeInference(format!(
-                            "Couldn’t infer type for {}",
+                            "Couldn't infer type for {}",
                             comp.name
                         ))
                     })?;
                     let def = ColumnDef::from_computed(&comp.name, &data_type);
-                    self.add_column(table, &def).await?;
+                    self.context
+                        .schema_manager
+                        .add_column(&self.context.destination, table, &def)
+                        .await?;
                 }
             }
         }
         Ok(())
     }
-
-    /// issue the ALTER TABLE … ADD COLUMN statement
-    async fn add_column(&self, table: &str, column: &ColumnDef) -> Result<(), SettingsError> {
-        let DataDestination::Database(db) = &self.context.destination.data_dest;
-        db.lock().await.add_column(table, column).await?;
-        Ok(())
-    }
 }
 
 impl CreateMissingColumnsSetting {
-    pub fn new(
+    pub async fn new(
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
         state: &Arc<Mutex<MigrationState>>,
     ) -> Self {
         Self {
-            context: SchemaSettingContext::new(src, dest, mapping, state),
+            context: SchemaSettingContext::new(src, dest, mapping, state).await,
         }
     }
 }

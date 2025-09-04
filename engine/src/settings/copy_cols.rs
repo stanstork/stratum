@@ -12,7 +12,7 @@ impl MigrationSetting for CopyColumnsSetting {
         MigrationSettingsPhase::BatchSize
     }
 
-    async fn apply(&self, ctx: &mut ItemContext) -> Result<(), MigrationError> {
+    async fn apply(&mut self, ctx: &mut ItemContext) -> Result<(), MigrationError> {
         let mut state = ctx.state.lock().await;
         state.copy_columns = self.0.clone();
         info!("Copy columns setting applied");

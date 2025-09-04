@@ -1,7 +1,7 @@
 use super::{context::SchemaSettingContext, phase::MigrationSettingsPhase, MigrationSetting};
 use crate::{
     context::item::ItemContext, destination::Destination, error::MigrationError,
-    metadata::entity::EntityMetadata, report::validation::SchemaWarning, source::Source,
+    metadata::entity::EntityMetadata, report::validation::SchemaAction, source::Source,
     state::MigrationState,
 };
 use async_trait::async_trait;
@@ -20,24 +20,24 @@ impl MigrationSetting for CreateMissingTablesSetting {
         MigrationSettingsPhase::CreateMissingTables
     }
 
-    async fn apply(&self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
+    async fn apply(&mut self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
         // If the table already exists, bail out
-        if self.context.destination_exists().await? {
-            let mut state = self.context.state.lock().await;
-            if let Some(report) = state.validation_report.as_mut() {
-                report
-                    .schema_analysis
-                    .destination_warnings
-                    .push(SchemaWarning {
-                        code: "ACTION_SKIPPED_TABLE_EXISTS".to_string(),
-                        message: format!("Destination table '{}' already exists. The CREATE TABLE step will be skipped.", self.context.destination.name),
-                        column: None,
-                    });
-            }
+        // if self.context.destination_exists().await? {
+        //     let mut state = self.context.state.lock().await;
+        //     if let Some(report) = state.validation_report.as_mut() {
+        //         report
+        //             .schema_analysis
+        //             .destination_warnings
+        //             .push(SchemaAction {
+        //                 code: "ACTION_SKIPPED_TABLE_EXISTS".to_string(),
+        //                 message: format!("Destination table '{}' already exists. The CREATE TABLE step will be skipped.", self.context.destination.name),
+        //                 column: None,
+        //             });
+        //     }
 
-            info!("Destination table already exists; skipping schema creation.");
-            return Ok(());
-        }
+        //     info!("Destination table already exists; skipping schema creation.");
+        //     return Ok(());
+        // }
 
         // Resolve source name from the destination
         let dest_name = &self.context.destination.name;
@@ -94,14 +94,14 @@ impl MigrationSetting for CreateMissingTablesSetting {
 }
 
 impl CreateMissingTablesSetting {
-    pub fn new(
+    pub async fn new(
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
         state: &Arc<Mutex<MigrationState>>,
     ) -> Self {
         Self {
-            context: SchemaSettingContext::new(src, dest, mapping, state),
+            context: SchemaSettingContext::new(src, dest, mapping, state).await,
         }
     }
 }

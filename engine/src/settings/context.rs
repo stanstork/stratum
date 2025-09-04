@@ -4,6 +4,7 @@ use crate::{
     destination::{data::DataDestination, Destination},
     metadata::field::FieldMetadata,
     schema::{plan::SchemaPlan, types::TypeEngine},
+    settings::schema_manager::{LiveSchemaManager, SchemaManager, ValidationSchemaManager},
     source::{data::DataSource, Source},
     state::MigrationState,
 };
@@ -23,20 +24,31 @@ pub struct SchemaSettingContext {
     pub destination: Destination,
     pub mapping: EntityMapping,
     pub state: Arc<Mutex<MigrationState>>,
+    pub schema_manager: Box<dyn SchemaManager>,
 }
 
 impl SchemaSettingContext {
-    pub fn new(
+    pub async fn new(
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
         state: &Arc<Mutex<MigrationState>>,
     ) -> Self {
+        let schema_manager: Box<dyn SchemaManager + Send> = if state.lock().await.is_validation_run
+        {
+            Box::new(ValidationSchemaManager {
+                report: state.lock().await.get_validation_report(),
+            })
+        } else {
+            Box::new(LiveSchemaManager)
+        };
+
         Self {
             source: src.clone(),
             destination: dest.clone(),
             mapping: mapping.clone(),
             state: state.clone(),
+            schema_manager,
         }
     }
 
@@ -119,9 +131,9 @@ impl SchemaSettingContext {
             .cloned();
 
         for query in all_queries {
-            if let Some(report) = state.validation_report.as_mut() {
-                report.generated_queries.ddl.push((query.clone(), None));
-            }
+            // if let Some(report) = state.validation_report.lock().await.as_mut() {
+            //     report.generated_queries.ddl.push((query.clone(), None));
+            // }
 
             if state.is_validation_run {
                 info!("Validation run - skipping execution of query: {}", query);

@@ -11,7 +11,7 @@ pub enum ValidationStatus {
 }
 
 #[derive(Serialize, Debug, Clone)]
-pub struct SchemaWarning {
+pub struct SchemaAction {
     pub code: String,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -32,9 +32,11 @@ pub struct ValidationSummary {
 #[derive(Serialize, Debug, Clone, Default)]
 pub struct SchemaAnalysis {
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub source_warnings: Vec<SchemaWarning>,
+    pub source_warnings: Vec<SchemaAction>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub destination_warnings: Vec<SchemaWarning>,
+    pub destination_warnings: Vec<SchemaAction>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<SchemaAction>,
 }
 
 #[derive(Serialize, Debug, Clone, Default)]

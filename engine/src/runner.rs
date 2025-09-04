@@ -178,8 +178,8 @@ async fn create_destination(
 async fn apply_settings(ctx: &mut ItemContext, settings: &Settings) -> Result<(), MigrationError> {
     info!("Applying migration settings");
 
-    let settings = collect_settings(settings, ctx);
-    for setting in settings.iter() {
+    let mut settings = collect_settings(settings, ctx).await;
+    for setting in settings.iter_mut() {
         if setting.can_apply(ctx) {
             setting.apply(ctx).await?;
         }
