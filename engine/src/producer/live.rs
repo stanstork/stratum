@@ -1,6 +1,7 @@
 use crate::{
     buffer::SledBuffer,
     context::item::ItemContext,
+    producer::DataProducer,
     source::Source,
     transform::{
         computed::ComputedTransform,
@@ -8,11 +9,12 @@ use crate::{
         pipeline::{TransformPipeline, TransformPipelineExt},
     },
 };
+use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::{watch::Sender, Mutex};
 use tracing::{error, info};
 
-pub struct Producer {
+pub struct LiveProducer {
     buffer: Arc<SledBuffer>,
     source: Source,
     pipeline: TransformPipeline,
@@ -20,9 +22,8 @@ pub struct Producer {
     batch_size: usize,
 }
 
-impl Producer {
-    pub async fn new(ctx: Arc<Mutex<ItemContext>>, sender: Sender<bool>) -> Self {
-        let ctx = ctx.lock().await;
+impl LiveProducer {
+    pub async fn new(ctx: &ItemContext, sender: Sender<bool>) -> Self {
         let buffer = Arc::clone(&ctx.buffer);
         let source = ctx.source.clone();
 
@@ -39,7 +40,7 @@ impl Producer {
                 ComputedTransform::new(ctx.mapping.clone())
             });
 
-        let batch_size = ctx.state.lock().await.batch_size;
+        let batch_size = ctx.state.lock().await.batch_size();
 
         Self {
             buffer,
@@ -49,18 +50,11 @@ impl Producer {
             pipeline,
         }
     }
+}
 
-    pub fn spawn(self) -> tokio::task::JoinHandle<()> {
-        tokio::spawn(async move {
-            let batch_number = self.run().await;
-            info!(
-                "Producer finished after processing {} batches",
-                batch_number - 1
-            );
-        })
-    }
-
-    async fn run(self) -> usize {
+#[async_trait]
+impl DataProducer for LiveProducer {
+    async fn run(&mut self) -> usize {
         let mut offset = 0; //self.buffer.read_last_offset();
         let mut batch_number = 1;
 

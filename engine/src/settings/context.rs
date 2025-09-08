@@ -12,12 +12,10 @@ use common::{mapping::EntityMapping, types::DataType};
 use smql::statements::setting::CopyColumns;
 use sql_adapter::{
     adapter::SqlAdapter,
-    error::db::DbError,
     metadata::{column::ColumnMetadata, table::TableMetadata},
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info};
 
 pub struct SchemaSettingContext {
     pub source: Source,
@@ -34,13 +32,18 @@ impl SchemaSettingContext {
         mapping: &EntityMapping,
         state: &Arc<Mutex<MigrationState>>,
     ) -> Self {
-        let schema_manager: Box<dyn SchemaManager + Send> = if state.lock().await.is_validation_run
-        {
+        let is_validation = state.lock().await.is_validation_run;
+
+        let schema_manager: Box<dyn SchemaManager + Send> = if is_validation {
+            // The validation manager is created for dry-run validation runs.
             Box::new(ValidationSchemaManager {
                 report: state.lock().await.get_validation_report(),
             })
         } else {
-            Box::new(LiveSchemaManager)
+            // The live manager is created for a real migration run.
+            Box::new(LiveSchemaManager {
+                destination: Arc::new(Mutex::new(dest.clone())),
+            })
         };
 
         Self {
@@ -80,15 +83,15 @@ impl SchemaSettingContext {
     }
 
     pub async fn apply_to_destination(
-        &self,
-        schema_plan: SchemaPlan<'_>,
+        &mut self,
+        schema_plan: SchemaPlan,
     ) -> Result<(), SettingsError> {
         if self
             .destination
             .format
             .intersects(ItemContext::sql_databases())
         {
-            self.infer_schema(&schema_plan).await?;
+            self.schema_manager.infer_schema(&schema_plan).await?;
             return Ok(());
         }
         Err(SettingsError::UnsupportedDestinationFormat(
@@ -96,7 +99,7 @@ impl SchemaSettingContext {
         ))
     }
 
-    pub async fn build_schema_plan(&self) -> Result<SchemaPlan<'_>, SettingsError> {
+    pub async fn build_schema_plan(&self) -> Result<SchemaPlan, SettingsError> {
         let ignore_constraints = self.state.lock().await.ignore_constraints;
         let mapped_columns_only = self.state.lock().await.copy_columns == CopyColumns::MapOnly;
         let source = self.source.primary.clone();
@@ -104,9 +107,9 @@ impl SchemaSettingContext {
         let type_engine = TypeEngine::new(
             source.clone(),
             // converter
-            &|meta: &FieldMetadata| -> (DataType, Option<usize>) { meta.pg_type() },
+            Box::new(|meta: &FieldMetadata| -> (DataType, Option<usize>) { meta.pg_type() }),
             // extractor
-            &|meta: &TableMetadata| -> Vec<ColumnMetadata> { TableMetadata::enums(meta) },
+            Box::new(|meta: &TableMetadata| -> Vec<ColumnMetadata> { TableMetadata::enums(meta) }),
         );
 
         Ok(SchemaPlan::new(
@@ -116,45 +119,5 @@ impl SchemaSettingContext {
             mapped_columns_only,
             self.mapping.clone(),
         ))
-    }
-
-    async fn infer_schema(&self, schema_plan: &SchemaPlan<'_>) -> Result<(), DbError> {
-        let mut state = self.state.lock().await;
-        let enum_queries = schema_plan.enum_queries().await?;
-        let table_queries = schema_plan.table_queries().await;
-        let fk_queries = schema_plan.fk_queries();
-
-        let all_queries = enum_queries
-            .iter()
-            .chain(&table_queries)
-            .chain(&fk_queries)
-            .cloned();
-
-        for query in all_queries {
-            // if let Some(report) = state.validation_report.lock().await.as_mut() {
-            //     report.generated_queries.ddl.push((query.clone(), None));
-            // }
-
-            if state.is_validation_run {
-                info!("Validation run - skipping execution of query: {}", query);
-                continue;
-            }
-
-            info!("Executing query: {}", query);
-            if let Err(err) = self
-                .destination
-                .data_dest
-                .adapter()
-                .await
-                .execute(&query)
-                .await
-            {
-                error!("Failed to execute query: {}\nError: {:?}", query, err);
-                return Err(err);
-            }
-        }
-
-        info!("Schema inference completed");
-        Ok(())
     }
 }

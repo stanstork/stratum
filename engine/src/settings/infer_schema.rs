@@ -58,7 +58,7 @@ impl InferSchemaSetting {
         }
     }
 
-    async fn apply_schema(&self) -> Result<(), SettingsError> {
+    async fn apply_schema(&mut self) -> Result<(), SettingsError> {
         let ctx = &self.context;
 
         let adapter = ctx.source_adapter().await?;

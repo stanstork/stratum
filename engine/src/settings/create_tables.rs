@@ -22,22 +22,10 @@ impl MigrationSetting for CreateMissingTablesSetting {
 
     async fn apply(&mut self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
         // If the table already exists, bail out
-        // if self.context.destination_exists().await? {
-        //     let mut state = self.context.state.lock().await;
-        //     if let Some(report) = state.validation_report.as_mut() {
-        //         report
-        //             .schema_analysis
-        //             .destination_warnings
-        //             .push(SchemaAction {
-        //                 code: "ACTION_SKIPPED_TABLE_EXISTS".to_string(),
-        //                 message: format!("Destination table '{}' already exists. The CREATE TABLE step will be skipped.", self.context.destination.name),
-        //                 column: None,
-        //             });
-        //     }
-
-        //     info!("Destination table already exists; skipping schema creation.");
-        //     return Ok(());
-        // }
+        if self.context.destination_exists().await? {
+            info!("Destination table already exists; skipping schema creation.");
+            return Ok(());
+        }
 
         // Resolve source name from the destination
         let dest_name = &self.context.destination.name;

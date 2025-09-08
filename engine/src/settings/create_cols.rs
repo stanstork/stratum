@@ -78,10 +78,7 @@ impl CreateMissingColumnsSetting {
                         SettingsError::MissingSourceColumn(format!("{} not in source", src_col))
                     })?;
                     let def = create_column_def(&dst_col, &type_conv, &meta);
-                    self.context
-                        .schema_manager
-                        .add_column(&self.context.destination, table, &def)
-                        .await?;
+                    self.context.schema_manager.add_column(table, &def).await?;
                 }
             }
         }
@@ -120,10 +117,7 @@ impl CreateMissingColumnsSetting {
                         ))
                     })?;
                     let def = ColumnDef::from_computed(&comp.name, &data_type);
-                    self.context
-                        .schema_manager
-                        .add_column(&self.context.destination, table, &def)
-                        .await?;
+                    self.context.schema_manager.add_column(table, &def).await?;
                 }
             }
         }

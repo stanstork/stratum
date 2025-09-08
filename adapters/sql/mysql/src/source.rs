@@ -85,9 +85,34 @@ impl MySqlDataSource {
             .offset(offset)
             .build()
     }
+}
+
+#[async_trait]
+impl DbDataSource for MySqlDataSource {
+    type Error = DbError;
+
+    async fn fetch(
+        &self,
+        batch_size: usize,
+        offset: Option<usize>,
+    ) -> Result<Vec<RowData>, DbError> {
+        let requests = self.build_fetch_rows_requests(batch_size, offset);
+
+        // fetch & concatenate
+        let mut rows = Vec::new();
+        for req in requests {
+            let mut fetched = self.adapter.fetch_rows(req).await?;
+            rows.append(&mut fetched);
+        }
+        Ok(rows)
+    }
 
     /// Build all requests: primary with join-fields, then the related ones without them.
-    fn build_requests(&self, batch_size: usize, offset: Option<usize>) -> Vec<FetchRowsRequest> {
+    fn build_fetch_rows_requests(
+        &self,
+        batch_size: usize,
+        offset: Option<usize>,
+    ) -> Vec<FetchRowsRequest> {
         let mut reqs = Vec::new();
         let mut processed_tables = HashSet::new();
 
@@ -119,27 +144,6 @@ impl MySqlDataSource {
         }
 
         reqs
-    }
-}
-
-#[async_trait]
-impl DbDataSource for MySqlDataSource {
-    type Error = DbError;
-
-    async fn fetch(
-        &self,
-        batch_size: usize,
-        offset: Option<usize>,
-    ) -> Result<Vec<RowData>, DbError> {
-        let requests = self.build_requests(batch_size, offset);
-
-        // fetch & concatenate
-        let mut rows = Vec::new();
-        for req in requests {
-            let mut fetched = self.adapter.fetch_rows(req).await?;
-            rows.append(&mut fetched);
-        }
-        Ok(rows)
     }
 }
 

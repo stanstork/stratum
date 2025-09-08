@@ -109,6 +109,8 @@ impl Consumer {
         batch_map: &mut HashMap<String, Vec<Record>>,
         tables: &[TableMetadata],
     ) {
+        return; // TEMPORARY: Disable writing to destination
+
         for table in tables.iter() {
             // Get the table name from the map or use the original name if no mapping is found
             // This is needed when the source and destination table names are different

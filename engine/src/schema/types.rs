@@ -20,14 +20,14 @@ pub type TypeConverter = dyn Fn(&FieldMetadata) -> (DataType, Option<usize>) + S
 /// A function that extracts enums from a table’s metadata.
 pub type EnumExtractor = dyn Fn(&TableMetadata) -> Vec<ColumnMetadata> + Send + Sync;
 
-pub struct TypeEngine<'a> {
+pub struct TypeEngine {
     source: DataSource,
 
     /// Function used to convert column types from source to target database format.
-    type_converter: &'a TypeConverter,
+    type_converter: Box<TypeConverter>,
 
     /// Function used to extract enums from table metadata.
-    enum_extractor: &'a EnumExtractor,
+    enum_extractor: Box<EnumExtractor>,
 }
 
 #[async_trait]
@@ -40,11 +40,11 @@ pub trait TypeInferencer {
     ) -> Option<DataType>;
 }
 
-impl<'a> TypeEngine<'a> {
+impl TypeEngine {
     pub fn new(
         source: DataSource,
-        type_converter: &'a TypeConverter,
-        enum_extractor: &'a EnumExtractor,
+        type_converter: Box<TypeConverter>,
+        enum_extractor: Box<EnumExtractor>,
     ) -> Self {
         Self {
             source,
@@ -54,11 +54,11 @@ impl<'a> TypeEngine<'a> {
     }
 
     pub fn type_converter(&self) -> &TypeConverter {
-        self.type_converter
+        self.type_converter.as_ref()
     }
 
     pub fn enum_extractor(&self) -> &EnumExtractor {
-        self.enum_extractor
+        self.enum_extractor.as_ref()
     }
 
     pub async fn infer_computed_type(

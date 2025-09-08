@@ -6,7 +6,7 @@ use crate::{
     error::MigrationError,
     filter::{compiler::FilterCompiler, csv::CsvFilterCompiler, sql::SqlFilterCompiler, Filter},
     metadata::entity::EntityMetadata,
-    producer::Producer,
+    producer::{create_producer, live::LiveProducer, DataProducer},
     settings::collect_settings,
     source::{data::DataSource, linked::LinkedSource, Source},
     state::MigrationState,
@@ -21,7 +21,7 @@ use smql::{
     },
 };
 use sql_adapter::metadata::provider::MetadataProvider;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, usize};
 use tokio::sync::{watch, Mutex};
 use tracing::{error, info};
 
@@ -51,17 +51,21 @@ pub async fn run(plan: MigrationPlan, dry_run: bool) -> Result<(), MigrationErro
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let ctx = Arc::new(Mutex::new(item_ctx));
 
-        let prod = Producer::new(ctx.clone(), shutdown_tx).await.spawn();
+        let mut prod = create_producer(&ctx, shutdown_tx).await;
+        let prod = tokio::spawn(async move { prod.run().await });
+
         let cons = Consumer::new(ctx.clone(), shutdown_rx).await.spawn();
 
         // await both before moving on
         match tokio::try_join!(prod, cons) {
-            Ok(((), ())) => info!("Item {} migrated successfully", mi.destination.name()),
+            Ok((_, ())) => info!("Item {} migrated successfully", mi.destination.name()),
             Err(e) => {
                 error!("Migration item error ({}): {}", mi.destination.name(), e);
                 // decide: return Err(e)?  or continue to next?
             }
         }
+
+        ctx.lock().await.debug_state().await;
 
         info!("Migration item {} completed", mi.destination.name());
     }
@@ -184,11 +188,6 @@ async fn apply_settings(ctx: &mut ItemContext, settings: &Settings) -> Result<()
             setting.apply(ctx).await?;
         }
     }
-
-    let state = ctx.state.lock().await;
-    println!("Report: {:#?}", state.validation_report);
-
-    todo!("Implement validation report handling");
 
     ctx.debug_state().await;
 

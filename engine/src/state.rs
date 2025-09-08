@@ -1,8 +1,11 @@
-use std::sync::Arc;
-
 use crate::report::validation::ValidationReport;
 use smql::statements::setting::{CopyColumns, Settings};
+use std::sync::Arc;
 use tokio::sync::Mutex;
+
+// Batch size used during dry-run validation.
+// TODO: Make this configurable.
+const DRY_RUN_BATCH_SIZE: usize = 10;
 
 #[derive(Debug, Clone)]
 pub struct MigrationState {
@@ -49,5 +52,13 @@ impl MigrationState {
 
     pub fn get_validation_report(&mut self) -> Arc<Mutex<ValidationReport>> {
         Arc::clone(&self.validation_report)
+    }
+
+    pub fn batch_size(&self) -> usize {
+        if self.is_validation_run {
+            DRY_RUN_BATCH_SIZE
+        } else {
+            self.batch_size
+        }
     }
 }

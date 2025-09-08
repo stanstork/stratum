@@ -1,4 +1,4 @@
-use crate::metadata::provider::MetadataHelper;
+use crate::{metadata::provider::MetadataHelper, requests::FetchRowsRequest};
 use async_trait::async_trait;
 use common::row_data::RowData;
 
@@ -11,4 +11,9 @@ pub trait DbDataSource: MetadataHelper + Send + Sync {
         batch_size: usize,
         offset: Option<usize>,
     ) -> Result<Vec<RowData>, Self::Error>;
+    fn build_fetch_rows_requests(
+        &self,
+        batch_size: usize,
+        offset: Option<usize>,
+    ) -> Vec<FetchRowsRequest>;
 }
