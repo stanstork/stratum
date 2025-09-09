@@ -23,31 +23,19 @@ pub struct LiveProducer {
 }
 
 impl LiveProducer {
-    pub async fn new(ctx: &ItemContext, sender: Sender<bool>) -> Self {
-        let buffer = Arc::clone(&ctx.buffer);
-        let source = ctx.source.clone();
-
-        let mut pipeline = TransformPipeline::new();
-
-        pipeline = pipeline
-            .add_if(!ctx.mapping.entity_name_map.is_empty(), || {
-                TableMapper::new(ctx.mapping.entity_name_map.clone())
-            })
-            .add_if(!ctx.mapping.field_mappings.is_empty(), || {
-                FieldMapper::new(ctx.mapping.field_mappings.clone())
-            })
-            .add_if(!ctx.mapping.field_mappings.is_empty(), || {
-                ComputedTransform::new(ctx.mapping.clone())
-            });
-
-        let batch_size = ctx.state.lock().await.batch_size();
-
+    pub fn new(
+        buffer: Arc<SledBuffer>,
+        source: Source,
+        pipeline: TransformPipeline,
+        sender: Sender<bool>,
+        batch_size: usize,
+    ) -> Self {
         Self {
             buffer,
             source,
-            batch_size,
-            shutdown_sender: sender,
             pipeline,
+            shutdown_sender: sender,
+            batch_size,
         }
     }
 }

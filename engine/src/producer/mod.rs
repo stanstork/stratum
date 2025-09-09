@@ -1,7 +1,3 @@
-use async_trait::async_trait;
-use std::sync::Arc;
-use tokio::sync::{watch::Sender, Mutex};
-
 use crate::{
     context::item::ItemContext,
     producer::{live::LiveProducer, validation::ValidationProducer},
@@ -11,6 +7,9 @@ use crate::{
         pipeline::{TransformPipeline, TransformPipelineExt},
     },
 };
+use async_trait::async_trait;
+use std::sync::Arc;
+use tokio::sync::{watch::Sender, Mutex};
 
 pub mod live;
 pub mod validation;
@@ -18,7 +17,6 @@ pub mod validation;
 #[async_trait]
 pub trait DataProducer {
     /// Executes the producer's main loop.
-    /// This method consumes the producer as it's meant to be run once.
     async fn run(&mut self) -> usize;
 }
 
@@ -26,15 +24,64 @@ pub async fn create_producer(
     ctx: &Arc<Mutex<ItemContext>>,
     sender: Sender<bool>,
 ) -> Box<dyn DataProducer + Send> {
-    let context_guard = ctx.lock().await;
-    let state_guard = context_guard.state.lock().await;
+    let is_validation_run = {
+        let ctx_guard = ctx.lock().await;
+        let state = ctx_guard.state.lock().await;
+        state.is_dry_run
+    };
 
-    if state_guard.is_validation_run {
-        // Create and return the ValidationProducer
-        Box::new(ValidationProducer::new(&context_guard, sender).await)
+    if is_validation_run {
+        let (state, source, pipeline) = {
+            let ctx_guard = ctx.lock().await;
+            (
+                ctx_guard.state.clone(),
+                ctx_guard.source.clone(),
+                create_pipeline_from_context(&ctx_guard),
+            )
+        };
+        let sample_size = 10; // TODO: Make this configurable
+
+        Box::new(ValidationProducer::new(
+            state,
+            source,
+            pipeline,
+            sample_size,
+        ))
     } else {
-        // Create and return the LiveProducer
-        Box::new(LiveProducer::new(&context_guard, sender).await)
+        let (buffer, source, pipeline) = {
+            let ctx_guard = ctx.lock().await;
+            let mut pipeline = TransformPipeline::new();
+            let mapping = ctx_guard.mapping.clone();
+
+            pipeline = pipeline
+                .add_if(!mapping.entity_name_map.is_empty(), || {
+                    TableMapper::new(mapping.entity_name_map.clone())
+                })
+                .add_if(!mapping.field_mappings.is_empty(), || {
+                    FieldMapper::new(mapping.field_mappings.clone())
+                })
+                .add_if(!mapping.field_mappings.is_empty(), || {
+                    ComputedTransform::new(mapping.clone())
+                });
+            (
+                Arc::clone(&ctx_guard.buffer),
+                ctx_guard.source.clone(),
+                pipeline,
+            )
+        };
+
+        let batch_size = {
+            let state_arc = {
+                let ctx_guard = ctx.lock().await;
+                ctx_guard.state.clone()
+            };
+            let state = state_arc.lock().await;
+            state.batch_size()
+        };
+
+        Box::new(LiveProducer::new(
+            buffer, source, pipeline, sender, batch_size,
+        ))
     }
 }
 

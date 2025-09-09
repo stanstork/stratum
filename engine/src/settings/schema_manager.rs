@@ -1,10 +1,10 @@
 use crate::{
     destination::{data::DataDestination, Destination},
-    report::validation::{SchemaAction, ValidationReport},
+    report::validation::{DryRunReport, SchemaAction, SqlKind, SqlStatement},
     schema::plan::SchemaPlan,
     settings::error::SettingsError,
 };
-use query_builder::dialect;
+use query_builder::dialect::{self, Dialect};
 use sql_adapter::{
     error::db::DbError,
     query::{column::ColumnDef, generator::QueryGenerator},
@@ -80,34 +80,42 @@ impl SchemaManager for LiveSchemaManager {
 }
 
 pub struct ValidationSchemaManager {
-    pub report: Arc<Mutex<ValidationReport>>,
+    pub report: Arc<Mutex<DryRunReport>>,
 }
 
 #[async_trait::async_trait]
 impl SchemaManager for ValidationSchemaManager {
     async fn add_column(&mut self, table: &str, column: &ColumnDef) -> Result<(), SettingsError> {
-        let mut report = self.report.lock().await;
+        let dialect = dialect::Postgres; // TODO: derive from destination connection
+        let (sql, params) = QueryGenerator::new(&dialect).add_column(table, column.clone());
 
-        // Generate the SQL that would be executed.
-        // TODO: The dialect should be determined from the destination connection.
-        let (sql, _) = QueryGenerator::new(&dialect::Postgres).add_column(table, column.clone());
-
-        report.generated_queries.schema_queries.push((sql, None));
-
-        // Add an informational message to the report about the action.
-        report.schema_analysis.actions.push(SchemaAction {
+        let stmt = SqlStatement {
+            dialect: dialect.name(),
+            kind: SqlKind::Schema,
+            sql,
+            params,
+        };
+        let action = SchemaAction {
             code: "ACTION_ADD_COLUMN".to_string(),
             message: format!(
                 "A new column '{}' will be added to the destination table '{}'.",
                 column.name, table
             ),
-            entity: Some(column.name.clone()),
-        });
+            entity: Some(format!("{}.{}", table, column.name)), // slightly richer context
+        };
+
+        {
+            let mut report = self.report.lock().await;
+            report.generated_sql.statements.push(stmt);
+            report.schema.actions.push(action);
+        }
 
         Ok(())
     }
 
     async fn infer_schema(&mut self, schema_plan: &SchemaPlan) -> Result<(), DbError> {
+        let dialect = dialect::Postgres; // TODO: Determine dialect from destination connection
+
         let enum_queries = schema_plan.enum_queries().await?;
         let table_queries = schema_plan.table_queries().await;
         let fk_queries = schema_plan.fk_queries();
@@ -126,19 +134,28 @@ impl SchemaManager for ValidationSchemaManager {
             )
         });
 
-        let all_actions = enum_actions.chain(table_actions).chain(fk_actions);
-        let mut report = self.report.lock().await;
+        let mut statements =
+            Vec::with_capacity(enum_queries.len() + table_queries.len() + fk_queries.len());
+        let mut actions = Vec::with_capacity(statements.capacity());
 
-        for (code, message, query) in all_actions {
-            report
-                .generated_queries
-                .schema_queries
-                .push((query.0.clone(), None));
-            report.schema_analysis.actions.push(SchemaAction {
+        for (code, message, query) in enum_actions.chain(table_actions).chain(fk_actions) {
+            statements.push(SqlStatement {
+                dialect: dialect.name(),
+                kind: SqlKind::Schema,
+                sql: query.0.clone(),
+                params: vec![],
+            });
+            actions.push(SchemaAction {
                 code: code.to_string(),
                 message: message.to_string(),
                 entity: Some(query.1.clone()),
             });
+        }
+
+        {
+            let mut report = self.report.lock().await;
+            report.generated_sql.statements.extend(statements);
+            report.schema.actions.extend(actions);
         }
 
         Ok(())

@@ -152,7 +152,7 @@ mod tests {
     // - The row count should match between the source and destination tables for all related tables.
     #[traced_test]
     #[tokio::test]
-    // #[ignore = "This test is ignored because it infers a large schema and copies a lot of data, so it takes a long time to run. It should be run manually when needed."]
+    #[ignore = "This test is ignored because it infers a large schema and copies a lot of data, so it takes a long time to run. It should be run manually when needed."]
     async fn tc05() {
         reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;

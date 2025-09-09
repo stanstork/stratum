@@ -8,6 +8,7 @@ use std::str::FromStr;
 use tracing::{info, Level};
 
 pub mod commands;
+pub mod output;
 
 #[derive(Parser)]
 #[command(name = "stratum", version = "0.0.1", about = "Data migration tool")]
@@ -59,9 +60,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 smql::parser::parse(&source).expect("Failed to parse config file")
             };
 
-            runner::run(plan, true).await?;
-
-            todo!("Implement validation report output");
+            let states = runner::run(plan, true).await?;
+            if let Some(path) = output {
+                output::write_report(states, path).await?;
+            }
         }
         Commands::Source { command } => match command {
             commands::SourceCommand::Info {

@@ -1,12 +1,12 @@
 use crate::{
     adapter::Adapter,
-    consumer::Consumer,
+    consumer::create_consumer,
     context::{global::GlobalContext, item::ItemContext},
     destination::{data::DataDestination, Destination},
     error::MigrationError,
     filter::{compiler::FilterCompiler, csv::CsvFilterCompiler, sql::SqlFilterCompiler, Filter},
     metadata::entity::EntityMetadata,
-    producer::{create_producer, live::LiveProducer, DataProducer},
+    producer::create_producer,
     settings::collect_settings,
     source::{data::DataSource, linked::LinkedSource, Source},
     state::MigrationState,
@@ -21,12 +21,18 @@ use smql::{
     },
 };
 use sql_adapter::metadata::provider::MetadataProvider;
-use std::{collections::HashMap, sync::Arc, usize};
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{watch, Mutex};
 use tracing::{error, info};
 
-pub async fn run(plan: MigrationPlan, dry_run: bool) -> Result<(), MigrationError> {
+pub async fn run(
+    plan: MigrationPlan,
+    dry_run: bool,
+) -> Result<HashMap<String, MigrationState>, MigrationError> {
     info!("Running migration v2");
+
+    // Keep track of per-item states
+    let mut states = HashMap::new();
 
     // Build the shared context
     let global_ctx = GlobalContext::new(&plan).await?;
@@ -40,24 +46,25 @@ pub async fn run(plan: MigrationPlan, dry_run: bool) -> Result<(), MigrationErro
         let mapping = EntityMapping::new(&mi);
         let source = create_source(&gc, &conn, &mapping, &mi).await?;
         let destination = create_destination(&gc, &conn, &mi).await?;
-        let state = MigrationState::new(&mi.settings, dry_run);
+        let state = MigrationState::new(&mi.settings, &source, &destination, dry_run).await;
         let mut item_ctx = ItemContext::new(source, destination, mapping.clone(), state);
 
         // Apply all settings
         apply_settings(&mut item_ctx, &mi.settings).await?;
         set_meta(&mut item_ctx).await?;
 
-        // Wire up producer and consumer
+        // Spawn producer & consumer
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let ctx = Arc::new(Mutex::new(item_ctx));
 
         let mut prod = create_producer(&ctx, shutdown_tx).await;
-        let prod = tokio::spawn(async move { prod.run().await });
+        let prod_handle = tokio::spawn(async move { prod.run().await });
 
-        let cons = Consumer::new(ctx.clone(), shutdown_rx).await.spawn();
+        let cons = create_consumer(&ctx, shutdown_rx).await;
+        let cons_handle = tokio::spawn(async move { cons.run().await });
 
         // await both before moving on
-        match tokio::try_join!(prod, cons) {
+        match tokio::try_join!(prod_handle, cons_handle) {
             Ok((_, ())) => info!("Item {} migrated successfully", mi.destination.name()),
             Err(e) => {
                 error!("Migration item error ({}): {}", mi.destination.name(), e);
@@ -66,12 +73,15 @@ pub async fn run(plan: MigrationPlan, dry_run: bool) -> Result<(), MigrationErro
         }
 
         ctx.lock().await.debug_state().await;
-
         info!("Migration item {} completed", mi.destination.name());
+
+        // Store the final state
+        let final_state = ctx.lock().await.state.lock().await.clone();
+        states.insert(mi.destination.name().clone(), final_state);
     }
 
     info!("Migration completed");
-    Ok(())
+    Ok(states)
 }
 
 pub async fn load_src_metadata(

@@ -18,6 +18,9 @@ pub trait Dialect: Send + Sync {
 
     /// Renders a generic `DataType` into a database-specific SQL type string.
     fn render_data_type(&self, data_type: &DataType, max_length: Option<usize>) -> String;
+
+    /// Returns the name of the dialect (e.g., "PostgreSQL", "MySQL").
+    fn name(&self) -> String;
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +78,10 @@ impl Dialect for Postgres {
             type_name
         }
     }
+
+    fn name(&self) -> String {
+        "PostgreSQL".into()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -131,5 +138,9 @@ impl Dialect for MySql {
         } else {
             type_name
         }
+    }
+
+    fn name(&self) -> String {
+        "MySQL".into()
     }
 }

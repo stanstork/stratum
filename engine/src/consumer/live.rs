@@ -1,10 +1,11 @@
 use crate::{
     buffer::SledBuffer,
-    context::item::ItemContext,
+    consumer::DataConsumer,
     destination::{data::DataDestination, Destination},
     metrics::Metrics,
     report::metrics::{send_report, MetricsReport},
 };
+use async_trait::async_trait;
 use common::{
     mapping::EntityMapping,
     record::{DataRecord, Record},
@@ -12,10 +13,10 @@ use common::{
 };
 use sql_adapter::metadata::table::TableMetadata;
 use std::{collections::HashMap, sync::Arc, time::Instant};
-use tokio::sync::{watch::Receiver, Mutex};
+use tokio::sync::watch::Receiver;
 use tracing::{error, info};
 
-pub struct Consumer {
+pub struct LiveConsumer {
     buffer: Arc<SledBuffer>,
     destination: Destination,
     mappings: EntityMapping,
@@ -23,28 +24,9 @@ pub struct Consumer {
     batch_size: usize,
 }
 
-impl Consumer {
-    pub async fn new(ctx: Arc<Mutex<ItemContext>>, receiver: Receiver<bool>) -> Self {
-        let ctx = ctx.lock().await;
-        let buffer = Arc::clone(&ctx.buffer);
-        let destination = ctx.destination.clone();
-        let mappings = ctx.mapping.clone();
-        let batch_size = ctx.state.lock().await.batch_size;
-
-        Self {
-            buffer,
-            destination,
-            mappings,
-            shutdown_receiver: receiver,
-            batch_size,
-        }
-    }
-
-    pub fn spawn(self) -> tokio::task::JoinHandle<()> {
-        tokio::spawn(async move { self.run().await })
-    }
-
-    async fn run(self) {
+#[async_trait]
+impl DataConsumer for LiveConsumer {
+    async fn run(&self) {
         let tables = match &self.destination.data_dest {
             DataDestination::Database(db) => db.lock().await.tables(),
         };
@@ -82,6 +64,24 @@ impl Consumer {
 
         info!("Consumer finished");
     }
+}
+
+impl LiveConsumer {
+    pub fn new(
+        buffer: Arc<SledBuffer>,
+        destination: Destination,
+        mappings: EntityMapping,
+        receiver: Receiver<bool>,
+        batch_size: usize,
+    ) -> Self {
+        Self {
+            buffer,
+            destination,
+            mappings,
+            shutdown_receiver: receiver,
+            batch_size,
+        }
+    }
 
     async fn process_record(
         &self,
@@ -109,7 +109,7 @@ impl Consumer {
         batch_map: &mut HashMap<String, Vec<Record>>,
         tables: &[TableMetadata],
     ) {
-        return; // TEMPORARY: Disable writing to destination
+        // return; // TEMPORARY: Disable writing to destination
 
         for table in tables.iter() {
             // Get the table name from the map or use the original name if no mapping is found
