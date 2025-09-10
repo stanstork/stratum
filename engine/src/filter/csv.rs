@@ -1,9 +1,8 @@
-use std::str::FromStr;
-
 use super::compiler::FilterCompiler;
-use crate::filter::expr_to_string;
+use crate::expr::expr_to_string;
 use csv::filter::{CsvComparator, CsvCondition, CsvFilter, CsvFilterExpr};
 use smql::statements::{self, expr::Expression, filter::FilterExpression};
+use std::str::FromStr;
 
 pub struct CsvFilterCompiler;
 

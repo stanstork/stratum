@@ -61,8 +61,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             let states = runner::run(plan, true).await?;
-            if let Some(path) = output {
-                output::write_report(states, path).await?;
+            match output {
+                Some(path) => output::write_report(states, path).await?,
+                None => output::print_report(states).await?,
             }
         }
         Commands::Source { command } => match command {

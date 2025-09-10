@@ -26,4 +26,9 @@ impl MigrationPlan {
             migration: migration.expect("`MIGRATE` statement is required to build a MigrationPlan"),
         }
     }
+
+    pub fn hash(&self) -> String {
+        let serialized = serde_json::to_string(self).expect("Failed to serialize MigrationPlan");
+        format!("{:x}", md5::compute(serialized))
+    }
 }

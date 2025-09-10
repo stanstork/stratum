@@ -1,4 +1,5 @@
-use super::{compiler::FilterCompiler, expr_to_string};
+use super::compiler::FilterCompiler;
+use crate::expr::expr_to_string;
 use smql::statements::{
     self,
     expr::Expression,

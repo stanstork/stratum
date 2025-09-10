@@ -5,6 +5,6 @@ CONNECTIONS(
 MIGRATE(
                 SOURCE(TABLE, actor) -> DEST(TABLE, actor) [
                     SETTINGS(CREATE_MISSING_COLUMNS=TRUE),
-                    MAP(CONCAT(actor[first_name], " ", actor[last_name]) -> full_name)
+                    MAP(actor_id -> acc_id, CONCAT(actor[first_name], " ", actor[last_name]) -> first_name, actor[first_name] -> acc_id)
                 ]
             );

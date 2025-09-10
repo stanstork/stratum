@@ -13,8 +13,8 @@ pub struct FieldMappings {
 
 #[derive(Clone, Debug, Default)]
 pub struct NameMap {
-    source_to_target: HashMap<String, String>, // old_name -> new_name
-    target_to_source: HashMap<String, String>, // new_name -> old_name
+    pub source_to_target: HashMap<String, String>, // old_name -> new_name
+    pub target_to_source: HashMap<String, String>, // new_name -> old_name
 }
 
 #[derive(Clone, Debug)]

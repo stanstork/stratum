@@ -151,14 +151,78 @@ pub struct DataProfile {
 }
 
 #[derive(Serialize, Debug, Default, Clone)]
+pub struct MappingTotals {
+    pub entities: usize,
+    pub mapped_fields: usize,
+    pub computed_fields: usize,
+    pub lookup_count: usize,
+}
+
+#[derive(Serialize, Debug, Default, Clone)]
+pub struct EntityMappingReport {
+    pub source_entity: String,
+    pub dest_entity: String,
+    pub mapped_fields: usize,
+    pub created_fields: usize, // from computed
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub renames: Vec<FieldRename>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub computed: Vec<ComputedPreview>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub coercions: Vec<CoercionHint>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct FieldRename {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct ComputedPreview {
+    pub name: String,
+    pub expression_preview: String, // pretty-printed/shortened
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct CoercionHint {
+    pub field: String,
+    pub from_type: String,
+    pub to_type: String,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct LookupMappingReport {
+    pub source_entity: String,
+    pub entity: String,
+    pub key: String,
+    pub target: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize, Debug, Default, Clone)]
+pub struct MappingReport {
+    pub totals: MappingTotals,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub entities: Vec<EntityMappingReport>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub lookups: Vec<LookupMappingReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mapping_hash: Option<String>,
+}
+
+#[derive(Serialize, Debug, Default, Clone)]
 pub struct DryRunReport {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub engine_version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub config_hash: Option<String>,
+    pub run_id: String,
+    pub engine_version: String,
+    pub config_hash: String, // hash of the smql config
 
     // content
     pub summary: DryRunSummary,
+    pub mapping: MappingReport,
     pub schema: SchemaReview,
     pub generated_sql: GeneratedSql,
     pub transform: TransformationReport,

@@ -38,7 +38,7 @@ pub async fn run(
     let global_ctx = GlobalContext::new(&plan).await?;
 
     // Run each migration item sequentially
-    for mi in plan.migration.migrate_items {
+    for mi in plan.migration.migrate_items.iter() {
         let gc = global_ctx.clone();
         let conn = plan.connections.clone();
 
@@ -46,7 +46,15 @@ pub async fn run(
         let mapping = EntityMapping::new(&mi);
         let source = create_source(&gc, &conn, &mapping, &mi).await?;
         let destination = create_destination(&gc, &conn, &mi).await?;
-        let state = MigrationState::new(&mi.settings, &source, &destination, dry_run).await;
+        let state = MigrationState::new(
+            &mi.settings,
+            &source,
+            &destination,
+            &mapping,
+            plan.hash(),
+            dry_run,
+        )
+        .await;
         let mut item_ctx = ItemContext::new(source, destination, mapping.clone(), state);
 
         // Apply all settings
@@ -72,7 +80,6 @@ pub async fn run(
             }
         }
 
-        ctx.lock().await.debug_state().await;
         info!("Migration item {} completed", mi.destination.name());
 
         // Store the final state
@@ -199,7 +206,7 @@ async fn apply_settings(ctx: &mut ItemContext, settings: &Settings) -> Result<()
         }
     }
 
-    ctx.debug_state().await;
+    // ctx.debug_state().await;
 
     Ok(())
 }
