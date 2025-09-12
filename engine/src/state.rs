@@ -177,9 +177,11 @@ fn build_mapping_report(mapping: &EntityMapping) -> MappingReport {
         entities.push(EntityMappingReport {
             source_entity: source_entity.clone(),
             dest_entity: dest_entity.clone(),
+            copy_policy: "ALL".to_string(), // TODO: set based on mapping settings
             mapped_fields,
             created_fields,
             renames,
+            omitted_source_columns: Vec::new(), // fill later when we have settings
             computed: computed_prev,
             coercions: Vec::new(), // fill later wehn we have types
             warnings,

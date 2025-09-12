@@ -17,7 +17,7 @@ use smql::{
     statements::{
         connection::{Connection, ConnectionPair, DataFormat},
         migrate::{MigrateItem, SpecKind},
-        setting::Settings,
+        setting::{CopyColumns, Settings},
     },
 };
 use sql_adapter::metadata::provider::MetadataProvider;
@@ -65,7 +65,12 @@ pub async fn run(
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let ctx = Arc::new(Mutex::new(item_ctx));
 
-        let mut prod = create_producer(&ctx, shutdown_tx).await;
+        let mut prod = create_producer(
+            &ctx,
+            shutdown_tx,
+            mi.settings.copy_columns == CopyColumns::MapOnly,
+        )
+        .await;
         let prod_handle = tokio::spawn(async move { prod.run().await });
 
         let cons = create_consumer(&ctx, shutdown_rx).await;

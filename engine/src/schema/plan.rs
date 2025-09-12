@@ -251,6 +251,13 @@ impl SchemaPlan {
         for computed in computed_fields {
             let column_name = &computed.name;
             if metadata.column(column_name).is_some() {
+                warn!(
+                    "Computed field {} conflicts with existing column",
+                    column_name
+                );
+                warn!("Skipping computed field {}", column_name);
+                // TODO: add to documentation
+                warn!("If CopyColumns=MapOnly and the name of the computed field matches an existing column, the computed field will be ignored.");
                 continue;
             }
 

@@ -162,10 +162,18 @@ pub struct MappingTotals {
 pub struct EntityMappingReport {
     pub source_entity: String,
     pub dest_entity: String,
+
+    pub copy_policy: String, // "ALL" | "MAP_ONLY"
+
     pub mapped_fields: usize,
     pub created_fields: usize, // from computed
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub renames: Vec<FieldRename>,
+
+    // When CopyColumns=MapOnly
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub omitted_source_columns: Vec<String>, // ignored in dest
+
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub computed: Vec<ComputedPreview>,
     #[serde(skip_serializing_if = "Vec::is_empty")]

@@ -8,6 +8,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
+use common::mapping;
 use std::sync::Arc;
 use tokio::sync::{watch::Sender, Mutex};
 
@@ -23,6 +24,7 @@ pub trait DataProducer {
 pub async fn create_producer(
     ctx: &Arc<Mutex<ItemContext>>,
     sender: Sender<bool>,
+    mapped_columns_only: bool,
 ) -> Box<dyn DataProducer + Send> {
     let is_validation_run = {
         let ctx_guard = ctx.lock().await;
@@ -40,12 +42,18 @@ pub async fn create_producer(
             )
         };
         let sample_size = 10; // TODO: Make this configurable
+        let mapping = {
+            let ctx_guard = ctx.lock().await;
+            ctx_guard.mapping.clone()
+        };
 
         Box::new(ValidationProducer::new(
             state,
             source,
             pipeline,
+            mapping,
             sample_size,
+            mapped_columns_only,
         ))
     } else {
         let (buffer, source, pipeline) = {
