@@ -29,6 +29,16 @@ pub enum CopyColumns {
     MapOnly,
 }
 
+impl Display for CopyColumns {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            CopyColumns::All => "ALL",
+            CopyColumns::MapOnly => "MAP_ONLY",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 // Constants for settings keys
 const KEY_INFER_SCHEMA: &str = "INFER_SCHEMA";
 const KEY_IGNORE_CONSTRAINTS: &str = "IGNORE_CONSTRAINTS";
