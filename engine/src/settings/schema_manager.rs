@@ -1,6 +1,10 @@
 use crate::{
     destination::{data::DataDestination, Destination},
-    report::validation::{DryRunReport, SchemaAction, SqlKind, SqlStatement},
+    report::{
+        dry_run::DryRunReport,
+        schema::SchemaAction,
+        sql::{SqlKind, SqlStatement},
+    },
     schema::plan::SchemaPlan,
     settings::error::SettingsError,
 };
@@ -89,25 +93,15 @@ impl SchemaManager for ValidationSchemaManager {
         let dialect = dialect::Postgres; // TODO: derive from destination connection
         let (sql, params) = QueryGenerator::new(&dialect).add_column(table, column.clone());
 
-        let stmt = SqlStatement {
-            dialect: dialect.name(),
-            kind: SqlKind::Schema,
-            sql,
-            params,
-        };
-        let action = SchemaAction {
-            code: "ACTION_ADD_COLUMN".to_string(),
-            message: format!(
-                "A new column '{}' will be added to the destination table '{}'.",
-                column.name, table
-            ),
-            entity: Some(format!("{}.{}", table, column.name)), // slightly richer context
-        };
-
         {
             let mut report = self.report.lock().await;
-            report.generated_sql.statements.push(stmt);
-            report.schema.actions.push(action);
+            report
+                .generated_sql
+                .add_statement(&dialect.name(), SqlKind::Schema, &sql, params);
+            report
+                .schema
+                .actions
+                .push(SchemaAction::add_column(table, column.name()));
         }
 
         Ok(())
@@ -122,34 +116,21 @@ impl SchemaManager for ValidationSchemaManager {
 
         let enum_actions = enum_queries
             .iter()
-            .map(|query| ("ACTION_CREATE_ENUM", "An ENUM type will be created.", query));
+            .map(|query| (SchemaAction::create_enum(&query.1), query));
         let table_actions = table_queries
             .iter()
-            .map(|query| ("ACTION_CREATE_TABLE", "A new table will be created.", query));
-        let fk_actions = fk_queries.iter().map(|query| {
-            (
-                "ACTION_ADD_FOREIGN_KEY",
-                "A foreign key constraint will be added.",
-                query,
-            )
-        });
+            .map(|query| (SchemaAction::create_table(&query.1), query));
+        let fk_actions = fk_queries
+            .iter()
+            .map(|query| (SchemaAction::add_foreign_key(&query.1), query));
 
         let mut statements =
             Vec::with_capacity(enum_queries.len() + table_queries.len() + fk_queries.len());
         let mut actions = Vec::with_capacity(statements.capacity());
 
-        for (code, message, query) in enum_actions.chain(table_actions).chain(fk_actions) {
-            statements.push(SqlStatement {
-                dialect: dialect.name(),
-                kind: SqlKind::Schema,
-                sql: query.0.clone(),
-                params: vec![],
-            });
-            actions.push(SchemaAction {
-                code: code.to_string(),
-                message: message.to_string(),
-                entity: Some(query.1.clone()),
-            });
+        for (action, query) in enum_actions.chain(table_actions).chain(fk_actions) {
+            statements.push(SqlStatement::schema_action(&dialect.name(), &query.0));
+            actions.push(action);
         }
 
         {

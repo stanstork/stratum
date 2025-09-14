@@ -18,22 +18,12 @@ pub enum FindingKind {
     Other,
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
-pub struct Location {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub entity: Option<String>, // table / collection
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub field: Option<String>, // column / property
-}
-
 #[derive(Serialize, Debug, Clone)]
 pub struct Finding {
     pub code: String,    // stable programmatic id
     pub message: String, // human-readable
     pub severity: Severity,
     pub kind: FindingKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub location: Option<Location>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suggestion: Option<String>, // how to fix
 }
@@ -55,7 +45,6 @@ impl MappingFinding {
             ),
             severity: Severity::Error,
             kind: FindingKind::SourceSchema,
-            location: None,
             suggestion: Some("Add field mappings for this table or disable `mapped_columns_only`.".into()),
         }
     }
@@ -68,7 +57,6 @@ impl FetchFinding {
             message: format!("Error fetching data: {error_message}"),
             severity: Severity::Error,
             kind: FindingKind::SourceData,
-            location: None,
             suggestion: Some("Check source connectivity and query validity.".into()),
         }
     }
@@ -84,7 +72,6 @@ impl SourceSchemaFinding {
             ),
             severity: Severity::Error,
             kind: FindingKind::SourceSchema,
-            location: None,
             suggestion: Some("Use a database source for validation runs.".into()),
         }
     }

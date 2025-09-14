@@ -46,16 +46,15 @@ pub async fn run(
         let mapping = EntityMapping::new(&mi);
         let source = create_source(&gc, &conn, &mapping, &mi).await?;
         let destination = create_destination(&gc, &conn, &mi).await?;
-        let state = MigrationState::new(
-            &mi.settings,
-            &source,
-            &destination,
-            &mapping,
-            plan.hash(),
+        let state = MigrationState::from_settings(&mi.settings);
+        let mut item_ctx = ItemContext::new(
+            source,
+            destination,
+            mapping.clone(),
+            state,
+            &plan.hash(),
             dry_run,
-        )
-        .await;
-        let mut item_ctx = ItemContext::new(source, destination, mapping.clone(), state);
+        );
 
         // Apply all settings
         apply_settings(&mut item_ctx, &mi.settings).await?;

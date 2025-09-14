@@ -1,4 +1,4 @@
-use engine::{report::validation::DryRunReport, state::MigrationState};
+use engine::{report::dry_run::DryRunReport, state::MigrationState};
 use std::collections::HashMap;
 
 async fn collect_reports(states: HashMap<String, MigrationState>) -> HashMap<String, DryRunReport> {

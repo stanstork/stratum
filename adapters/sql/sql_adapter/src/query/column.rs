@@ -42,4 +42,8 @@ impl ColumnDef {
     pub fn is_array(&self) -> bool {
         self.data_type.to_string().eq_ignore_ascii_case("ARRAY")
     }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
 }

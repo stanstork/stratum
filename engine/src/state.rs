@@ -1,8 +1,8 @@
 use crate::{
     destination::{data::DataDestination, Destination},
     report::{
+        dry_run::{DryRunReport, EndpointType},
         mapping::MappingReport,
-        validation::{DryRunReport, EndpointType},
     },
     source::{data::DataSource, Source},
 };
@@ -25,22 +25,6 @@ pub struct MigrationState {
 }
 
 impl MigrationState {
-    pub async fn new(
-        settings: &Settings,
-        source: &Source,
-        dest: &Destination,
-        mapping: &EntityMapping,
-        config_hash: String,
-        dry_run: bool,
-    ) -> Self {
-        let mut state = Self::from_settings(settings);
-        state.is_dry_run = dry_run;
-        state.dry_run_report = Arc::new(Mutex::new(
-            Self::create_report(source, dest, mapping, &config_hash, settings).await,
-        ));
-        state
-    }
-
     pub fn from_settings(settings: &Settings) -> Self {
         MigrationState {
             batch_size: settings.batch_size,
@@ -55,12 +39,28 @@ impl MigrationState {
         }
     }
 
-    pub fn mark_validation_run(&mut self) {
-        self.is_dry_run = true;
-    }
+    pub async fn mark_dry_run(
+        &mut self,
+        source: &Source,
+        destination: &Destination,
+        mapping: &EntityMapping,
+        config_hash: &str,
+        dry_run: bool,
+    ) {
+        if !dry_run {
+            return;
+        }
 
-    pub fn dry_run_report(&mut self) -> Arc<Mutex<DryRunReport>> {
-        Arc::clone(&self.dry_run_report)
+        let report = Self::create_report(
+            source,
+            destination,
+            mapping,
+            config_hash,
+            &self.copy_columns,
+        )
+        .await;
+        self.is_dry_run = true;
+        self.dry_run_report = Arc::new(Mutex::new(report));
     }
 
     pub fn batch_size(&self) -> usize {
@@ -69,10 +69,10 @@ impl MigrationState {
 
     pub async fn create_report(
         source: &Source,
-        dest: &Destination,
+        destination: &Destination,
         mapping: &EntityMapping,
         config_hash: &str,
-        settings: &Settings,
+        copy_columns: &CopyColumns,
     ) -> DryRunReport {
         let source_endpoint = match &source.primary {
             DataSource::Database(_) => EndpointType::Database {
@@ -81,9 +81,9 @@ impl MigrationState {
             _ => panic!("Unsupported source type for dry run report"),
         };
 
-        let dest_endpoint = match &dest.data_dest {
+        let dest_endpoint = match &destination.data_dest {
             DataDestination::Database(_) => EndpointType::Database {
-                dialect: dest.dialect().name(),
+                dialect: destination.dialect().name(),
             },
         };
 
@@ -95,7 +95,7 @@ impl MigrationState {
         report.summary.source = source_endpoint;
         report.summary.destination = dest_endpoint;
         report.summary.timestamp = chrono::Utc::now();
-        report.mapping = MappingReport::from_mapping(mapping, settings);
+        report.mapping = MappingReport::from_mapping(mapping, copy_columns);
         report
     }
 }

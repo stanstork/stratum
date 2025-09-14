@@ -1,10 +1,10 @@
 use crate::{
     producer::DataProducer,
     report::{
+        dry_run::DryRunStatus,
         finding::{FetchFinding, Finding, MappingFinding, Severity, SourceSchemaFinding},
-        validation::{
-            DryRunStatus, SqlKind, SqlStatement, TransformationRecord, TransformationReport,
-        },
+        sql::{SqlKind, SqlStatement},
+        transform::{TransformationRecord, TransformationReport},
     },
     source::{data::DataSource, Source},
     state::MigrationState,

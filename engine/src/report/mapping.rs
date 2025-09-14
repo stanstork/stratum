@@ -1,10 +1,8 @@
-use std::collections::{HashMap, HashSet};
-
+use crate::expr::expr_to_string;
 use common::mapping::{EntityMapping, LookupField};
 use serde::Serialize;
-use smql::statements::setting::Settings;
-
-use crate::expr::expr_to_string;
+use smql::statements::setting::{CopyColumns, Settings};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Serialize, Debug, Default, Clone)]
 pub struct MappingReport {
@@ -63,7 +61,7 @@ pub struct LookupMappingReport {
 }
 
 impl MappingReport {
-    pub fn from_mapping(mapping: &EntityMapping, settings: &Settings) -> Self {
+    pub fn from_mapping(mapping: &EntityMapping, copy_columns: &CopyColumns) -> Self {
         let mut total_mapped_fields = 0;
         let mut total_computed_fields = 0;
 
@@ -130,7 +128,7 @@ impl MappingReport {
                 EntityMappingReport {
                     source_entity: source_entity.clone(),
                     dest_entity: dest_entity.clone(),
-                    copy_policy: settings.copy_columns.to_string(),
+                    copy_policy: copy_columns.to_string(),
                     mapped_fields: renames.len(),
                     created_fields: computed_prev.len(),
                     renames,
