@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt};
 use uuid::Uuid;
 
+use crate::types::DataType;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Value {
     Int(i64),
@@ -89,12 +91,30 @@ impl Value {
     pub fn equal(&self, other: &Value) -> bool {
         self.compare(other).map_or(false, |o| o == Ordering::Equal)
     }
+
+    pub fn get_data_type(&self) -> DataType {
+        match self {
+            Value::Int(_) => DataType::Int,
+            Value::Float(_) => DataType::Float,
+            Value::String(_) => DataType::String,
+            Value::Boolean(_) => DataType::Boolean,
+            Value::Json(_) => DataType::Json,
+            Value::Uuid(_) => DataType::VarChar, // UUIDs are typically stored as strings
+            Value::Bytes(_) => DataType::Bytea,
+            Value::Date(_) => DataType::Date,
+            Value::Timestamp(_) => DataType::Timestamp,
+            Value::Enum(_, _) => DataType::Enum,
+            Value::StringArray(_) => DataType::Array,
+            Value::Null => DataType::Null,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FieldValue {
     pub name: String,
     pub value: Option<Value>,
+    pub data_type: DataType,
 }
 
 impl fmt::Display for Value {

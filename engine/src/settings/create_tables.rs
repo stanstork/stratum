@@ -72,7 +72,7 @@ impl MigrationSetting for CreateMissingTablesSetting {
         // Set the create missing tables flag to global state
         {
             let mut state = self.context.state.lock().await;
-            state.create_missing_tables = true;
+            state.set_create_missing_tables(true);
         }
 
         info!("Create missing tables setting applied");

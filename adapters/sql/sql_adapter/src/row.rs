@@ -20,15 +20,15 @@ impl DbRow<'_> {
             .columns()
             .iter()
             .map(|column| {
-                let column_type =
-                    DataType::try_from(self.column_type(column)).unwrap_or_else(|_| {
-                        warn!("Unknown column type: {}", self.column_type(column));
-                        DataType::String
-                    });
+                let data_type = DataType::try_from(self.column_type(column)).unwrap_or_else(|_| {
+                    warn!("Unknown column type: {}", self.column_type(column));
+                    DataType::String
+                });
 
                 FieldValue {
                     name: column.to_string(),
-                    value: self.get_value(column_type, column),
+                    value: self.get_value(data_type.clone(), column),
+                    data_type,
                 }
             })
             .collect();

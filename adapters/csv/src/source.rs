@@ -83,6 +83,7 @@ impl FileDataSource for CsvDataSource {
                         fields.push(FieldValue {
                             name: col_meta.name.clone(),
                             value,
+                            data_type: col_meta.data_type.clone(),
                         });
                     }
 

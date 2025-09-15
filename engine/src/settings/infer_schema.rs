@@ -38,7 +38,7 @@ impl MigrationSetting for InferSchemaSetting {
         // Set the infer schema flag to global state
         {
             let mut state = self.context.state.lock().await;
-            state.infer_schema = true;
+            state.set_infer_schema(true);
         }
 
         info!("Infer schema setting applied");

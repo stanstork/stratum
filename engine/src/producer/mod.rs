@@ -8,11 +8,12 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use common::mapping;
+use smql::statements::setting::CopyColumns;
 use std::sync::Arc;
 use tokio::sync::{watch::Sender, Mutex};
 
 pub mod live;
+pub mod schema_validator;
 pub mod validation;
 
 #[async_trait]
@@ -24,7 +25,6 @@ pub trait DataProducer {
 pub async fn create_producer(
     ctx: &Arc<Mutex<ItemContext>>,
     sender: Sender<bool>,
-    mapped_columns_only: bool,
 ) -> Box<dyn DataProducer + Send> {
     let is_validation_run = {
         let ctx_guard = ctx.lock().await;
@@ -33,27 +33,31 @@ pub async fn create_producer(
     };
 
     if is_validation_run {
-        let (state, source, pipeline) = {
+        let (state, source, destination, pipeline) = {
             let ctx_guard = ctx.lock().await;
             (
                 ctx_guard.state.clone(),
                 ctx_guard.source.clone(),
+                ctx_guard.destination.clone(),
                 create_pipeline_from_context(&ctx_guard),
             )
         };
-        let sample_size = 10; // TODO: Make this configurable
         let mapping = {
             let ctx_guard = ctx.lock().await;
             ctx_guard.mapping.clone()
+        };
+        let settings = {
+            let state_guard = state.lock().await;
+            state_guard.settings.clone()
         };
 
         Box::new(ValidationProducer::new(
             state,
             source,
+            destination,
             pipeline,
             mapping,
-            sample_size,
-            mapped_columns_only,
+            settings,
         ))
     } else {
         let (buffer, source, pipeline) = {

@@ -9,13 +9,7 @@ use tracing::info;
 
 #[derive(Debug, Clone)]
 pub struct MigrationState {
-    pub batch_size: usize,
-    pub ignore_constraints: bool,
-    pub infer_schema: bool,
-    pub create_missing_columns: bool,
-    pub create_missing_tables: bool,
-    pub cascade_schema: bool,
-    pub copy_columns: CopyColumns,
+    pub settings: Settings,
     pub is_dry_run: bool,
     pub dry_run_report: Arc<Mutex<DryRunReport>>,
 }
@@ -23,13 +17,7 @@ pub struct MigrationState {
 impl MigrationState {
     pub fn from_settings(settings: &Settings) -> Self {
         MigrationState {
-            batch_size: settings.batch_size,
-            ignore_constraints: settings.ignore_constraints,
-            infer_schema: settings.infer_schema,
-            create_missing_columns: settings.create_missing_columns,
-            create_missing_tables: settings.create_missing_tables,
-            cascade_schema: settings.cascade_schema,
-            copy_columns: settings.copy_columns.clone(),
+            settings: settings.clone(),
             is_dry_run: false,
             dry_run_report: Arc::new(Mutex::new(DryRunReport::default())),
         }
@@ -37,7 +25,7 @@ impl MigrationState {
 
     /// Configures the migration for a dry run, generating a detailed report.
     pub fn mark_dry_run(&mut self, params: DryRunParams<'_>) -> Result<(), MigrationError> {
-        let report = DryRunReport::new(params, &self.copy_columns)?;
+        let report = DryRunReport::new(params, &self.settings.copy_columns)?;
         self.is_dry_run = true;
         self.dry_run_report = Arc::new(Mutex::new(report));
         info!("Migration marked as dry run.");
@@ -48,7 +36,59 @@ impl MigrationState {
         self.dry_run_report.clone()
     }
 
+    pub fn set_batch_size(&mut self, size: usize) {
+        self.settings.batch_size = size;
+    }
+
     pub fn batch_size(&self) -> usize {
-        self.batch_size
+        self.settings.batch_size
+    }
+
+    pub fn set_cascade(&mut self, cascade: bool) {
+        self.settings.cascade_schema = cascade;
+    }
+
+    pub fn cascade(&self) -> bool {
+        self.settings.cascade_schema
+    }
+
+    pub fn set_copy_columns(&mut self, setting: CopyColumns) {
+        self.settings.copy_columns = setting;
+    }
+
+    pub fn copy_columns(&self) -> CopyColumns {
+        self.settings.copy_columns.clone()
+    }
+
+    pub fn set_infer_schema(&mut self, infer: bool) {
+        self.settings.infer_schema = infer;
+    }
+
+    pub fn infer_schema(&self) -> bool {
+        self.settings.infer_schema
+    }
+
+    pub fn set_ignore_constraints(&mut self, ignore: bool) {
+        self.settings.ignore_constraints = ignore;
+    }
+
+    pub fn ignore_constraints(&self) -> bool {
+        self.settings.ignore_constraints
+    }
+
+    pub fn set_create_missing_columns(&mut self, create: bool) {
+        self.settings.create_missing_columns = create;
+    }
+
+    pub fn create_missing_columns(&self) -> bool {
+        self.settings.create_missing_columns
+    }
+
+    pub fn set_create_missing_tables(&mut self, create: bool) {
+        self.settings.create_missing_tables = create;
+    }
+
+    pub fn create_missing_tables(&self) -> bool {
+        self.settings.create_missing_tables
     }
 }

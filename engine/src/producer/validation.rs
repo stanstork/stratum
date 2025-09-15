@@ -1,8 +1,9 @@
 use crate::{
-    producer::DataProducer,
+    destination::Destination,
+    producer::{schema_validator::DestinationSchemaValidator, DataProducer},
     report::{
         dry_run::DryRunStatus,
-        finding::{FetchFinding, Finding, MappingFinding, Severity, SourceSchemaFinding},
+        finding::{FetchFinding, Finding, MappingFinding, Severity},
         sql::{SqlKind, SqlStatement},
         transform::{TransformationRecord, TransformationReport},
     },
@@ -12,7 +13,9 @@ use crate::{
 };
 use async_trait::async_trait;
 use common::{mapping::EntityMapping, row_data::RowData};
+use csv::settings;
 use query_builder::dialect::{self, Dialect};
+use smql::statements::setting::{self, CopyColumns, Settings};
 use sql_adapter::query::generator::QueryGenerator;
 use std::{
     collections::{HashMap, HashSet},
@@ -34,33 +37,33 @@ struct SampleResult {
 pub struct ValidationProducer {
     state: Arc<Mutex<MigrationState>>,
     source: Source,
+    destination: Destination,
     pipeline: TransformPipeline,
     mapping: EntityMapping,
-    sample_size: usize,
-    mapped_columns_only: bool,
+    settings: Settings,
 }
 
 impl ValidationProducer {
     pub fn new(
         state: Arc<Mutex<MigrationState>>,
         source: Source,
+        destination: Destination,
         pipeline: TransformPipeline,
         mapping: EntityMapping,
-        sample_size: usize,
-        mapped_columns_only: bool,
+        settings: Settings,
     ) -> Self {
         Self {
             state,
             source,
+            destination,
             mapping,
             pipeline,
-            sample_size,
-            mapped_columns_only,
+            settings,
         }
     }
 
     fn is_allowed_output_field(&self, table: &str, field_name: &str) -> Result<bool, Finding> {
-        if !self.mapped_columns_only {
+        if self.settings.copy_columns == CopyColumns::All {
             return Ok(true);
         }
 
@@ -95,7 +98,7 @@ impl ValidationProducer {
         findings: &mut Vec<Finding>,
         omitted: &mut HashMap<String, HashSet<String>>,
     ) {
-        if !self.mapped_columns_only {
+        if self.settings.copy_columns == CopyColumns::All {
             return;
         }
 
@@ -143,11 +146,14 @@ impl ValidationProducer {
     }
 
     /// Fetches a sample of data, applies the transformation pipeline, and prunes unmapped columns.
-    async fn sample_and_transform(&self) -> SampleResult {
+    async fn sample_and_transform(
+        &self,
+        validator: &mut DestinationSchemaValidator,
+    ) -> SampleResult {
         let mut prune_findings = Vec::new();
         let mut omitted_columns: HashMap<String, HashSet<String>> = HashMap::new();
 
-        match self.source.fetch_data(self.sample_size, None).await {
+        match self.source.fetch_data(self.sample_size(), None).await {
             Ok(data) => {
                 let total = data.len();
                 let sample: Vec<TransformationRecord> = data
@@ -162,6 +168,7 @@ impl ValidationProducer {
                                 output_row.entity = input_row.entity.clone();
                             }
                             self.prune_row(output_row, &mut prune_findings, &mut omitted_columns);
+                            validator.validate(output_row);
                         }
 
                         Some(TransformationRecord {
@@ -203,7 +210,7 @@ impl ValidationProducer {
                 let dialect_impl = dialect::MySql; // TODO: Determine dialect from source
                 let generator = QueryGenerator::new(&dialect_impl);
 
-                let requests = db.build_fetch_rows_requests(self.sample_size, None);
+                let requests = db.build_fetch_rows_requests(self.sample_size(), None);
                 let statements = requests
                     .into_iter()
                     .map(|req| {
@@ -224,13 +231,25 @@ impl ValidationProducer {
             ),
         }
     }
+
+    fn sample_size(&self) -> usize {
+        10 // TODO: make configurable
+    }
 }
 
 #[async_trait]
 impl DataProducer for ValidationProducer {
     async fn run(&mut self) -> usize {
+        let mut validator = DestinationSchemaValidator::new(
+            &self.destination,
+            self.mapping.clone(),
+            &self.settings,
+        )
+        .await
+        .expect("Failed to initialize schema validator");
+
         let (statements, prep_findings) = self.generate_sql_statements().await;
-        let sample_result = self.sample_and_transform().await;
+        let sample_result = self.sample_and_transform(&mut validator).await;
 
         let state = self.state.lock().await;
         let mut report = state.dry_run_report.lock().await;
@@ -256,6 +275,11 @@ impl DataProducer for ValidationProducer {
                 entity_report.omitted_source_columns.extend(omitted.clone());
             }
         }
+
+        report
+            .schema_validation
+            .findings
+            .extend(validator.findings());
 
         let has_errors = report
             .summary

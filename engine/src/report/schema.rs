@@ -24,6 +24,12 @@ pub struct SchemaReview {
     pub actions: Vec<SchemaAction>, // actionable changes (e.g., "ADD COLUMN")
 }
 
+#[derive(Serialize, Debug, Default, Clone)]
+pub struct SchemaValidationReport {
+    /// Findings related to schema mismatches between transformed data and the destination.
+    pub findings: Vec<Finding>,
+}
+
 impl SchemaAction {
     pub fn add_column(entity: &str, column: &str) -> Self {
         SchemaAction {

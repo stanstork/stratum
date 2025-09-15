@@ -100,8 +100,8 @@ impl SchemaSettingContext {
     }
 
     pub async fn build_schema_plan(&self) -> Result<SchemaPlan, SettingsError> {
-        let ignore_constraints = self.state.lock().await.ignore_constraints;
-        let mapped_columns_only = self.state.lock().await.copy_columns == CopyColumns::MapOnly;
+        let ignore_constraints = self.state.lock().await.ignore_constraints();
+        let mapped_columns_only = self.state.lock().await.copy_columns() == CopyColumns::MapOnly;
         let source = self.source.primary.clone();
 
         let type_engine = TypeEngine::new(

@@ -49,7 +49,7 @@ impl MigrationSetting for CascadeSchemaSetting {
         // Set the cascade flag to global state
         {
             let mut state = self.context.state.lock().await;
-            state.cascade_schema = true;
+            state.set_cascade(true);
         }
 
         info!("Cascade schema setting applied");

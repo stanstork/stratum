@@ -31,7 +31,7 @@ pub async fn create_consumer(
         let (buffer, destination, mappings, batch_size) = {
             let ctx_guard = ctx.lock().await;
             let mappings = ctx_guard.mapping.clone();
-            let batch_size = ctx_guard.state.lock().await.batch_size;
+            let batch_size = ctx_guard.state.lock().await.batch_size();
 
             (
                 Arc::clone(&ctx_guard.buffer),

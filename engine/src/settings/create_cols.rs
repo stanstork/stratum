@@ -56,7 +56,7 @@ impl MigrationSetting for CreateMissingColumnsSetting {
 
         {
             let mut state = self.context.state.lock().await;
-            state.create_missing_columns = true;
+            state.set_create_missing_columns(true);
         }
 
         Ok(())

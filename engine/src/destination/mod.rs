@@ -53,4 +53,8 @@ impl Destination {
     pub fn dialect(&self) -> Box<dyn dialect::Dialect> {
         Box::new(dialect::Postgres) // Currently only Postgres is supported
     }
+
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
 }

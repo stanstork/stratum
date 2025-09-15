@@ -86,6 +86,7 @@ lazy_static! {
         m.insert("BYTEA", DataType::Bytea);
         m.insert("ARRAY", DataType::Array);
         m.insert("CHARACTER", DataType::Char);
+        m.insert("CHARACTER VARYING", DataType::VarChar);
         m
     };
 }

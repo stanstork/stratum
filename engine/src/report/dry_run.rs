@@ -2,7 +2,10 @@ use crate::{
     destination::{data::DataDestination, Destination},
     error::MigrationError,
     report::{
-        finding::Finding, mapping::MappingReport, schema::SchemaReview, sql::GeneratedSql,
+        finding::Finding,
+        mapping::MappingReport,
+        schema::{SchemaReview, SchemaValidationReport},
+        sql::GeneratedSql,
         transform::TransformationReport,
     },
     source::{data::DataSource, Source},
@@ -63,6 +66,7 @@ pub struct DryRunReport {
     pub schema: SchemaReview,
     pub generated_sql: GeneratedSql,
     pub transform: TransformationReport,
+    pub schema_validation: SchemaValidationReport,
 }
 
 /// A container for the parameters required to generate a dry run report.

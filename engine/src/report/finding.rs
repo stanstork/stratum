@@ -1,13 +1,13 @@
 use serde::Serialize;
 
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Severity {
     Info,
     Warning,
     Error,
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FindingKind {
     SourceSchema, // e.g., nullable mismatch, missing PK
     DestinationSchema,
@@ -18,7 +18,7 @@ pub enum FindingKind {
     Other,
 }
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Finding {
     pub code: String,    // stable programmatic id
     pub message: String, // human-readable
@@ -26,6 +26,28 @@ pub struct Finding {
     pub kind: FindingKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suggestion: Option<String>, // how to fix
+}
+
+impl Finding {
+    pub fn error(code: &str, message: &str) -> Self {
+        Finding {
+            code: code.to_string(),
+            message: message.to_string(),
+            severity: Severity::Error,
+            kind: FindingKind::DestinationSchema,
+            suggestion: None,
+        }
+    }
+
+    pub fn warning(code: &str, message: &str) -> Self {
+        Finding {
+            code: code.to_string(),
+            message: message.to_string(),
+            severity: Severity::Warning,
+            kind: FindingKind::DestinationSchema,
+            suggestion: None,
+        }
+    }
 }
 
 pub struct MappingFinding;
