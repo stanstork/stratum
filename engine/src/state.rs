@@ -1,15 +1,11 @@
 use crate::{
-    destination::{data::DataDestination, Destination},
-    report::{
-        dry_run::{DryRunReport, EndpointType},
-        mapping::MappingReport,
-    },
-    source::{data::DataSource, Source},
+    error::MigrationError,
+    report::dry_run::{DryRunParams, DryRunReport},
 };
-use common::mapping::EntityMapping;
 use smql::statements::setting::{CopyColumns, Settings};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::info;
 
 #[derive(Debug, Clone)]
 pub struct MigrationState {
@@ -39,63 +35,20 @@ impl MigrationState {
         }
     }
 
-    pub async fn mark_dry_run(
-        &mut self,
-        source: &Source,
-        destination: &Destination,
-        mapping: &EntityMapping,
-        config_hash: &str,
-        dry_run: bool,
-    ) {
-        if !dry_run {
-            return;
-        }
-
-        let report = Self::create_report(
-            source,
-            destination,
-            mapping,
-            config_hash,
-            &self.copy_columns,
-        )
-        .await;
+    /// Configures the migration for a dry run, generating a detailed report.
+    pub fn mark_dry_run(&mut self, params: DryRunParams<'_>) -> Result<(), MigrationError> {
+        let report = DryRunReport::new(params, &self.copy_columns)?;
         self.is_dry_run = true;
         self.dry_run_report = Arc::new(Mutex::new(report));
+        info!("Migration marked as dry run.");
+        Ok(())
+    }
+
+    pub fn dry_run_report(&self) -> Arc<Mutex<DryRunReport>> {
+        self.dry_run_report.clone()
     }
 
     pub fn batch_size(&self) -> usize {
         self.batch_size
-    }
-
-    pub async fn create_report(
-        source: &Source,
-        destination: &Destination,
-        mapping: &EntityMapping,
-        config_hash: &str,
-        copy_columns: &CopyColumns,
-    ) -> DryRunReport {
-        let source_endpoint = match &source.primary {
-            DataSource::Database(_) => EndpointType::Database {
-                dialect: source.dialect().name(),
-            },
-            _ => panic!("Unsupported source type for dry run report"),
-        };
-
-        let dest_endpoint = match &destination.data_dest {
-            DataDestination::Database(_) => EndpointType::Database {
-                dialect: destination.dialect().name(),
-            },
-        };
-
-        let mut report = DryRunReport::default();
-
-        report.run_id = uuid::Uuid::new_v4().to_string();
-        report.config_hash = config_hash.to_string();
-        report.engine_version = env!("CARGO_PKG_VERSION").to_string();
-        report.summary.source = source_endpoint;
-        report.summary.destination = dest_endpoint;
-        report.summary.timestamp = chrono::Utc::now();
-        report.mapping = MappingReport::from_mapping(mapping, copy_columns);
-        report
     }
 }

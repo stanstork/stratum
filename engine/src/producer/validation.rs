@@ -220,9 +220,7 @@ impl ValidationProducer {
             }
             _ => (
                 Vec::new(),
-                vec![SourceSchemaFinding::create_unsupported_finding(
-                    self.source.format().to_string(),
-                )],
+                Vec::new(), // No SQL statements for non-database sources
             ),
         }
     }
@@ -237,7 +235,7 @@ impl DataProducer for ValidationProducer {
         let state = self.state.lock().await;
         let mut report = state.dry_run_report.lock().await;
 
-        report.generated_sql.statements = statements;
+        report.generated_sql.statements.extend(statements);
         report.summary.records_sampled = sample_result.records_sampled;
 
         if let Some(tr) = sample_result.transform_report {
@@ -264,8 +262,21 @@ impl DataProducer for ValidationProducer {
             .errors
             .iter()
             .any(|e| e.severity == Severity::Error);
+        let has_warnings = report
+            .mapping
+            .entities
+            .iter()
+            .any(|e| !e.warnings.is_empty())
+            || report
+                .transform
+                .sample
+                .iter()
+                .any(|r| r.warnings.as_ref().map_or(false, |w| !w.is_empty()));
+
         report.summary.status = if has_errors {
             DryRunStatus::Failure
+        } else if has_warnings {
+            DryRunStatus::SuccessWithWarnings
         } else {
             DryRunStatus::Success
         };

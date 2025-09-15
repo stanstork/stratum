@@ -43,13 +43,8 @@ impl ItemContext {
         source: Source,
         destination: Destination,
         mapping: EntityMapping,
-        mut state: MigrationState,
-        config_hash: &str,
-        dry_run: bool,
+        state: MigrationState,
     ) -> Self {
-        // Mark as dry run if applicable
-        state.mark_dry_run(&source, &destination, &mapping, config_hash, dry_run);
-
         let state = Arc::new(Mutex::new(state));
         let buffer = Arc::new(SledBuffer::new(&format!(
             "migration_buffer_{}",

@@ -4,7 +4,12 @@ CONNECTIONS(
 );
 MIGRATE(
     SOURCE(TABLE, actor) -> DEST(TABLE, actor) [
-        SETTINGS(CREATE_MISSING_COLUMNS=TRUE,COPY_COLUMNS=MAP_ONLY),
-        MAP(actor_id -> id, CONCAT(actor[first_name], actor[last_name]) -> full_name)
+        SETTINGS(CREATE_MISSING_TABLES=TRUE,IGNORE_CONSTRAINTS=TRUE,COPY_COLUMNS=MAP_ONLY),
+        MAP(
+            actor_id -> id,
+            last_update -> id,
+            first_name -> full_name,
+            CONCAT(actor[first_name], actor[last_name]) -> full_name
+        )
     ]
 );

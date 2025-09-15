@@ -7,6 +7,7 @@ use crate::{
     filter::{compiler::FilterCompiler, csv::CsvFilterCompiler, sql::SqlFilterCompiler, Filter},
     metadata::entity::EntityMetadata,
     producer::create_producer,
+    report::dry_run::DryRunParams,
     settings::collect_settings,
     source::{data::DataSource, linked::LinkedSource, Source},
     state::MigrationState,
@@ -46,15 +47,19 @@ pub async fn run(
         let mapping = EntityMapping::new(&mi);
         let source = create_source(&gc, &conn, &mapping, &mi).await?;
         let destination = create_destination(&gc, &conn, &mi).await?;
-        let state = MigrationState::from_settings(&mi.settings);
-        let mut item_ctx = ItemContext::new(
-            source,
-            destination,
-            mapping.clone(),
-            state,
-            &plan.hash(),
-            dry_run,
-        );
+        let mut state = MigrationState::from_settings(&mi.settings);
+
+        if dry_run {
+            let dry_run_params = DryRunParams {
+                source: &source,
+                destination: &destination,
+                mapping: &mapping,
+                config_hash: &plan.hash(),
+            };
+            state.mark_dry_run(dry_run_params)?;
+        }
+
+        let mut item_ctx = ItemContext::new(source, destination, mapping.clone(), state);
 
         // Apply all settings
         apply_settings(&mut item_ctx, &mi.settings).await?;
