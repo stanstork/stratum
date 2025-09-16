@@ -151,7 +151,8 @@ impl fmt::Display for Value {
     }
 }
 
-pub trait QueryExt<'q> {
-    /// Binds a slice of `Value` enum to the query.
-    fn bind_values(self, values: &'q [Value]) -> Self;
+impl FieldValue {
+    pub fn value_data_type(&self) -> Option<DataType> {
+        self.value.as_ref().map(|v| v.get_data_type())
+    }
 }

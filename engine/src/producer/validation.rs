@@ -13,9 +13,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use common::{mapping::EntityMapping, row_data::RowData};
-use csv::settings;
 use query_builder::dialect::{self, Dialect};
-use smql::statements::setting::{self, CopyColumns, Settings};
+use smql::statements::setting::{CopyColumns, Settings};
 use sql_adapter::query::generator::QueryGenerator;
 use std::{
     collections::{HashMap, HashSet},
@@ -285,7 +284,12 @@ impl DataProducer for ValidationProducer {
             .summary
             .errors
             .iter()
-            .any(|e| e.severity == Severity::Error);
+            .any(|e| e.severity == Severity::Error)
+            || report
+                .schema_validation
+                .findings
+                .iter()
+                .any(|f| f.severity == Severity::Error);
         let has_warnings = report
             .mapping
             .entities

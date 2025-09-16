@@ -58,7 +58,7 @@ impl JoinSource {
                                     .then(|| lk.target.clone())
                             })
                         {
-                            field.alias = Some(alias);
+                            field.alias = Some(alias.expect("Lookup target should be set"));
                         }
 
                         field

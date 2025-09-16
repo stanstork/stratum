@@ -24,7 +24,7 @@ pub struct LookupField {
     /// The key used for the lookup (e.g., column name).
     pub key: String,
     /// The target field name in the destination entity.
-    pub target: String,
+    pub target: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -240,7 +240,11 @@ impl EntityMapping {
             for computed in computed_list {
                 // collect *all* lookups inside this computed field
                 let mut found = Vec::new();
-                Self::extract_lookups(&computed.expression, &computed.name, &mut found);
+                Self::extract_lookups(
+                    &computed.expression,
+                    &Some(computed.name.clone()),
+                    &mut found,
+                );
 
                 // group them by entity
                 for lf in found {
@@ -253,13 +257,13 @@ impl EntityMapping {
     }
 
     /// Walks `expr` and pushes every `Lookup` it finds into `out`.
-    fn extract_lookups(expr: &Expression, target: &str, out: &mut Vec<LookupField>) {
+    fn extract_lookups(expr: &Expression, target: &Option<String>, out: &mut Vec<LookupField>) {
         match expr {
             Expression::Lookup { entity, key, .. } => {
                 out.push(LookupField {
                     entity: entity.clone(),
                     key: key.clone(),
-                    target: target.to_string(),
+                    target: target.clone(),
                 });
             }
 
@@ -270,7 +274,7 @@ impl EntityMapping {
 
             Expression::FunctionCall { arguments, .. } => {
                 for arg in arguments {
-                    Self::extract_lookups(arg, target, out);
+                    Self::extract_lookups(arg, &None, out);
                 }
             }
 

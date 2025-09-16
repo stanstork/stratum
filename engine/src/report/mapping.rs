@@ -55,7 +55,7 @@ pub struct LookupMappingReport {
     pub source_entity: String,
     pub entity: String,
     pub key: String,
-    pub target: String,
+    pub target: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
 }
@@ -201,11 +201,13 @@ fn lookup_warnings(
         .get(source_entity_key)
     {
         if let Some(nm) = mapping.field_mappings.column_mappings.get(dest_entity) {
-            if nm.source_to_target.values().any(|t| t == &l.target) {
-                w.push(format!(
-                    "Lookup target '{}' collides with a renamed column in '{}'",
-                    l.target, dest_entity
-                ));
+            if let Some(target) = &l.target {
+                if nm.source_to_target.values().any(|t| t == target) {
+                    w.push(format!(
+                        "Lookup target '{}' collides with a renamed column in '{}'",
+                        target, dest_entity
+                    ));
+                }
             }
         }
     }
@@ -218,7 +220,7 @@ fn compute_mapping_hash(mapping: &EntityMapping) -> String {
         entities: Vec<(&'a String, &'a String)>,
         renames: Vec<(&'a String, Vec<(&'a String, &'a String)>)>,
         computed: Vec<(&'a String, Vec<&'a String>)>,
-        lookup_targets: Vec<(&'a String, Vec<&'a String>)>,
+        lookup_targets: Vec<(&'a String, Vec<&'a Option<String>>)>,
     }
 
     let mut entities: Vec<_> = mapping.entity_name_map.source_to_target.iter().collect();

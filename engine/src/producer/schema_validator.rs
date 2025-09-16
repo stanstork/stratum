@@ -4,19 +4,43 @@ use common::{
     row_data::RowData,
     value::{FieldValue, Value},
 };
-use smql::statements::setting::Settings;
+use smql::statements::setting::{CopyColumns, Settings};
 use sql_adapter::{
     error::db::DbError,
-    metadata::{provider::MetadataProvider, table::TableMetadata},
+    metadata::{column::ColumnMetadata, provider::MetadataProvider, table::TableMetadata},
 };
 use std::collections::{HashMap, HashSet};
+
+#[derive(Clone, Copy, Debug)]
+enum TablePolicy {
+    /// Destination table must already exist.
+    RequireExisting,
+    /// Destination table may be created. When creating, how do we treat columns?
+    AllowCreate(NewTableCreation),
+}
+
+#[derive(Clone, Copy, Debug)]
+enum NewTableCreation {
+    /// Create with all columns present in transformed rows.
+    CopyAll,
+    /// Create only mapped/computed columns.
+    MapOnly,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ColumnPolicy {
+    /// Columns must already exist in destination.
+    RequireExisting,
+    /// Missing columns may be created, but only when they're mapped/computed (not arbitrary).
+    AllowCreateIfPlanned,
+}
 
 pub struct DestinationSchemaValidator {
     mapping: EntityMapping,
     schemas: HashMap<String, TableMetadata>,
     findings: HashSet<Finding>,
-    create_missing_tables: bool,
-    create_missing_columns: bool,
+    table_policy: TablePolicy,
+    column_policy: ColumnPolicy,
 }
 
 impl DestinationSchemaValidator {
@@ -29,135 +53,37 @@ impl DestinationSchemaValidator {
         let tables = [destination.name()];
         let meta_graph = MetadataProvider::build_metadata_graph(&*adapter, &tables).await?;
 
+        let table_policy = if settings.create_missing_tables {
+            match settings.copy_columns {
+                CopyColumns::All => TablePolicy::AllowCreate(NewTableCreation::CopyAll),
+                CopyColumns::MapOnly => TablePolicy::AllowCreate(NewTableCreation::MapOnly),
+            }
+        } else {
+            TablePolicy::RequireExisting
+        };
+
+        let column_policy = if settings.create_missing_columns {
+            ColumnPolicy::AllowCreateIfPlanned
+        } else {
+            ColumnPolicy::RequireExisting
+        };
+
         Ok(Self {
             mapping,
             schemas: meta_graph,
             findings: HashSet::new(),
-            create_missing_tables: settings.create_missing_tables,
-            create_missing_columns: settings.create_missing_columns,
+            table_policy,
+            column_policy,
         })
     }
 
     pub fn validate(&mut self, row: &RowData) {
-        let table_name = &row.entity;
-
-        if let Some(table_metadata) = self.schemas.get(table_name) {
-            let row_field_names: HashSet<_> = row.field_values.iter().map(|f| &f.name).collect();
-
-            // Check fields present in the row against the schema
-            for field in &row.field_values {
-                let field_name = &field.name;
-                let transformed_type = &field.data_type;
-
-                match table_metadata.columns.get(field_name) {
-                    Some(column_metadata) => {
-                        let destination_type = &column_metadata.data_type;
-                        if !destination_type.is_compatible(transformed_type) {
-                            // Type Mismatch Finding
-                            self.findings.insert(Finding::error(
-                                "SCHEMA_TYPE_MISMATCH",
-                                &format!(
-                                    "Type mismatch for column '{}' in table '{}'. Transformed data has type {:?}, but destination expects {:?}.",
-                                    field_name, table_name, transformed_type, destination_type
-                                ),
-                            ));
-                        }
-
-                        // Null value for a non-nullable column
-                        if !column_metadata.is_nullable && field.value.is_none() {
-                            self.findings.insert(Finding::error(
-                                "SCHEMA_NULL_VIOLATION",
-                                &format!(
-                                    "Field '{}' in table '{}' is null, but the destination column is not nullable.",
-                                    field_name, table_name
-                                ),
-                            ));
-                        }
-
-                        // Truncation Risk for character types
-                        if let Some(max_len) = column_metadata.char_max_length {
-                            if let Some(actual_len) = self.get_field_value_length(field) {
-                                if actual_len > max_len {
-                                    self.findings.insert(Finding::warning(
-                                        "SCHEMA_TRUNCATION_RISK",
-                                        &format!(
-                                            "Data for column '{}' in table '{}' has length {} which exceeds the destination column's limit of {}. Data may be truncated.",
-                                            field_name, table_name, actual_len, max_len
-                                        ),
-                                    ));
-                                }
-                            }
-                        }
-
-                        // TODO: Add more checks (e.g., numeric precision, enum values, etc.
-                    }
-                    None => {
-                        // Column doesn't exist. Check if we are allowed to create it.
-                        if self.create_missing_columns {
-                            // If allowed, only create a finding if it's NOT a planned new column.
-                            let is_computed = self
-                                .mapping
-                                .field_mappings
-                                .computed_fields
-                                .get(table_name)
-                                .map_or(false, |computed_list| {
-                                    computed_list.iter().any(|cf| &cf.name == field_name)
-                                });
-
-                            let is_renamed_target = self
-                                .mapping
-                                .field_mappings
-                                .column_mappings
-                                .get(table_name)
-                                .map_or(false, |name_map| {
-                                    name_map
-                                        .source_to_target
-                                        .values()
-                                        .any(|target_name| target_name == field_name)
-                                });
-
-                            if !is_computed && !is_renamed_target {
-                                self.findings.insert(Finding::error(
-                                    "SCHEMA_COLUMN_MISSING",
-                                    &format!(
-                                        "Transformed data contains column '{}' which does not exist in destination table '{}' and is not a mapped or computed field.",
-                                        field_name, table_name
-                                    ),
-                                ));
-                            }
-                        } else {
-                            // If not allowed to create columns, it's always an error.
-                            self.findings.insert(Finding::error(
-                                "SCHEMA_COLUMN_MISSING",
-                                &format!(
-                                    "Transformed data contains column '{}' which does not exist in destination table '{}'. `create_missing_columns` is false.",
-                                    field_name, table_name
-                                ),
-                            ));
-                        }
-                    }
-                }
+        let table_meta = self.schemas.get(&row.entity).cloned();
+        match table_meta {
+            Some(table_meta) if !table_meta.columns.is_empty() => {
+                self.validate_existing_table(&row.entity, &table_meta, row);
             }
-
-            // Check for missing required columns in the row
-            for (column_name, column_metadata) in &table_metadata.columns {
-                // A column is required if it's not nullable AND it doesn't have a default value.
-                if !column_metadata.is_nullable && !column_metadata.has_default {
-                    if !row_field_names.contains(column_name) {
-                        self.findings.insert(Finding::error(
-                            "SCHEMA_MISSING_REQUIRED_COLUMN",
-                            &format!(
-                                "Required column '{}' is missing from the transformed data for table '{}'.",
-                                column_name, table_name
-                            ),
-                        ));
-                    }
-                }
-            }
-        } else {
-            // If the table doesn't exist in the destination, we can't validate.
-            // This might be expected if `create_missing_tables` is true.
-            // For now, we'll just return no findings for this case.
+            _ => self.validate_missing_table(&row.entity, row),
         }
     }
 
@@ -165,10 +91,207 @@ impl DestinationSchemaValidator {
         self.findings.iter().cloned().collect()
     }
 
-    fn get_field_value_length(&self, field: &FieldValue) -> Option<usize> {
+    fn validate_existing_table(
+        &mut self,
+        table_name: &str,
+        table_meta: &TableMetadata,
+        row: &RowData,
+    ) {
+        // Validate every field we're writing
+        for field in &row.field_values {
+            self.validate_field(table_name, table_meta, field);
+        }
+
+        // Ensure required destination columns are present in row
+        self.validate_required_columns(table_name, table_meta, row);
+    }
+
+    fn validate_field(&mut self, table_name: &str, table_meta: &TableMetadata, field: &FieldValue) {
+        let name = &field.name;
+        match table_meta.columns.get(name) {
+            Some(col) => {
+                self.check_nullability(table_name, name, col, field);
+                self.check_type_compatibility(table_name, name, col, field);
+                self.check_truncation(table_name, name, col, field);
+                // TODO: numeric precision/scale, enums, etc.
+            }
+            None => self.handle_missing_column(table_name, name),
+        }
+    }
+
+    fn check_nullability(
+        &mut self,
+        table_name: &str,
+        field_name: &str,
+        col: &ColumnMetadata,
+        field: &FieldValue,
+    ) {
+        if !col.is_nullable && field.value.is_none() {
+            self.findings.insert(Finding::error(
+                "SCHEMA_NULL_VIOLATION",
+                &format!(
+                    "Field '{}' in table '{}' is null, but the destination column is not nullable.",
+                    field_name, table_name
+                ),
+            ));
+        }
+    }
+
+    fn check_type_compatibility(
+        &mut self,
+        table_name: &str,
+        field_name: &str,
+        col: &ColumnMetadata,
+        field: &FieldValue,
+    ) {
+        let Some(transformed_ty) = field.value_data_type() else {
+            return;
+        };
+
+        if !col.data_type.is_compatible(&transformed_ty) {
+            self.findings.insert(Finding::error(
+                "SCHEMA_TYPE_MISMATCH",
+                &format!(
+                    "Type mismatch for column '{}' in table '{}'. Transformed data has type {}, but destination expects {:?}.",
+                    field_name, table_name, transformed_ty, col.data_type
+                ),
+            ));
+        }
+    }
+
+    fn check_truncation(
+        &mut self,
+        table_name: &str,
+        field_name: &str,
+        col: &ColumnMetadata,
+        field: &FieldValue,
+    ) {
+        let Some(max_len) = col.char_max_length else {
+            return;
+        };
+        let Some(actual_len) = self.field_len(field) else {
+            return;
+        };
+        if actual_len > max_len {
+            self.findings.insert(Finding::warning(
+                "SCHEMA_TRUNCATION_RISK",
+                &format!(
+                    "Data for column '{}' in table '{}' has length {} which exceeds the destination column limit of {}. Data may be truncated.",
+                    field_name, table_name, actual_len, max_len
+                ),
+            ));
+        }
+    }
+
+    fn field_len(&self, field: &FieldValue) -> Option<usize> {
         match &field.value {
             Some(Value::String(s)) => Some(s.len()),
-            _ => None, // Not a string, so no length check is applicable
+            _ => None,
+        }
+    }
+
+    fn handle_missing_column(&mut self, table_name: &str, field_name: &str) {
+        match self.column_policy {
+            ColumnPolicy::RequireExisting => {
+                self.findings.insert(Finding::error(
+                    "SCHEMA_COLUMN_MISSING",
+                    &format!(
+                        "Transformed data contains column '{}' which does not exist in destination table '{}'. Missing-column creation is disabled.",
+                        field_name, table_name
+                    ),
+                ));
+            }
+            ColumnPolicy::AllowCreateIfPlanned => {
+                if self.is_new_column(table_name, field_name) {
+                    // OK: planned (mapped/computed) new column
+                    return;
+                }
+                self.findings.insert(Finding::error(
+                    "SCHEMA_COLUMN_MISSING",
+                    &format!(
+                        "Transformed data contains column '{}' which does not exist in destination table '{}' and is not a mapped or computed field.",
+                        field_name, table_name
+                    ),
+                ));
+            }
+        }
+    }
+
+    fn is_new_column(&self, table_name: &str, field_name: &str) -> bool {
+        self.is_computed(table_name, field_name) || self.is_renamed_target(table_name, field_name)
+    }
+
+    fn is_computed(&self, table_name: &str, field_name: &str) -> bool {
+        self.mapping
+            .field_mappings
+            .computed_fields
+            .get(table_name)
+            .map_or(false, |list| list.iter().any(|cf| cf.name == field_name))
+    }
+
+    fn is_renamed_target(&self, table_name: &str, field_name: &str) -> bool {
+        self.mapping
+            .field_mappings
+            .column_mappings
+            .get(table_name)
+            .map_or(false, |map| {
+                map.source_to_target.values().any(|t| t == field_name)
+            })
+    }
+
+    fn validate_required_columns(
+        &mut self,
+        table_name: &str,
+        table_meta: &TableMetadata,
+        row: &RowData,
+    ) {
+        let row_fields: HashSet<&str> = row.field_values.iter().map(|f| f.name.as_str()).collect();
+
+        for (col_name, col_meta) in &table_meta.columns {
+            if !col_meta.is_nullable
+                && !col_meta.has_default
+                && !row_fields.contains(col_name.as_str())
+            {
+                self.findings.insert(Finding::error(
+                    "SCHEMA_MISSING_REQUIRED_COLUMN",
+                    &format!(
+                        "Required column '{}' is missing from the transformed data for table '{}'.",
+                        col_name, table_name
+                    ),
+                ));
+            }
+        }
+    }
+
+    fn validate_missing_table(&mut self, table_name: &str, row: &RowData) {
+        match self.table_policy {
+            TablePolicy::RequireExisting => {
+                self.findings.insert(Finding::error(
+                    "SCHEMA_TABLE_MISSING",
+                    &format!(
+                        "Destination table '{}' does not exist and table creation is disabled.",
+                        table_name
+                    ),
+                ));
+            }
+            TablePolicy::AllowCreate(NewTableCreation::CopyAll) => {
+                // Assume all provided columns will be created; nothing to validate here.
+            }
+            TablePolicy::AllowCreate(NewTableCreation::MapOnly) => {
+                // Best-effort: ensure all columns are known to the mapping.
+                for field in &row.field_values {
+                    let field_name = field.name.as_str();
+                    if !self.is_new_column(table_name, field_name) {
+                        self.findings.insert(Finding::warning(
+                            "SCHEMA_UNMAPPED_COLUMN_FOR_NEW_TABLE",
+                            &format!(
+                                "Transformed data for new table '{}' contains column '{}' which is not explicitly mapped/computed; its type/constraints cannot be validated.",
+                                table_name, field_name
+                            ),
+                        ));
+                    }
+                }
+            }
         }
     }
 }

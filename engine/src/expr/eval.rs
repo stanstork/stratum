@@ -48,10 +48,15 @@ impl Evaluator for Expression {
                     .and_then(|fields| fields.iter().find(|lk| lk.key.eq_ignore_ascii_case(key)))
                     // Given the LookupField, find the matching column in the current row
                     .and_then(|lk| {
-                        row.field_values
-                            .iter()
-                            .find(|col| col.name.eq_ignore_ascii_case(&lk.target))
-                            .and_then(|col| col.value.clone())
+                        if let Some(target) = &lk.target {
+                            row.field_values
+                                .iter()
+                                .find(|col| col.name.eq_ignore_ascii_case(target))
+                                .and_then(|col| col.value.clone())
+                        } else {
+                            warn!("Lookup target is not set for {}[{}]", entity, key);
+                            return None;
+                        }
                     });
 
                 let raw = row
