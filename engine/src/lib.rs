@@ -17,6 +17,6 @@ pub mod settings;
 pub mod source;
 pub mod state;
 pub mod transform;
-pub mod validate;
+pub mod validation;
 
 mod tests;

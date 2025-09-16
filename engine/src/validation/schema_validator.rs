@@ -1,4 +1,8 @@
-use crate::{destination::Destination, report::finding::Finding};
+use crate::{
+    destination::Destination,
+    report::finding::Finding,
+    validation::key::{KeyCheckPolicy, KeyChecker},
+};
 use common::{
     mapping::EntityMapping,
     row_data::RowData,
@@ -39,8 +43,12 @@ pub struct DestinationSchemaValidator {
     mapping: EntityMapping,
     schemas: HashMap<String, TableMetadata>,
     findings: HashSet<Finding>,
+
     table_policy: TablePolicy,
     column_policy: ColumnPolicy,
+
+    key_policy: KeyCheckPolicy,
+    key_checker: KeyChecker,
 }
 
 impl DestinationSchemaValidator {
@@ -68,12 +76,16 @@ impl DestinationSchemaValidator {
             ColumnPolicy::RequireExisting
         };
 
+        let key_policy = KeyCheckPolicy::IntraBatchAndDestination { batch_size: 10 }; // TODO: make configurable
+
         Ok(Self {
             mapping,
             schemas: meta_graph,
             findings: HashSet::new(),
             table_policy,
             column_policy,
+            key_policy,
+            key_checker: KeyChecker::new(),
         })
     }
 

@@ -1,6 +1,6 @@
 use crate::{
     destination::Destination,
-    producer::{schema_validator::DestinationSchemaValidator, DataProducer},
+    producer::DataProducer,
     report::{
         dry_run::DryRunStatus,
         finding::{FetchFinding, Finding, MappingFinding, Severity},
@@ -10,6 +10,7 @@ use crate::{
     source::{data::DataSource, Source},
     state::MigrationState,
     transform::pipeline::TransformPipeline,
+    validation::schema_validator::DestinationSchemaValidator,
 };
 use async_trait::async_trait;
 use common::{mapping::EntityMapping, row_data::RowData};

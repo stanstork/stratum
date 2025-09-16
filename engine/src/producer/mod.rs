@@ -8,12 +8,10 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use smql::statements::setting::CopyColumns;
 use std::sync::Arc;
 use tokio::sync::{watch::Sender, Mutex};
 
 pub mod live;
-pub mod schema_validator;
 pub mod validation;
 
 #[async_trait]
