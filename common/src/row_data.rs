@@ -1,4 +1,7 @@
-use crate::{record::DataRecord, value::FieldValue};
+use crate::{
+    record::DataRecord,
+    value::{FieldValue, Value},
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,6 +22,12 @@ impl RowData {
         self.field_values
             .iter()
             .find(|f| f.name.eq_ignore_ascii_case(field))
+    }
+
+    pub fn get_value(&self, field: &str) -> Value {
+        self.get(field)
+            .and_then(|f| f.value.clone())
+            .unwrap_or(Value::Null)
     }
 }
 

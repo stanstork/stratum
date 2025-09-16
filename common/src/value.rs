@@ -1,6 +1,6 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, fmt};
+use std::{cmp::Ordering, fmt, hash::Hash};
 use uuid::Uuid;
 
 use crate::types::DataType;
@@ -19,6 +19,40 @@ pub enum Value {
     Enum(String, String),
     StringArray(Vec<String>),
     Null,
+}
+
+impl Eq for Value {}
+
+impl Hash for Value {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        use Value::*;
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Int(v) => v.hash(state),
+            Float(v) => {
+                // Hash the bits of the float to handle NaN and -0.0 correctly
+                let bits = v.to_bits();
+                bits.hash(state);
+            }
+            String(v) => v.hash(state),
+            Boolean(v) => v.hash(state),
+            Json(v) => {
+                // Serialize JSON to a string for hashing
+                let json_str = serde_json::to_string(v).unwrap_or_default();
+                json_str.hash(state);
+            }
+            Uuid(v) => v.hash(state),
+            Bytes(v) => v.hash(state),
+            Date(v) => v.hash(state),
+            Timestamp(v) => v.hash(state),
+            Enum(name, value) => {
+                name.hash(state);
+                value.hash(state);
+            }
+            StringArray(v) => v.hash(state),
+            Null => {} // Nothing to hash for Null
+        }
+    }
 }
 
 impl Value {

@@ -93,7 +93,15 @@ impl DestinationSchemaValidator {
         let table_meta = self.schemas.get(&row.entity).cloned();
         match table_meta {
             Some(table_meta) if !table_meta.columns.is_empty() => {
-                self.validate_existing_table(&row.entity, &table_meta, row);
+                let table_name = row.entity.as_str();
+                self.validate_existing_table(table_name, &table_meta, row);
+                self.key_checker.record_row(
+                    table_name,
+                    &table_meta,
+                    row,
+                    self.key_policy,
+                    &mut self.findings,
+                );
             }
             _ => self.validate_missing_table(&row.entity, row),
         }

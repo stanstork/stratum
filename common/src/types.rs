@@ -153,6 +153,7 @@ impl DataType {
             | (DataType::IntUnsigned, DataType::Long)
             | (DataType::LongLong, DataType::Long)
             | (DataType::Long, DataType::LongLong) => true,
+            (DataType::Int, DataType::Short) | (DataType::Short, DataType::Int) => true, // Int can hold Short values
             (DataType::String, DataType::VarChar) | (DataType::VarChar, DataType::String) => true,
             (DataType::Geometry, DataType::Bytea) | (DataType::Bytea, DataType::Geometry) => true,
             (DataType::Blob, DataType::Bytea) | (DataType::Bytea, DataType::Blob) => true,
