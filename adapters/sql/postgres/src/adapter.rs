@@ -1,6 +1,7 @@
 use crate::{bind_values, data_type::PgDataType};
 use async_trait::async_trait;
 use common::{row_data::RowData, types::DataType, value::Value};
+use query_builder::dialect;
 use sql_adapter::{
     adapter::SqlAdapter,
     error::{adapter::ConnectorError, db::DbError},
@@ -9,6 +10,7 @@ use sql_adapter::{
         provider::MetadataProvider,
         table::TableMetadata,
     },
+    query::generator::QueryGenerator,
     requests::FetchRowsRequest,
     row::DbRow,
 };
@@ -87,6 +89,30 @@ impl SqlAdapter for PgAdapter {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(tables)
+    }
+
+    async fn find_existing_keys(
+        &self,
+        table: &str,
+        key_columns: &[String],
+        keys_batch: &[Vec<Value>],
+    ) -> Result<Vec<RowData>, DbError> {
+        let dialect = dialect::Postgres;
+        let generator = QueryGenerator::new(&dialect);
+        let sql = generator.key_existence(table, key_columns, keys_batch.len());
+
+        let mut query = sqlx::query(&sql);
+        for key_value in keys_batch {
+            query = bind_values(query, key_value);
+        }
+
+        let rows = query.fetch_all(&self.pool).await?;
+        let result = rows
+            .into_iter()
+            .map(|row| DbRow::PostgresRow(&row).get_row_data(table))
+            .collect();
+
+        Ok(result)
     }
 
     async fn fetch_rows(&self, _request: FetchRowsRequest) -> Result<Vec<RowData>, DbError> {

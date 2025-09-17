@@ -251,6 +251,8 @@ impl DataProducer for ValidationProducer {
         let (statements, prep_findings) = self.generate_sql_statements().await;
         let sample_result = self.sample_and_transform(&mut validator).await;
 
+        let finalize = validator.finalize(&self.destination).await;
+
         let state = self.state.lock().await;
         let mut report = state.dry_run_report.lock().await;
 

@@ -107,6 +107,15 @@ impl DestinationSchemaValidator {
         }
     }
 
+    pub async fn finalize(&mut self, destination: &Destination) -> Result<(), DbError> {
+        if matches!(self.key_policy, KeyCheckPolicy::None) {
+            return Ok(());
+        }
+        self.key_checker
+            .check_pending(destination, 10, &mut self.findings)
+            .await
+    }
+
     pub fn findings(&self) -> Vec<Finding> {
         self.findings.iter().cloned().collect()
     }

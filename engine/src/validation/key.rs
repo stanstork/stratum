@@ -1,5 +1,6 @@
-use crate::report::finding::Finding;
+use crate::{destination::Destination, report::finding::Finding};
 use common::{row_data::RowData, value::Value};
+use postgres::destination;
 use sql_adapter::{adapter::SqlAdapter, error::db::DbError, metadata::table::TableMetadata};
 use std::collections::{HashMap, HashSet};
 
@@ -73,25 +74,33 @@ impl KeyChecker {
 
     pub async fn check_pending(
         &mut self,
-        _adapter: &(dyn SqlAdapter + Send + Sync),
+        destination: &Destination,
         batch_size: usize,
         findings: &mut HashSet<Finding>,
     ) -> Result<(), DbError> {
         for ((table, kind), keys) in self.pending.drain() {
-            for _key_batch in keys.chunks(batch_size) {
-                let constraint_name = match &kind {
-                    KeyKind::Primary => "PRIMARY".to_string(),
-                    KeyKind::Unique(name) => name.clone(),
+            let adapter = destination.data_dest.adapter().await;
+            let table_meta = adapter.fetch_metadata(&table).await?;
+
+            for key_batch in keys.chunks(batch_size) {
+                let key_columns: &Vec<String> = match &kind {
+                    KeyKind::Primary => &table_meta.primary_keys,
+                    KeyKind::Unique(_) => {
+                        // TODO: Handle unique constraints with multiple columns
+                        &Vec::new()
+                    }
                 };
 
-                let existing_keys: Vec<String> = Vec::new(); // TODO: adapter.find_existing_keys(&table, &constraint_name, key_batch).await?;
+                let existing_keys = adapter
+                    .find_existing_keys(&table, key_columns, key_batch)
+                    .await?;
 
                 for existing_key in existing_keys {
                     findings.insert(Finding::error(
                         "SCHEMA_KEY_VIOLATION_IN_DB",
                         &format!(
-                            "Key {:?} for constraint '{}' on table '{}' already exists in the destination.",
-                            existing_key, constraint_name, table
+                            "Key violation for table '{}' on key {:?} found in destination database",
+                            table, existing_key
                         ),
                     ));
                 }

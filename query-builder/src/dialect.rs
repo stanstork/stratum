@@ -1,6 +1,9 @@
 //! Defines the `Dialect` trait for database-specific SQL syntax.
 
-use common::types::DataType;
+use common::{types::DataType, value::Value};
+
+// A collection of ordered values representing a composite key.
+type KeyValue<'a> = &'a [Value];
 
 pub trait Dialect: Send + Sync {
     /// Wraps an identifier (like a table or column name) in the correct
@@ -21,6 +24,15 @@ pub trait Dialect: Send + Sync {
 
     /// Returns the name of the dialect (e.g., "PostgreSQL", "MySQL").
     fn name(&self) -> String;
+
+    /// Generates the SQL query and a corresponding list of parameters to bind
+    /// for efficiently checking the existence of multiple composite keys.
+    fn build_key_existence_query(
+        &self,
+        table_name: &str,
+        key_columns: &[String],
+        keys_batch: usize,
+    ) -> String;
 }
 
 #[derive(Debug, Clone)]
@@ -82,6 +94,54 @@ impl Dialect for Postgres {
     fn name(&self) -> String {
         "PostgreSQL".into()
     }
+
+    fn build_key_existence_query(
+        &self,
+        table_name: &str,
+        key_columns: &[String],
+        keys_batch: usize,
+    ) -> String {
+        if keys_batch == 0 || key_columns.is_empty() {
+            return String::new();
+        }
+
+        // Use the efficient VALUES + INNER JOIN strategy for PostgreSQL
+        let value_columns: String = (1..=key_columns.len())
+            .map(|i| format!("c{}", i))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let join_conditions = key_columns
+            .iter()
+            .enumerate()
+            .map(|(i, col_name)| format!("t.{} = v.c{}", self.quote_identifier(col_name), i + 1))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+
+        let mut placeholder_idx = 1;
+        let placeholders: String = (0..keys_batch)
+            .map(|_| {
+                let p = (0..key_columns.len())
+                    .map(|_| {
+                        let p_str = format!("${}", placeholder_idx);
+                        placeholder_idx += 1;
+                        p_str
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("({})", p)
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        format!(
+            "SELECT v.* FROM (VALUES {}) AS v({}) INNER JOIN {} AS t ON {}",
+            placeholders,
+            value_columns,
+            self.quote_identifier(table_name),
+            join_conditions
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -142,5 +202,14 @@ impl Dialect for MySql {
 
     fn name(&self) -> String {
         "MySQL".into()
+    }
+
+    fn build_key_existence_query(
+        &self,
+        table_name: &str,
+        key_columns: &[String],
+        keys_batch: usize,
+    ) -> String {
+        todo!("Implement batch key existence query for MySQL")
     }
 }

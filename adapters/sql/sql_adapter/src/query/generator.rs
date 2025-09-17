@@ -198,6 +198,16 @@ impl<'a> QueryGenerator<'a> {
         self.render_ast(builder.build())
     }
 
+    pub fn key_existence(
+        &self,
+        table_name: &str,
+        key_columns: &[String],
+        keys_batch: usize,
+    ) -> String {
+        self.dialect
+            .build_key_existence_query(table_name, key_columns, keys_batch)
+    }
+
     fn render_ast(&self, ast: impl Render) -> (String, Vec<Value>) {
         let mut renderer = Renderer::new(self.dialect);
         ast.render(&mut renderer);

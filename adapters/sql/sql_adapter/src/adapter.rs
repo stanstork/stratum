@@ -22,4 +22,11 @@ pub trait SqlAdapter {
     async fn fetch_referencing_tables(&self, table: &str) -> Result<Vec<String>, DbError>;
     async fn fetch_rows(&self, request: FetchRowsRequest) -> Result<Vec<RowData>, DbError>;
     async fn fetch_column_type(&self, table: &str, column: &str) -> Result<String, DbError>;
+
+    async fn find_existing_keys(
+        &self,
+        table: &str,
+        key_columns: &[String],
+        keys_batch: &[Vec<Value>],
+    ) -> Result<Vec<RowData>, DbError>;
 }

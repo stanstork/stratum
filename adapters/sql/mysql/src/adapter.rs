@@ -148,4 +148,13 @@ impl SqlAdapter for MySqlAdapter {
 
         Ok(tables)
     }
+
+    async fn find_existing_keys(
+        &self,
+        table: &str,
+        key_columns: &[String],
+        keys_batch: &[Vec<Value>],
+    ) -> Result<Vec<RowData>, DbError> {
+        todo!("Implement find_existing_keys for MySQL")
+    }
 }
