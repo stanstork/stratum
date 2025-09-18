@@ -1,9 +1,6 @@
 //! Defines the `Dialect` trait for database-specific SQL syntax.
 
-use common::{types::DataType, value::Value};
-
-// A collection of ordered values representing a composite key.
-type KeyValue<'a> = &'a [Value];
+use common::types::DataType;
 
 pub trait Dialect: Send + Sync {
     /// Wraps an identifier (like a table or column name) in the correct
@@ -105,7 +102,13 @@ impl Dialect for Postgres {
             return String::new();
         }
 
-        // Use the efficient VALUES + INNER JOIN strategy for PostgreSQL
+        let select_clause = key_columns
+            .iter()
+            .enumerate()
+            .map(|(i, col_name)| format!("v.c{} AS {}", i + 1, self.quote_identifier(col_name)))
+            .collect::<Vec<_>>()
+            .join(", ");
+
         let value_columns: String = (1..=key_columns.len())
             .map(|i| format!("c{}", i))
             .collect::<Vec<_>>()
@@ -135,7 +138,8 @@ impl Dialect for Postgres {
             .join(", ");
 
         format!(
-            "SELECT v.* FROM (VALUES {}) AS v({}) INNER JOIN {} AS t ON {}",
+            "SELECT {} FROM (VALUES {}) AS v({}) INNER JOIN {} AS t ON {}",
+            select_clause,
             placeholders,
             value_columns,
             self.quote_identifier(table_name),

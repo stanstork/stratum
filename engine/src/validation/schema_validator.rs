@@ -107,7 +107,10 @@ impl DestinationSchemaValidator {
         }
     }
 
-    pub async fn finalize(&mut self, destination: &Destination) -> Result<(), DbError> {
+    pub async fn validate_pending_keys(
+        &mut self,
+        destination: &Destination,
+    ) -> Result<(), DbError> {
         if matches!(self.key_policy, KeyCheckPolicy::None) {
             return Ok(());
         }

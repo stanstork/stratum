@@ -1,7 +1,9 @@
 use crate::{destination::Destination, report::finding::Finding};
-use common::{row_data::RowData, value::Value};
-use postgres::destination;
-use sql_adapter::{adapter::SqlAdapter, error::db::DbError, metadata::table::TableMetadata};
+use common::{
+    row_data::RowData,
+    value::{FieldValue, Value},
+};
+use sql_adapter::{error::db::DbError, metadata::table::TableMetadata};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug)]
@@ -96,11 +98,17 @@ impl KeyChecker {
                     .await?;
 
                 for existing_key in existing_keys {
+                    let constraint_name = match &kind {
+                        KeyKind::Primary => "PRIMARY KEY".to_string(),
+                        KeyKind::Unique(name) => format!("UNIQUE constraint '{}'", name),
+                    };
+                    let formatted_key = Self::format_key(&existing_key.field_values);
+
                     findings.insert(Finding::error(
                         "SCHEMA_KEY_VIOLATION_IN_DB",
                         &format!(
-                            "Key violation for table '{}' on key {:?} found in destination database",
-                            table, existing_key
+                            "Key value {} for constraint '{}' on table '{}' already exists in the destination.",
+                            formatted_key, constraint_name, table
                         ),
                     ));
                 }
@@ -187,5 +195,16 @@ impl KeyChecker {
             ),
         };
         Finding::error(code, &msg)
+    }
+
+    fn format_key(key_value: &[FieldValue]) -> String {
+        let parts: Vec<String> = key_value
+            .iter()
+            .map(|v| match &v.value {
+                Some(val) => format!("{} = {}", v.name, val),
+                None => format!("{} = NULL", v.name),
+            })
+            .collect();
+        format!("({})", parts.join(", "))
     }
 }

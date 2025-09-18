@@ -251,10 +251,21 @@ impl DataProducer for ValidationProducer {
         let (statements, prep_findings) = self.generate_sql_statements().await;
         let sample_result = self.sample_and_transform(&mut validator).await;
 
-        let finalize = validator.finalize(&self.destination).await;
-
         let state = self.state.lock().await;
         let mut report = state.dry_run_report.lock().await;
+
+        match validator.validate_pending_keys(&self.destination).await {
+            Ok(_) => {}
+            Err(e) => {
+                report
+                    .summary
+                    .errors
+                    .push(FetchFinding::create_error_finding(&format!(
+                        "Schema validation error: {}",
+                        e
+                    )));
+            }
+        }
 
         report.generated_sql.statements.extend(statements);
         report.summary.records_sampled = sample_result.records_sampled;
