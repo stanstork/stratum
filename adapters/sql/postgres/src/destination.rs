@@ -21,6 +21,8 @@ pub struct PgDestination {
 
     /// Metadata for any child tables (via FKs) when cascading
     related_meta: HashMap<String, TableMetadata>,
+
+    dialect: dialect::Postgres,
 }
 
 impl PgDestination {
@@ -29,6 +31,7 @@ impl PgDestination {
             adapter,
             primary_meta: None,
             related_meta: HashMap::new(),
+            dialect: dialect::Postgres,
         }
     }
 }
@@ -42,20 +45,24 @@ impl DbDataDestination for PgDestination {
             return Ok(());
         }
 
-        let generator = QueryGenerator::new(&dialect::Postgres);
-        let (sql, params) = generator.insert_batch(meta, rows.clone());
+        let num_rows = rows.len();
+        let generator = QueryGenerator::new(&self.dialect);
+        let (sql, params) = generator.insert_batch(meta, rows);
 
-        info!("Executing insert into `{}`", meta.name);
+        info!("Inserting {} rows into {}", num_rows, meta.name);
         self.adapter.execute_with_params(&sql, params).await?;
 
         Ok(())
     }
 
     async fn toggle_trigger(&self, table: &str, enable: bool) -> Result<(), DbError> {
-        let (sql, _params) =
-            QueryGenerator::new(&dialect::Postgres).toggle_triggers(table, !enable);
+        let (sql, _params) = QueryGenerator::new(&self.dialect).toggle_triggers(table, enable);
 
-        info!("Executing query: {}", sql);
+        info!(
+            "{} triggers on table {}",
+            if enable { "Enabling" } else { "Disabling" },
+            table
+        );
         self.adapter.execute(&sql).await?;
 
         Ok(())
@@ -66,10 +73,9 @@ impl DbDataDestination for PgDestination {
     }
 
     async fn add_column(&self, table: &str, column: &ColumnDef) -> Result<(), DbError> {
-        let (sql, _params) =
-            QueryGenerator::new(&dialect::Postgres).add_column(table, column.clone());
+        let (sql, _params) = QueryGenerator::new(&self.dialect).add_column(table, column.clone());
 
-        info!("Executing query: {}", sql);
+        info!("Adding column {} to table {}", column.name, table);
         self.adapter.execute(&sql).await?;
 
         Ok(())

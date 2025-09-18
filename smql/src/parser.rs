@@ -1,4 +1,4 @@
-use crate::{plan::MigrationPlan, statements::statement::Statement};
+use crate::{error::SmqlError, plan::MigrationPlan, statements::statement::Statement};
 use pest::{iterators::Pair, Parser};
 use pest_derive::Parser;
 
@@ -10,9 +10,9 @@ pub trait StatementParser {
     fn parse(pair: Pair<Rule>) -> Self;
 }
 
-pub fn parse(source: &str) -> Result<MigrationPlan, Box<dyn std::error::Error>> {
-    let pairs = SmqlParserV02::parse(Rule::program, source)
-        .map_err(|e| format!("Parsing failed: {}", e))?;
+pub fn parse(source: &str) -> Result<MigrationPlan, SmqlError> {
+    let pairs =
+        SmqlParserV02::parse(Rule::program, source).map_err(|e| SmqlError::Parse(e.to_string()))?;
 
     let mut statements = vec![];
     for pair in pairs {

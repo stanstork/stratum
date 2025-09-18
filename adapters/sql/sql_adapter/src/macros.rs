@@ -1,125 +1,105 @@
 #[macro_export]
 macro_rules! ident {
-    ($field:expr) => {
-        if $field.is_geometry() {
-            query_builder::ast::expr::Expr::Alias {
-                expr: Box::new(query_builder::ast::expr::Expr::FunctionCall(
-                    query_builder::ast::expr::FunctionCall {
-                        name: "ST_AsBinary".to_string(),
-                        args: vec![query_builder::ast::expr::Expr::Identifier(
-                            query_builder::ast::expr::Ident {
-                                qualifier: Some($field.table.clone()),
-                                name: $field.column.clone(),
-                            },
-                        )],
-                        wildcard: false,
-                    },
-                )),
-                alias: $field.alias.clone().unwrap().clone(),
-            }
-        } else if let Some(alias) = &$field.alias {
-            query_builder::ast::expr::Expr::Alias {
-                expr: Box::new(query_builder::ast::expr::Expr::Identifier(
+    ($field:expr) => {{
+        // Create the base expression (either a simple identifier or a function call for geometry)
+        let base_expr = if $field.is_geometry() {
+            query_builder::ast::expr::Expr::FunctionCall(query_builder::ast::expr::FunctionCall {
+                name: "ST_AsBinary".to_string(),
+                args: vec![query_builder::ast::expr::Expr::Identifier(
                     query_builder::ast::expr::Ident {
                         qualifier: Some($field.table.clone()),
                         name: $field.column.clone(),
                     },
-                )),
-                alias: alias.clone(),
-            }
+                )],
+                wildcard: false,
+            })
         } else {
             query_builder::ast::expr::Expr::Identifier(query_builder::ast::expr::Ident {
                 qualifier: Some($field.table.clone()),
                 name: $field.column.clone(),
             })
-        }
-    };
+        };
 
-    ($col_meta:expr, $table:expr) => {
-        match $col_meta.data_type {
-            common::types::DataType::Geometry => query_builder::ast::expr::Expr::FunctionCall(
-                query_builder::ast::expr::FunctionCall {
-                    name: "ST_AsBinary".to_string(),
-                    args: vec![query_builder::ast::expr::Expr::Identifier(
-                        query_builder::ast::expr::Ident {
-                            qualifier: Some($table.name.clone()),
-                            name: $col_meta.name.clone(),
-                        },
-                    )],
-                    wildcard: false,
-                },
-            ),
-            _ => query_builder::ast::expr::Expr::Identifier(query_builder::ast::expr::Ident {
-                qualifier: Some($table.name.clone()),
-                name: $col_meta.name.clone(),
-            }),
+        if let Some(alias) = &$field.alias {
+            query_builder::ast::expr::Expr::Alias {
+                expr: Box::new(base_expr),
+                alias: alias.clone(),
+            }
+        } else {
+            base_expr
         }
-    };
+    }};
 }
 
 #[macro_export]
 macro_rules! join_on_expr {
-    ($join_clause:expr) => {{
-        let conditions = &$join_clause.conditions;
-        if conditions.is_empty() {
-            // A JOIN ON clause cannot be empty.
-            panic!("JoinClause must have at least one condition to build an expression.");
-        }
+    ($join_clause:expr) => {
+        (|| -> Result<query_builder::ast::expr::Expr, $crate::error::db::DbError> {
+            let conditions = &$join_clause.conditions;
+            if conditions.is_empty() {
+                return Err($crate::error::db::DbError::QueryBuildError(
+                    "JoinClause must have at least one condition.".to_string(),
+                ));
+            }
 
-        // Helper closure to create a single equality expression.
-        let condition_to_expr = |cond: &$crate::join::clause::JoinCondition| {
-            query_builder::ast::expr::Expr::BinaryOp(Box::new(query_builder::ast::expr::BinaryOp {
-                left: query_builder::ast::expr::Expr::Identifier(query_builder::ast::expr::Ident {
-                    qualifier: Some(cond.left.alias.clone()),
-                    name: cond.left.column.clone(),
-                }),
-                op: query_builder::ast::expr::BinaryOperator::Eq,
-                right: query_builder::ast::expr::Expr::Identifier(
-                    query_builder::ast::expr::Ident {
-                        qualifier: Some(cond.right.alias.clone()),
-                        name: cond.right.column.clone(),
+            let condition_to_expr = |cond: &$crate::join::clause::JoinCondition| {
+                query_builder::ast::expr::Expr::BinaryOp(Box::new(
+                    query_builder::ast::expr::BinaryOp {
+                        left: query_builder::ast::expr::Expr::Identifier(
+                            query_builder::ast::expr::Ident {
+                                qualifier: Some(cond.left.alias.clone()),
+                                name: cond.left.column.clone(),
+                            },
+                        ),
+                        op: query_builder::ast::expr::BinaryOperator::Eq,
+                        right: query_builder::ast::expr::Expr::Identifier(
+                            query_builder::ast::expr::Ident {
+                                qualifier: Some(cond.right.alias.clone()),
+                                name: cond.right.column.clone(),
+                            },
+                        ),
                     },
-                ),
-            }))
-        };
+                ))
+            };
 
-        // Start with the first condition as the base expression.
-        let mut expr_tree = condition_to_expr(&conditions[0]);
-
-        // Fold the rest of the conditions into the tree, chaining with AND.
-        for cond in conditions.iter().skip(1) {
-            let new_op = condition_to_expr(cond);
-
-            expr_tree = query_builder::ast::expr::Expr::BinaryOp(Box::new(
-                query_builder::ast::expr::BinaryOp {
-                    left: expr_tree, // The previous expression tree
-                    op: query_builder::ast::expr::BinaryOperator::And,
-                    right: new_op, // The new condition
-                },
-            ));
-        }
-
-        expr_tree
-    }};
+            conditions[1..]
+                .iter()
+                .try_fold(condition_to_expr(&conditions[0]), |left_expr, cond| {
+                    let right_expr = condition_to_expr(cond);
+                    Ok(query_builder::ast::expr::Expr::BinaryOp(Box::new(
+                        query_builder::ast::expr::BinaryOp {
+                            left: left_expr,
+                            op: query_builder::ast::expr::BinaryOperator::And,
+                            right: right_expr,
+                        },
+                    )))
+                })
+        })()
+    };
 }
 
 #[macro_export]
 macro_rules! sql_filter_expr {
     ($filter_expr:expr) => {{
-        fn convert(expr: &$crate::filter::expr::SqlFilterExpr) -> query_builder::ast::expr::Expr {
+        fn convert(
+            expr: &$crate::filter::expr::SqlFilterExpr,
+        ) -> Result<query_builder::ast::expr::Expr, $crate::error::db::DbError> {
             match expr {
                 $crate::filter::expr::SqlFilterExpr::Leaf(cond) => {
                     let op = match cond.comparator.as_str() {
-                        "=" => query_builder::ast::expr::BinaryOperator::Eq,
-                        "!=" => query_builder::ast::expr::BinaryOperator::NotEq,
-                        ">" => query_builder::ast::expr::BinaryOperator::Gt,
-                        ">=" => query_builder::ast::expr::BinaryOperator::GtEq,
-                        "<" => query_builder::ast::expr::BinaryOperator::Lt,
-                        "<=" => query_builder::ast::expr::BinaryOperator::LtEq,
-                        other => panic!("Unsupported comparator: {}", other),
-                    };
+                        "=" => Ok(query_builder::ast::expr::BinaryOperator::Eq),
+                        "!=" => Ok(query_builder::ast::expr::BinaryOperator::NotEq),
+                        ">" => Ok(query_builder::ast::expr::BinaryOperator::Gt),
+                        ">=" => Ok(query_builder::ast::expr::BinaryOperator::GtEq),
+                        "<" => Ok(query_builder::ast::expr::BinaryOperator::Lt),
+                        "<=" => Ok(query_builder::ast::expr::BinaryOperator::LtEq),
+                        other => Err($crate::error::db::DbError::QueryBuildError(format!(
+                            "Unsupported comparator: {}",
+                            other
+                        ))),
+                    }?;
 
-                    query_builder::ast::expr::Expr::BinaryOp(Box::new(
+                    Ok(query_builder::ast::expr::Expr::BinaryOp(Box::new(
                         query_builder::ast::expr::BinaryOp {
                             left: query_builder::ast::expr::Expr::Identifier(
                                 query_builder::ast::expr::Ident {
@@ -132,12 +112,14 @@ macro_rules! sql_filter_expr {
                                 common::value::Value::String(cond.value.clone()),
                             ),
                         },
-                    ))
+                    )))
                 }
                 $crate::filter::expr::SqlFilterExpr::And(children)
                 | $crate::filter::expr::SqlFilterExpr::Or(children) => {
                     if children.is_empty() {
-                        panic!("AND/OR expressions cannot be empty.");
+                        return Err($crate::error::db::DbError::QueryBuildError(
+                            "AND/OR expressions cannot be empty.".to_string(),
+                        ));
                     }
 
                     let op = if matches!(expr, $crate::filter::expr::SqlFilterExpr::And(_)) {
@@ -146,20 +128,18 @@ macro_rules! sql_filter_expr {
                         query_builder::ast::expr::BinaryOperator::Or
                     };
 
-                    // Start with the first child as the base.
-                    let mut expr_tree = convert(&children[0]);
-
-                    // Fold the rest of the children into the tree.
-                    for child in children.iter().skip(1) {
-                        expr_tree = query_builder::ast::expr::Expr::BinaryOp(Box::new(
-                            query_builder::ast::expr::BinaryOp {
-                                left: expr_tree,
-                                op: op.clone(),
-                                right: convert(child),
-                            },
-                        ));
-                    }
-                    expr_tree
+                    children[1..]
+                        .iter()
+                        .try_fold(convert(&children[0])?, |left_expr, child| {
+                            let right_expr = convert(child)?;
+                            Ok(query_builder::ast::expr::Expr::BinaryOp(Box::new(
+                                query_builder::ast::expr::BinaryOp {
+                                    left: left_expr,
+                                    op: op.clone(),
+                                    right: right_expr,
+                                },
+                            )))
+                        })
                 }
             }
         }
@@ -186,7 +166,7 @@ macro_rules! add_joins {
                 join_kind,
                 table_ref!(&join.left.table),
                 Some(&join.left.alias),
-                join_on_expr!(join),
+                join_on_expr!(join).unwrap(),
             )
         })
     }};
@@ -195,12 +175,12 @@ macro_rules! add_joins {
 #[macro_export]
 macro_rules! add_where {
     ($builder:expr, $filter:expr) => {{
-        let mut temp_builder = $builder;
+        let mut builder = $builder;
         if let Some(filter) = $filter {
             if let Some(expr) = &filter.expr {
-                temp_builder = temp_builder.where_clause(sql_filter_expr!(expr));
+                builder = builder.where_clause(sql_filter_expr!(expr).unwrap());
             }
         }
-        temp_builder
+        builder
     }};
 }

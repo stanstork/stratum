@@ -18,7 +18,7 @@ use smql::{
     statements::{
         connection::{Connection, ConnectionPair, DataFormat},
         migrate::{MigrateItem, SpecKind},
-        setting::{CopyColumns, Settings},
+        setting::Settings,
     },
 };
 use sql_adapter::metadata::provider::MetadataProvider;

@@ -126,7 +126,7 @@ impl Value {
         self.compare(other).map_or(false, |o| o == Ordering::Equal)
     }
 
-    pub fn get_data_type(&self) -> DataType {
+    pub fn data_type(&self) -> DataType {
         match self {
             Value::Int(_) => DataType::Int,
             Value::Float(_) => DataType::Float,
@@ -187,6 +187,6 @@ impl fmt::Display for Value {
 
 impl FieldValue {
     pub fn value_data_type(&self) -> Option<DataType> {
-        self.value.as_ref().map(|v| v.get_data_type())
+        self.value.as_ref().map(|v| v.data_type())
     }
 }

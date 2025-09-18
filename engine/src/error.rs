@@ -45,4 +45,7 @@ pub enum MigrationError {
 
     #[error("Missing AUTH_TOKEN environment variable")]
     MissingAuthToken,
+
+    #[error("Unexpected error: {0}")]
+    Unexpected(String),
 }

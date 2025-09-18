@@ -11,6 +11,7 @@ pub trait DbDataSource: MetadataHelper + Send + Sync {
         batch_size: usize,
         offset: Option<usize>,
     ) -> Result<Vec<RowData>, Self::Error>;
+
     fn build_fetch_rows_requests(
         &self,
         batch_size: usize,

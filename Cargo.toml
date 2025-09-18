@@ -9,7 +9,6 @@ members = [
     "engine",
     "query-builder",
     "smql",
-    "query-builder",
 ]
 
 resolver = "2"

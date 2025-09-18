@@ -72,9 +72,6 @@ impl<'a> QueryGenerator<'a> {
         let mut builder = InsertBuilder::new(table_ref!(meta.name))
             .columns(&col_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
 
-        // println!("Rows: {:?}", rows);
-        // println!("Sorted Columns: {:?}", sorted_columns);
-
         for row in rows {
             // Create a HashMap for efficient, case-insensitive lookup of values by column name
             let field_map: HashMap<String, Value> = row
@@ -95,20 +92,15 @@ impl<'a> QueryGenerator<'a> {
                 })
                 .collect();
 
-            // Add the row of values to the builder.
             builder = builder.values(ordered_values);
         }
 
-        let insert_ast = builder.build();
-
-        self.render_ast(insert_ast)
+        self.render_ast(builder.build())
     }
 
     pub fn toggle_triggers(&self, table: &str, enable: bool) -> (String, Vec<Value>) {
-        let builder = AlterTableBuilder::new(table_ref!(table)).toggle_triggers(!enable);
-        let query_ast = builder.build();
-
-        self.render_ast(query_ast)
+        let builder = AlterTableBuilder::new(table_ref!(table)).toggle_triggers(enable);
+        self.render_ast(builder.build())
     }
 
     pub fn add_column(&self, table: &str, column: ColumnDef) -> (String, Vec<Value>) {
@@ -166,9 +158,7 @@ impl<'a> QueryGenerator<'a> {
             builder_with_cols
         };
 
-        let create_ast = final_builder.build();
-
-        self.render_ast(create_ast)
+        self.render_ast(final_builder.build())
     }
 
     pub fn add_foreign_key(
@@ -187,7 +177,7 @@ impl<'a> QueryGenerator<'a> {
         self.render_ast(query_ast)
     }
 
-    pub fn create_enum(&self, name: &str, values: &Vec<String>) -> (String, Vec<Value>) {
+    pub fn create_enum(&self, name: &str, values: &[String]) -> (String, Vec<Value>) {
         let builder = CreateEnumBuilder::new(
             TypeName {
                 schema: None,
@@ -215,6 +205,7 @@ impl<'a> QueryGenerator<'a> {
     }
 }
 
+// TODO: Split functionality by dialect
 /// Maps a `Value` to a query `Expr` based on column metadata.
 ///
 /// This function contains all the specific logic for handling different data types,

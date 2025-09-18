@@ -94,7 +94,7 @@ impl KeyChecker {
                 };
 
                 let existing_keys = adapter
-                    .find_existing_keys(&table, key_columns, key_batch)
+                    .fetch_existing_keys(&table, key_columns, key_batch)
                     .await?;
 
                 for existing_key in existing_keys {

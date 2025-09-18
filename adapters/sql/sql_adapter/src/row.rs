@@ -27,7 +27,7 @@ impl DbRow<'_> {
 
                 FieldValue {
                     name: column.to_string(),
-                    value: self.get_value(data_type.clone(), column),
+                    value: self.get_value(&data_type, column),
                     data_type,
                 }
             })
@@ -36,7 +36,7 @@ impl DbRow<'_> {
         RowData::new(table, columns)
     }
 
-    pub fn get_value(&self, data_type: DataType, name: &str) -> Option<Value> {
+    pub fn get_value(&self, data_type: &DataType, name: &str) -> Option<Value> {
         match data_type {
             DataType::Int | DataType::Long | DataType::Short => {
                 self.try_get_i64(name).map(Value::Int)

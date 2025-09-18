@@ -12,7 +12,7 @@ pub enum FieldMetadata {
 impl FieldMetadata {
     pub fn pg_type(&self) -> (DataType, Option<usize>) {
         match self {
-            FieldMetadata::Sql(col) => DataType::to_pg_type(col),
+            FieldMetadata::Sql(col) => DataType::as_pg_type_info(col),
             FieldMetadata::Csv(col) => (col.data_type.clone(), None),
         }
     }

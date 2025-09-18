@@ -5,11 +5,11 @@ pub struct CreateEnumBuilder {
 }
 
 impl CreateEnumBuilder {
-    pub fn new(name: TypeName, values: &Vec<String>) -> Self {
+    pub fn new(name: TypeName, values: &[String]) -> Self {
         Self {
             ast: CreateEnum {
                 name,
-                values: values.clone(),
+                values: values.to_vec(),
             },
         }
     }
