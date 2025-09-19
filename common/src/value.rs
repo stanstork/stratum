@@ -103,7 +103,7 @@ impl Value {
             Value::Timestamp(_) => None,
             Value::Null => Some("NULL".to_string()),
             Value::Enum(_, v) => Some(v.clone()),
-            Value::StringArray(v) => Some(format!("{:?}", v)),
+            Value::StringArray(v) => Some(format!("{v:?}")),
         }
     }
 
@@ -123,7 +123,7 @@ impl Value {
     }
 
     pub fn equal(&self, other: &Value) -> bool {
-        self.compare(other).map_or(false, |o| o == Ordering::Equal)
+        self.compare(other) == Some(Ordering::Equal)
     }
 
     pub fn data_type(&self) -> DataType {
@@ -154,32 +154,32 @@ pub struct FieldValue {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Int(v) => write!(f, "{}", v),
+            Value::Int(v) => write!(f, "{v}"),
             Value::Float(v) => write!(f, "{:.15}", v),
             Value::String(v) => write!(f, "'{}'", v.replace("'", "''")),
-            Value::Boolean(v) => write!(f, "{}", v),
+            Value::Boolean(v) => write!(f, "{v}"),
             Value::Json(v) => {
                 let json_str = v.to_string().replace('\'', "''");
-                write!(f, "'{}'", json_str)
+                write!(f, "'{json_str}'")
             }
-            Value::Uuid(v) => write!(f, "{}", v),
+            Value::Uuid(v) => write!(f, "{v}"),
             Value::Bytes(v) => {
-                let hex = v.iter().fold(String::new(), |acc, byte: &u8| {
-                    acc + &format!("{:02x}", byte)
-                });
-                write!(f, "E'\\\\x{}'", hex)
+                let hex = v
+                    .iter()
+                    .fold(String::new(), |acc, byte: &u8| acc + &format!("{byte:02x}"));
+                write!(f, "E'\\\\x{hex}'")
             }
-            Value::Date(v) => write!(f, "'{}'", v),
-            Value::Timestamp(v) => write!(f, "'{}'", v),
+            Value::Date(v) => write!(f, "'{v}'"),
+            Value::Timestamp(v) => write!(f, "'{v}'"),
             Value::Null => write!(f, "NULL"),
-            Value::Enum(_, v) => write!(f, "'{}'", v.replace("'", "''")),
+            Value::Enum(_, v) => write!(f, "'{v}'"),
             Value::StringArray(v) => {
                 let array_str = v
                     .iter()
                     .map(|s| format!("\"{}\"", s.replace('\"', "\\\"")))
                     .collect::<Vec<String>>()
                     .join(", ");
-                write!(f, "'{{{}}}'", array_str)
+                write!(f, "'{{{array_str}}}'")
             }
         }
     }

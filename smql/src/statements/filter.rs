@@ -101,6 +101,6 @@ impl Display for Comparator {
             Comparator::LessThan => "<",
             Comparator::LessThanOrEqual => "<=",
         };
-        write!(f, "{}", op)
+        write!(f, "{op}")
     }
 }

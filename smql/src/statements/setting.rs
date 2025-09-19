@@ -35,7 +35,7 @@ impl Display for CopyColumns {
             CopyColumns::All => "ALL",
             CopyColumns::MapOnly => "MAP_ONLY",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 

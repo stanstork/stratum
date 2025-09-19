@@ -33,7 +33,7 @@ impl RowData {
 
 impl DataRecord for RowData {
     fn debug(&self) {
-        println!("{:#?}", self);
+        println!("{self:#?}");
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -42,13 +42,13 @@ impl DataRecord for RowData {
 
     fn serialize(&self) -> Vec<u8> {
         serde_json::to_vec(self).unwrap_or_else(|_| {
-            panic!("Failed to serialize: {:?}", self);
+            panic!("Failed to serialize: {self:?}");
         })
     }
 
     fn deserialize(data: Vec<u8>) -> Self {
         serde_json::from_slice(&data).unwrap_or_else(|_| {
-            panic!("Failed to deserialize: {:?}", data);
+            panic!("Failed to deserialize: {data:?}");
         })
     }
 }

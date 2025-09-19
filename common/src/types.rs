@@ -98,7 +98,7 @@ impl TryFrom<&str> for DataType {
         TYPE_MAP
             .get(s.to_uppercase().as_str())
             .cloned()
-            .ok_or_else(|| format!("Unknown column type: {}", s))
+            .ok_or_else(|| format!("Unknown column type: {s}"))
     }
 }
 
@@ -136,7 +136,7 @@ impl fmt::Display for DataType {
             DataType::Array => write!(f, "ARRAY"),
             DataType::Char => write!(f, "CHAR"),
             DataType::Date => write!(f, "DATE"),
-            DataType::Custom(ref name) => write!(f, "{}", name),
+            DataType::Custom(ref name) => write!(f, "{name}"),
         }
     }
 }
