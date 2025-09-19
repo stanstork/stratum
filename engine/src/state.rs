@@ -20,6 +20,12 @@ pub struct MigrationState {
     dry_run_report: Arc<Mutex<DryRunReport>>,
 }
 
+impl Default for MigrationState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MigrationState {
     pub fn new() -> Self {
         MigrationState {
@@ -76,7 +82,7 @@ impl MigrationState {
     }
 
     pub fn copy_columns(&self) -> CopyColumns {
-        self.copy_columns.clone()
+        self.copy_columns
     }
 
     pub fn set_infer_schema(&mut self, infer: bool) {

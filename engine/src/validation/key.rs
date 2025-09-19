@@ -37,6 +37,12 @@ pub struct KeyChecker {
     pending: HashMap<(String, KeyKind), Vec<KeyValue>>,
 }
 
+impl Default for KeyChecker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KeyChecker {
     pub fn new() -> Self {
         Self {
@@ -103,15 +109,14 @@ impl KeyChecker {
                 for existing_key in existing_keys {
                     let constraint_name = match &kind {
                         KeyKind::Primary => "PRIMARY KEY".to_string(),
-                        KeyKind::Unique(name) => format!("UNIQUE constraint '{}'", name),
+                        KeyKind::Unique(name) => format!("UNIQUE constraint '{name}'"),
                     };
                     let formatted_key = Self::format_key(&existing_key.field_values);
 
                     findings.insert(Finding::error(
                         "SCHEMA_KEY_VIOLATION_IN_DB",
                         &format!(
-                            "Key value {} for constraint '{}' on table '{}' already exists in the destination.",
-                            formatted_key, constraint_name, table
+                            "Key value {formatted_key} for constraint '{constraint_name}' on table '{table}' already exists in the destination."
                         ), FindingKind::DestinationSchema
                     ));
                 }
@@ -185,15 +190,13 @@ impl KeyChecker {
             KeyKind::Primary => (
                 "SCHEMA_PK_DUPLICATE_IN_BATCH",
                 format!(
-                    "Duplicate PRIMARY KEY {:?} found in sample for table '{}' (columns: {:?})",
-                    key_value, table, cols
+                    "Duplicate PRIMARY KEY {key_value:?} found in sample for table '{table}' (columns: {cols:?})"
                 ),
             ),
             KeyKind::Unique(name) => (
                 "SCHEMA_UNIQUE_DUPLICATE_IN_BATCH",
                 format!(
-                    "Duplicate UNIQUE constraint '{}' key {:?} found in sample for table '{}' (columns: {:?})",
-                    name, key_value, table, cols
+                    "Duplicate UNIQUE constraint '{name}' key {key_value:?} found in sample for table '{table}' (columns: {cols:?})"
                 ),
             ),
         };

@@ -13,7 +13,7 @@ impl Render for Insert {
             .map(|c| r.dialect.quote_identifier(c))
             .collect();
         r.sql.push_str(&quoted_columns.join(", "));
-        r.sql.push_str(")");
+        r.sql.push(')');
 
         // 2. VALUES (...)
         r.sql.push_str(" VALUES ");

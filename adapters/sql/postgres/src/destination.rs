@@ -106,7 +106,7 @@ impl MetadataHelper for PgDestination {
             .filter(|meta| {
                 self.primary_meta
                     .as_ref()
-                    .map_or(true, |p| !p.name.eq_ignore_ascii_case(&meta.name))
+                    .is_none_or(|p| !p.name.eq_ignore_ascii_case(&meta.name))
             })
             .cloned()
             .collect::<Vec<_>>();

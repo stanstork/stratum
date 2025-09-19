@@ -162,8 +162,7 @@ impl DestinationSchemaValidator {
             self.findings.insert(Finding::error(
                 "SCHEMA_NULL_VIOLATION",
                 &format!(
-                    "Field '{}' in table '{}' is null, but the destination column is not nullable.",
-                    field_name, table_name
+                    "Field '{field_name}' in table '{table_name}' is null, but the destination column is not nullable."
                 ),
                 FindingKind::SampleData,
             ));
@@ -209,8 +208,7 @@ impl DestinationSchemaValidator {
             self.findings.insert(Finding::warning(
                 "SCHEMA_TRUNCATION_RISK",
                 &format!(
-                    "Data for column '{}' in table '{}' has length {} which exceeds the destination column limit of {}. Data may be truncated.",
-                    field_name, table_name, actual_len, max_len
+                    "Data for column '{field_name}' in table '{table_name}' has length {actual_len} which exceeds the destination column limit of {max_len}. Data may be truncated."
                 ), FindingKind::SampleData
             ));
         }
@@ -229,8 +227,7 @@ impl DestinationSchemaValidator {
                 self.findings.insert(Finding::error(
                     "SCHEMA_COLUMN_MISSING",
                     &format!(
-                        "Transformed data contains column '{}' which does not exist in destination table '{}'. Missing-column creation is disabled.",
-                        field_name, table_name
+                        "Transformed data contains column '{field_name}' which does not exist in destination table '{table_name}'. Missing-column creation is disabled."
                     ), FindingKind::SampleData
                 ));
             }
@@ -242,8 +239,7 @@ impl DestinationSchemaValidator {
                 self.findings.insert(Finding::error(
                     "SCHEMA_COLUMN_MISSING",
                     &format!(
-                        "Transformed data contains column '{}' which does not exist in destination table '{}' and is not a mapped or computed field.",
-                        field_name, table_name
+                        "Transformed data contains column '{field_name}' which does not exist in destination table '{table_name}' and is not a mapped or computed field."
                     ), FindingKind::SampleData
                 ));
             }
@@ -259,7 +255,7 @@ impl DestinationSchemaValidator {
             .field_mappings
             .computed_fields
             .get(table_name)
-            .map_or(false, |list| list.iter().any(|cf| cf.name == field_name))
+            .is_some_and(|list| list.iter().any(|cf| cf.name == field_name))
     }
 
     fn is_renamed_target(&self, table_name: &str, field_name: &str) -> bool {
@@ -267,7 +263,7 @@ impl DestinationSchemaValidator {
             .field_mappings
             .column_mappings
             .get(table_name)
-            .map_or(false, |map| {
+            .is_some_and(|map| {
                 map.source_to_target.values().any(|t| t == field_name)
             })
     }
@@ -288,8 +284,7 @@ impl DestinationSchemaValidator {
                 self.findings.insert(Finding::error(
                     "SCHEMA_MISSING_REQUIRED_COLUMN",
                     &format!(
-                        "Required column '{}' is missing from the transformed data for table '{}'.",
-                        col_name, table_name
+                        "Required column '{col_name}' is missing from the transformed data for table '{table_name}'."
                     ),
                     FindingKind::SampleData,
                 ));
@@ -303,8 +298,7 @@ impl DestinationSchemaValidator {
                 self.findings.insert(Finding::error(
                     "SCHEMA_TABLE_MISSING",
                     &format!(
-                        "Destination table '{}' does not exist and table creation is disabled.",
-                        table_name
+                        "Destination table '{table_name}' does not exist and table creation is disabled."
                     ),
                     FindingKind::SampleData,
                 ));
@@ -320,8 +314,7 @@ impl DestinationSchemaValidator {
                         self.findings.insert(Finding::warning(
                             "SCHEMA_UNMAPPED_COLUMN_FOR_NEW_TABLE",
                             &format!(
-                                "Transformed data for new table '{}' contains column '{}' which is not explicitly mapped/computed; its type/constraints cannot be validated.",
-                                table_name, field_name
+                                "Transformed data for new table '{table_name}' contains column '{field_name}' which is not explicitly mapped/computed; its type/constraints cannot be validated."
                             ), FindingKind::SampleData
                         ));
                     }

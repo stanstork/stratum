@@ -4,6 +4,12 @@ use tracing::info;
 
 pub struct ValidationConsumer;
 
+impl Default for ValidationConsumer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ValidationConsumer {
     pub fn new() -> Self {
         Self {}

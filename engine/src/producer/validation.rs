@@ -106,7 +106,7 @@ impl ValidationProducer {
         }
 
         if let Some(e) = results.schema_validation_error {
-            let error_msg = format!("Schema validation error: {}", e);
+            let error_msg = format!("Schema validation error: {e}");
             report
                 .summary
                 .errors
@@ -159,7 +159,7 @@ impl ValidationProducer {
                 .transform
                 .sample
                 .iter()
-                .any(|r| r.warnings.as_ref().map_or(false, |w| !w.is_empty()));
+                .any(|r| r.warnings.as_ref().is_some_and(|w| !w.is_empty()));
 
         if has_errors {
             DryRunStatus::Failure

@@ -75,7 +75,7 @@ impl CreateMissingColumnsSetting {
             for (src_col, dst_col) in columns.forward_map() {
                 if dest_meta.get_column(&dst_col).is_none() {
                     let meta = source_meta.column(&src_col).ok_or_else(|| {
-                        SettingsError::MissingSourceColumn(format!("{} not in source", src_col))
+                        SettingsError::MissingSourceColumn(format!("{src_col} not in source"))
                     })?;
                     let def = create_column_def(&dst_col, &type_conv, &meta);
                     self.context.schema_manager.add_column(table, &def).await?;

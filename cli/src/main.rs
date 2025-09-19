@@ -66,7 +66,7 @@ async fn main() -> Result<(), CliError> {
                 if let Some(output_file) = output {
                     std::fs::write(output_file, metadata_json)?;
                 } else {
-                    println!("{}", metadata_json);
+                    println!("{metadata_json}");
                 }
             }
         },
@@ -74,7 +74,7 @@ async fn main() -> Result<(), CliError> {
             let source = tokio::fs::read_to_string(&config).await?;
             let plan = smql::parser::parse(&source)?;
             let json = serde_json::to_string_pretty(&plan).map_err(CliError::JsonSerialize)?;
-            println!("{}", json);
+            println!("{json}");
         }
         Commands::TestConn { format, conn_str } => {
             let kind = ConnectionKind::from_str(&format)

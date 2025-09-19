@@ -82,8 +82,7 @@ impl Finding {
         Self::new(
             CODE_UNSUPPORTED_SOURCE,
             format!(
-                "Validation run does not support source type: {}",
-                source_format
+                "Validation run does not support source type: {source_format}"
             ),
             Severity::Error,
             FindingKind::SourceSchema,

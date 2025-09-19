@@ -58,7 +58,7 @@ impl Source {
     }
 
     pub fn format(&self) -> DataFormat {
-        self.format.clone()
+        self.format
     }
 
     pub fn name(&self) -> &str {

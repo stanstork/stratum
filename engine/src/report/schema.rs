@@ -47,10 +47,9 @@ impl SchemaAction {
         Self::new(
             ACTION_ADD_COLUMN,
             format!(
-                "A new column '{}' will be added to the destination table '{}'.",
-                column, entity
+                "A new column '{column}' will be added to the destination table '{entity}'."
             ),
-            Some(format!("{}.{}", entity, column)),
+            Some(format!("{entity}.{column}")),
         )
     }
 
@@ -58,8 +57,7 @@ impl SchemaAction {
         Self::new(
             ACTION_CREATE_ENUM,
             format!(
-                "A new enum type '{}' will be created in the destination.",
-                enum_name
+                "A new enum type '{enum_name}' will be created in the destination."
             ),
             Some(enum_name.to_string()),
         )
@@ -68,7 +66,7 @@ impl SchemaAction {
     pub fn create_table(table: &str) -> Self {
         Self::new(
             ACTION_CREATE_TABLE,
-            format!("A new table '{}' will be created.", table),
+            format!("A new table '{table}' will be created."),
             Some(table.to_string()),
         )
     }
@@ -77,8 +75,7 @@ impl SchemaAction {
         Self::new(
             ACTION_ADD_FOREIGN_KEY,
             format!(
-                "A foreign key constraint '{}' will be added to the destination.",
-                fk_name
+                "A foreign key constraint '{fk_name}' will be added to the destination."
             ),
             Some(fk_name.to_string()),
         )

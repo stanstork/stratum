@@ -96,8 +96,7 @@ impl FileDataSource for CsvDataSource {
                 }
                 Some(Err(e)) => {
                     return Err(FileError::ReadError(format!(
-                        "Error reading CSV record: {}",
-                        e
+                        "Error reading CSV record: {e}"
                     )));
                 }
                 // End of file

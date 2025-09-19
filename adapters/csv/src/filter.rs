@@ -65,7 +65,7 @@ impl FromStr for CsvComparator {
             ">=" => Ok(CsvComparator::GreaterThanOrEqual),
             "<" => Ok(CsvComparator::LessThan),
             "<=" => Ok(CsvComparator::LessThanOrEqual),
-            _ => Err(format!("Unsupported comparator: {}", s)),
+            _ => Err(format!("Unsupported comparator: {s}")),
         }
     }
 }

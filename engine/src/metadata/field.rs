@@ -54,7 +54,7 @@ impl FieldMetadata {
 
     pub fn default_value(&self) -> Option<Value> {
         match self {
-            FieldMetadata::Sql(col) => col.default_value.as_ref().map(|v| v.clone()),
+            FieldMetadata::Sql(col) => col.default_value.clone(),
             FieldMetadata::Csv(_col) => None,
         }
     }

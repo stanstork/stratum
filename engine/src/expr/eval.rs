@@ -54,8 +54,8 @@ impl Evaluator for Expression {
                                 .find(|col| col.name.eq_ignore_ascii_case(target))
                                 .and_then(|col| col.value.clone())
                         } else {
-                            warn!("Lookup target is not set for {}[{}]", entity, key);
-                            return None;
+                            // Lookup target is not specified. Used in function arguments.
+                            None
                         }
                     });
 
@@ -137,7 +137,7 @@ fn eval_function(name: &str, args: &[Value]) -> Option<Value> {
                     Value::Json(v) => v.to_string(),
                     Value::Null => "NULL".to_string(),
                     Value::Enum(_, v) => v.clone(),
-                    Value::StringArray(v) => format!("{:?}", v),
+                    Value::StringArray(v) => format!("{v:?}"),
                 })
                 .collect::<Vec<_>>()
                 .join("");

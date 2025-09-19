@@ -23,7 +23,7 @@ impl FromStr for ConnectionKind {
             "mysql" | "mariadb" => Ok(ConnectionKind::MySql),
             "pg" | "postgres" | "postgresql" => Ok(ConnectionKind::Postgres),
             "ftp" => Ok(ConnectionKind::Ftp),
-            other => Err(format!("Unknown connection kind: {}", other)),
+            other => Err(format!("Unknown connection kind: {other}")),
         }
     }
 }

@@ -38,7 +38,7 @@ impl CreateTableBuilder {
 
     pub fn primary_key(mut self, columns: Vec<String>) -> Self {
         self.ast.constraints.push(TableConstraint::PrimaryKey {
-            columns: columns.iter().map(|s| s.clone()).collect(),
+            columns: columns.to_vec(),
         });
         self
     }

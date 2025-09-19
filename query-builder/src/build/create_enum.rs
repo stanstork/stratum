@@ -30,11 +30,9 @@ mod tests {
                 schema: None,
                 name: "mood".to_string(),
             },
-            &vec![
-                "happy".to_string(),
+            &["happy".to_string(),
                 "sad".to_string(),
-                "neutral".to_string(),
-            ],
+                "neutral".to_string()],
         );
         let ast = builder.build();
         assert_eq!(ast.name.name, "mood");

@@ -45,7 +45,7 @@ impl Drop for TriggerGuard {
         // Since `drop` cannot be async, we must spawn a task to run the async code.
         tokio::spawn(async move {
             for table in tables.iter() {
-                if let Err(e) = destination.toggle_trigger(&table, target_state).await {
+                if let Err(e) = destination.toggle_trigger(table, target_state).await {
                     error!(
                         table = %table,
                         error = %e,

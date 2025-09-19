@@ -136,8 +136,7 @@ mod tests {
 
             assert!(
                 dest_tables.contains(table),
-                "Table {} not found in destination",
-                table
+                "Table {table} not found in destination"
             );
         }
     }
@@ -209,14 +208,13 @@ mod tests {
         run_smql(tmpl, "orders").await;
         assert_row_count("orders", "orders", "orders").await;
 
-        let dependent_tables = vec!["order_items", "products", "users"];
+        let dependent_tables = ["order_items", "products", "users"];
         for table in dependent_tables.iter() {
             let dest_count = get_row_count(table, "orders", DbType::Postgres).await;
 
             assert_eq!(
                 0, dest_count,
-                "expected no rows in destination table {}",
-                table
+                "expected no rows in destination table {table}"
             );
         }
     }
@@ -414,7 +412,7 @@ mod tests {
         let src_last = get_cell_as_string(query, "sakila", DbType::MySql, "last_name").await;
         let dst_full = get_cell_as_string(query, "sakila", DbType::Postgres, "full_name").await;
 
-        assert_eq!(dst_full, format!("{}{}", src_first, src_last));
+        assert_eq!(dst_full, format!("{src_first}{src_last}"));
     }
 
     // Test Settings: CREATE_MISSING_TABLES = TRUE, IGNORE_CONSTRAINTS = TRUE.
@@ -457,9 +455,8 @@ mod tests {
 
         for column in src_cols.iter() {
             assert!(
-                !dst_cols.contains(&format!("users_{}", column)),
-                "Column {} should not exist in destination table",
-                column
+                !dst_cols.contains(&format!("users_{column}")),
+                "Column {column} should not exist in destination table"
             );
         }
     }
@@ -673,8 +670,7 @@ mod tests {
         let expected = file_row_count(csv_path, true).unwrap();
         assert_eq!(
             actual, expected,
-            "Expected {} rows in `customers`, got {}",
-            expected, actual
+            "Expected {expected} rows in `customers`, got {actual}"
         );
     }
 
@@ -722,8 +718,7 @@ mod tests {
         let expected = file_row_count(csv_path, true).unwrap();
         assert_eq!(
             actual, expected,
-            "Expected {} rows in `customers`, got {}",
-            expected, actual
+            "Expected {expected} rows in `customers`, got {actual}"
         );
 
         // Verify the full_name column exists and is populated
@@ -778,7 +773,7 @@ mod tests {
         let last = get_cell_as_string(query, "customers", DbType::Postgres, "last_name").await;
         let full = get_cell_as_string(query, "customers", DbType::Postgres, "full_name").await;
 
-        assert_eq!(full, format!("{}{}", first, last));
+        assert_eq!(full, format!("{first}{last}"));
     }
 
     // Test Settings: CREATE_MISSING_TABLES = TRUE, CREATE_MISSING_COLUMNS = TRUE, FILTER.

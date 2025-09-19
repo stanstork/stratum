@@ -36,7 +36,7 @@ fn bind_values<'q>(
             Value::Timestamp(t) => query.bind(*t),
             Value::Null => query.bind(None::<String>),
             Value::Enum(_, v) => query.bind(v),
-            Value::StringArray(v) => query.bind(format!("{:?}", v)), // Bind as a string representation of the array
+            Value::StringArray(v) => query.bind(format!("{v:?}")), // Bind as a string representation of the array
         };
     }
     query
@@ -167,9 +167,8 @@ impl SqlAdapter for MySqlAdapter {
                 // get the VARBINARY column as Vec<u8>
                 let raw: Vec<u8> = row.try_get(0)?;
                 // convert to String
-                String::from_utf8(raw).map_err(|e| {
-                    DbError::Unknown(format!("invalid UTF-8 in table name: {}", e).into())
-                })
+                String::from_utf8(raw)
+                    .map_err(|e| DbError::Unknown(format!("invalid UTF-8 in table name: {e}")))
             })
             .collect::<Result<_, _>>()?;
 
@@ -178,9 +177,9 @@ impl SqlAdapter for MySqlAdapter {
 
     async fn fetch_existing_keys(
         &self,
-        table: &str,
-        key_columns: &[String],
-        keys_batch: &[Vec<Value>],
+        _table: &str,
+        _key_columns: &[String],
+        _keys_batch: &[Vec<Value>],
     ) -> Result<Vec<RowData>, DbError> {
         todo!("Implement find_existing_keys for MySQL")
     }

@@ -30,7 +30,7 @@ fn compile_sql_expr(expr: &FilterExpression) -> SqlFilterExpr {
             match name.to_ascii_uppercase().as_str() {
                 "AND" => SqlFilterExpr::and(children),
                 "OR" => SqlFilterExpr::or(children),
-                _ => panic!("Unsupported function call: {}", name),
+                _ => panic!("Unsupported function call: {name}"),
             }
         }
     }
@@ -43,13 +43,13 @@ fn from_stmt_condition(
     let (table, column) = match &c.left {
         Expression::Lookup { entity, key, .. } => (entity.clone(), key.clone()),
         other => {
-            return Err(format!("Unsupported expression type filter field: {:?}", other).into())
+            return Err(format!("Unsupported expression type filter field: {other:?}").into())
         }
     };
 
     // stringify the RHS (literal, identifier, lookup or arithmetic)
     let value = format_expr(&c.right)
-        .map_err(|e| format!("Unsupported expression type filter value: {:?}", e))?;
+        .map_err(|e| format!("Unsupported expression type filter value: {e:?}"))?;
 
     // map comparator to its SQL symbol
     let comparator = match c.op {

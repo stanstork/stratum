@@ -23,7 +23,7 @@ pub struct FromState;
 #[derive(Debug, Clone)]
 pub struct SelectBuilder<State> {
     ast: Select,
-    state: State,
+    _state: State,
 }
 
 /// Implementation for the initial state of the builder.
@@ -31,7 +31,7 @@ impl SelectBuilder<InitialState> {
     pub fn new() -> Self {
         Self {
             ast: Select::default(),
-            state: InitialState,
+            _state: InitialState,
         }
     }
 
@@ -41,7 +41,7 @@ impl SelectBuilder<InitialState> {
         self.ast.columns = columns;
         SelectBuilder {
             ast: self.ast,
-            state: SelectState,
+            _state: SelectState,
         }
     }
 }
@@ -57,7 +57,7 @@ impl SelectBuilder<SelectState> {
         });
         SelectBuilder {
             ast: self.ast,
-            state: FromState,
+            _state: FromState,
         }
     }
 }

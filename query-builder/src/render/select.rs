@@ -80,7 +80,7 @@ impl Render for JoinClause {
             JoinKind::Right => "RIGHT JOIN",
             JoinKind::Full => "FULL OUTER JOIN",
         };
-        r.sql.push_str(&format!("{} ", join_str));
+        r.sql.push_str(&format!("{join_str} "));
         r.sql
             .push_str(&r.dialect.quote_identifier(&self.table.name));
         if let Some(alias) = &self.alias {

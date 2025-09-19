@@ -28,7 +28,7 @@ impl DataDestination {
                 panic!("MySql data destination is not implemented yet")
             }
             other => {
-                panic!("Unsupported data destination format: {:?}", other);
+                panic!("Unsupported data destination format: {other:?}");
             }
         }
     }

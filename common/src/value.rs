@@ -155,7 +155,7 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Int(v) => write!(f, "{v}"),
-            Value::Float(v) => write!(f, "{:.15}", v),
+            Value::Float(v) => write!(f, "{v:.15}"),
             Value::String(v) => write!(f, "'{}'", v.replace("'", "''")),
             Value::Boolean(v) => write!(f, "{v}"),
             Value::Json(v) => {

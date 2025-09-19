@@ -44,9 +44,9 @@ pub async fn run(
         let conn = plan.connections.clone();
 
         // Prepare per-item state
-        let mapping = EntityMapping::new(&mi);
-        let source = create_source(&gc, &conn, &mapping, &mi).await?;
-        let destination = create_destination(&gc, &conn, &mi).await?;
+        let mapping = EntityMapping::new(mi);
+        let source = create_source(&gc, &conn, &mapping, mi).await?;
+        let destination = create_destination(&gc, &conn, mi).await?;
         let mut state = MigrationState::new();
 
         if dry_run {
@@ -119,10 +119,10 @@ pub async fn load_src_metadata(
         meta_graph.len()
     );
 
-    return Ok(meta_graph
+    Ok(meta_graph
         .iter()
         .map(|(name, meta)| (name.clone(), EntityMetadata::Table(meta.clone())))
-        .collect());
+        .collect())
 }
 
 async fn create_source(
@@ -232,7 +232,7 @@ fn get_data_format(item: &MigrateItem, conn: &Connection) -> (DataFormat, DataFo
         match kind {
             SpecKind::Table => {
                 conn.as_ref()
-                    .unwrap_or_else(|| panic!("Connection {} is required", label))
+                    .unwrap_or_else(|| panic!("Connection {label} is required"))
                     .format
             }
             SpecKind::Api => DataFormat::Api,

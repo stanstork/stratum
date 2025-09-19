@@ -237,8 +237,7 @@ fn lookup_warnings(
             if let Some(target) = &l.target {
                 if nm.source_to_target.values().any(|t| t == target) {
                     w.push(format!(
-                        "Lookup target '{}' collides with a renamed column in '{}'",
-                        target, dest_entity
+                        "Lookup target '{target}' collides with a renamed column in '{dest_entity}'"
                     ));
                 }
             }
@@ -303,5 +302,5 @@ fn compute_mapping_hash(mapping: &EntityMapping) -> String {
 
     let json = serde_json::to_vec(&minimal).expect("Failed to serialize mapping for hashing.");
     let hash = md5::compute(&json);
-    format!("{:x}", hash)
+    format!("{hash:x}")
 }

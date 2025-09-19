@@ -169,8 +169,8 @@ impl DbRow<'_> {
 impl fmt::Debug for DbRow<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            DbRow::MySqlRow(row) => write!(f, "{:?}", row),
-            DbRow::PostgresRow(row) => write!(f, "{:?}", row),
+            DbRow::MySqlRow(row) => write!(f, "{row:?}"),
+            DbRow::PostgresRow(row) => write!(f, "{row:?}"),
         }
     }
 }

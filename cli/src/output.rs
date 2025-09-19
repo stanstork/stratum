@@ -30,6 +30,6 @@ pub async fn write_report(
 
 pub async fn print_report(states: HashMap<String, MigrationState>) -> Result<(), CliError> {
     let report_json = generate_report_json(states).await?;
-    println!("{}", report_json);
+    println!("{report_json}");
     Ok(())
 }

@@ -11,6 +11,12 @@ pub struct Metrics {
     inner: Arc<Mutex<InnerMetrics>>,
 }
 
+impl Default for Metrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Metrics {
     pub fn new() -> Self {
         Metrics {

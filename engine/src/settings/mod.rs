@@ -77,7 +77,7 @@ pub async fn collect_settings(cfg: &Settings, ctx: &ItemContext) -> Vec<Box<dyn 
         all_settings.push(Box::new(cascade_schema_setting) as _);
     }
 
-    let copy_columns_setting = CopyColumnsSetting(cfg.copy_columns.clone());
+    let copy_columns_setting = CopyColumnsSetting(cfg.copy_columns);
     all_settings.push(Box::new(copy_columns_setting) as _);
 
     // Sort settings by phase to ensure they are applied in the correct order

@@ -37,7 +37,7 @@ pub struct Postgres;
 
 impl Dialect for Postgres {
     fn quote_identifier(&self, ident: &str) -> String {
-        format!(r#""{}""#, ident)
+        format!(r#""{ident}""#)
     }
 
     fn get_placeholder(&self, index: usize) -> String {
@@ -82,7 +82,7 @@ impl Dialect for Postgres {
         };
 
         if let Some(max_len) = max_length {
-            format!("{}({})", type_name, max_len)
+            format!("{type_name}({max_len})")
         } else {
             type_name
         }
@@ -110,7 +110,7 @@ impl Dialect for Postgres {
             .join(", ");
 
         let value_columns: String = (1..=key_columns.len())
-            .map(|i| format!("c{}", i))
+            .map(|i| format!("c{i}"))
             .collect::<Vec<_>>()
             .join(", ");
 
@@ -126,13 +126,13 @@ impl Dialect for Postgres {
             .map(|_| {
                 let p = (0..key_columns.len())
                     .map(|_| {
-                        let p_str = format!("${}", placeholder_idx);
+                        let p_str = format!("${placeholder_idx}");
                         placeholder_idx += 1;
                         p_str
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("({})", p)
+                format!("({p})")
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -153,7 +153,7 @@ pub struct MySql;
 
 impl Dialect for MySql {
     fn quote_identifier(&self, ident: &str) -> String {
-        format!(r#"`{}`"#, ident)
+        format!(r#"`{ident}`"#)
     }
 
     fn get_placeholder(&self, _index: usize) -> String {
@@ -198,7 +198,7 @@ impl Dialect for MySql {
         };
 
         if let Some(max_len) = max_length {
-            format!("{}({})", type_name, max_len)
+            format!("{type_name}({max_len})")
         } else {
             type_name
         }
