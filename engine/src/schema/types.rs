@@ -17,7 +17,7 @@ pub type AdapterRef = Arc<dyn SqlAdapter + Send + Sync>;
 /// returning the target type name and optional size (e.g., MySQL `blob` → PostgreSQL `bytea`).
 pub type TypeConverter = dyn Fn(&FieldMetadata) -> (DataType, Option<usize>) + Send + Sync;
 
-/// A function that extracts enums from a table’s metadata.
+/// A function that extracts enums from a table's metadata.
 pub type EnumExtractor = dyn Fn(&TableMetadata) -> Vec<ColumnMetadata> + Send + Sync;
 
 pub struct TypeEngine {

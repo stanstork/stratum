@@ -1,9 +1,5 @@
 //! Provides a type-safe, fluent builder for constructing `Select` ASTs.
 
-// --- Typestate Marker Structs ---
-// These zero-sized structs represent the state of the builder.
-// They ensure that methods are called in the correct SQL order at compile time.
-
 use crate::ast::{
     common::{JoinKind, OrderDir, TableRef},
     expr::Expr,

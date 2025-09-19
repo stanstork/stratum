@@ -1,5 +1,5 @@
 use super::compiler::FilterCompiler;
-use crate::expr::expr_to_string;
+use crate::expr::format_expr;
 use csv::filter::{CsvComparator, CsvCondition, CsvFilter, CsvFilterExpr};
 use smql::statements::{self, expr::Expression, filter::FilterExpression};
 use std::str::FromStr;
@@ -27,7 +27,7 @@ fn from_stmt_condition(
     };
 
     // Render the right-hand side to string
-    let value = expr_to_string(&cond.right)
+    let value = format_expr(&cond.right)
         .map_err(|e| format!("Unsupported expression type filter value: {:?}", e))?
         .trim_start_matches('\'')
         .trim_end_matches('\'')

@@ -5,7 +5,8 @@ use std::collections::HashMap;
 
 async fn collect_reports(states: HashMap<String, MigrationState>) -> HashMap<String, DryRunReport> {
     let report_futures = states.into_iter().map(|(name, state)| async move {
-        let report = state.dry_run_report.lock().await;
+        let binding = state.dry_run_report();
+        let report = binding.lock().await;
         (name, report.clone())
     });
 

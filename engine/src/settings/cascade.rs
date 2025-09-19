@@ -70,7 +70,7 @@ impl CascadeSchemaSetting {
     }
 
     /// Build the graph for the source table, apply any SQL‐filter‐driven joins
-    /// into the source’s DataSource, and store related_meta & cascade_joins.
+    /// into the source's DataSource, and store related_meta & cascade_joins.
     async fn apply_source(&self) -> Result<(), MigrationError> {
         let table_name = self.context.source.name.clone();
         let adapter = self.context.source_adapter().await?;

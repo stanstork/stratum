@@ -1,4 +1,7 @@
-use crate::{destination::Destination, report::finding::Finding};
+use crate::{
+    destination::Destination,
+    report::finding::{Finding, FindingKind},
+};
 use common::{
     row_data::RowData,
     value::{FieldValue, Value},
@@ -109,7 +112,7 @@ impl KeyChecker {
                         &format!(
                             "Key value {} for constraint '{}' on table '{}' already exists in the destination.",
                             formatted_key, constraint_name, table
-                        ),
+                        ), FindingKind::DestinationSchema
                     ));
                 }
             }
@@ -194,7 +197,7 @@ impl KeyChecker {
                 ),
             ),
         };
-        Finding::error(code, &msg)
+        Finding::error(code, &msg, FindingKind::SampleData)
     }
 
     fn format_key(key_value: &[FieldValue]) -> String {

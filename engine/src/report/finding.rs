@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
 pub enum Severity {
     Info,
     Warning,
@@ -8,6 +9,7 @@ pub enum Severity {
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
 pub enum FindingKind {
     SourceSchema, // e.g., nullable mismatch, missing PK
     DestinationSchema,
@@ -15,6 +17,7 @@ pub enum FindingKind {
     Mapping,        // field map issues
     Transformation, // pipeline issues
     Connectivity,   // auth/connection
+    SampleData,     // issues found during dry run sampling
     Other,
 }
 
@@ -28,73 +31,73 @@ pub struct Finding {
     pub suggestion: Option<String>, // how to fix
 }
 
-impl Finding {
-    pub fn error(code: &str, message: &str) -> Self {
-        Finding {
-            code: code.to_string(),
-            message: message.to_string(),
-            severity: Severity::Error,
-            kind: FindingKind::DestinationSchema,
-            suggestion: None,
-        }
-    }
-
-    pub fn warning(code: &str, message: &str) -> Self {
-        Finding {
-            code: code.to_string(),
-            message: message.to_string(),
-            severity: Severity::Warning,
-            kind: FindingKind::DestinationSchema,
-            suggestion: None,
-        }
-    }
-}
-
-pub struct MappingFinding;
-pub struct FetchFinding;
-pub struct SourceSchemaFinding;
-
+/// Constants for finding codes.
 const CODE_MAPPING_MISSING: &str = "MAPPING_MISSING";
 const CODE_FETCH_ERROR: &str = "FETCH_ERROR";
 const CODE_UNSUPPORTED_SOURCE: &str = "UNSUPPORTED_SOURCE";
 
-impl MappingFinding {
-    pub fn create_missing_finding(table: &str, extra_message: &str) -> Finding {
+impl Finding {
+    pub fn new(
+        code: &str,
+        message: String,
+        severity: Severity,
+        kind: FindingKind,
+        suggestion: Option<String>,
+    ) -> Self {
         Finding {
-            code: CODE_MAPPING_MISSING.into(),
-            message: format!(
+            code: code.to_string(),
+            message,
+            severity,
+            kind,
+            suggestion,
+        }
+    }
+
+    /// Creates a new finding for a missing table mapping.
+    pub fn new_mapping_missing(table: &str, extra_message: &str) -> Self {
+        Self::new(
+            CODE_MAPPING_MISSING,
+            format!(
                 "No mapping found for table `{table}` while `mapped_columns_only` is set.{extra_message}"
             ),
-            severity: Severity::Error,
-            kind: FindingKind::SourceSchema,
-            suggestion: Some("Add field mappings for this table or disable `mapped_columns_only`.".into()),
-        }
+            Severity::Error,
+            FindingKind::Mapping,
+            Some("Add field mappings for this table or disable `mapped_columns_only`.".into()),
+        )
     }
-}
 
-impl FetchFinding {
-    pub fn create_error_finding(error_message: &str) -> Finding {
-        Finding {
-            code: CODE_FETCH_ERROR.into(),
-            message: format!("Error fetching data: {error_message}"),
-            severity: Severity::Error,
-            kind: FindingKind::SourceData,
-            suggestion: Some("Check source connectivity and query validity.".into()),
-        }
+    /// Creates a new finding for a data fetching error.
+    pub fn new_fetch_error(error_message: &str) -> Self {
+        Self::new(
+            CODE_FETCH_ERROR,
+            format!("Error fetching data: {error_message}"),
+            Severity::Error,
+            FindingKind::SourceData,
+            Some("Check source connectivity and query validity.".into()),
+        )
     }
-}
 
-impl SourceSchemaFinding {
-    pub fn create_unsupported_finding(source_format: String) -> Finding {
-        Finding {
-            code: CODE_UNSUPPORTED_SOURCE.into(),
-            message: format!(
-                "Validation run does not support source type: {:?}",
+    /// Creates a new finding for an unsupported source type.
+    pub fn new_unsupported_source(source_format: &str) -> Self {
+        Self::new(
+            CODE_UNSUPPORTED_SOURCE,
+            format!(
+                "Validation run does not support source type: {}",
                 source_format
             ),
-            severity: Severity::Error,
-            kind: FindingKind::SourceSchema,
-            suggestion: Some("Use a database source for validation runs.".into()),
-        }
+            Severity::Error,
+            FindingKind::SourceSchema,
+            Some("Use a database source for validation runs.".into()),
+        )
+    }
+
+    /// Creates a standardized error finding.
+    pub fn error(code: &str, message: &str, kind: FindingKind) -> Self {
+        Finding::new(code, message.to_string(), Severity::Error, kind, None)
+    }
+
+    /// Creates a standardized warning finding.
+    pub fn warning(code: &str, message: &str, kind: FindingKind) -> Self {
+        Finding::new(code, message.to_string(), Severity::Warning, kind, None)
     }
 }

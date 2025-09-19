@@ -1,4 +1,4 @@
-use crate::filter::Filter;
+use crate::{error::MigrationError, filter::Filter};
 use common::record::Record;
 use data::DataSource;
 use linked::LinkedSource;
@@ -40,7 +40,7 @@ impl Source {
         &self,
         batch_size: usize,
         offset: Option<usize>,
-    ) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<Record>, MigrationError> {
         match &self.primary {
             DataSource::Database(db) => {
                 let db = db.lock().await;

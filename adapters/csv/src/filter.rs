@@ -84,7 +84,7 @@ impl CsvFilter {
     /// Returns true if this row passes the filter (or if there's no filter).
     ///
     /// `record` is the CSV row, `headers` the list of column names, and
-    /// `meta` is `CsvMetadata` used to know each column’s declared type.
+    /// `meta` is `CsvMetadata` used to know each column's declared type.
     pub fn eval(
         &self,
         record: &StringRecord,
@@ -121,7 +121,7 @@ impl CsvFilterExpr {
     ) -> bool {
         match self {
             CsvFilterExpr::Leaf(cond) => {
-                // locate the metadata for this condition’s column
+                // locate the metadata for this condition's column
                 let (_, col_meta) = match headers_meta
                     .iter()
                     .find(|(hdr, _)| hdr.eq_ignore_ascii_case(&cond.left))

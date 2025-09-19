@@ -1,5 +1,5 @@
 use super::compiler::FilterCompiler;
-use crate::expr::expr_to_string;
+use crate::expr::format_expr;
 use smql::statements::{
     self,
     expr::Expression,
@@ -48,7 +48,7 @@ fn from_stmt_condition(
     };
 
     // stringify the RHS (literal, identifier, lookup or arithmetic)
-    let value = expr_to_string(&c.right)
+    let value = format_expr(&c.right)
         .map_err(|e| format!("Unsupported expression type filter value: {:?}", e))?;
 
     // map comparator to its SQL symbol

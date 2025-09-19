@@ -210,9 +210,9 @@ impl Dialect for MySql {
 
     fn build_key_existence_query(
         &self,
-        table_name: &str,
-        key_columns: &[String],
-        keys_batch: usize,
+        _table_name: &str,
+        _key_columns: &[String],
+        _keys_batch: usize,
     ) -> String {
         todo!("Implement batch key existence query for MySQL")
     }

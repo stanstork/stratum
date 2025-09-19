@@ -47,7 +47,7 @@ pub async fn run(
         let mapping = EntityMapping::new(&mi);
         let source = create_source(&gc, &conn, &mapping, &mi).await?;
         let destination = create_destination(&gc, &conn, &mi).await?;
-        let mut state = MigrationState::from_settings(&mi.settings);
+        let mut state = MigrationState::new();
 
         if dry_run {
             let dry_run_params = DryRunParams {
@@ -69,18 +69,24 @@ pub async fn run(
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let ctx = Arc::new(Mutex::new(item_ctx));
 
-        let mut prod = create_producer(&ctx, shutdown_tx).await;
+        let mut prod = create_producer(&ctx, shutdown_tx, &mi.settings).await;
         let prod_handle = tokio::spawn(async move { prod.run().await });
 
-        let cons = create_consumer(&ctx, shutdown_rx).await;
+        let mut cons = create_consumer(&ctx, shutdown_rx).await;
         let cons_handle = tokio::spawn(async move { cons.run().await });
 
         // await both before moving on
         match tokio::try_join!(prod_handle, cons_handle) {
-            Ok((_, ())) => info!("Item {} migrated successfully", mi.destination.name()),
+            Ok((_, cons_result)) => match cons_result {
+                Ok(()) => info!("Item {} migrated successfully", mi.destination.name()),
+                Err(e) => {
+                    error!("Consumer error ({}): {}", mi.destination.name(), e);
+                    // decide: return Err(e.into())? or continue to next?
+                }
+            },
             Err(e) => {
                 error!("Migration item error ({}): {}", mi.destination.name(), e);
-                // decide: return Err(e)?  or continue to next?
+                // decide: return Err(e.into())? or continue to next?
             }
         }
 
@@ -209,8 +215,6 @@ async fn apply_settings(ctx: &mut ItemContext, settings: &Settings) -> Result<()
             setting.apply(ctx).await?;
         }
     }
-
-    // ctx.debug_state().await;
 
     Ok(())
 }

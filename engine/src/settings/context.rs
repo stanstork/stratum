@@ -32,9 +32,9 @@ impl SchemaSettingContext {
         mapping: &EntityMapping,
         state: &Arc<Mutex<MigrationState>>,
     ) -> Self {
-        let is_validation = state.lock().await.is_dry_run;
+        let is_dry_run = state.lock().await.is_dry_run();
 
-        let schema_manager: Box<dyn SchemaManager + Send> = if is_validation {
+        let schema_manager: Box<dyn SchemaManager + Send> = if is_dry_run {
             // The validation manager is created for dry-run validation runs.
             Box::new(ValidationSchemaManager {
                 report: state.lock().await.dry_run_report(),

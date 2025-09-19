@@ -3,7 +3,7 @@ use smql::statements::expr::{Expression, Literal, Operator};
 pub mod eval;
 pub mod types;
 
-pub fn expr_to_string(e: &Expression) -> Result<String, Expression> {
+pub fn format_expr(e: &Expression) -> Result<String, Expression> {
     match e {
         Expression::Literal(lit) => Ok(match lit {
             Literal::String(s) => format!("{}", s.trim_start_matches('"').trim_end_matches('"')),
@@ -20,8 +20,8 @@ pub fn expr_to_string(e: &Expression) -> Result<String, Expression> {
             operator,
             right,
         } => {
-            let l = expr_to_string(left)?;
-            let r = expr_to_string(right)?;
+            let l = format_expr(left)?;
+            let r = format_expr(right)?;
             let op = match operator {
                 Operator::Add => "+",
                 Operator::Subtract => "-",
@@ -31,8 +31,7 @@ pub fn expr_to_string(e: &Expression) -> Result<String, Expression> {
             Ok(format!("{} {} {}", l, op, r))
         }
         Expression::FunctionCall { name, arguments } => {
-            let args: Result<Vec<String>, Expression> =
-                arguments.iter().map(expr_to_string).collect();
+            let args: Result<Vec<String>, Expression> = arguments.iter().map(format_expr).collect();
             Ok(format!("{}({})", name, args?.join(", ")))
         }
     }

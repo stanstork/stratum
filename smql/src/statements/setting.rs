@@ -23,7 +23,7 @@ pub struct SettingsPair {
     pub value: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CopyColumns {
     All,
     MapOnly,

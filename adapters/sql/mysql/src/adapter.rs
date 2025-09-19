@@ -160,7 +160,7 @@ impl SqlAdapter for MySqlAdapter {
     async fn list_tables(&self) -> Result<Vec<String>, DbError> {
         let rows = sqlx::query("SHOW TABLES").fetch_all(&self.pool).await?;
 
-        // extract each row’s first column as Vec<u8> and then utf8‐decode
+        // extract each row's first column as Vec<u8> and then utf8‐decode
         let tables = rows
             .into_iter()
             .map(|row| {

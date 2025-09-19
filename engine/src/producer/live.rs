@@ -1,24 +1,18 @@
 use crate::{
-    buffer::SledBuffer,
-    context::item::ItemContext,
-    producer::DataProducer,
-    source::Source,
-    transform::{
-        computed::ComputedTransform,
-        mapping::{FieldMapper, TableMapper},
-        pipeline::{TransformPipeline, TransformPipelineExt},
-    },
+    buffer::SledBuffer, error::ProducerError, producer::DataProducer, source::Source,
+    transform::pipeline::TransformPipeline,
 };
 use async_trait::async_trait;
+use futures::future::join_all;
 use std::sync::Arc;
-use tokio::sync::{watch::Sender, Mutex};
+use tokio::sync::watch::Sender;
 use tracing::{error, info};
 
 pub struct LiveProducer {
     buffer: Arc<SledBuffer>,
     source: Source,
     pipeline: TransformPipeline,
-    shutdown_sender: Sender<bool>,
+    shutdown_tx: Sender<bool>,
     batch_size: usize,
 }
 
@@ -27,14 +21,14 @@ impl LiveProducer {
         buffer: Arc<SledBuffer>,
         source: Source,
         pipeline: TransformPipeline,
-        sender: Sender<bool>,
+        shutdown_tx: Sender<bool>,
         batch_size: usize,
     ) -> Self {
         Self {
             buffer,
             source,
             pipeline,
-            shutdown_sender: sender,
+            shutdown_tx,
             batch_size,
         }
     }
@@ -42,15 +36,12 @@ impl LiveProducer {
 
 #[async_trait]
 impl DataProducer for LiveProducer {
-    async fn run(&mut self) -> usize {
+    async fn run(&mut self) -> Result<usize, ProducerError> {
         let mut offset = 0; //self.buffer.read_last_offset();
-        let mut batch_number = 1;
+        let mut batch_no: usize = 1;
 
         loop {
-            info!(
-                "Fetching batch #{batch_number} with offset {offset} and batch size {0}",
-                self.batch_size
-            );
+            info!(batch_no, batch_size = self.batch_size, "Fetching batch.");
 
             match self.source.fetch_data(self.batch_size, Some(offset)).await {
                 Ok(records) if records.is_empty() => {
@@ -58,43 +49,41 @@ impl DataProducer for LiveProducer {
                     break;
                 }
                 Ok(records) => {
-                    info!("Fetched {} records in batch #{batch_number}", records.len());
+                    info!(count = records.len(), "Fetched records in batch.");
 
-                    for record in records.iter() {
-                        // Apply the transformation pipeline to each record
-                        let transformed_record = self.pipeline.apply(record);
+                    // Transform records concurrently
+                    let transform_futures = records.iter().map(|record| {
+                        let pipeline = &self.pipeline;
+                        async move { pipeline.apply(record) }
+                    });
+                    let transformed_records = join_all(transform_futures).await;
 
-                        // Store the transformed record in the buffer
-                        if let Err(e) = self.buffer.store(transformed_record.serialize()) {
-                            error!("Failed to store record: {}", e);
-                            return batch_number;
-                        }
+                    // Store transformed records in the buffer
+                    for record in transformed_records {
+                        self.buffer
+                            .store(record.serialize())
+                            .map_err(|e| ProducerError::Store(e.to_string()))?;
                     }
 
                     offset += self.batch_size;
-                    if let Err(e) = self.buffer.store_last_offset(offset) {
-                        error!(
-                            "Failed to persist last offset after batch #{batch_number}: {}",
-                            e
-                        );
-                        break;
-                    }
+                    self.buffer
+                        .store_last_offset(offset)
+                        .map_err(|e| ProducerError::StoreOffset(e.to_string()))?;
                 }
                 Err(e) => {
-                    error!(
-                        "Failed to fetch batch #{batch_number} at offset {}: {}",
-                        offset, e
-                    );
-                    break;
+                    error!("Failed to fetch batch #{batch_no} at offset {offset}: {e}");
+                    return Err(ProducerError::Fetch {
+                        source: Box::new(e),
+                    });
                 }
             }
 
-            batch_number += 1;
+            batch_no += 1;
         }
 
-        // Notify the consumer to shutdown
-        self.shutdown_sender.send(true).unwrap();
+        // Try to notify consumer; do not crash if the receiver is gone.
+        let _ = self.shutdown_tx.send(true);
 
-        batch_number
+        Ok(batch_no - 1) // Return the number of batches processed
     }
 }

@@ -1,8 +1,7 @@
 //! Defines the core rendering trait and context for converting AST to SQL.
 
-use common::value::Value;
-
 use crate::dialect::Dialect;
+use common::value::Value;
 
 pub mod alter_table;
 pub mod create_enum;

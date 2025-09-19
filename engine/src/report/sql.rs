@@ -1,18 +1,16 @@
 use common::value::Value;
 use serde::Serialize;
 
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+/// The type of SQL statement generated.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
 pub enum SqlKind {
     Schema,
+    #[default]
     Data,
 }
 
-impl Default for SqlKind {
-    fn default() -> Self {
-        SqlKind::Data
-    }
-}
-
+/// A single generated SQL statement.
 #[derive(Serialize, Debug, Clone)]
 pub struct SqlStatement {
     pub dialect: String, // "MySQL", "Postgres", ...
@@ -22,6 +20,18 @@ pub struct SqlStatement {
     pub params: Vec<Value>, // normalized; empty if none
 }
 
+impl SqlStatement {
+    pub fn schema_action(dialect: &str, sql: &str) -> Self {
+        SqlStatement {
+            dialect: dialect.to_string(),
+            kind: SqlKind::Schema,
+            sql: sql.to_string(),
+            params: vec![],
+        }
+    }
+}
+
+/// A collection of generated SQL statements for the dry run.
 #[derive(Serialize, Debug, Default, Clone)]
 pub struct GeneratedSql {
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -36,16 +46,5 @@ impl GeneratedSql {
             sql: sql.to_string(),
             params,
         });
-    }
-}
-
-impl SqlStatement {
-    pub fn schema_action(dialect: &str, sql: &str) -> Self {
-        SqlStatement {
-            dialect: dialect.to_string(),
-            kind: SqlKind::Schema,
-            sql: sql.to_string(),
-            params: vec![],
-        }
     }
 }

@@ -1,9 +1,10 @@
 use crate::{
     destination::Destination,
+    error::ProducerError,
     producer::DataProducer,
     report::{
-        dry_run::DryRunStatus,
-        finding::{FetchFinding, Finding, MappingFinding, Severity},
+        dry_run::{DryRunReport, DryRunStatus},
+        finding::{Finding, Severity},
         sql::{SqlKind, SqlStatement},
         transform::{TransformationRecord, TransformationReport},
     },
@@ -14,9 +15,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use common::{mapping::EntityMapping, row_data::RowData};
-use query_builder::dialect::{self, Dialect};
 use smql::statements::setting::{CopyColumns, Settings};
-use sql_adapter::query::generator::QueryGenerator;
+use sql_adapter::{error::db::DbError, query::generator::QueryGenerator};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -32,8 +32,14 @@ struct SampleResult {
     omitted_columns: HashMap<String, HashSet<String>>,
 }
 
-/// The producer for a validation run. Fetches a small sample, transforms it,
-/// and writes the results and diagnostics to the ValidationReport.
+struct ValidationResults {
+    statements: Vec<SqlStatement>,
+    prep_findings: Vec<Finding>,
+    sample_result: SampleResult,
+    schema_findings: Vec<Finding>,
+    schema_validation_error: Option<DbError>,
+}
+
 pub struct ValidationProducer {
     state: Arc<Mutex<MigrationState>>,
     source: Source,
@@ -62,6 +68,108 @@ impl ValidationProducer {
         }
     }
 
+    async fn perform_validation(&mut self) -> Result<ValidationResults, ProducerError> {
+        let mut validator = DestinationSchemaValidator::new(
+            &self.destination,
+            self.mapping.clone(),
+            &self.settings,
+        )
+        .await
+        .map_err(|e| ProducerError::Other(format!("Init schema validator: {e}")))?;
+
+        let (statements, prep_findings) = self.generate_sql_statements().await;
+        let sample_result = self.sample_and_transform(&mut validator).await;
+
+        let schema_validation_error = validator
+            .validate_pending_keys(&self.destination)
+            .await
+            .err();
+
+        Ok(ValidationResults {
+            statements,
+            prep_findings,
+            sample_result,
+            schema_findings: validator.findings(),
+            schema_validation_error,
+        })
+    }
+
+    async fn update_report(&self, results: ValidationResults) {
+        let state = self.state.lock().await;
+        let dry_run_report = state.dry_run_report();
+        let mut report = dry_run_report.lock().await;
+
+        report.generated_sql.statements.extend(results.statements);
+        report.summary.records_sampled = results.sample_result.records_sampled;
+        if let Some(tr) = results.sample_result.transform_report {
+            report.transform = tr;
+        }
+
+        if let Some(e) = results.schema_validation_error {
+            let error_msg = format!("Schema validation error: {}", e);
+            report
+                .summary
+                .errors
+                .push(Finding::new_fetch_error(&error_msg));
+        }
+        report.summary.errors.extend(results.prep_findings);
+        report
+            .summary
+            .errors
+            .extend(results.sample_result.prune_findings);
+        if let Some(err) = results.sample_result.fetch_error {
+            report.summary.errors.push(err);
+        }
+
+        for entity_report in &mut report.mapping.entities {
+            if let Some(omitted) = results
+                .sample_result
+                .omitted_columns
+                .get(&entity_report.source_entity)
+            {
+                entity_report.omitted_source_columns.extend(omitted.clone());
+            }
+        }
+
+        report
+            .schema_validation
+            .findings
+            .extend(results.schema_findings);
+        report.summary.status = Self::calculate_status(&report);
+    }
+
+    fn calculate_status(report: &DryRunReport) -> DryRunStatus {
+        let has_errors = report
+            .summary
+            .errors
+            .iter()
+            .any(|e| e.severity == Severity::Error)
+            || report
+                .schema_validation
+                .findings
+                .iter()
+                .any(|f| f.severity == Severity::Error);
+
+        let has_warnings = report
+            .mapping
+            .entities
+            .iter()
+            .any(|e| !e.warnings.is_empty())
+            || report
+                .transform
+                .sample
+                .iter()
+                .any(|r| r.warnings.as_ref().map_or(false, |w| !w.is_empty()));
+
+        if has_errors {
+            DryRunStatus::Failure
+        } else if has_warnings {
+            DryRunStatus::SuccessWithWarnings
+        } else {
+            DryRunStatus::Success
+        }
+    }
+
     fn is_allowed_output_field(&self, table: &str, field_name: &str) -> Result<bool, Finding> {
         if self.settings.copy_columns == CopyColumns::All {
             return Ok(true);
@@ -72,7 +180,7 @@ impl ValidationProducer {
             .field_mappings
             .column_mappings
             .get(table)
-            .ok_or_else(|| MappingFinding::create_missing_finding(table, ""))?;
+            .ok_or_else(|| Finding::new_mapping_missing(table, ""))?;
 
         if colmap.contains_target_key(field_name) {
             return Ok(true);
@@ -90,8 +198,7 @@ impl ValidationProducer {
         Ok(false)
     }
 
-    /// Removes fields from a `RowData` instance that are not part of the defined mapping
-    /// when `mapped_columns_only` is true.
+    /// Prune unmapped columns when CopyColumns::MapOnly is set.
     fn prune_row(
         &self,
         row: &mut RowData,
@@ -112,7 +219,7 @@ impl ValidationProducer {
             .column_mappings
             .contains_key(table)
         {
-            findings.push(MappingFinding::create_missing_finding(
+            findings.push(Finding::new_mapping_missing(
                 table,
                 " Output row will be empty.",
             ));
@@ -145,7 +252,6 @@ impl ValidationProducer {
         row.field_values = retained;
     }
 
-    /// Fetches a sample of data, applies the transformation pipeline, and prunes unmapped columns.
     async fn sample_and_transform(
         &self,
         validator: &mut DestinationSchemaValidator,
@@ -195,20 +301,19 @@ impl ValidationProducer {
             Err(e) => SampleResult {
                 records_sampled: 0,
                 transform_report: None,
-                fetch_error: Some(FetchFinding::create_error_finding(&e.to_string())),
+                fetch_error: Some(Finding::new_fetch_error(&e.to_string())),
                 prune_findings,
                 omitted_columns,
             },
         }
     }
 
-    /// Generates SQL statements for fetching data from a database source.
     async fn generate_sql_statements(&self) -> (Vec<SqlStatement>, Vec<Finding>) {
         match &self.source.primary {
             DataSource::Database(db_arc) => {
                 let db = db_arc.lock().await;
-                let dialect_impl = dialect::MySql; // TODO: Determine dialect from source
-                let generator = QueryGenerator::new(&dialect_impl);
+                let dialect = self.source.dialect();
+                let generator = QueryGenerator::new(dialect.as_ref());
 
                 let requests = db.build_fetch_rows_requests(self.sample_size(), None);
                 let statements = requests
@@ -216,7 +321,7 @@ impl ValidationProducer {
                     .map(|req| {
                         let (sql, params) = generator.select(&req);
                         SqlStatement {
-                            dialect: dialect_impl.name(),
+                            dialect: dialect.name(),
                             kind: SqlKind::Data,
                             sql,
                             params,
@@ -239,90 +344,9 @@ impl ValidationProducer {
 
 #[async_trait]
 impl DataProducer for ValidationProducer {
-    async fn run(&mut self) -> usize {
-        let mut validator = DestinationSchemaValidator::new(
-            &self.destination,
-            self.mapping.clone(),
-            &self.settings,
-        )
-        .await
-        .expect("Failed to initialize schema validator");
-
-        let (statements, prep_findings) = self.generate_sql_statements().await;
-        let sample_result = self.sample_and_transform(&mut validator).await;
-
-        let state = self.state.lock().await;
-        let mut report = state.dry_run_report.lock().await;
-
-        match validator.validate_pending_keys(&self.destination).await {
-            Ok(_) => {}
-            Err(e) => {
-                report
-                    .summary
-                    .errors
-                    .push(FetchFinding::create_error_finding(&format!(
-                        "Schema validation error: {}",
-                        e
-                    )));
-            }
-        }
-
-        report.generated_sql.statements.extend(statements);
-        report.summary.records_sampled = sample_result.records_sampled;
-
-        if let Some(tr) = sample_result.transform_report {
-            report.transform = tr;
-        }
-
-        report.summary.errors.extend(prep_findings);
-        report.summary.errors.extend(sample_result.prune_findings);
-        if let Some(err) = sample_result.fetch_error {
-            report.summary.errors.push(err);
-        }
-
-        for entity_report in &mut report.mapping.entities {
-            if let Some(omitted) = sample_result
-                .omitted_columns
-                .get(&entity_report.source_entity)
-            {
-                entity_report.omitted_source_columns.extend(omitted.clone());
-            }
-        }
-
-        report
-            .schema_validation
-            .findings
-            .extend(validator.findings());
-
-        let has_errors = report
-            .summary
-            .errors
-            .iter()
-            .any(|e| e.severity == Severity::Error)
-            || report
-                .schema_validation
-                .findings
-                .iter()
-                .any(|f| f.severity == Severity::Error);
-        let has_warnings = report
-            .mapping
-            .entities
-            .iter()
-            .any(|e| !e.warnings.is_empty())
-            || report
-                .transform
-                .sample
-                .iter()
-                .any(|r| r.warnings.as_ref().map_or(false, |w| !w.is_empty()));
-
-        report.summary.status = if has_errors {
-            DryRunStatus::Failure
-        } else if has_warnings {
-            DryRunStatus::SuccessWithWarnings
-        } else {
-            DryRunStatus::Success
-        };
-
-        sample_result.records_sampled
+    async fn run(&mut self) -> Result<usize, ProducerError> {
+        let results = self.perform_validation().await?;
+        self.update_report(results).await;
+        Ok(1) // One validation run completed
     }
 }

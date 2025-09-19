@@ -1,6 +1,6 @@
 use crate::{
     destination::Destination,
-    report::finding::Finding,
+    report::finding::{Finding, FindingKind},
     validation::key::{KeyCheckPolicy, KeyChecker},
 };
 use common::{
@@ -165,6 +165,7 @@ impl DestinationSchemaValidator {
                     "Field '{}' in table '{}' is null, but the destination column is not nullable.",
                     field_name, table_name
                 ),
+                FindingKind::SampleData,
             ));
         }
     }
@@ -186,7 +187,7 @@ impl DestinationSchemaValidator {
                 &format!(
                     "Type mismatch for column '{}' in table '{}'. Transformed data has type {}, but destination expects {:?}.",
                     field_name, table_name, transformed_ty, col.data_type
-                ),
+                ),               FindingKind::SampleData,
             ));
         }
     }
@@ -210,7 +211,7 @@ impl DestinationSchemaValidator {
                 &format!(
                     "Data for column '{}' in table '{}' has length {} which exceeds the destination column limit of {}. Data may be truncated.",
                     field_name, table_name, actual_len, max_len
-                ),
+                ), FindingKind::SampleData
             ));
         }
     }
@@ -230,7 +231,7 @@ impl DestinationSchemaValidator {
                     &format!(
                         "Transformed data contains column '{}' which does not exist in destination table '{}'. Missing-column creation is disabled.",
                         field_name, table_name
-                    ),
+                    ), FindingKind::SampleData
                 ));
             }
             ColumnPolicy::AllowCreateIfPlanned => {
@@ -243,7 +244,7 @@ impl DestinationSchemaValidator {
                     &format!(
                         "Transformed data contains column '{}' which does not exist in destination table '{}' and is not a mapped or computed field.",
                         field_name, table_name
-                    ),
+                    ), FindingKind::SampleData
                 ));
             }
         }
@@ -290,6 +291,7 @@ impl DestinationSchemaValidator {
                         "Required column '{}' is missing from the transformed data for table '{}'.",
                         col_name, table_name
                     ),
+                    FindingKind::SampleData,
                 ));
             }
         }
@@ -304,6 +306,7 @@ impl DestinationSchemaValidator {
                         "Destination table '{}' does not exist and table creation is disabled.",
                         table_name
                     ),
+                    FindingKind::SampleData,
                 ));
             }
             TablePolicy::AllowCreate(NewTableCreation::CopyAll) => {
@@ -319,7 +322,7 @@ impl DestinationSchemaValidator {
                             &format!(
                                 "Transformed data for new table '{}' contains column '{}' which is not explicitly mapped/computed; its type/constraints cannot be validated.",
                                 table_name, field_name
-                            ),
+                            ), FindingKind::SampleData
                         ));
                     }
                 }

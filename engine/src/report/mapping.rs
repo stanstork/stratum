@@ -1,9 +1,10 @@
-use crate::expr::expr_to_string;
-use common::mapping::{EntityMapping, LookupField};
+use crate::expr::format_expr;
+use common::mapping::{EntityMapping, LookupField, NameMap};
 use serde::Serialize;
-use smql::statements::setting::{CopyColumns, Settings};
+use smql::statements::setting::CopyColumns;
 use std::collections::{HashMap, HashSet};
 
+/// A detailed report on the entity and field mappings.
 #[derive(Serialize, Debug, Default, Clone)]
 pub struct MappingReport {
     pub totals: MappingTotals,
@@ -13,6 +14,7 @@ pub struct MappingReport {
     pub mapping_hash: Option<String>,
 }
 
+/// A summary of counts across all entity mappings.
 #[derive(Serialize, Debug, Default, Clone)]
 pub struct MappingTotals {
     pub entities: usize,
@@ -21,6 +23,7 @@ pub struct MappingTotals {
     pub lookup_count: usize,
 }
 
+/// A report on the mapping for a single entity (e.g., a table).
 #[derive(Serialize, Debug, Default, Clone)]
 pub struct EntityMappingReport {
     pub source_entity: String,
@@ -38,18 +41,21 @@ pub struct EntityMappingReport {
     pub warnings: Vec<String>,
 }
 
+/// Represents the renaming of a single field.
 #[derive(Serialize, Debug, Default, Clone)]
 pub struct FieldRename {
     pub from: String,
     pub to: String,
 }
 
+/// A preview of a computed field.
 #[derive(Serialize, Debug, Default, Clone)]
 pub struct ComputedPreview {
     pub name: String,
     pub expression_preview: String,
 }
 
+/// A report on a single lookup mapping.
 #[derive(Serialize, Debug, Default, Clone)]
 pub struct LookupMappingReport {
     pub source_entity: String,
@@ -61,97 +67,11 @@ pub struct LookupMappingReport {
 }
 
 impl MappingReport {
+    /// Creates a `MappingReport` from a given `EntityMapping` configuration.
     pub fn from_mapping(mapping: &EntityMapping, copy_columns: &CopyColumns) -> Self {
-        let mut total_mapped_fields = 0;
-        let mut total_computed_fields = 0;
-
-        let entities: Vec<EntityMappingReport> = mapping
-            .entity_name_map
-            .source_to_target
-            .iter()
-            .map(|(source_entity, dest_entity)| {
-                let rename_map = mapping.field_mappings.column_mappings.get(dest_entity);
-                let computed = mapping
-                    .field_mappings
-                    .computed_fields
-                    .get(dest_entity)
-                    .map(|v| v.as_slice())
-                    .unwrap_or(&[]);
-
-                let renames: Vec<FieldRename> = rename_map
-                    .map(|nm| {
-                        nm.source_to_target
-                            .iter()
-                            .map(|(from, to)| FieldRename {
-                                from: from.clone(),
-                                to: to.clone(),
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                let computed_prev: Vec<ComputedPreview> = computed
-                    .iter()
-                    .map(|c| ComputedPreview {
-                        name: c.name.clone(),
-                        expression_preview: expr_to_string(&c.expression)
-                            .unwrap_or_else(|_| "<complex expression>".to_string()),
-                    })
-                    .collect();
-
-                let mut warnings: Vec<String> = Vec::new();
-                if let Some(nm) = rename_map {
-                    if has_duplicate_values(&nm.source_to_target) {
-                        warnings.push("Duplicate target column in renames".into());
-                    }
-                }
-                if !computed_prev.is_empty() && rename_map.is_some() {
-                    let targets = rename_map
-                        .unwrap()
-                        .source_to_target
-                        .values()
-                        .cloned()
-                        .collect::<HashSet<_>>();
-                    for c in &computed_prev {
-                        if targets.contains(&c.name) {
-                            warnings.push(format!(
-                                "Computed field '{}' overwrites a renamed column",
-                                c.name
-                            ));
-                        }
-                    }
-                }
-
-                total_mapped_fields += renames.len();
-                total_computed_fields += computed_prev.len();
-
-                EntityMappingReport {
-                    source_entity: source_entity.clone(),
-                    dest_entity: dest_entity.clone(),
-                    copy_policy: copy_columns.to_string(),
-                    mapped_fields: renames.len(),
-                    created_fields: computed_prev.len(),
-                    renames,
-                    omitted_source_columns: Vec::new(),
-                    computed: computed_prev,
-                    warnings,
-                }
-            })
-            .collect();
-
-        let lookup_reports = mapping
-            .lookups
-            .iter()
-            .flat_map(|(source_entity, lookups)| {
-                lookups.iter().map(move |l| LookupMappingReport {
-                    source_entity: source_entity.clone(),
-                    entity: l.entity.clone(),
-                    key: l.key.clone(),
-                    target: l.target.clone(),
-                    warnings: lookup_warnings(mapping, source_entity, l),
-                })
-            })
-            .collect::<Vec<_>>();
+        let (entities, total_mapped_fields, total_computed_fields) =
+            Self::process_entity_reports(mapping, copy_columns);
+        let lookup_reports = Self::process_lookup_reports(mapping);
 
         let totals = MappingTotals {
             entities: entities.len(),
@@ -166,6 +86,119 @@ impl MappingReport {
             lookups: lookup_reports,
             mapping_hash: Some(compute_mapping_hash(mapping)),
         }
+    }
+
+    fn process_entity_reports(
+        mapping: &EntityMapping,
+        copy_columns: &CopyColumns,
+    ) -> (Vec<EntityMappingReport>, usize, usize) {
+        let mut total_mapped = 0;
+        let mut total_computed = 0;
+
+        let reports = mapping
+            .entity_name_map
+            .source_to_target
+            .iter()
+            .map(|(source, dest)| {
+                let report = Self::create_single_entity_report(mapping, source, dest, copy_columns);
+                total_mapped += report.mapped_fields;
+                total_computed += report.created_fields;
+                report
+            })
+            .collect();
+
+        (reports, total_mapped, total_computed)
+    }
+
+    fn create_single_entity_report(
+        mapping: &EntityMapping,
+        source_entity: &str,
+        dest_entity: &str,
+        copy_columns: &CopyColumns,
+    ) -> EntityMappingReport {
+        let rename_map = mapping.field_mappings.column_mappings.get(dest_entity);
+        let computed_fields = mapping
+            .field_mappings
+            .computed_fields
+            .get(dest_entity)
+            .map_or(&[][..], |v| v.as_slice());
+
+        let renames: Vec<FieldRename> = rename_map
+            .map(|nm| {
+                nm.source_to_target
+                    .iter()
+                    .map(|(from, to)| FieldRename {
+                        from: from.clone(),
+                        to: to.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let computed = computed_fields
+            .iter()
+            .map(|c| ComputedPreview {
+                name: c.name.clone(),
+                expression_preview: format_expr(&c.expression)
+                    .unwrap_or_else(|_| "<complex expression>".to_string()),
+            })
+            .collect::<Vec<_>>();
+
+        let warnings = Self::collect_entity_warnings(rename_map, &computed);
+
+        EntityMappingReport {
+            source_entity: source_entity.to_string(),
+            dest_entity: dest_entity.to_string(),
+            copy_policy: copy_columns.to_string(),
+            mapped_fields: renames.len(),
+            created_fields: computed.len(),
+            renames,
+            omitted_source_columns: Vec::new(), // Will be filled in later steps
+            computed,
+            warnings,
+        }
+    }
+
+    fn collect_entity_warnings(
+        rename_map: Option<&NameMap>,
+        computed: &[ComputedPreview],
+    ) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        if let Some(nm) = rename_map {
+            if has_duplicate_values(&nm.source_to_target) {
+                warnings.push("Duplicate target column in renames".into());
+            }
+
+            if !computed.is_empty() {
+                let targets: HashSet<_> = nm.source_to_target.values().cloned().collect();
+                for c in computed {
+                    if targets.contains(&c.name) {
+                        warnings.push(format!(
+                            "Computed field '{}' overwrites a renamed column",
+                            c.name
+                        ));
+                    }
+                }
+            }
+        }
+        warnings
+    }
+
+    fn process_lookup_reports(mapping: &EntityMapping) -> Vec<LookupMappingReport> {
+        mapping
+            .lookups
+            .iter()
+            .flat_map(|(source_entity, lookups)| {
+                lookups.iter().map(move |l| LookupMappingReport {
+                    source_entity: source_entity.clone(),
+                    entity: l.entity.clone(),
+                    key: l.key.clone(),
+                    target: l.target.clone(),
+                    warnings: lookup_warnings(mapping, source_entity, l),
+                })
+            })
+            .collect()
     }
 }
 
@@ -268,7 +301,7 @@ fn compute_mapping_hash(mapping: &EntityMapping) -> String {
         lookup_targets,
     };
 
-    let json = serde_json::to_vec(&minimal).unwrap_or_default();
+    let json = serde_json::to_vec(&minimal).expect("Failed to serialize mapping for hashing.");
     let hash = md5::compute(&json);
     format!("{:x}", hash)
 }
