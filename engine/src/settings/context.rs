@@ -38,6 +38,7 @@ impl SchemaSettingContext {
             // The validation manager is created for dry-run validation runs.
             Box::new(ValidationSchemaManager {
                 report: state.lock().await.dry_run_report(),
+                state: state.clone(),
             })
         } else {
             // The live manager is created for a real migration run.

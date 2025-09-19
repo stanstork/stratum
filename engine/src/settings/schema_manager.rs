@@ -7,6 +7,7 @@ use crate::{
     },
     schema::plan::SchemaPlan,
     settings::error::SettingsError,
+    state::MigrationState,
 };
 use query_builder::dialect::{self, Dialect};
 use sql_adapter::{
@@ -85,11 +86,21 @@ impl SchemaManager for LiveSchemaManager {
 
 pub struct ValidationSchemaManager {
     pub report: Arc<Mutex<DryRunReport>>,
+    pub state: Arc<Mutex<MigrationState>>,
 }
 
 #[async_trait::async_trait]
 impl SchemaManager for ValidationSchemaManager {
     async fn add_column(&mut self, table: &str, column: &ColumnDef) -> Result<(), SettingsError> {
+        let state = self.state.lock().await;
+        if state.infer_schema() {
+            info!(
+                "Skipping add_column for '{}' on table '{}' due to infer_schema being enabled.",
+                column.name, table
+            );
+            return Ok(());
+        }
+
         let dialect = dialect::Postgres; // TODO: derive from destination connection
         let (sql, params) = QueryGenerator::new(&dialect).add_column(table, column.clone());
 
@@ -137,6 +148,12 @@ impl SchemaManager for ValidationSchemaManager {
             let mut report = self.report.lock().await;
             report.generated_sql.statements.extend(statements);
             report.schema.actions.extend(actions);
+        }
+
+        // Mark that schema inference has been performed.
+        {
+            let mut state = self.state.lock().await;
+            state.set_infer_schema(true);
         }
 
         Ok(())
