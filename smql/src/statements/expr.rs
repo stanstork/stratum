@@ -68,7 +68,7 @@ impl StatementParser for Expression {
                 // Extract function arguments
                 let args_pair = inner.next().expect("Expected function arguments");
                 if args_pair.as_rule() != Rule::function_args {
-                    panic!("Unexpected function argument structure: {:?}", args_pair);
+                    panic!("Unexpected function argument structure: {args_pair:?}");
                 }
 
                 let arguments = args_pair.into_inner().map(Expression::parse).collect();
@@ -107,7 +107,7 @@ impl StatementParser for Expression {
             Rule::boolean => {
                 Expression::Literal(Literal::Boolean(pair.as_str().eq_ignore_ascii_case("true")))
             }
-            _ => panic!("Unexpected expression type: {:?}", pair),
+            _ => panic!("Unexpected expression type: {pair:?}"),
         }
     }
 }

@@ -89,7 +89,8 @@ impl CsvAdapter {
             })
             .collect();
 
-        for result in reader.records().take(self.settings.sample_size) {
+        let skip = if self.settings.has_headers { 1 } else { 0 };
+        for result in reader.records().skip(skip).take(self.settings.sample_size) {
             let record = result?;
             for (col_meta, field) in columns.iter_mut().zip(record.iter()) {
                 if field.is_empty() {

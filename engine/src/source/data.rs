@@ -60,7 +60,7 @@ impl DataSource {
                 Ok(DataSource::File(Arc::new(Mutex::new(ds))))
             }
 
-            // Anything else isn’t a SQL format we support
+            // Anything else isn't a SQL format we support
             (fmt, _) => Err(MigrationError::UnsupportedFormat(fmt.to_string())),
         }
     }

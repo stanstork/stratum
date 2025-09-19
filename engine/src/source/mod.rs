@@ -1,7 +1,8 @@
-use crate::filter::Filter;
+use crate::{error::MigrationError, filter::Filter};
 use common::record::Record;
 use data::DataSource;
 use linked::LinkedSource;
+use query_builder::dialect::{self, Dialect};
 use smql::statements::connection::DataFormat;
 
 pub mod data;
@@ -39,7 +40,7 @@ impl Source {
         &self,
         batch_size: usize,
         offset: Option<usize>,
-    ) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<Record>, MigrationError> {
         match &self.primary {
             DataSource::Database(db) => {
                 let db = db.lock().await;
@@ -53,6 +54,22 @@ impl Source {
                 let records = rows.into_iter().map(Record::RowData).collect();
                 Ok(records)
             }
+        }
+    }
+
+    pub fn format(&self) -> DataFormat {
+        self.format
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn dialect(&self) -> Box<dyn Dialect> {
+        match self.format {
+            DataFormat::MySql => Box::new(dialect::MySql),
+            DataFormat::Postgres => Box::new(dialect::Postgres),
+            _ => panic!("Unsupported dialect for source"),
         }
     }
 }

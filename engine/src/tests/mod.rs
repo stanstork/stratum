@@ -18,7 +18,7 @@ async fn mysql_pool(source_db: &str) -> MySqlPool {
         .connect(match source_db {
             "sakila" => TEST_MYSQL_URL_SAKILA,
             "orders" => TEST_MYSQL_URL_ORDERS,
-            _ => panic!("Unknown source database: {}", source_db),
+            _ => panic!("Unknown source database: {source_db}"),
         })
         .await
         .expect("connect mysql")

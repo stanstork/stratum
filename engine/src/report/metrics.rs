@@ -3,15 +3,15 @@ use serde::Serialize;
 use tracing::{error, info, warn};
 
 #[derive(Debug, Clone, Serialize)]
-pub struct FinalReport {
+pub struct MetricsReport {
     records_processed: u64,
     bytes_transferred: u64,
     status: String,
 }
 
-impl FinalReport {
+impl MetricsReport {
     pub fn new(records_processed: u64, bytes_transferred: u64, status: String) -> Self {
-        FinalReport {
+        MetricsReport {
             records_processed,
             bytes_transferred,
             status,
@@ -20,7 +20,7 @@ impl FinalReport {
 }
 
 /// Sends the final report to the configured callback URL.
-pub async fn send_report(report: FinalReport) -> Result<(), MigrationError> {
+pub async fn send_report(report: MetricsReport) -> Result<(), MigrationError> {
     let callback_url = match std::env::var("REPORT_CALLBACK_URL") {
         Ok(url) => url,
         Err(_) => {

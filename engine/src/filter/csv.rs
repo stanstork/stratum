@@ -1,9 +1,8 @@
-use std::str::FromStr;
-
 use super::compiler::FilterCompiler;
-use crate::filter::expr_to_string;
+use crate::expr::format_expr;
 use csv::filter::{CsvComparator, CsvCondition, CsvFilter, CsvFilterExpr};
 use smql::statements::{self, expr::Expression, filter::FilterExpression};
+use std::str::FromStr;
 
 pub struct CsvFilterCompiler;
 
@@ -23,13 +22,13 @@ fn from_stmt_condition(
     let field = match &cond.left {
         Expression::Lookup { key, .. } => key.clone(),
         other => {
-            return Err(format!("Unsupported expression type filter field: {:?}", other).into())
+            return Err(format!("Unsupported expression type filter field: {other:?}").into())
         }
     };
 
     // Render the right-hand side to string
-    let value = expr_to_string(&cond.right)
-        .map_err(|e| format!("Unsupported expression type filter value: {:?}", e))?
+    let value = format_expr(&cond.right)
+        .map_err(|e| format!("Unsupported expression type filter value: {e:?}"))?
         .trim_start_matches('\'')
         .trim_end_matches('\'')
         .to_string();
@@ -60,7 +59,7 @@ fn compile_csv_expr(expr: &FilterExpression) -> CsvFilterExpr {
             match name.to_ascii_uppercase().as_str() {
                 "AND" => CsvFilterExpr::and(children),
                 "OR" => CsvFilterExpr::or(children),
-                _ => panic!("Unsupported function call: {}", name),
+                _ => panic!("Unsupported function call: {name}"),
             }
         }
     }

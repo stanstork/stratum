@@ -1,13 +1,17 @@
+use crate::error::CliError;
 use clap::Parser;
 use commands::Commands;
 use engine::{
     conn::{ConnectionKind, ConnectionPinger, MySqlConnectionPinger, PostgresConnectionPinger},
     runner,
 };
+use smql::plan::MigrationPlan;
 use std::str::FromStr;
-use tracing::Level;
+use tracing::{info, Level};
 
 pub mod commands;
+pub mod error;
+pub mod output;
 
 #[derive(Parser)]
 #[command(name = "stratum", version = "0.0.1", about = "Data migration tool")]
@@ -17,7 +21,7 @@ struct Cli {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), CliError> {
     // Initialize logger
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
@@ -25,18 +29,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Commands::Migrate { config, from_ast } => {
-            let plan = if from_ast {
-                // If `from_ast` is true, read the config file as a pre-parsed AST
-                let source = read_migration_config(&config).expect("Failed to read config file");
-                serde_json::from_str(&source)
-                    .expect("Failed to deserialize config file into MigrationConfig")
-            } else {
-                // Otherwise, read the config file and parse it
-                let source = read_migration_config(&config).expect("Failed to read config file");
-                smql::parser::parse(&source).expect("Failed to parse config file")
-            };
+            let plan = load_migration_plan(&config, from_ast).await?;
+            runner::run(plan, false).await?;
+        }
+        Commands::Validate {
+            config,
+            from_ast,
+            output,
+        } => {
+            info!(
+                "Validating migration config: {}, from_ast: {}, output: {:?}",
+                config, from_ast, output
+            );
 
-            runner::run(plan).await?;
+            let plan = load_migration_plan(&config, from_ast).await?;
+            let states = runner::run(plan, true).await?;
+
+            match output {
+                Some(path) => output::write_report(states, path).await?,
+                None => output::print_report(states).await?,
+            }
         }
         Commands::Source { command } => match command {
             commands::SourceCommand::Info {
@@ -44,41 +56,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 format,
                 output,
             } => {
-                let kind =
-                    ConnectionKind::from_str(&format).expect("Failed to parse connection kind");
-                let metadata = runner::load_src_metadata(&conn_str, kind.data_format())
-                    .await
-                    .expect("Failed to load source metadata");
+                let kind = ConnectionKind::from_str(&format)
+                    .map_err(|_| CliError::InvalidConnectionFormat(format.clone()))?;
+                let metadata = runner::load_src_metadata(&conn_str, kind.data_format()).await?;
 
-                // If an output file is specified, write metadata to it
+                let metadata_json =
+                    serde_json::to_string_pretty(&metadata).map_err(CliError::JsonSerialize)?;
+
                 if let Some(output_file) = output {
-                    std::fs::write(output_file, serde_json::to_string_pretty(&metadata)?)
-                        .expect("Failed to write metadata to file");
+                    std::fs::write(output_file, metadata_json)?;
                 } else {
-                    // Otherwise, print metadata to stdout
-                    println!("{}", serde_json::to_string_pretty(&metadata)?);
+                    println!("{metadata_json}");
                 }
             }
         },
         Commands::Ast { config } => {
-            let source = read_migration_config(&config).expect("Failed to read config file");
-            let plan = smql::parser::parse(&source).expect("Failed to parse config file");
-            let json =
-                serde_json::to_string_pretty(&plan).expect("Failed to serialize plan to JSON");
-            println!("{}", json);
+            let source = tokio::fs::read_to_string(&config).await?;
+            let plan = smql::parser::parse(&source)?;
+            let json = serde_json::to_string_pretty(&plan).map_err(CliError::JsonSerialize)?;
+            println!("{json}");
         }
         Commands::TestConn { format, conn_str } => {
-            let kind = ConnectionKind::from_str(&format).expect("Failed to parse connection kind");
+            let kind = ConnectionKind::from_str(&format)
+                .map_err(|_| CliError::InvalidConnectionFormat(format))?;
             match kind {
                 ConnectionKind::MySql => {
-                    let pinger = MySqlConnectionPinger { conn_str };
-                    pinger.ping().await?;
+                    MySqlConnectionPinger { conn_str }.ping().await?;
                 }
                 ConnectionKind::Postgres => {
-                    let pinger = PostgresConnectionPinger { conn_str };
-                    pinger.ping().await?;
+                    PostgresConnectionPinger { conn_str }.ping().await?;
                 }
-                _ => panic!("Unsupported connection kind for testing"),
+                _ => return Err(CliError::UnsupportedConnectionKind),
             }
         }
     }
@@ -86,7 +94,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn read_migration_config(path: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let config = std::fs::read_to_string(path)?;
-    Ok(config)
+async fn load_migration_plan(path: &str, from_ast: bool) -> Result<MigrationPlan, CliError> {
+    let source = tokio::fs::read_to_string(path).await?;
+    if from_ast {
+        // If `from_ast` is true, read the config file as a pre-parsed AST
+        let plan = serde_json::from_str(&source)?;
+        Ok(plan)
+    } else {
+        // Otherwise, read the config file and parse it
+        let plan = smql::parser::parse(&source)?;
+        Ok(plan)
+    }
 }

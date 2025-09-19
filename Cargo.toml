@@ -1,11 +1,13 @@
 [workspace]
-members = [ "adapters/csv",
+members = [
+    "adapters/csv",
     "adapters/sql/mysql",
     "adapters/sql/postgres",
     "adapters/sql/sql_adapter",
     "cli",
     "common",
     "engine",
+    "query-builder",
     "smql",
 ]
 

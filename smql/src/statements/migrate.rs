@@ -143,6 +143,6 @@ impl Spec {
         self.names
             .first()
             .cloned()
-            .unwrap_or_else(|| panic!("No name found for spec: {:?}", self))
+            .unwrap_or_else(|| panic!("No name found for spec: {self:?}"))
     }
 }

@@ -10,6 +10,7 @@ csv = { path = "../adapters/csv" }
 sql_adapter = { path = "../adapters/sql/sql_adapter" }
 smql = { path = "../smql" }
 common = { path = "../common" }
+query-builder = { path = "../query-builder" }
 
 async-trait = "0.1.86"
 serde = "1.0.217"
@@ -37,3 +38,4 @@ bitflags = "2.9.0"
 thiserror = "2.0.12"
 tracing-test = "0.2.5"
 reqwest = { version = "0.12.23", features = ["blocking", "json"] }
+md5 = "0.8.0"

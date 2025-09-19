@@ -32,13 +32,13 @@ impl MigrationSetting for InferSchemaSetting {
         )
     }
 
-    async fn apply(&self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
+    async fn apply(&mut self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
         self.apply_schema().await?;
 
         // Set the infer schema flag to global state
         {
             let mut state = self.context.state.lock().await;
-            state.infer_schema = true;
+            state.set_infer_schema(true);
         }
 
         info!("Infer schema setting applied");
@@ -47,18 +47,18 @@ impl MigrationSetting for InferSchemaSetting {
 }
 
 impl InferSchemaSetting {
-    pub fn new(
+    pub async fn new(
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
         state: &Arc<Mutex<MigrationState>>,
     ) -> Self {
         Self {
-            context: SchemaSettingContext::new(src, dest, mapping, state),
+            context: SchemaSettingContext::new(src, dest, mapping, state).await,
         }
     }
 
-    async fn apply_schema(&self) -> Result<(), SettingsError> {
+    async fn apply_schema(&mut self) -> Result<(), SettingsError> {
         let ctx = &self.context;
 
         let adapter = ctx.source_adapter().await?;

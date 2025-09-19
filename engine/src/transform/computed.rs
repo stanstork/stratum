@@ -63,6 +63,7 @@ fn update_row(row: &mut RowData, column: &str, column_value: &Value) {
         row.field_values.push(FieldValue {
             name: column.to_string(),
             value: Some(column_value.clone()),
+            data_type: column_value.data_type(),
         });
     }
 }

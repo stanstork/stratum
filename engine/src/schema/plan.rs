@@ -4,21 +4,22 @@ use crate::{
     source::data::DataSource,
 };
 use common::mapping::EntityMapping;
+use query_builder::dialect;
 use sql_adapter::{
     error::db::DbError,
     metadata::table::TableMetadata,
-    query::{builder::SqlQueryBuilder, column::ColumnDef, fk::ForeignKeyDef},
+    query::{column::ColumnDef, fk::ForeignKeyDef, generator::QueryGenerator},
 };
 use std::collections::{HashMap, HashSet};
 use tracing::warn;
 
 /// Represents the schema migration plan from source to target, including type conversion,
 /// name mapping, and metadata relationships.
-pub struct SchemaPlan<'a> {
+pub struct SchemaPlan {
     source: DataSource,
 
     /// Type engine for converting types between source and target databases.
-    type_engine: TypeEngine<'a>,
+    type_engine: TypeEngine,
 
     /// Indicates whether to ignore constraints during the migration process.
     /// Primary keys and foreign keys are not created in the target database.
@@ -44,10 +45,10 @@ pub struct SchemaPlan<'a> {
     fk_definitions: HashMap<String, Vec<ForeignKeyDef>>,
 }
 
-impl<'a> SchemaPlan<'a> {
+impl SchemaPlan {
     pub fn new(
         source: DataSource,
-        type_engine: TypeEngine<'a>,
+        type_engine: TypeEngine,
         ignore_constraints: bool,
         mapped_columns_only: bool,
         mapping: EntityMapping,
@@ -65,16 +66,15 @@ impl<'a> SchemaPlan<'a> {
         }
     }
 
-    pub fn type_engine(&self) -> &TypeEngine<'a> {
+    pub fn type_engine(&self) -> &TypeEngine {
         &self.type_engine
     }
 
-    pub async fn table_queries(&self) -> HashSet<String> {
+    pub async fn table_queries(&self) -> HashSet<(String, String)> {
         let mut queries = HashSet::new();
 
         for (table, columns) in &self.column_definitions {
             let resolved_table = self.mapping.entity_name_map.resolve(table);
-
             let mut resolved_columns = self.resolve_column_definitions(table, columns);
 
             // Optionally drop unmapped columns
@@ -86,23 +86,19 @@ impl<'a> SchemaPlan<'a> {
             // Always append computed columns
             resolved_columns.extend(self.computed_column_definitions(table).await);
 
-            let query = SqlQueryBuilder::new()
-                .create_table(
-                    &resolved_table,
-                    &resolved_columns,
-                    &[], // no extra constraints here
-                    self.ignore_constraints,
-                )
-                .build()
-                .0;
+            let (sql, _) = QueryGenerator::new(&dialect::Postgres).create_table(
+                &resolved_table,
+                &resolved_columns,
+                self.ignore_constraints,
+            );
 
-            queries.insert(query);
+            queries.insert((sql, resolved_table));
         }
 
         queries
     }
 
-    pub fn fk_queries(&self) -> HashSet<String> {
+    pub fn fk_queries(&self) -> HashSet<(String, String)> {
         if self.ignore_constraints {
             return HashSet::new();
         }
@@ -127,16 +123,15 @@ impl<'a> SchemaPlan<'a> {
                             .resolve(&resolved_table, &fk.column),
                     };
 
-                    SqlQueryBuilder::new()
-                        .add_foreign_key(&resolved_table, &resolved_fk)
-                        .build()
-                        .0
+                    let (sql, _) = QueryGenerator::new(&dialect::Postgres)
+                        .add_foreign_key(&resolved_table, &resolved_fk);
+                    (sql, fk.column.clone())
                 })
             })
             .collect()
     }
 
-    pub async fn enum_queries(&self) -> Result<HashSet<String>, DbError> {
+    pub async fn enum_queries(&self) -> Result<HashSet<(String, String)>, DbError> {
         let mut queries = HashSet::new();
 
         for (table, column) in &self.enum_definitions {
@@ -147,13 +142,9 @@ impl<'a> SchemaPlan<'a> {
 
             let enum_type = adapter.fetch_column_type(table, column).await?;
             let variants = Self::parse_enum(&enum_type);
+            let (sql, _) = QueryGenerator::new(&dialect::Postgres).create_enum(column, &variants);
 
-            let enum_sql = SqlQueryBuilder::new()
-                .create_enum(column, &variants)
-                .build()
-                .0;
-
-            queries.insert(enum_sql);
+            queries.insert((sql, column.clone()));
         }
 
         Ok(queries)
@@ -260,6 +251,13 @@ impl<'a> SchemaPlan<'a> {
         for computed in computed_fields {
             let column_name = &computed.name;
             if metadata.column(column_name).is_some() {
+                warn!(
+                    "Computed field {} conflicts with existing column",
+                    column_name
+                );
+                warn!("Skipping computed field {}", column_name);
+                // TODO: add to documentation
+                warn!("If CopyColumns=MapOnly and the name of the computed field matches an existing column, the computed field will be ignored.");
                 continue;
             }
 
@@ -272,7 +270,7 @@ impl<'a> SchemaPlan<'a> {
                     name: (*column_name).clone(),
                     is_nullable: true, // Assuming computed fields are nullable
                     default: None,
-                    data_type: inferred_type.to_string(),
+                    data_type: inferred_type,
                     is_primary_key: false,
                     char_max_length: None,
                 });
@@ -307,7 +305,7 @@ impl<'a> SchemaPlan<'a> {
 
     fn visit_schema_deps(
         metadata: &TableMetadata,
-        plan: &mut SchemaPlan<'_>,
+        plan: &mut SchemaPlan,
         visited: &mut HashSet<String>,
     ) {
         if !visited.insert(metadata.name.clone()) || plan.metadata_exists(&metadata.name) {

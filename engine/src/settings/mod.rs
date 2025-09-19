@@ -20,6 +20,7 @@ pub mod create_tables;
 pub mod error;
 pub mod infer_schema;
 pub mod phase;
+pub mod schema_manager;
 
 #[async_trait]
 pub trait MigrationSetting: Send + Sync {
@@ -31,51 +32,56 @@ pub trait MigrationSetting: Send + Sync {
         true
     }
 
-    async fn apply(&self, ctx: &mut ItemContext) -> Result<(), MigrationError>;
+    async fn apply(&mut self, ctx: &mut ItemContext) -> Result<(), MigrationError>;
 }
 
-pub fn collect_settings(cfg: &Settings, ctx: &ItemContext) -> Vec<Box<dyn MigrationSetting>> {
+pub async fn collect_settings(cfg: &Settings, ctx: &ItemContext) -> Vec<Box<dyn MigrationSetting>> {
     let src = ctx.source.clone();
     let dest = ctx.destination.clone();
     let state = ctx.state.clone();
     let mapping = ctx.mapping.clone();
 
-    // Collect all settings based on the configuration
-    let mut all: Vec<Box<dyn MigrationSetting>> = [
-        // batch size > 0?
-        cfg.batch_size
-            .gt(&0)
-            .then(|| Box::new(BatchSizeSetting(cfg.batch_size as i64)) as _),
-        // ignore constraints?
-        cfg.ignore_constraints
-            .then(|| Box::new(IgnoreConstraintsSettings(true)) as _),
-        // create missing tables?
-        cfg.create_missing_tables.then(|| {
-            Box::new(CreateMissingTablesSetting::new(
-                &src, &dest, &mapping, &state,
-            )) as _
-        }),
-        // create missing columns?
-        cfg.create_missing_columns.then(|| {
-            Box::new(CreateMissingColumnsSetting::new(
-                &src, &dest, &mapping, &state,
-            )) as _
-        }),
-        // infer schema?
-        cfg.infer_schema
-            .then(|| Box::new(InferSchemaSetting::new(&src, &dest, &mapping, &state)) as _),
-        // cascade schema?
-        cfg.cascade_schema
-            .then(|| Box::new(CascadeSchemaSetting::new(&src, &dest, &mapping, &state)) as _),
-        // copy columns
-        Some(Box::new(CopyColumnsSetting(cfg.copy_columns.clone())) as _),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    let mut all_settings: Vec<Box<dyn MigrationSetting>> = Vec::new();
+
+    println!("Settings: {cfg:#?}");
+
+    if cfg.batch_size > 0 {
+        let batch_size_setting = BatchSizeSetting(cfg.batch_size as i64);
+        all_settings.push(Box::new(batch_size_setting) as _);
+    }
+
+    if cfg.create_missing_columns {
+        let missing_cols_setting =
+            CreateMissingColumnsSetting::new(&src, &dest, &mapping, &state).await;
+        all_settings.push(Box::new(missing_cols_setting) as _);
+    }
+
+    if cfg.ignore_constraints {
+        let ignore_constraints_setting = IgnoreConstraintsSettings(true);
+        all_settings.push(Box::new(ignore_constraints_setting) as _);
+    }
+
+    if cfg.create_missing_tables {
+        let missing_tables_setting =
+            CreateMissingTablesSetting::new(&src, &dest, &mapping, &state).await;
+        all_settings.push(Box::new(missing_tables_setting) as _);
+    }
+
+    if cfg.infer_schema {
+        let infer_schema_setting = InferSchemaSetting::new(&src, &dest, &mapping, &state).await;
+        all_settings.push(Box::new(infer_schema_setting) as _);
+    }
+
+    if cfg.cascade_schema {
+        let cascade_schema_setting = CascadeSchemaSetting::new(&src, &dest, &mapping, &state).await;
+        all_settings.push(Box::new(cascade_schema_setting) as _);
+    }
+
+    let copy_columns_setting = CopyColumnsSetting(cfg.copy_columns);
+    all_settings.push(Box::new(copy_columns_setting) as _);
 
     // Sort settings by phase to ensure they are applied in the correct order
-    all.sort_by_key(|s| s.phase());
+    all_settings.sort_by_key(|s| s.phase());
 
-    all
+    all_settings
 }

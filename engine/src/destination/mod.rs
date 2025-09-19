@@ -1,5 +1,6 @@
 use common::record::Record;
 use data::DataDestination;
+use query_builder::dialect;
 use smql::statements::connection::DataFormat;
 use sql_adapter::{error::db::DbError, metadata::table::TableMetadata};
 
@@ -47,5 +48,13 @@ impl Destination {
         match &self.data_dest {
             DataDestination::Database(db) => db.lock().await.toggle_trigger(table, enable).await,
         }
+    }
+
+    pub fn dialect(&self) -> Box<dyn dialect::Dialect> {
+        Box::new(dialect::Postgres) // Currently only Postgres is supported
+    }
+
+    pub fn name(&self) -> String {
+        self.name.clone()
     }
 }

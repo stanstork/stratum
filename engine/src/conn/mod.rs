@@ -1,5 +1,7 @@
+use crate::error::MigrationError;
 use async_trait::async_trait;
 use smql::statements::connection::DataFormat;
+use sql_adapter::error::db::DbError;
 use sqlx::{MySql, Pool};
 use sqlx::{Postgres, Row};
 use std::str::FromStr;
@@ -21,7 +23,7 @@ impl FromStr for ConnectionKind {
             "mysql" | "mariadb" => Ok(ConnectionKind::MySql),
             "pg" | "postgres" | "postgresql" => Ok(ConnectionKind::Postgres),
             "ftp" => Ok(ConnectionKind::Ftp),
-            other => Err(format!("Unknown connection kind: {}", other)),
+            other => Err(format!("Unknown connection kind: {other}")),
         }
     }
 }
@@ -40,7 +42,7 @@ impl ConnectionKind {
 #[async_trait]
 pub trait ConnectionPinger {
     /// Attempts to ping; returns Err if unreachable
-    async fn ping(&self) -> Result<(), Box<dyn std::error::Error>>;
+    async fn ping(&self) -> Result<(), MigrationError>;
 }
 
 /// MySQL/MariaDB pinger
@@ -55,13 +57,13 @@ pub struct PostgresConnectionPinger {
 
 #[async_trait]
 impl ConnectionPinger for MySqlConnectionPinger {
-    async fn ping(&self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn ping(&self) -> Result<(), MigrationError> {
         info!("Pinging MySQL at '{}'", &self.conn_str);
 
         // connect
         let pool = Pool::<MySql>::connect(&self.conn_str).await.map_err(|e| {
             error!("MySQL connection to '{}' failed: {}", &self.conn_str, e);
-            Box::<dyn std::error::Error>::from(e)
+            MigrationError::from(DbError::from(e))
         })?;
 
         // run the simple query
@@ -70,7 +72,7 @@ impl ConnectionPinger for MySqlConnectionPinger {
             .await
             .map_err(|e| {
                 error!("MySQL ping query on '{}' failed: {}", &self.conn_str, e);
-                Box::<dyn std::error::Error>::from(e)
+                MigrationError::from(DbError::from(e))
             })?;
 
         // verify the result
@@ -81,7 +83,7 @@ impl ConnectionPinger for MySqlConnectionPinger {
                 &self.conn_str, val
             );
             error!("{}", msg);
-            return Err(msg.into());
+            return Err(MigrationError::Unexpected(msg));
         }
 
         info!("MySQL ping to '{}' succeeded", &self.conn_str);
@@ -91,7 +93,7 @@ impl ConnectionPinger for MySqlConnectionPinger {
 
 #[async_trait]
 impl ConnectionPinger for PostgresConnectionPinger {
-    async fn ping(&self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn ping(&self) -> Result<(), MigrationError> {
         info!("Pinging Postgres at '{}'", &self.conn_str);
 
         // connect
@@ -99,7 +101,7 @@ impl ConnectionPinger for PostgresConnectionPinger {
             .await
             .map_err(|e| {
                 error!("Postgres connection to '{}' failed: {}", &self.conn_str, e);
-                Box::<dyn std::error::Error>::from(e)
+                MigrationError::from(DbError::from(e))
             })?;
 
         // run the simple query
@@ -108,7 +110,7 @@ impl ConnectionPinger for PostgresConnectionPinger {
             .await
             .map_err(|e| {
                 error!("Postgres ping query on '{}' failed: {}", &self.conn_str, e);
-                Box::<dyn std::error::Error>::from(e)
+                MigrationError::from(DbError::from(e))
             })?;
 
         // verify the result
@@ -119,7 +121,7 @@ impl ConnectionPinger for PostgresConnectionPinger {
                 &self.conn_str, val
             );
             error!("{}", msg);
-            return Err(msg.into());
+            return Err(MigrationError::Unexpected(msg));
         }
 
         info!("Postgres ping to '{}' succeeded", &self.conn_str);

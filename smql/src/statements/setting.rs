@@ -23,10 +23,20 @@ pub struct SettingsPair {
     pub value: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CopyColumns {
     All,
     MapOnly,
+}
+
+impl Display for CopyColumns {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            CopyColumns::All => "ALL",
+            CopyColumns::MapOnly => "MAP_ONLY",
+        };
+        write!(f, "{s}")
+    }
 }
 
 // Constants for settings keys

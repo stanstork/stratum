@@ -1,6 +1,8 @@
 use crate::data_type::MySqlColumnDataType;
 use async_trait::async_trait;
-use common::{row_data::RowData, types::DataType};
+use common::{row_data::RowData, types::DataType, value::Value};
+use futures_util::stream::TryStreamExt;
+use query_builder::dialect::{self};
 use sql_adapter::{
     adapter::SqlAdapter,
     error::{adapter::ConnectorError, db::DbError},
@@ -9,17 +11,41 @@ use sql_adapter::{
         provider::MetadataProvider,
         table::TableMetadata,
     },
-    query::builder::SqlQueryBuilder,
+    query::generator::QueryGenerator,
     requests::FetchRowsRequest,
     row::DbRow,
 };
-use sqlx::{MySql, Pool, Row};
+use sqlx::{query::Query, MySql, Pool, Row};
 use std::collections::HashMap;
-use tracing::info;
+use tracing::{debug, trace};
+
+fn bind_values<'q>(
+    mut query: Query<'q, MySql, sqlx::mysql::MySqlArguments>,
+    params: &'q [Value],
+) -> Query<'q, MySql, sqlx::mysql::MySqlArguments> {
+    for p in params {
+        query = match p {
+            Value::Int(i) => query.bind(*i),
+            Value::Float(f) => query.bind(*f),
+            Value::String(s) => query.bind(s),
+            Value::Boolean(b) => query.bind(*b),
+            Value::Json(j) => query.bind(j),
+            Value::Uuid(u) => query.bind(*u),
+            Value::Bytes(b) => query.bind(b),
+            Value::Date(d) => query.bind(*d),
+            Value::Timestamp(t) => query.bind(*t),
+            Value::Null => query.bind(None::<String>),
+            Value::Enum(_, v) => query.bind(v),
+            Value::StringArray(v) => query.bind(format!("{v:?}")), // Bind as a string representation of the array
+        };
+    }
+    query
+}
 
 #[derive(Clone)]
 pub struct MySqlAdapter {
     pool: Pool<MySql>,
+    dialect: dialect::MySql,
 }
 
 const QUERY_TABLE_EXISTS_SQL: &str = include_str!("../sql/table_exists.sql");
@@ -32,7 +58,10 @@ const QUERY_COLUMN_TYPE_SQL: &str = include_str!("../sql/column_type.sql");
 impl SqlAdapter for MySqlAdapter {
     async fn connect(url: &str) -> Result<Self, ConnectorError> {
         let pool = Pool::connect(url).await?;
-        Ok(MySqlAdapter { pool })
+        Ok(MySqlAdapter {
+            pool,
+            dialect: dialect::MySql,
+        })
     }
 
     async fn table_exists(&self, table: &str) -> Result<bool, DbError> {
@@ -53,6 +82,13 @@ impl SqlAdapter for MySqlAdapter {
 
     async fn execute(&self, query: &str) -> Result<(), DbError> {
         sqlx::query(query).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    async fn execute_with_params(&self, query: &str, params: Vec<Value>) -> Result<(), DbError> {
+        let query = sqlx::query(query);
+        let bound_query = bind_values(query, &params);
+        bound_query.execute(&self.pool).await?;
         Ok(())
     }
 
@@ -91,25 +127,22 @@ impl SqlAdapter for MySqlAdapter {
     }
 
     async fn fetch_rows(&self, request: FetchRowsRequest) -> Result<Vec<RowData>, DbError> {
-        let alias = request.alias.as_deref().unwrap_or(&request.table);
-        let query = SqlQueryBuilder::new()
-            .select(&request.columns)
-            .from(&request.table, alias)
-            .join(&request.joins)
-            .where_clause(&request.filter)
-            .limit(request.limit)
-            .offset(request.offset.unwrap_or(0))
-            .build();
+        let generator = QueryGenerator::new(&self.dialect);
+        let (sql, params) = generator.select(&request);
 
         // Log the generated SQL query for debugging
-        info!("Generated SQL query: {:#?}", query.0);
+        debug!("Generated SQL: {}", sql);
+        trace!("Parameters: {:?}", params);
 
-        // Execute the query and fetch the rows
-        let rows = sqlx::query(&query.0).fetch_all(&self.pool).await?;
-        let result = rows
-            .into_iter()
-            .map(|row| DbRow::MySqlRow(&row).get_row_data(&request.table))
-            .collect();
+        // Bind parameters and execute
+        let query = sqlx::query(&sql);
+        let bound_query = bind_values(query, &params);
+
+        let result = bound_query
+            .fetch(&self.pool) // returns a stream of results
+            .map_ok(|row| DbRow::MySqlRow(&row).get_row_data(&request.table))
+            .try_collect::<Vec<RowData>>() // gathers the items into a collection, stopping at the first error
+            .await?;
 
         Ok(result)
     }
@@ -127,19 +160,27 @@ impl SqlAdapter for MySqlAdapter {
     async fn list_tables(&self) -> Result<Vec<String>, DbError> {
         let rows = sqlx::query("SHOW TABLES").fetch_all(&self.pool).await?;
 
-        // extract each row’s first column as Vec<u8> and then utf8‐decode
+        // extract each row's first column as Vec<u8> and then utf8‐decode
         let tables = rows
             .into_iter()
             .map(|row| {
                 // get the VARBINARY column as Vec<u8>
                 let raw: Vec<u8> = row.try_get(0)?;
                 // convert to String
-                String::from_utf8(raw).map_err(|e| {
-                    DbError::Unknown(format!("invalid UTF-8 in table name: {}", e).into())
-                })
+                String::from_utf8(raw)
+                    .map_err(|e| DbError::Unknown(format!("invalid UTF-8 in table name: {e}")))
             })
             .collect::<Result<_, _>>()?;
 
         Ok(tables)
+    }
+
+    async fn fetch_existing_keys(
+        &self,
+        _table: &str,
+        _key_columns: &[String],
+        _keys_batch: &[Vec<Value>],
+    ) -> Result<Vec<RowData>, DbError> {
+        todo!("Implement find_existing_keys for MySQL")
     }
 }

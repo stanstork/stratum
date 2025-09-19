@@ -1,4 +1,4 @@
-use common::types::DataType;
+use common::{types::DataType, value::Value};
 use csv::metadata::CsvColumnMetadata;
 use postgres::data_type::PgDataType;
 use sql_adapter::metadata::column::ColumnMetadata;
@@ -10,10 +10,10 @@ pub enum FieldMetadata {
 }
 
 impl FieldMetadata {
-    pub fn pg_type(&self) -> (String, Option<usize>) {
+    pub fn pg_type(&self) -> (DataType, Option<usize>) {
         match self {
-            FieldMetadata::Sql(col) => DataType::to_pg_type(col),
-            FieldMetadata::Csv(col) => (col.data_type.to_string(), None),
+            FieldMetadata::Sql(col) => DataType::as_pg_type_info(col),
+            FieldMetadata::Csv(col) => (col.data_type.clone(), None),
         }
     }
 
@@ -40,8 +40,8 @@ impl FieldMetadata {
 
     pub fn data_type(&self) -> DataType {
         match self {
-            FieldMetadata::Sql(col) => col.data_type,
-            FieldMetadata::Csv(col) => col.data_type,
+            FieldMetadata::Sql(col) => col.data_type.clone(),
+            FieldMetadata::Csv(col) => col.data_type.clone(),
         }
     }
 
@@ -52,9 +52,9 @@ impl FieldMetadata {
         }
     }
 
-    pub fn default_value(&self) -> Option<String> {
+    pub fn default_value(&self) -> Option<Value> {
         match self {
-            FieldMetadata::Sql(col) => col.default_value.as_ref().map(ToString::to_string),
+            FieldMetadata::Sql(col) => col.default_value.clone(),
             FieldMetadata::Csv(_col) => None,
         }
     }

@@ -48,10 +48,15 @@ impl Evaluator for Expression {
                     .and_then(|fields| fields.iter().find(|lk| lk.key.eq_ignore_ascii_case(key)))
                     // Given the LookupField, find the matching column in the current row
                     .and_then(|lk| {
-                        row.field_values
-                            .iter()
-                            .find(|col| col.name.eq_ignore_ascii_case(&lk.target))
-                            .and_then(|col| col.value.clone())
+                        if let Some(target) = &lk.target {
+                            row.field_values
+                                .iter()
+                                .find(|col| col.name.eq_ignore_ascii_case(target))
+                                .and_then(|col| col.value.clone())
+                        } else {
+                            // Lookup target is not specified. Used in function arguments.
+                            None
+                        }
                     });
 
                 let raw = row
@@ -130,6 +135,9 @@ fn eval_function(name: &str, args: &[Value]) -> Option<Value> {
                     Value::Timestamp(t) => t.to_rfc3339(),
                     Value::Bytes(b) => String::from_utf8_lossy(b).to_string(),
                     Value::Json(v) => v.to_string(),
+                    Value::Null => "NULL".to_string(),
+                    Value::Enum(_, v) => v.clone(),
+                    Value::StringArray(v) => format!("{v:?}"),
                 })
                 .collect::<Vec<_>>()
                 .join("");

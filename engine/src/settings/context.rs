@@ -4,39 +4,55 @@ use crate::{
     destination::{data::DataDestination, Destination},
     metadata::field::FieldMetadata,
     schema::{plan::SchemaPlan, types::TypeEngine},
+    settings::schema_manager::{LiveSchemaManager, SchemaManager, ValidationSchemaManager},
     source::{data::DataSource, Source},
     state::MigrationState,
 };
-use common::mapping::EntityMapping;
+use common::{mapping::EntityMapping, types::DataType};
 use smql::statements::setting::CopyColumns;
 use sql_adapter::{
     adapter::SqlAdapter,
-    error::db::DbError,
     metadata::{column::ColumnMetadata, table::TableMetadata},
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info};
 
 pub struct SchemaSettingContext {
     pub source: Source,
     pub destination: Destination,
     pub mapping: EntityMapping,
     pub state: Arc<Mutex<MigrationState>>,
+    pub schema_manager: Box<dyn SchemaManager>,
 }
 
 impl SchemaSettingContext {
-    pub fn new(
+    pub async fn new(
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
         state: &Arc<Mutex<MigrationState>>,
     ) -> Self {
+        let is_dry_run = state.lock().await.is_dry_run();
+
+        let schema_manager: Box<dyn SchemaManager + Send> = if is_dry_run {
+            // The validation manager is created for dry-run validation runs.
+            Box::new(ValidationSchemaManager {
+                report: state.lock().await.dry_run_report(),
+                state: state.clone(),
+            })
+        } else {
+            // The live manager is created for a real migration run.
+            Box::new(LiveSchemaManager {
+                destination: Arc::new(Mutex::new(dest.clone())),
+            })
+        };
+
         Self {
             source: src.clone(),
             destination: dest.clone(),
             mapping: mapping.clone(),
             state: state.clone(),
+            schema_manager,
         }
     }
 
@@ -68,15 +84,15 @@ impl SchemaSettingContext {
     }
 
     pub async fn apply_to_destination(
-        &self,
-        schema_plan: SchemaPlan<'_>,
+        &mut self,
+        schema_plan: SchemaPlan,
     ) -> Result<(), SettingsError> {
         if self
             .destination
             .format
             .intersects(ItemContext::sql_databases())
         {
-            Self::infer_schema(&self.destination.data_dest, &schema_plan).await?;
+            self.schema_manager.infer_schema(&schema_plan).await?;
             return Ok(());
         }
         Err(SettingsError::UnsupportedDestinationFormat(
@@ -84,17 +100,17 @@ impl SchemaSettingContext {
         ))
     }
 
-    pub async fn build_schema_plan(&self) -> Result<SchemaPlan<'_>, SettingsError> {
-        let ignore_constraints = self.state.lock().await.ignore_constraints;
-        let mapped_columns_only = self.state.lock().await.copy_columns == CopyColumns::MapOnly;
+    pub async fn build_schema_plan(&self) -> Result<SchemaPlan, SettingsError> {
+        let ignore_constraints = self.state.lock().await.ignore_constraints();
+        let mapped_columns_only = self.state.lock().await.copy_columns() == CopyColumns::MapOnly;
         let source = self.source.primary.clone();
 
         let type_engine = TypeEngine::new(
             source.clone(),
             // converter
-            &|meta: &FieldMetadata| -> (String, Option<usize>) { meta.pg_type() },
+            Box::new(|meta: &FieldMetadata| -> (DataType, Option<usize>) { meta.pg_type() }),
             // extractor
-            &|meta: &TableMetadata| -> Vec<ColumnMetadata> { TableMetadata::enums(meta) },
+            Box::new(|meta: &TableMetadata| -> Vec<ColumnMetadata> { TableMetadata::enums(meta) }),
         );
 
         Ok(SchemaPlan::new(
@@ -104,31 +120,5 @@ impl SchemaSettingContext {
             mapped_columns_only,
             self.mapping.clone(),
         ))
-    }
-
-    async fn infer_schema(
-        dest: &DataDestination,
-        schema_plan: &SchemaPlan<'_>,
-    ) -> Result<(), DbError> {
-        let enum_queries = schema_plan.enum_queries().await?;
-        let table_queries = schema_plan.table_queries().await;
-        let fk_queries = schema_plan.fk_queries();
-
-        let all_queries = enum_queries
-            .iter()
-            .chain(&table_queries)
-            .chain(&fk_queries)
-            .cloned();
-
-        for query in all_queries {
-            info!("Executing query: {}", query);
-            if let Err(err) = dest.adapter().await.execute(&query).await {
-                error!("Failed to execute query: {}\nError: {:?}", query, err);
-                return Err(err);
-            }
-        }
-
-        info!("Schema inference completed");
-        Ok(())
     }
 }

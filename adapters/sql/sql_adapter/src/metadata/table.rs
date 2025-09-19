@@ -72,7 +72,7 @@ impl TableMetadata {
         tables
     }
 
-    pub fn column_defs<T: Fn(&ColumnMetadata) -> (String, Option<usize>)>(
+    pub fn column_defs<T: Fn(&ColumnMetadata) -> (DataType, Option<usize>)>(
         &self,
         type_converter: &T,
     ) -> Vec<ColumnDef> {
@@ -90,7 +90,7 @@ impl TableMetadata {
                     data_type,
                     is_nullable: col.is_nullable,
                     is_primary_key: self.primary_keys.contains(name),
-                    default: col.default_value.as_ref().map(ToString::to_string),
+                    default: col.default_value.clone(),
                     char_max_length,
                 }
             })

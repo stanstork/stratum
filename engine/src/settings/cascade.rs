@@ -39,7 +39,7 @@ impl MigrationSetting for CascadeSchemaSetting {
         )
     }
 
-    async fn apply(&self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
+    async fn apply(&mut self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
         // Handle source metadata & cascade‐joins
         self.apply_source().await?;
 
@@ -49,7 +49,7 @@ impl MigrationSetting for CascadeSchemaSetting {
         // Set the cascade flag to global state
         {
             let mut state = self.context.state.lock().await;
-            state.cascade_schema = true;
+            state.set_cascade(true);
         }
 
         info!("Cascade schema setting applied");
@@ -58,19 +58,19 @@ impl MigrationSetting for CascadeSchemaSetting {
 }
 
 impl CascadeSchemaSetting {
-    pub fn new(
+    pub async fn new(
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
         state: &Arc<Mutex<MigrationState>>,
     ) -> Self {
         Self {
-            context: SchemaSettingContext::new(src, dest, mapping, state),
+            context: SchemaSettingContext::new(src, dest, mapping, state).await,
         }
     }
 
     /// Build the graph for the source table, apply any SQL‐filter‐driven joins
-    /// into the source’s DataSource, and store related_meta & cascade_joins.
+    /// into the source's DataSource, and store related_meta & cascade_joins.
     async fn apply_source(&self) -> Result<(), MigrationError> {
         let table_name = self.context.source.name.clone();
         let adapter = self.context.source_adapter().await?;

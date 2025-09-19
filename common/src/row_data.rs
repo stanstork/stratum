@@ -1,4 +1,7 @@
-use crate::{record::DataRecord, value::FieldValue};
+use crate::{
+    record::DataRecord,
+    value::{FieldValue, Value},
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,11 +23,17 @@ impl RowData {
             .iter()
             .find(|f| f.name.eq_ignore_ascii_case(field))
     }
+
+    pub fn get_value(&self, field: &str) -> Value {
+        self.get(field)
+            .and_then(|f| f.value.clone())
+            .unwrap_or(Value::Null)
+    }
 }
 
 impl DataRecord for RowData {
     fn debug(&self) {
-        println!("{:#?}", self);
+        println!("{self:#?}");
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -33,13 +42,13 @@ impl DataRecord for RowData {
 
     fn serialize(&self) -> Vec<u8> {
         serde_json::to_vec(self).unwrap_or_else(|_| {
-            panic!("Failed to serialize: {:?}", self);
+            panic!("Failed to serialize: {self:?}");
         })
     }
 
     fn deserialize(data: Vec<u8>) -> Self {
         serde_json::from_slice(&data).unwrap_or_else(|_| {
-            panic!("Failed to deserialize: {:?}", data);
+            panic!("Failed to deserialize: {data:?}");
         })
     }
 }

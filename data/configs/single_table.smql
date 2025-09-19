@@ -30,6 +30,8 @@ MIGRATE (
         ),
 
         MAP(
+            id                                  -> order_id,
+            total * 1.3                         -> total_tax,
             users[name]                         -> user_name,
             users[email]                        -> user_email,
             order_items[price]                  -> order_price,

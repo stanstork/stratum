@@ -83,6 +83,7 @@ impl FileDataSource for CsvDataSource {
                         fields.push(FieldValue {
                             name: col_meta.name.clone(),
                             value,
+                            data_type: col_meta.data_type.clone(),
                         });
                     }
 
@@ -95,8 +96,7 @@ impl FileDataSource for CsvDataSource {
                 }
                 Some(Err(e)) => {
                     return Err(FileError::ReadError(format!(
-                        "Error reading CSV record: {}",
-                        e
+                        "Error reading CSV record: {e}"
                     )));
                 }
                 // End of file

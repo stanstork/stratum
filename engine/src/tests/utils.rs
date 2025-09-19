@@ -80,7 +80,7 @@ pub enum DbType {
 pub async fn run_smql(template: &str, source_db: &str) {
     let smql = templated_smql(template, source_db);
     let plan = parse(&smql).expect("parse smql");
-    run(plan).await.expect("migration ran");
+    run(plan, false).await.expect("migration ran");
 }
 
 /// Assert that a table exists (or not) in Postgres
@@ -102,8 +102,7 @@ pub async fn assert_table_exists(table: &str, should: bool) {
     .unwrap();
     assert_eq!(
         exists, should,
-        "expected table '{}' existence == {}",
-        table, should
+        "expected table '{table}' existence == {should}"
     );
 }
 
@@ -127,8 +126,7 @@ pub async fn assert_column_exists(table: &str, column: &str, should: bool) {
     .unwrap();
     assert_eq!(
         exists, should,
-        "expected column '{}' existence == {}",
-        column, should
+        "expected column '{column}' existence == {should}"
     );
 }
 
@@ -139,15 +137,14 @@ pub async fn assert_row_count(source_table: &str, source_db: &str, dest_table: &
 
     assert_eq!(
         source_count, dest_count,
-        "expected row count for table '{}' to be {} but got {}",
-        dest_table, source_count, dest_count
+        "expected row count for table '{dest_table}' to be {source_count} but got {dest_count}"
     );
 }
 
 /// Get the row count of a table in either MySQL or Postgres
 /// depending on the `db` parameter
 pub async fn get_row_count(table: &str, source_db: &str, db: DbType) -> i64 {
-    let query = format!("SELECT COUNT(*) FROM {};", table);
+    let query = format!("SELECT COUNT(*) FROM {table};");
 
     // Use the appropriate database connection based on the `db` parameter
     match db {
@@ -277,15 +274,15 @@ pub async fn get_cell_as_string(query: &str, schema: &str, db: DbType, column: &
         .expect("fetch_rows failed");
     let row = rows
         .first()
-        .unwrap_or_else(|| panic!("no rows returned for query `{}`", query));
+        .unwrap_or_else(|| panic!("no rows returned for query `{query}`"));
     let col = row
         .get(column)
-        .unwrap_or_else(|| panic!("column `{}` not found in row", column));
+        .unwrap_or_else(|| panic!("column `{column}` not found in row"));
     col.value
         .as_ref()
-        .unwrap_or_else(|| panic!("column `{}` was NULL", column))
+        .unwrap_or_else(|| panic!("column `{column}` was NULL"))
         .as_string()
-        .unwrap_or_else(|| panic!("column `{}` was not a string", column))
+        .unwrap_or_else(|| panic!("column `{column}` was not a string"))
 }
 
 /// Fetch a single cell from the first row of `query`,
@@ -296,15 +293,15 @@ pub async fn get_cell_as_f64(query: &str, schema: &str, db: DbType, column: &str
         .expect("fetch_rows failed");
     let row = rows
         .first()
-        .unwrap_or_else(|| panic!("no rows returned for query `{}`", query));
+        .unwrap_or_else(|| panic!("no rows returned for query `{query}`"));
     let col = row
         .get(column)
-        .unwrap_or_else(|| panic!("column `{}` not found in row", column));
+        .unwrap_or_else(|| panic!("column `{column}` not found in row"));
     col.value
         .as_ref()
-        .unwrap_or_else(|| panic!("column `{}` was NULL", column))
+        .unwrap_or_else(|| panic!("column `{column}` was NULL"))
         .as_f64()
-        .unwrap_or_else(|| panic!("column `{}` was not a float", column))
+        .unwrap_or_else(|| panic!("column `{column}` was not a float"))
 }
 
 /// Fetch a single cell from the first row of `query`,
@@ -314,18 +311,18 @@ pub async fn get_cell_as_usize(query: &str, schema: &str, db: DbType, column: &s
         .await
         .expect("fetch_rows failed");
 
-    println!("rows: {:?}", rows);
+    println!("rows: {rows:?}");
     let row = rows
         .first()
-        .unwrap_or_else(|| panic!("no rows returned for query `{}`", query));
+        .unwrap_or_else(|| panic!("no rows returned for query `{query}`"));
     let col = row
         .get(column)
-        .unwrap_or_else(|| panic!("column `{}` not found in row", column));
+        .unwrap_or_else(|| panic!("column `{column}` not found in row"));
     col.value
         .as_ref()
-        .unwrap_or_else(|| panic!("column `{}` was NULL", column))
+        .unwrap_or_else(|| panic!("column `{column}` was NULL"))
         .as_usize()
-        .unwrap_or_else(|| panic!("column `{}` was not a float", column))
+        .unwrap_or_else(|| panic!("column `{column}` was not a float"))
 }
 
 /// Execute a SQL statement in Postgres, panicking on any error

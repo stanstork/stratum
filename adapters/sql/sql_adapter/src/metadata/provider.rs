@@ -88,8 +88,7 @@ impl MetadataProvider {
 
             if !visited.insert(table_name.to_string()) {
                 return Err(DbError::CircularReference(format!(
-                    "Circular reference detected for table: {}",
-                    table_name
+                    "Circular reference detected for table: {table_name}"
                 )));
             }
 

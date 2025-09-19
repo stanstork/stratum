@@ -9,7 +9,7 @@ pub trait ColumnMetadataMapper {
 
 impl ColumnMetadataMapper for ColumnMetadata {
     fn from_pg_row(row: &PgRow) -> ColumnMetadata {
-        let data_type = DataType::from_pg_row(row);
+        let data_type = DataType::parse_from_row(row);
         ColumnMetadata::from_row(&DbRow::PostgresRow(row), data_type)
     }
 }

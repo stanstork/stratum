@@ -19,7 +19,7 @@ impl MigrationSetting for CreateMissingTablesSetting {
         MigrationSettingsPhase::CreateMissingTables
     }
 
-    async fn apply(&self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
+    async fn apply(&mut self, _ctx: &mut ItemContext) -> Result<(), MigrationError> {
         // If the table already exists, bail out
         if self.context.destination_exists().await? {
             info!("Destination table already exists; skipping schema creation.");
@@ -72,7 +72,7 @@ impl MigrationSetting for CreateMissingTablesSetting {
         // Set the create missing tables flag to global state
         {
             let mut state = self.context.state.lock().await;
-            state.create_missing_tables = true;
+            state.set_create_missing_tables(true);
         }
 
         info!("Create missing tables setting applied");
@@ -81,14 +81,14 @@ impl MigrationSetting for CreateMissingTablesSetting {
 }
 
 impl CreateMissingTablesSetting {
-    pub fn new(
+    pub async fn new(
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
         state: &Arc<Mutex<MigrationState>>,
     ) -> Self {
         Self {
-            context: SchemaSettingContext::new(src, dest, mapping, state),
+            context: SchemaSettingContext::new(src, dest, mapping, state).await,
         }
     }
 }

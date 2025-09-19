@@ -2,7 +2,7 @@ use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum DataType {
     Decimal,
     Short,
@@ -35,6 +35,7 @@ pub enum DataType {
     Geometry,
     Array,
     Char,
+    Custom(String),
 }
 
 lazy_static! {
@@ -85,6 +86,7 @@ lazy_static! {
         m.insert("BYTEA", DataType::Bytea);
         m.insert("ARRAY", DataType::Array);
         m.insert("CHARACTER", DataType::Char);
+        m.insert("CHARACTER VARYING", DataType::VarChar);
         m
     };
 }
@@ -95,8 +97,8 @@ impl TryFrom<&str> for DataType {
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         TYPE_MAP
             .get(s.to_uppercase().as_str())
-            .copied()
-            .ok_or_else(|| format!("Unknown column type: {}", s))
+            .cloned()
+            .ok_or_else(|| format!("Unknown column type: {s}"))
     }
 }
 
@@ -134,6 +136,7 @@ impl fmt::Display for DataType {
             DataType::Array => write!(f, "ARRAY"),
             DataType::Char => write!(f, "CHAR"),
             DataType::Date => write!(f, "DATE"),
+            DataType::Custom(ref name) => write!(f, "{name}"),
         }
     }
 }
@@ -150,6 +153,7 @@ impl DataType {
             | (DataType::IntUnsigned, DataType::Long)
             | (DataType::LongLong, DataType::Long)
             | (DataType::Long, DataType::LongLong) => true,
+            (DataType::Int, DataType::Short) | (DataType::Short, DataType::Int) => true, // Int can hold Short values
             (DataType::String, DataType::VarChar) | (DataType::VarChar, DataType::String) => true,
             (DataType::Geometry, DataType::Bytea) | (DataType::Bytea, DataType::Geometry) => true,
             (DataType::Blob, DataType::Bytea) | (DataType::Bytea, DataType::Blob) => true,

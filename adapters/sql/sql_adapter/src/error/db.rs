@@ -28,6 +28,10 @@ pub enum DbError {
     #[error("Invalid adapter: {0}")]
     InvalidAdapter(String),
 
+    /// An error occurred while building a SQL query.
+    #[error("Query build error: {0}")]
+    QueryBuildError(String),
+
     #[error("Unknown error: {0}")]
     Unknown(String),
 }

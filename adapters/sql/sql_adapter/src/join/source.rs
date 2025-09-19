@@ -32,7 +32,7 @@ impl JoinSource {
             .flat_map(|clause| {
                 let left_alias = clause.left.alias.clone();
 
-                // fetch the map of table -> fields, then get table’s Vec<SelectField>
+                // fetch the map of table -> fields, then get table's Vec<SelectField>
                 let source_fields = self
                     .meta
                     .get(&clause.left.table)
@@ -45,7 +45,7 @@ impl JoinSource {
                 source_fields
                     .into_iter()
                     .map(|mut field| {
-                        // override the field’s table with alias
+                        // override the field's table with alias
                         field.table = left_alias.clone();
 
                         // apply any lookup aliases
@@ -58,7 +58,7 @@ impl JoinSource {
                                     .then(|| lk.target.clone())
                             })
                         {
-                            field.alias = Some(alias);
+                            field.alias = alias;
                         }
 
                         field

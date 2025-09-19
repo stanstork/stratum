@@ -20,15 +20,15 @@ impl DbRow<'_> {
             .columns()
             .iter()
             .map(|column| {
-                let column_type =
-                    DataType::try_from(self.column_type(column)).unwrap_or_else(|_| {
-                        warn!("Unknown column type: {}", self.column_type(column));
-                        DataType::String
-                    });
+                let data_type = DataType::try_from(self.column_type(column)).unwrap_or_else(|_| {
+                    warn!("Unknown column type: {}", self.column_type(column));
+                    DataType::String
+                });
 
                 FieldValue {
                     name: column.to_string(),
-                    value: self.get_value(column_type, column),
+                    value: self.get_value(&data_type, column),
+                    data_type,
                 }
             })
             .collect();
@@ -36,7 +36,7 @@ impl DbRow<'_> {
         RowData::new(table, columns)
     }
 
-    pub fn get_value(&self, data_type: DataType, name: &str) -> Option<Value> {
+    pub fn get_value(&self, data_type: &DataType, name: &str) -> Option<Value> {
         match data_type {
             DataType::Int | DataType::Long | DataType::Short => {
                 self.try_get_i64(name).map(Value::Int)
@@ -55,8 +55,11 @@ impl DbRow<'_> {
             DataType::Json => self.try_get_json(name).map(Value::Json),
             DataType::Timestamp => self.try_get_timestamp(name).map(Value::Timestamp),
             DataType::Date => self.try_get_date(name).map(Value::Date),
-            DataType::Enum => self.try_get_string(name).map(Value::String),
-            DataType::Bytea => self.try_get_bytes(name).map(Value::Bytes),
+            DataType::Enum => {
+                let enum_value = self.try_get_string(name)?;
+                Some(Value::Enum(name.to_string(), enum_value))
+            }
+            DataType::Bytea | DataType::Geometry => self.try_get_bytes(name).map(Value::Bytes),
             DataType::Blob | DataType::TinyBlob | DataType::MediumBlob | DataType::LongBlob => {
                 self.try_get_bytes(name).map(Value::Bytes)
             }
@@ -166,8 +169,8 @@ impl DbRow<'_> {
 impl fmt::Debug for DbRow<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            DbRow::MySqlRow(row) => write!(f, "{:?}", row),
-            DbRow::PostgresRow(row) => write!(f, "{:?}", row),
+            DbRow::MySqlRow(row) => write!(f, "{row:?}"),
+            DbRow::PostgresRow(row) => write!(f, "{row:?}"),
         }
     }
 }

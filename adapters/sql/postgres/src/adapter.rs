@@ -1,6 +1,8 @@
 use crate::data_type::PgDataType;
 use async_trait::async_trait;
-use common::{row_data::RowData, types::DataType};
+use common::{row_data::RowData, types::DataType, value::Value};
+use futures_util::TryStreamExt;
+use query_builder::dialect;
 use sql_adapter::{
     adapter::SqlAdapter,
     error::{adapter::ConnectorError, db::DbError},
@@ -9,15 +11,40 @@ use sql_adapter::{
         provider::MetadataProvider,
         table::TableMetadata,
     },
+    query::generator::QueryGenerator,
     requests::FetchRowsRequest,
     row::DbRow,
 };
-use sqlx::{Pool, Postgres, Row};
+use sqlx::{query::Query, Pool, Postgres, Row};
 use std::collections::HashMap;
+
+fn bind_values<'q>(
+    mut query: Query<'q, Postgres, sqlx::postgres::PgArguments>,
+    params: &'q [Value],
+) -> Query<'q, Postgres, sqlx::postgres::PgArguments> {
+    for p in params {
+        query = match p {
+            Value::Int(i) => query.bind(*i),
+            Value::Float(f) => query.bind(*f),
+            Value::String(s) => query.bind(s),
+            Value::Boolean(b) => query.bind(*b),
+            Value::Json(j) => query.bind(j),
+            Value::Uuid(u) => query.bind(*u),
+            Value::Bytes(b) => query.bind(b),
+            Value::Date(d) => query.bind(*d),
+            Value::Timestamp(t) => query.bind(*t),
+            Value::Null => query.bind(None::<String>),
+            Value::Enum(_, v) => query.bind(v),
+            Value::StringArray(arr) => query.bind(arr),
+        };
+    }
+    query
+}
 
 #[derive(Clone)]
 pub struct PgAdapter {
     pool: Pool<Postgres>,
+    dialect: dialect::Postgres,
 }
 
 const QUERY_TABLE_EXISTS_SQL: &str = include_str!("../sql/table_exists.sql");
@@ -29,7 +56,10 @@ const QUERY_TABLE_REFERENCING_SQL: &str = include_str!("../sql/table_referencing
 impl SqlAdapter for PgAdapter {
     async fn connect(url: &str) -> Result<Self, ConnectorError> {
         let pool = Pool::connect(url).await?;
-        Ok(PgAdapter { pool })
+        Ok(PgAdapter {
+            pool,
+            dialect: dialect::Postgres,
+        })
     }
 
     async fn table_exists(&self, table: &str) -> Result<bool, DbError> {
@@ -53,13 +83,20 @@ impl SqlAdapter for PgAdapter {
         Ok(())
     }
 
+    async fn execute_with_params(&self, query: &str, params: Vec<Value>) -> Result<(), DbError> {
+        let query = sqlx::query(query);
+        let bound_query = bind_values(query, &params);
+        bound_query.execute(&self.pool).await?;
+        Ok(())
+    }
+
     async fn fetch_metadata(&self, table: &str) -> Result<TableMetadata, DbError> {
         let query = QUERY_TABLE_METADATA_SQL.replace("{table}", table);
         let rows = sqlx::query(&query).fetch_all(&self.pool).await?;
         let columns = rows
             .iter()
             .map(|row| {
-                let data_type = DataType::from_pg_row(row);
+                let data_type = DataType::parse_from_row(row);
                 let column_metadata = ColumnMetadata::from_row(&DbRow::PostgresRow(row), data_type);
                 Ok((column_metadata.name.clone(), column_metadata))
             })
@@ -80,6 +117,29 @@ impl SqlAdapter for PgAdapter {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(tables)
+    }
+
+    async fn fetch_existing_keys(
+        &self,
+        table: &str,
+        key_columns: &[String],
+        keys_batch: &[Vec<Value>],
+    ) -> Result<Vec<RowData>, DbError> {
+        let generator = QueryGenerator::new(&self.dialect);
+        let sql = generator.key_existence(table, key_columns, keys_batch.len());
+
+        let mut query = sqlx::query(&sql);
+        for key_value in keys_batch {
+            query = bind_values(query, key_value);
+        }
+
+        let rows_stream = query.fetch(&self.pool);
+        let result = rows_stream
+            .map_ok(|row| DbRow::PostgresRow(&row).get_row_data(table))
+            .try_collect::<Vec<RowData>>()
+            .await?;
+
+        Ok(result)
     }
 
     async fn fetch_rows(&self, _request: FetchRowsRequest) -> Result<Vec<RowData>, DbError> {

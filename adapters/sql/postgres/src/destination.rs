@@ -1,13 +1,14 @@
 use crate::adapter::PgAdapter;
 use async_trait::async_trait;
 use common::row_data::RowData;
+use query_builder::dialect;
 use sql_adapter::{
     adapter::SqlAdapter,
     destination::DbDataDestination,
     error::db::DbError,
     join::clause::JoinClause,
     metadata::{provider::MetadataHelper, table::TableMetadata},
-    query::{builder::SqlQueryBuilder, column::ColumnDef},
+    query::{column::ColumnDef, generator::QueryGenerator},
 };
 use std::{collections::HashMap, sync::Arc};
 use tracing::info;
@@ -20,6 +21,8 @@ pub struct PgDestination {
 
     /// Metadata for any child tables (via FKs) when cascading
     related_meta: HashMap<String, TableMetadata>,
+
+    dialect: dialect::Postgres,
 }
 
 impl PgDestination {
@@ -28,6 +31,7 @@ impl PgDestination {
             adapter,
             primary_meta: None,
             related_meta: HashMap::new(),
+            dialect: dialect::Postgres,
         }
     }
 }
@@ -41,47 +45,25 @@ impl DbDataDestination for PgDestination {
             return Ok(());
         }
 
-        let columns = meta
-            .columns
-            .values()
-            .map(ColumnDef::new)
-            .collect::<Vec<_>>();
+        let num_rows = rows.len();
+        let generator = QueryGenerator::new(&self.dialect);
+        let (sql, params) = generator.insert_batch(meta, rows);
 
-        if columns.is_empty() {
-            return Err(DbError::Write("No columns found in metadata".to_string()));
-        }
-
-        let all_values: Vec<Vec<String>> = rows
-            .into_iter()
-            .map(|row| {
-                columns
-                    .iter()
-                    .map(|col| {
-                        row.field_values
-                            .iter()
-                            .find(|rc| rc.name.eq_ignore_ascii_case(&col.name))
-                            .and_then(|rc| rc.value.clone())
-                            .map_or_else(|| "NULL".to_string(), |val| val.to_string())
-                    })
-                    .collect()
-            })
-            .collect();
-
-        let query = SqlQueryBuilder::new()
-            .insert_batch(&meta.name, columns, all_values)
-            .build();
-
-        info!("Executing insert into `{}`", meta.name);
-        self.adapter.execute(&query.0).await?;
+        info!("Inserting {} rows into {}", num_rows, meta.name);
+        self.adapter.execute_with_params(&sql, params).await?;
 
         Ok(())
     }
 
     async fn toggle_trigger(&self, table: &str, enable: bool) -> Result<(), DbError> {
-        let query = SqlQueryBuilder::new().toggle_trigger(table, enable).build();
+        let (sql, _params) = QueryGenerator::new(&self.dialect).toggle_triggers(table, enable);
 
-        info!("Executing query: {}", query.0);
-        self.adapter.execute(&query.0).await?;
+        info!(
+            "{} triggers on table {}",
+            if enable { "Enabling" } else { "Disabling" },
+            table
+        );
+        self.adapter.execute(&sql).await?;
 
         Ok(())
     }
@@ -91,10 +73,10 @@ impl DbDataDestination for PgDestination {
     }
 
     async fn add_column(&self, table: &str, column: &ColumnDef) -> Result<(), DbError> {
-        let query = SqlQueryBuilder::new().add_column(table, column).build();
+        let (sql, _params) = QueryGenerator::new(&self.dialect).add_column(table, column.clone());
 
-        info!("Executing query: {}", query.0);
-        self.adapter.execute(&query.0).await?;
+        info!("Adding column {} to table {}", column.name, table);
+        self.adapter.execute(&sql).await?;
 
         Ok(())
     }
@@ -124,7 +106,7 @@ impl MetadataHelper for PgDestination {
             .filter(|meta| {
                 self.primary_meta
                     .as_ref()
-                    .map_or(true, |p| !p.name.eq_ignore_ascii_case(&meta.name))
+                    .is_none_or(|p| !p.name.eq_ignore_ascii_case(&meta.name))
             })
             .cloned()
             .collect::<Vec<_>>();

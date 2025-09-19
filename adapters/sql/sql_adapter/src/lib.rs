@@ -4,6 +4,7 @@ pub mod destination;
 pub mod error;
 pub mod filter;
 pub mod join;
+pub mod macros;
 pub mod metadata;
 pub mod query;
 pub mod requests;
