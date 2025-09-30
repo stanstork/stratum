@@ -5,6 +5,7 @@ use crate::{
     report::{
         dry_run::{DryRunReport, DryRunStatus},
         finding::{Finding, Severity},
+        mapping::EntityMappingReport,
         sql::{SqlKind, SqlStatement},
         transform::{TransformationRecord, TransformationReport},
     },
@@ -128,6 +129,10 @@ impl ValidationProducer {
                 .get(&entity_report.source_entity)
             {
                 entity_report.omitted_source_columns.extend(omitted.clone());
+            }
+
+            if self.settings.copy_columns == CopyColumns::All {
+                self.update_one_to_one_mapped(entity_report).await;
             }
         }
 
@@ -334,6 +339,34 @@ impl ValidationProducer {
                 Vec::new(),
                 Vec::new(), // No SQL statements for non-database sources
             ),
+        }
+    }
+
+    async fn update_one_to_one_mapped(&self, entity_report: &mut EntityMappingReport) {
+        if let Ok(meta) = self
+            .source
+            .primary
+            .fetch_meta(entity_report.source_entity.clone())
+            .await
+        {
+            let source_columns: HashSet<String> =
+                meta.columns().iter().map(|c| c.name().to_owned()).collect();
+            let target_columns: HashSet<String> = entity_report
+                .renames
+                .iter()
+                .map(|r| r.from.clone())
+                .collect();
+            let computed_columns: HashSet<String> = entity_report
+                .computed
+                .iter()
+                .map(|c| c.name.clone())
+                .collect();
+
+            entity_report.one_to_one = source_columns
+                .difference(&target_columns)
+                .filter(|col| !computed_columns.contains(*col))
+                .cloned()
+                .collect();
         }
     }
 

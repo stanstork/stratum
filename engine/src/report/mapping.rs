@@ -31,6 +31,9 @@ pub struct EntityMappingReport {
     pub copy_policy: String,
     pub mapped_fields: usize,
     pub created_fields: usize,
+    // Columns mapped 1:1 without rename or expression.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub one_to_one: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub renames: Vec<FieldRename>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -152,6 +155,7 @@ impl MappingReport {
             copy_policy: copy_columns.to_string(),
             mapped_fields: renames.len(),
             created_fields: computed.len(),
+            one_to_one: Vec::new(), // Will be filled in later steps
             renames,
             omitted_source_columns: Vec::new(), // Will be filled in later steps
             computed,
