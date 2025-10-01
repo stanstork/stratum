@@ -55,6 +55,7 @@ pub async fn run(
                 destination: &destination,
                 mapping: &mapping,
                 config_hash: &plan.hash(),
+                copy_columns: mi.settings.copy_columns.clone(),
             };
             state.mark_dry_run(dry_run_params)?;
         }

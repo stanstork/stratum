@@ -1,10 +1,10 @@
 CONNECTIONS(
-    SOURCE(MYSQL,  "mysql://sakila_user:qwerty123@localhost:3306/sakila"),
+    SOURCE(MYSQL,  "mysql://user:password@localhost:3306/testdb"),
     DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/testdb")
 );
 MIGRATE(
-    SOURCE(TABLE, actor) -> DEST(TABLE, actor) [
-        SETTINGS(CREATE_MISSING_COLUMNS=TRUE,CREATE_MISSING_TABLES=TRUE),
-        MAP(CONCAT(actor[first_name], actor[last_name]) -> full_name, actor_id -> id)
+    SOURCE(TABLE, orders) -> DEST(TABLE, orders_flat2) [
+        SETTINGS(CREATE_MISSING_COLUMNS=TRUE,CREATE_MISSING_TABLES=TRUE,COPY_COLUMNS=MAP_ONLY),
+        MAP(user_id -> user_id, id -> id, total -> total)
     ]
 );

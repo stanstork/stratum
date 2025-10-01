@@ -46,7 +46,7 @@ impl MigrationState {
     /// This method initializes a new `DryRunReport` and sets the `is_dry_run` flag.
     /// It returns an error if the report cannot be generated.
     pub fn mark_dry_run(&mut self, params: DryRunParams<'_>) -> Result<(), ReportGenerationError> {
-        let report = DryRunReport::new(params, &self.copy_columns)?;
+        let report = DryRunReport::new(params)?;
         self.is_dry_run = true;
         self.dry_run_report = Arc::new(Mutex::new(report));
         info!("Migration marked as dry run.");

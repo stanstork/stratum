@@ -126,10 +126,21 @@ impl MappingReport {
             .get(dest_entity)
             .map_or(&[][..], |v| v.as_slice());
 
+        let one_to_one = rename_map
+            .map(|nm| {
+                nm.source_to_target
+                    .iter()
+                    .filter(|(s, t)| s == t) // One-to-one mappings
+                    .map(|(col, _)| col.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
         let renames: Vec<FieldRename> = rename_map
             .map(|nm| {
                 nm.source_to_target
                     .iter()
+                    .filter(|(s, t)| s != t) // Exclude one-to-one mappings
                     .map(|(from, to)| FieldRename {
                         from: from.clone(),
                         to: to.clone(),
@@ -155,7 +166,7 @@ impl MappingReport {
             copy_policy: copy_columns.to_string(),
             mapped_fields: renames.len(),
             created_fields: computed.len(),
-            one_to_one: Vec::new(), // Will be filled in later steps
+            one_to_one,
             renames,
             omitted_source_columns: Vec::new(), // Will be filled in later steps
             computed,

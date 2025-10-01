@@ -74,13 +74,11 @@ pub struct DryRunParams<'a> {
     pub destination: &'a Destination,
     pub mapping: &'a EntityMapping,
     pub config_hash: &'a str,
+    pub copy_columns: CopyColumns,
 }
 
 impl DryRunReport {
-    pub fn new(
-        params: DryRunParams,
-        copy_columns: &CopyColumns,
-    ) -> Result<Self, ReportGenerationError> {
+    pub fn new(params: DryRunParams) -> Result<Self, ReportGenerationError> {
         let source_endpoint = Self::source_endpoint(params.source)?;
         let dest_endpoint = Self::dest_endpoint(params.destination)?;
 
@@ -96,7 +94,7 @@ impl DryRunReport {
             config_hash: params.config_hash.to_string(),
             engine_version: env!("CARGO_PKG_VERSION").to_string(),
             summary,
-            mapping: MappingReport::from_mapping(params.mapping, copy_columns),
+            mapping: MappingReport::from_mapping(params.mapping, &params.copy_columns),
             ..Default::default()
         })
     }

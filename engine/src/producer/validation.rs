@@ -25,6 +25,7 @@ use std::{
 use tokio::sync::Mutex;
 
 /// A container for the results of the `sample_and_transform` operation.
+#[derive(Debug)]
 struct SampleResult {
     records_sampled: usize,
     transform_report: Option<TransformationReport>,
@@ -247,9 +248,10 @@ impl ValidationProducer {
             }
         });
 
+        let source_name = self.mapping.entity_name_map.reverse_resolve(table);
         if !dropped.is_empty() {
             omitted
-                .entry(table.to_string())
+                .entry(source_name)
                 .or_default()
                 .extend(dropped.into_iter().map(|fv| fv.name));
         }
@@ -362,11 +364,13 @@ impl ValidationProducer {
                 .map(|c| c.name.clone())
                 .collect();
 
-            entity_report.one_to_one = source_columns
-                .difference(&target_columns)
-                .filter(|col| !computed_columns.contains(*col))
-                .cloned()
-                .collect();
+            entity_report.one_to_one.extend(
+                source_columns
+                    .difference(&target_columns)
+                    .filter(|col| !computed_columns.contains(*col))
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            );
         }
     }
 

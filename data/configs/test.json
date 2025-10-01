@@ -15,135 +15,44 @@
         "settings": {
             "batch_size": 1000,
             "csv_header": true,
-            "copy_columns": "All",
-            "infer_schema": true,
+            "copy_columns": "MapOnly",
+            "infer_schema": false,
             "csv_delimiter": ",",
             "csv_id_column": null,
-            "cascade_schema": true,
-            "ignore_constraints": false,
+            "cascade_schema": false,
+            "ignore_constraints": true,
             "create_missing_tables": true,
             "create_missing_columns": true
         },
         "migrate_items": [
             {
-                "id": "2025-08-02T14:21:35.982Z",
                 "map": {
                     "mappings": [
                         {
                             "source": {
-                                "Identifier": "order_date"
-                            },
-                            "target": "orders_order_date"
-                        },
-                        {
-                            "source": {
                                 "Identifier": "user_id"
                             },
-                            "target": "orders_user_id"
+                            "target": "user_id"
                         },
                         {
                             "source": {
                                 "Identifier": "id"
                             },
-                            "target": "orders_id"
+                            "target": "id"
                         },
                         {
                             "source": {
                                 "Identifier": "total"
                             },
-                            "target": "orders_total"
-                        },
-                        {
-                            "source": {
-                                "Lookup": {
-                                    "key": "created_at",
-                                    "field": "",
-                                    "entity": "users"
-                                }
-                            },
-                            "target": "users_created_at"
-                        },
-                        {
-                            "source": {
-                                "Lookup": {
-                                    "key": "id",
-                                    "field": "",
-                                    "entity": "users"
-                                }
-                            },
-                            "target": "users_id"
-                        },
-                        {
-                            "source": {
-                                "Lookup": {
-                                    "key": "email",
-                                    "field": "",
-                                    "entity": "users"
-                                }
-                            },
-                            "target": "users_email"
-                        },
-                        {
-                            "source": {
-                                "Lookup": {
-                                    "key": "name",
-                                    "field": "",
-                                    "entity": "users"
-                                }
-                            },
-                            "target": "users_name"
+                            "target": "total"
                         }
                     ]
                 },
                 "load": {
-                    "matches": [
-                        {
-                            "left": {
-                                "Lookup": {
-                                    "key": "id",
-                                    "field": "",
-                                    "entity": "users"
-                                }
-                            },
-                            "right": {
-                                "Lookup": {
-                                    "key": "user_id",
-                                    "field": "",
-                                    "entity": "orders"
-                                }
-                            }
-                        }
-                    ],
-                    "entities": [
-                        "users"
-                    ]
+                    "matches": [],
+                    "entities": []
                 },
-                "filter": {
-                    "expression": {
-                        "FunctionCall": [
-                            "AND",
-                            [
-                                {
-                                    "Condition": {
-                                        "op": "GreaterThan",
-                                        "left": {
-                                            "Lookup": {
-                                                "key": "total",
-                                                "field": "",
-                                                "entity": "orders"
-                                            }
-                                        },
-                                        "right": {
-                                            "Literal": {
-                                                "Integer": 400
-                                            }
-                                        }
-                                    }
-                                }
-                            ]
-                        ]
-                    }
-                },
+                "filter": null,
                 "source": {
                     "kind": "Table",
                     "names": [
@@ -153,7 +62,7 @@
                 "settings": {
                     "batch_size": 1000,
                     "csv_header": true,
-                    "copy_columns": "All",
+                    "copy_columns": "MapOnly",
                     "infer_schema": false,
                     "csv_delimiter": ",",
                     "csv_id_column": null,
@@ -165,7 +74,7 @@
                 "destination": {
                     "kind": "Table",
                     "names": [
-                        "orders_flat"
+                        "orders_flat2"
                     ]
                 }
             }
