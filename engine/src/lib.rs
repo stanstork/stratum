@@ -9,6 +9,8 @@ pub mod expr;
 pub mod filter;
 pub mod metadata;
 pub mod metrics;
+pub mod migration_state;
+pub mod pipeline;
 pub mod producer;
 pub mod report;
 pub mod runner;
@@ -17,6 +19,7 @@ pub mod settings;
 pub mod source;
 pub mod state;
 pub mod transform;
+pub mod utils;
 pub mod validation;
 
 mod tests;

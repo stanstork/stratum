@@ -1,3 +1,5 @@
+use core::error;
+
 use crate::settings::error::SettingsError;
 use csv::error::FileError;
 use sql_adapter::error::{adapter::ConnectorError, db::DbError};
@@ -51,6 +53,9 @@ pub enum MigrationError {
 
     #[error("Report generation error: {0}")]
     Report(#[from] ReportGenerationError),
+
+    #[error("Sled error: {0}")]
+    Sled(#[from] sled::Error),
 }
 
 #[derive(Error, Debug)]
@@ -101,4 +106,28 @@ pub enum ReportGenerationError {
 
     #[error("Failed to determine destination endpoint type")]
     DestinationEndpointError,
+}
+
+#[derive(Error, Debug)]
+pub enum WallEntryError {
+    #[error("Failed to deserialize WAL entry: {0}")]
+    Deserialization(String),
+
+    #[error("Other error: {0}")]
+    Other(String),
+}
+
+#[derive(Error, Debug)]
+pub enum StateStoreError {
+    #[error("Failed to save checkpoint: {0}")]
+    SaveCheckpoint(String),
+
+    #[error("Failed to load checkpoint: {0}")]
+    LoadCheckpoint(String),
+
+    #[error("Failed to append WAL entry: {0}")]
+    AppendWAL(String),
+
+    #[error("Failed to iterate WAL entries: {0}")]
+    IterateWAL(String),
 }

@@ -1,5 +1,6 @@
 use crate::{
     destination::{data::DataDestination, Destination},
+    migration_state::MigrationState,
     report::{
         dry_run::DryRunReport,
         schema::SchemaAction,
@@ -7,7 +8,6 @@ use crate::{
     },
     schema::plan::SchemaPlan,
     settings::error::SettingsError,
-    state::MigrationState,
 };
 use query_builder::dialect::{self, Dialect};
 use sql_adapter::{

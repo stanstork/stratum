@@ -1,9 +1,14 @@
 use crate::{error::MigrationError, filter::Filter};
+use chrono::Duration;
 use common::record::Record;
 use data::DataSource;
 use linked::LinkedSource;
-use query_builder::dialect::{self, Dialect};
+use query_builder::{
+    dialect::{self, Dialect},
+    offsets::{Cursor, OffsetStrategy},
+};
 use smql::statements::connection::DataFormat;
+use tokio_util::sync::CancellationToken;
 
 pub mod data;
 pub mod linked;
@@ -39,12 +44,23 @@ impl Source {
     pub async fn fetch_data(
         &self,
         batch_size: usize,
-        offset: Option<usize>,
+        max_ms: Duration,
+        cancel: &CancellationToken,
+        cursor: Option<Cursor>,
+        start: &dyn OffsetStrategy,
     ) -> Result<Vec<Record>, MigrationError> {
         match &self.primary {
             DataSource::Database(db) => {
                 let db = db.lock().await;
-                let rows = db.fetch(batch_size, offset).await?;
+                let rows = db
+                    .fetch(
+                        batch_size,
+                        max_ms,
+                        cancel,
+                        cursor.unwrap_or(Cursor::None),
+                        start,
+                    )
+                    .await?;
                 let records = rows.into_iter().map(Record::RowData).collect();
                 Ok(records)
             }

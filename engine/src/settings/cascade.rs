@@ -4,8 +4,8 @@ use crate::{
     destination::{data::DataDestination, Destination},
     error::MigrationError,
     filter::Filter,
+    migration_state::MigrationState,
     source::{data::DataSource, Source},
-    state::MigrationState,
 };
 use async_trait::async_trait;
 use common::mapping::EntityMapping;

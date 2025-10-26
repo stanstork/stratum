@@ -28,3 +28,4 @@ serde = "1.0.217"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 futures-util = "0.3.31"
+tokio-util = "0.7.16"

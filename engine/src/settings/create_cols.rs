@@ -8,9 +8,9 @@ use crate::{
     error::MigrationError,
     expr::types::ExpressionWrapper,
     metadata::{entity::EntityMetadata, field::FieldMetadata},
+    migration_state::MigrationState,
     schema::{types::TypeInferencer, utils::create_column_def},
     source::Source,
-    state::MigrationState,
 };
 use async_trait::async_trait;
 use common::{mapping::EntityMapping, types::DataType};

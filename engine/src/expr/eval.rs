@@ -128,6 +128,8 @@ fn eval_function(name: &str, args: &[Value]) -> Option<Value> {
                         .trim_end_matches('\"')
                         .to_string(),
                     Value::Int(i) => i.to_string(),
+                    Value::Uint(u) => u.to_string(),
+                    Value::Usize(u) => u.to_string(),
                     Value::Float(f) => f.to_string(),
                     Value::Boolean(b) => b.to_string(),
                     Value::Uuid(u) => u.to_string(),

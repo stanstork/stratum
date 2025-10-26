@@ -6,11 +6,12 @@ use crate::{
     error::MigrationError,
     filter::{compiler::FilterCompiler, csv::CsvFilterCompiler, sql::SqlFilterCompiler, Filter},
     metadata::entity::EntityMetadata,
+    migration_state::MigrationState,
     producer::create_producer,
     report::dry_run::DryRunParams,
     settings::collect_settings,
     source::{data::DataSource, linked::LinkedSource, Source},
-    state::MigrationState,
+    state::sled_store::SledStateStore,
 };
 use common::mapping::EntityMapping;
 use smql::{
@@ -35,8 +36,8 @@ pub async fn run(
     // Keep track of per-item states
     let mut states = HashMap::new();
 
-    // Build the shared context
-    let global_ctx = GlobalContext::new(&plan).await?;
+    let state = Arc::new(SledStateStore::open("~/.stratum/state")?);
+    let global_ctx = GlobalContext::new(&plan, state).await?;
 
     // Run each migration item sequentially
     for mi in plan.migration.migrate_items.iter() {

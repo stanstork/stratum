@@ -1,13 +1,14 @@
+use crate::types::DataType;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt, hash::Hash};
 use uuid::Uuid;
 
-use crate::types::DataType;
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Value {
     Int(i64),
+    Uint(u64),
+    Usize(usize),
     Float(f64),
     String(String),
     Boolean(bool),
@@ -29,6 +30,8 @@ impl Hash for Value {
         std::mem::discriminant(self).hash(state);
         match self {
             Int(v) => v.hash(state),
+            Uint(v) => v.hash(state),
+            Usize(v) => v.hash(state),
             Float(v) => {
                 // Hash the bits of the float to handle NaN and -0.0 correctly
                 let bits = v.to_bits();
@@ -59,6 +62,8 @@ impl Value {
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             Value::Int(v) => Some(*v as f64),
+            Value::Uint(v) => Some(*v as f64),
+            Value::Usize(v) => Some(*v as f64),
             Value::Float(v) => Some(*v),
             Value::String(v) => v.parse::<f64>().ok(),
             Value::Boolean(v) => Some(if *v { 1.0 } else { 0.0 }),
@@ -76,6 +81,8 @@ impl Value {
     pub fn as_usize(&self) -> Option<usize> {
         match self {
             Value::Int(v) => Some(*v as usize),
+            Value::Uint(v) => Some(*v as usize),
+            Value::Usize(v) => Some(*v),
             Value::Float(v) => Some(*v as usize),
             Value::String(v) => v.parse::<usize>().ok(),
             Value::Boolean(v) => Some(if *v { 1 } else { 0 }),
@@ -93,6 +100,8 @@ impl Value {
     pub fn as_string(&self) -> Option<String> {
         match self {
             Value::Int(v) => Some(v.to_string()),
+            Value::Uint(v) => Some(v.to_string()),
+            Value::Usize(v) => Some(v.to_string()),
             Value::Float(v) => Some(v.to_string()),
             Value::String(v) => Some(v.clone()),
             Value::Boolean(v) => Some(v.to_string()),
@@ -111,6 +120,8 @@ impl Value {
         use Value::*;
         match (self, other) {
             (Int(a), Int(b)) => Some(a.cmp(b)),
+            (Uint(a), Uint(b)) => Some(a.cmp(b)),
+            (Usize(a), Usize(b)) => Some(a.cmp(b)),
             (Float(a), Float(b)) => a.partial_cmp(b),
             (Int(a), Float(b)) => (*a as f64).partial_cmp(b),
             (Float(a), Int(b)) => a.partial_cmp(&(*b as f64)),
@@ -129,6 +140,8 @@ impl Value {
     pub fn data_type(&self) -> DataType {
         match self {
             Value::Int(_) => DataType::Int,
+            Value::Uint(_) => DataType::IntUnsigned,
+            Value::Usize(_) => DataType::IntUnsigned,
             Value::Float(_) => DataType::Float,
             Value::String(_) => DataType::String,
             Value::Boolean(_) => DataType::Boolean,
@@ -155,6 +168,8 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Int(v) => write!(f, "{v}"),
+            Value::Uint(v) => write!(f, "{v}"),
+            Value::Usize(v) => write!(f, "{v}"),
             Value::Float(v) => write!(f, "{v:.15}"),
             Value::String(v) => write!(f, "'{}'", v.replace("'", "''")),
             Value::Boolean(v) => write!(f, "{v}"),

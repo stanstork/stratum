@@ -1,4 +1,4 @@
-use crate::{adapter::Adapter, error::MigrationError};
+use crate::{adapter::Adapter, error::MigrationError, state::sled_store::SledStateStore};
 use csv::settings::CsvSettings;
 use futures::lock::Mutex;
 use smql::{
@@ -17,12 +17,17 @@ pub struct GlobalContext {
     pub batch_size: usize,
     /// Cache of file-backed adapters (e.g. CSV readers) by file path
     file_adapters: Arc<Mutex<HashMap<String, Adapter>>>,
+
+    pub state: Arc<SledStateStore>,
 }
 
 impl GlobalContext {
     /// Build a new context, connecting to all SQL endpoints and
     /// pre-creating adapters for every CSV-based migrate item.
-    pub async fn new(plan: &MigrationPlan) -> Result<Self, MigrationError> {
+    pub async fn new(
+        plan: &MigrationPlan,
+        state: Arc<SledStateStore>,
+    ) -> Result<Self, MigrationError> {
         let src_conn = Self::create_sql_adapter(&plan.connections.source).await?;
         let dst_conn = Self::create_sql_adapter(&plan.connections.dest).await?;
         let batch_size = plan.migration.settings.batch_size;
@@ -36,6 +41,7 @@ impl GlobalContext {
             dst_conn,
             batch_size,
             file_adapters,
+            state,
         })
     }
 

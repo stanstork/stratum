@@ -1,7 +1,9 @@
 use crate::adapter::MySqlAdapter;
 use async_trait::async_trait;
+use chrono::Duration;
 use common::row_data::RowData;
 use futures_util::future;
+use query_builder::offsets::{Cursor, OffsetStrategy};
 use sql_adapter::{
     adapter::SqlAdapter,
     error::db::DbError,
@@ -15,6 +17,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
+use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
 pub struct MySqlDataSource {
@@ -58,7 +61,8 @@ impl MySqlDataSource {
         meta: &TableMetadata,
         join_clauses: &[JoinClause],
         batch_size: usize,
-        offset: Option<usize>,
+        cursor: Cursor,
+        start: &dyn OffsetStrategy,
         include_join_fields: bool,
     ) -> FetchRowsRequest {
         // base columns
@@ -83,7 +87,8 @@ impl MySqlDataSource {
             .joins(join_clauses.to_vec())
             .filter(filter_clause)
             .limit(batch_size)
-            .offset(offset)
+            .cursor(cursor)
+            .start(start)
             .build()
     }
 }
@@ -95,9 +100,12 @@ impl DbDataSource for MySqlDataSource {
     async fn fetch(
         &self,
         batch_size: usize,
-        offset: Option<usize>,
+        max_ms: Duration,
+        cancel: &CancellationToken,
+        cursor: Cursor,
+        start: &dyn OffsetStrategy,
     ) -> Result<Vec<RowData>, DbError> {
-        let requests = self.build_fetch_rows_requests(batch_size, offset);
+        let requests = self.build_fetch_rows_requests(batch_size, cursor, start);
         let futures = requests.into_iter().map(|req| self.adapter.fetch_rows(req));
 
         // Run all futures concurrently
@@ -116,7 +124,8 @@ impl DbDataSource for MySqlDataSource {
     fn build_fetch_rows_requests(
         &self,
         batch_size: usize,
-        offset: Option<usize>,
+        cursor: Cursor,
+        start: &dyn OffsetStrategy,
     ) -> Vec<FetchRowsRequest> {
         let mut reqs = Vec::new();
         let mut processed_tables = HashSet::new();
@@ -129,7 +138,15 @@ impl DbDataSource for MySqlDataSource {
                 .map(|j| j.clauses.clone())
                 .unwrap_or_default();
 
-            reqs.push(self.build_request_for(&meta.name, meta, &joins, batch_size, offset, true));
+            reqs.push(self.build_request_for(
+                &meta.name,
+                meta,
+                &joins,
+                batch_size,
+                cursor.clone(),
+                start,
+                true,
+            ));
             processed_tables.insert(meta.name.clone());
         }
 
@@ -145,7 +162,15 @@ impl DbDataSource for MySqlDataSource {
                 .get(table)
                 .unwrap_or(&Vec::new())
                 .to_vec();
-            reqs.push(self.build_request_for(table, meta, &joins, batch_size, offset, false));
+            reqs.push(self.build_request_for(
+                table,
+                meta,
+                &joins,
+                batch_size,
+                cursor.clone(),
+                start,
+                false,
+            ));
         }
 
         reqs

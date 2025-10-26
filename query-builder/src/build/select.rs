@@ -1,9 +1,12 @@
 //! Provides a type-safe, fluent builder for constructing `Select` ASTs.
 
-use crate::ast::{
-    common::{JoinKind, OrderDir, TableRef},
-    expr::Expr,
-    select::{FromClause, JoinClause, OrderByExpr, Select},
+use crate::{
+    ast::{
+        common::{JoinKind, OrderDir, TableRef},
+        expr::Expr,
+        select::{FromClause, JoinClause, OrderByExpr, Select},
+    },
+    offsets::{Cursor, OffsetStrategy},
 };
 
 /// The initial state of the builder before any clauses have been added.
@@ -22,7 +25,7 @@ pub struct FromState;
 
 #[derive(Debug, Clone)]
 pub struct SelectBuilder<State> {
-    ast: Select,
+    pub ast: Select,
     _state: State,
 }
 
@@ -100,6 +103,13 @@ impl SelectBuilder<FromState> {
         self
     }
 
+    /// Applies an offset-based pagination strategy to the query.
+    /// This will add the appropriate WHERE, ORDER BY, and LIMIT clauses
+    /// based on the strategy and cursor.
+    pub fn paginate(self, strategy: &dyn OffsetStrategy, cursor: &Cursor, limit: usize) -> Self {
+        strategy.apply_to_builder(self, cursor, limit)
+    }
+
     /// Finalizes and returns the constructed `Select` AST.
     pub fn build(self) -> Select {
         self.ast
@@ -108,6 +118,7 @@ impl SelectBuilder<FromState> {
 
 #[cfg(test)]
 mod tests {
+    use chrono_tz::Tz;
     use common::value::Value;
 
     use crate::{
@@ -116,6 +127,7 @@ mod tests {
             expr::{BinaryOp, BinaryOperator, Expr, Ident},
         },
         build::select::SelectBuilder,
+        offsets::{Cursor, PkOffset, TimestampOffset},
     };
 
     fn ident(name: &str) -> Expr {
@@ -210,5 +222,157 @@ mod tests {
 
         assert_eq!(ast.limit, Some(value(Value::Int(50))));
         assert_eq!(ast.offset, Some(value(Value::Int(100))));
+    }
+
+    #[test]
+    fn test_build_with_pagination_pk() {
+        let builder = SelectBuilder::new();
+        let strategy = PkOffset {
+            pk: "id".to_string(),
+        };
+        let cursor = Cursor::Pk { id: 100 };
+
+        let ast = builder
+            .select(vec![ident("id"), ident("name")])
+            .from(table("users"), None)
+            .paginate(&strategy, &cursor, 50)
+            .build();
+
+        // Check limit
+        assert_eq!(ast.limit, Some(value(Value::Uint(50))));
+
+        // Check order by
+        assert_eq!(ast.order_by.len(), 1);
+        assert_eq!(ast.order_by[0].expr, ident("id"));
+        assert_eq!(ast.order_by[0].direction, Some(OrderDir::Asc));
+
+        // Check where clause
+        let where_clause = ast.where_clause.unwrap();
+        // Expected: (id > 100)
+        assert_eq!(
+            where_clause,
+            Expr::BinaryOp(Box::new(BinaryOp {
+                left: ident("id"),
+                op: BinaryOperator::Gt,
+                right: value(Value::Uint(100)),
+            }))
+        );
+    }
+
+    #[test]
+    fn test_build_pagination_first_page() {
+        let builder = SelectBuilder::new();
+        let strategy = PkOffset {
+            pk: "id".to_string(),
+        };
+        // Cursor::None means first page
+        let cursor = Cursor::None;
+
+        let ast = builder
+            .select(vec![ident("id"), ident("name")])
+            .from(table("users"), None)
+            .paginate(&strategy, &cursor, 50)
+            .build();
+
+        // Check limit
+        assert_eq!(ast.limit, Some(value(Value::Uint(50))));
+
+        // Check order by
+        assert_eq!(ast.order_by.len(), 1);
+        assert_eq!(ast.order_by[0].expr, ident("id"));
+        assert_eq!(ast.order_by[0].direction, Some(OrderDir::Asc));
+
+        // Check where clause - should be None
+        assert!(ast.where_clause.is_none());
+    }
+
+    #[test]
+    fn test_build_pagination_with_existing_where() {
+        let builder = SelectBuilder::new();
+        let strategy = TimestampOffset {
+            ts_col: "created_at".to_string(),
+            pk: "id".to_string(),
+            tz: Tz::UTC,
+        };
+        let cursor = Cursor::CompositeTsPk {
+            ts_col: "created_at".to_string(),
+            pk_col: "id".to_string(),
+            ts: 123456789,
+            id: 42,
+        };
+
+        let original_where = Expr::BinaryOp(Box::new(BinaryOp {
+            left: ident("status"),
+            op: BinaryOperator::Eq,
+            right: value(Value::String("active".to_string())),
+        }));
+
+        let ast = builder
+            .select(vec![ident("id")])
+            .from(table("posts"), None)
+            .where_clause(original_where.clone())
+            .paginate(&strategy, &cursor, 25)
+            .build();
+
+        // Check limit
+        assert_eq!(ast.limit, Some(value(Value::Uint(25))));
+
+        // Check order by
+        assert_eq!(ast.order_by.len(), 2);
+        assert_eq!(ast.order_by[0].expr, ident("created_at"));
+        assert_eq!(ast.order_by[1].expr, ident("id"));
+
+        // Check where clause
+        // Expected: (status = 'active') AND ((created_at > 123...) OR (created_at = 123... AND id > 42))
+        let where_clause = ast.where_clause.unwrap();
+
+        let (left, op, right) = match where_clause {
+            Expr::BinaryOp(op) => (op.left, op.op, op.right),
+            _ => panic!("Expected outer BinaryOp(AND)"),
+        };
+
+        assert_eq!(op, BinaryOperator::And);
+        assert_eq!(left, original_where);
+
+        // Check pagination part of clause
+        let (cond1, op_or, cond2) = match right {
+            Expr::BinaryOp(op) => (op.left, op.op, op.right),
+            _ => panic!("Expected inner BinaryOp(OR)"),
+        };
+        assert_eq!(op_or, BinaryOperator::Or);
+
+        // cond1: (created_at > 123...)
+        assert_eq!(
+            cond1,
+            Expr::BinaryOp(Box::new(BinaryOp {
+                left: ident("created_at"),
+                op: BinaryOperator::Gt,
+                right: value(Value::Int(123456789)),
+            }))
+        );
+
+        // cond2: (created_at = 123... AND id > 42)
+        let (cond2_left, op_and, cond2_right) = match cond2 {
+            Expr::BinaryOp(op) => (op.left, op.op, op.right),
+            _ => panic!("Expected inner-right BinaryOp(AND)"),
+        };
+        assert_eq!(op_and, BinaryOperator::And);
+
+        assert_eq!(
+            cond2_left,
+            Expr::BinaryOp(Box::new(BinaryOp {
+                left: ident("created_at"),
+                op: BinaryOperator::Eq,
+                right: value(Value::Int(123456789)),
+            }))
+        );
+        assert_eq!(
+            cond2_right,
+            Expr::BinaryOp(Box::new(BinaryOp {
+                left: ident("id"),
+                op: BinaryOperator::Gt,
+                right: value(Value::Uint(42)),
+            }))
+        );
     }
 }

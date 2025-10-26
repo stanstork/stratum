@@ -1,6 +1,6 @@
 use crate::{filter::SqlFilter, join::clause::JoinClause, query::select::SelectField};
+use query_builder::offsets::{Cursor, OffsetStrategy, PkOffset};
 
-#[derive(Debug, Clone)]
 pub struct FetchRowsRequest {
     pub table: String,
     pub alias: Option<String>,
@@ -8,7 +8,8 @@ pub struct FetchRowsRequest {
     pub joins: Vec<JoinClause>,
     pub filter: Option<SqlFilter>,
     pub limit: usize,
-    pub offset: Option<usize>,
+    pub cursor: Cursor,
+    pub start: Box<dyn OffsetStrategy>,
 }
 
 pub struct FetchRowsRequestBuilder {
@@ -18,7 +19,8 @@ pub struct FetchRowsRequestBuilder {
     joins: Vec<JoinClause>,
     filter: Option<SqlFilter>,
     limit: usize,
-    offset: Option<usize>,
+    cursor: Cursor,
+    start: Box<dyn OffsetStrategy>,
 }
 
 impl FetchRowsRequestBuilder {
@@ -30,7 +32,8 @@ impl FetchRowsRequestBuilder {
             joins: Vec::new(),
             filter: None,
             limit: 0,
-            offset: None,
+            cursor: Cursor::None,
+            start: Box::new(PkOffset { pk: "".to_string() }),
         }
     }
 
@@ -59,8 +62,13 @@ impl FetchRowsRequestBuilder {
         self
     }
 
-    pub fn offset(mut self, offset: Option<usize>) -> Self {
-        self.offset = offset;
+    pub fn cursor(mut self, cursor: Cursor) -> Self {
+        self.cursor = cursor;
+        self
+    }
+
+    pub fn start(mut self, start: &dyn OffsetStrategy) -> Self {
+        self.start = start.clone_box();
         self
     }
 
@@ -72,7 +80,8 @@ impl FetchRowsRequestBuilder {
             joins: self.joins,
             filter: self.filter,
             limit: self.limit,
-            offset: self.offset,
+            cursor: self.cursor,
+            start: self.start,
         }
     }
 }

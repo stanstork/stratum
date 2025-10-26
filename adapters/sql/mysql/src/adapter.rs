@@ -26,6 +26,8 @@ fn bind_values<'q>(
     for p in params {
         query = match p {
             Value::Int(i) => query.bind(*i),
+            Value::Uint(u) => query.bind(*u),
+            Value::Usize(u) => query.bind(*u as u64),
             Value::Float(f) => query.bind(*f),
             Value::String(s) => query.bind(s),
             Value::Boolean(b) => query.bind(*b),

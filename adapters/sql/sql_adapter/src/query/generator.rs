@@ -50,7 +50,7 @@ impl<'a> QueryGenerator<'a> {
         // Build the final AST
         let select_ast = select
             .limit(value!(Value::Int(request.limit as i64)))
-            .offset(value!(Value::Int(request.offset.unwrap_or(0) as i64)))
+            .paginate(request.start.as_ref(), &request.cursor, request.limit)
             .build();
 
         self.render_ast(select_ast)

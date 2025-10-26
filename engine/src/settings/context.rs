@@ -3,10 +3,10 @@ use crate::{
     context::item::ItemContext,
     destination::{data::DataDestination, Destination},
     metadata::field::FieldMetadata,
+    migration_state::MigrationState,
     schema::{plan::SchemaPlan, types::TypeEngine},
     settings::schema_manager::{LiveSchemaManager, SchemaManager, ValidationSchemaManager},
     source::{data::DataSource, Source},
-    state::MigrationState,
 };
 use common::{mapping::EntityMapping, types::DataType};
 use smql::statements::setting::CopyColumns;

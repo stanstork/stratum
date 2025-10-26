@@ -1,6 +1,7 @@
 use crate::{
     destination::Destination,
     error::ProducerError,
+    migration_state::MigrationState,
     producer::DataProducer,
     report::{
         dry_run::{DryRunReport, DryRunStatus},
@@ -10,12 +11,13 @@ use crate::{
         transform::{TransformationRecord, TransformationReport},
     },
     source::{data::DataSource, Source},
-    state::MigrationState,
     transform::pipeline::TransformPipeline,
     validation::schema_validator::DestinationSchemaValidator,
 };
 use async_trait::async_trait;
+use chrono::Duration;
 use common::{mapping::EntityMapping, row_data::RowData};
+use query_builder::offsets::{Cursor, PkOffset};
 use smql::statements::setting::{CopyColumns, Settings};
 use sql_adapter::{error::db::DbError, query::generator::QueryGenerator};
 use std::{
@@ -23,6 +25,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 /// A container for the results of the `sample_and_transform` operation.
 #[derive(Debug)]
@@ -265,8 +268,21 @@ impl ValidationProducer {
     ) -> SampleResult {
         let mut prune_findings = Vec::new();
         let mut omitted_columns: HashMap<String, HashSet<String>> = HashMap::new();
+        let i = PkOffset {
+            pk: "id".to_string(),
+        }; // Temporary; replace with dynamic offset strategy
 
-        match self.source.fetch_data(self.sample_size(), None).await {
+        match self
+            .source
+            .fetch_data(
+                self.sample_size(),
+                Duration::seconds(60),
+                &CancellationToken::new(),
+                None,
+                &i,
+            )
+            .await
+        {
             Ok(data) => {
                 let total = data.len();
                 let sample: Vec<TransformationRecord> = data
@@ -322,7 +338,11 @@ impl ValidationProducer {
                 let dialect = self.source.dialect();
                 let generator = QueryGenerator::new(dialect.as_ref());
 
-                let requests = db.build_fetch_rows_requests(self.sample_size(), None);
+                let i = PkOffset {
+                    pk: "id".to_string(),
+                }; // Temporary; replace with dynamic offset strategy
+
+                let requests = db.build_fetch_rows_requests(self.sample_size(), Cursor::None, &i);
                 let statements = requests
                     .into_iter()
                     .map(|req| {

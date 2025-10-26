@@ -4,8 +4,8 @@ use super::{
 };
 use crate::{
     context::item::ItemContext, destination::Destination, error::MigrationError,
-    metadata::entity::EntityMetadata, schema::plan::SchemaPlan, source::Source,
-    state::MigrationState,
+    metadata::entity::EntityMetadata, migration_state::MigrationState, schema::plan::SchemaPlan,
+    source::Source,
 };
 use async_trait::async_trait;
 use common::mapping::EntityMapping;

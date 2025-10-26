@@ -1,5 +1,5 @@
 use crate::error::CliError;
-use engine::{report::dry_run::DryRunReport, state::MigrationState};
+use engine::{migration_state::MigrationState, report::dry_run::DryRunReport};
 use futures_util::future::join_all;
 use std::collections::HashMap;
 
