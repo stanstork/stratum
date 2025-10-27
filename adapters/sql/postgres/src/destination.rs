@@ -1,6 +1,6 @@
 use crate::adapter::PgAdapter;
 use async_trait::async_trait;
-use common::row_data::RowData;
+use data_model::records::row_data::RowData;
 use query_builder::dialect;
 use sql_adapter::{
     adapter::SqlAdapter,

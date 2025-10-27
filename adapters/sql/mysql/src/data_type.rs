@@ -1,4 +1,4 @@
-use common::types::DataType;
+use data_model::core::types::DataType;
 use sqlx::mysql::MySqlRow;
 use sqlx::Row;
 

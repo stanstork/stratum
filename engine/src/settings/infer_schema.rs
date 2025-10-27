@@ -8,7 +8,7 @@ use crate::{
     source::Source,
 };
 use async_trait::async_trait;
-use common::mapping::EntityMapping;
+use data_model::transform::mapping::EntityMapping;
 use smql::statements::connection::DataFormat;
 use sql_adapter::metadata::provider::MetadataProvider;
 use std::sync::Arc;

@@ -1,4 +1,4 @@
-use common::types::DataType;
+use data_model::core::types::DataType;
 use sql_adapter::metadata::column::ColumnMetadata;
 use sqlx::postgres::PgRow;
 use sqlx::Row;

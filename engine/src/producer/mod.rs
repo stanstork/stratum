@@ -9,7 +9,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use common::mapping::EntityMapping;
+use data_model::transform::mapping::EntityMapping;
 use smql::statements::setting::Settings;
 use std::sync::Arc;
 use tokio::sync::{watch::Sender, Mutex};

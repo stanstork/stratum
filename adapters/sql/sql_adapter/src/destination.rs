@@ -3,7 +3,7 @@ use crate::{
     query::column::ColumnDef,
 };
 use async_trait::async_trait;
-use common::row_data::RowData;
+use data_model::records::row_data::RowData;
 
 #[async_trait]
 pub trait DbDataDestination: MetadataHelper + Send + Sync {

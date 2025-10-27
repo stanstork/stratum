@@ -1,4 +1,4 @@
-use common::record::Record;
+use data_model::records::record::Record;
 
 pub trait Transform: Send + Sync {
     fn apply(&self, record: &Record) -> Record;

@@ -1,4 +1,4 @@
-use crate::row_data::RowData;
+use crate::records::row_data::RowData;
 
 #[derive(Debug, Clone)]
 pub enum Record {

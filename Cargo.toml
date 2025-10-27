@@ -5,7 +5,7 @@ members = [
     "adapters/sql/postgres",
     "adapters/sql/sql_adapter",
     "cli",
-    "common",
+    "data-model",
     "engine",
     "query-builder",
     "smql",

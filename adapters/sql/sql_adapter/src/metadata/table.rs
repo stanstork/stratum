@@ -1,6 +1,6 @@
 use super::{column::ColumnMetadata, fk::ForeignKeyMetadata};
 use crate::query::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField};
-use common::types::DataType;
+use data_model::core::types::DataType;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 

@@ -1,6 +1,6 @@
 //! Defines the AST for SQL expressions.
 
-use common::value::Value;
+use data_model::core::value::Value;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {

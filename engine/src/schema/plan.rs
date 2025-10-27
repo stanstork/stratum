@@ -3,7 +3,7 @@ use crate::{
     metadata::{entity::EntityMetadata, field::FieldMetadata},
     source::data::DataSource,
 };
-use common::mapping::EntityMapping;
+use data_model::transform::mapping::EntityMapping;
 use query_builder::dialect;
 use sql_adapter::{
     error::db::DbError,

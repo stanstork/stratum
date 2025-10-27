@@ -1,12 +1,14 @@
 //! Provides a type-safe, fluent builder for constructing `Select` ASTs.
 
+use data_model::pagination::cursor::Cursor;
+
 use crate::{
     ast::{
         common::{JoinKind, OrderDir, TableRef},
         expr::Expr,
         select::{FromClause, JoinClause, OrderByExpr, Select},
     },
-    offsets::{Cursor, OffsetStrategy},
+    offsets::offset_strategy_from_cursor,
 };
 
 /// The initial state of the builder before any clauses have been added.
@@ -105,8 +107,9 @@ impl SelectBuilder<FromState> {
 
     /// Applies an offset-based pagination strategy to the query.
     /// This will add the appropriate WHERE, ORDER BY, and LIMIT clauses
-    /// based on the strategy and cursor.
-    pub fn paginate(self, strategy: &dyn OffsetStrategy, cursor: &Cursor, limit: usize) -> Self {
+    /// based on the cursor.
+    pub fn paginate(self, cursor: &Cursor, limit: usize) -> Self {
+        let strategy = offset_strategy_from_cursor(cursor);
         strategy.apply_to_builder(self, cursor, limit)
     }
 
@@ -118,8 +121,7 @@ impl SelectBuilder<FromState> {
 
 #[cfg(test)]
 mod tests {
-    use chrono_tz::Tz;
-    use common::value::Value;
+    use data_model::{core::value::Value, pagination::cursor::Cursor};
 
     use crate::{
         ast::{
@@ -127,7 +129,6 @@ mod tests {
             expr::{BinaryOp, BinaryOperator, Expr, Ident},
         },
         build::select::SelectBuilder,
-        offsets::{Cursor, PkOffset, TimestampOffset},
     };
 
     fn ident(name: &str) -> Expr {
@@ -227,15 +228,15 @@ mod tests {
     #[test]
     fn test_build_with_pagination_pk() {
         let builder = SelectBuilder::new();
-        let strategy = PkOffset {
-            pk: "id".to_string(),
+        let cursor = Cursor::Pk {
+            pk_col: "id".to_string(),
+            id: 100,
         };
-        let cursor = Cursor::Pk { id: 100 };
 
         let ast = builder
             .select(vec![ident("id"), ident("name")])
             .from(table("users"), None)
-            .paginate(&strategy, &cursor, 50)
+            .paginate(&cursor, 50)
             .build();
 
         // Check limit
@@ -262,16 +263,13 @@ mod tests {
     #[test]
     fn test_build_pagination_first_page() {
         let builder = SelectBuilder::new();
-        let strategy = PkOffset {
-            pk: "id".to_string(),
-        };
         // Cursor::None means first page
         let cursor = Cursor::None;
 
         let ast = builder
             .select(vec![ident("id"), ident("name")])
             .from(table("users"), None)
-            .paginate(&strategy, &cursor, 50)
+            .paginate(&cursor, 50)
             .build();
 
         // Check limit
@@ -289,11 +287,6 @@ mod tests {
     #[test]
     fn test_build_pagination_with_existing_where() {
         let builder = SelectBuilder::new();
-        let strategy = TimestampOffset {
-            ts_col: "created_at".to_string(),
-            pk: "id".to_string(),
-            tz: Tz::UTC,
-        };
         let cursor = Cursor::CompositeTsPk {
             ts_col: "created_at".to_string(),
             pk_col: "id".to_string(),
@@ -311,7 +304,7 @@ mod tests {
             .select(vec![ident("id")])
             .from(table("posts"), None)
             .where_clause(original_where.clone())
-            .paginate(&strategy, &cursor, 25)
+            .paginate(&cursor, 25)
             .build();
 
         // Check limit

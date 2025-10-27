@@ -4,8 +4,8 @@ use crate::{
     settings::CsvSettings,
     types::CsvType,
 };
-use common::types::DataType;
 use csv::Position;
+use data_model::core::types::DataType;
 use std::{
     fs::File,
     sync::{Arc, Mutex},

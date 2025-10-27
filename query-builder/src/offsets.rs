@@ -7,26 +7,11 @@ use crate::{
     ident, value,
 };
 use async_trait::async_trait;
-use common::value::Value;
-use serde::{Deserialize, Serialize};
-
-/// Represents the pagination cursor.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub enum Cursor {
-    /// No cursor, fetch the first page.
-    None,
-    /// Cursor for simple Primary Key offset.
-    Pk { id: u64 },
-    /// Cursor for composite (timestamp/numeric + PK) offset.
-    CompositeTsPk {
-        ts_col: String,
-        pk_col: String,
-        /// The timestamp (micros) or numeric value.
-        ts: i64,
-        /// The tie-breaker ID.
-        id: u64,
-    },
-}
+use data_model::{
+    core::value::Value,
+    pagination::{cursor::Cursor, offset::OffsetConfig},
+    records::row_data::RowData,
+};
 
 #[async_trait]
 pub trait OffsetStrategy: Send + Sync {
@@ -37,6 +22,9 @@ pub trait OffsetStrategy: Send + Sync {
         cursor: &Cursor,
         limit: usize,
     ) -> SelectBuilder<FromState>;
+
+    /// Generates the next cursor based on the last fetched row.
+    fn next_cursor(&self, row: &RowData) -> Cursor;
 
     /// Clones the boxed trait object.
     fn clone_box(&self) -> Box<dyn OffsetStrategy>;
@@ -65,10 +53,10 @@ impl OffsetStrategy for PkOffset {
         limit: usize,
     ) -> SelectBuilder<FromState> {
         // Add WHERE clause based on cursor
-        if let Cursor::Pk { id } = cursor {
+        if let Cursor::Pk { pk_col, id } = cursor {
             // WHERE pk > ?
             let where_cond = Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident(&self.pk),
+                left: ident(pk_col),
                 op: BinaryOperator::Gt,
                 right: value(Value::Uint(*id)),
             }));
@@ -98,6 +86,17 @@ impl OffsetStrategy for PkOffset {
         builder = builder.limit(value(Value::Uint(limit as u64)));
 
         builder
+    }
+
+    fn next_cursor(&self, row: &RowData) -> Cursor {
+        let pk_value = row.get_value(&self.pk);
+        match pk_value {
+            Value::Uint(id) => Cursor::Pk {
+                pk_col: self.pk.clone(),
+                id,
+            },
+            _ => Cursor::None, // Fallback for unexpected types
+        }
     }
 
     fn clone_box(&self) -> Box<dyn OffsetStrategy> {
@@ -175,6 +174,30 @@ impl OffsetStrategy for NumericOffset {
         builder
     }
 
+    fn next_cursor(&self, row: &RowData) -> Cursor {
+        let num_v = row.get_value(&self.col);
+        let pk_v = row.get_value(&self.pk);
+
+        let to_i128 = |v: &Value| -> Option<i128> {
+            match v {
+                Value::Int(i) => Some(*i as i128),
+                Value::Uint(u) => Some(*u as i128),
+                Value::Float(d) => Some(d.to_string().parse::<i128>().ok()?),
+                _ => None,
+            }
+        };
+
+        match (to_i128(&num_v), pk_v) {
+            (Some(val), Value::Uint(id)) => Cursor::CompositeNumPk {
+                num_col: self.col.clone(),
+                pk_col: self.pk.clone(),
+                val,
+                id,
+            },
+            _ => Cursor::None,
+        }
+    }
+
     fn clone_box(&self) -> Box<dyn OffsetStrategy> {
         Box::new(NumericOffset {
             col: self.col.clone(),
@@ -240,11 +263,119 @@ impl OffsetStrategy for TimestampOffset {
         builder
     }
 
+    fn next_cursor(&self, row: &RowData) -> Cursor {
+        let ts_v = row.get_value(&self.ts_col);
+        let pk_v = row.get_value(&self.pk);
+
+        // Expect ts is stored canonically as micros (i64) in RowData (after normalization).
+        match (ts_v, pk_v) {
+            (Value::Int(ts), Value::Uint(id)) => Cursor::CompositeTsPk {
+                ts_col: self.ts_col.clone(),
+                pk_col: self.pk.clone(),
+                ts,
+                id,
+            },
+            _ => Cursor::None,
+        }
+    }
+
     fn clone_box(&self) -> Box<dyn OffsetStrategy> {
         Box::new(TimestampOffset {
             ts_col: self.ts_col.clone(),
             pk: self.pk.clone(),
             tz: self.tz,
         })
+    }
+}
+
+pub fn strategy_from_config(config: &OffsetConfig) -> Box<dyn OffsetStrategy> {
+    // If user didn't specify a cursor column -> default PK "id".
+    let default_pk = "id".to_string();
+
+    // If the config includes a 'strategy' hint, use it; otherwise infer:
+    // - no cursor  -> PK
+    // - cursor + no tiebreaker -> Numeric (single) by default
+    // - cursor + tiebreaker    -> use Timestamp if name suggests time, else Numeric
+    let strategy =
+        config
+            .strategy
+            .as_deref()
+            .unwrap_or_else(|| match (&config.cursor, &config.tiebreaker) {
+                (None, _) => "pk",
+                (Some(_), None) => "numeric",
+                (Some(c), Some(_))
+                    if c.to_lowercase().contains("time") || c.to_lowercase().contains("date") =>
+                {
+                    "timestamp"
+                }
+                _ => "numeric",
+            });
+
+    match strategy {
+        "pk" => Box::new(PkOffset {
+            pk: config.cursor.clone().unwrap_or(default_pk),
+        }),
+
+        "numeric" => {
+            let col = config
+                .cursor
+                .clone()
+                .unwrap_or_else(|| panic!("Numeric offset requires 'cursor' column"));
+            let pk = config.tiebreaker.clone().unwrap_or(default_pk);
+            Box::new(NumericOffset { col, pk })
+        }
+
+        "timestamp" => {
+            let ts_col = config
+                .cursor
+                .clone()
+                .unwrap_or_else(|| panic!("Timestamp offset requires 'cursor' column"));
+            let pk = config.tiebreaker.clone().unwrap_or(default_pk);
+            let tz = config
+                .timezone
+                .as_deref()
+                .unwrap_or("UTC")
+                .parse::<chrono_tz::Tz>()
+                .unwrap_or(chrono_tz::UTC);
+            Box::new(TimestampOffset { ts_col, pk, tz })
+        }
+
+        other => panic!("Unsupported offset strategy: {other}"),
+    }
+}
+
+/// Build a strategy from a concrete cursor (e.g., when resuming).
+pub fn offset_strategy_from_cursor(cursor: &Cursor) -> Box<dyn OffsetStrategy> {
+    match cursor {
+        Cursor::Pk { pk_col, .. } => Box::new(PkOffset { pk: pk_col.clone() }),
+
+        Cursor::Numeric { col, .. } => {
+            // Without a pk in the cursor, default tiebreaker to "id".
+            Box::new(NumericOffset {
+                col: col.clone(),
+                pk: "id".to_string(),
+            })
+        }
+
+        Cursor::CompositeNumPk {
+            num_col, pk_col, ..
+        } => Box::new(NumericOffset {
+            col: num_col.clone(),
+            pk: pk_col.clone(),
+        }),
+
+        Cursor::Timestamp { col, .. } => Box::new(TimestampOffset {
+            ts_col: col.clone(),
+            pk: "id".to_string(),
+            tz: chrono_tz::UTC,
+        }),
+
+        Cursor::CompositeTsPk { ts_col, pk_col, .. } => Box::new(TimestampOffset {
+            ts_col: ts_col.clone(),
+            pk: pk_col.clone(),
+            tz: chrono_tz::UTC,
+        }),
+
+        Cursor::None => panic!("Cannot derive offset strategy from Cursor::None"),
     }
 }

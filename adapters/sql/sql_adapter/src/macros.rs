@@ -109,7 +109,7 @@ macro_rules! sql_filter_expr {
                             ),
                             op,
                             right: query_builder::ast::expr::Expr::Value(
-                                common::value::Value::String(cond.value.clone()),
+                                data_model::core::value::Value::String(cond.value.clone()),
                             ),
                         },
                     )))

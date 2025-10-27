@@ -1,5 +1,5 @@
 use crate::{filter::SqlFilter, join::clause::JoinClause, query::select::SelectField};
-use query_builder::offsets::{Cursor, OffsetStrategy, PkOffset};
+use data_model::pagination::cursor::Cursor;
 
 pub struct FetchRowsRequest {
     pub table: String,
@@ -9,7 +9,6 @@ pub struct FetchRowsRequest {
     pub filter: Option<SqlFilter>,
     pub limit: usize,
     pub cursor: Cursor,
-    pub start: Box<dyn OffsetStrategy>,
 }
 
 pub struct FetchRowsRequestBuilder {
@@ -20,7 +19,6 @@ pub struct FetchRowsRequestBuilder {
     filter: Option<SqlFilter>,
     limit: usize,
     cursor: Cursor,
-    start: Box<dyn OffsetStrategy>,
 }
 
 impl FetchRowsRequestBuilder {
@@ -33,7 +31,6 @@ impl FetchRowsRequestBuilder {
             filter: None,
             limit: 0,
             cursor: Cursor::None,
-            start: Box::new(PkOffset { pk: "".to_string() }),
         }
     }
 
@@ -67,11 +64,6 @@ impl FetchRowsRequestBuilder {
         self
     }
 
-    pub fn start(mut self, start: &dyn OffsetStrategy) -> Self {
-        self.start = start.clone_box();
-        self
-    }
-
     pub fn build(self) -> FetchRowsRequest {
         FetchRowsRequest {
             table: self.table,
@@ -81,7 +73,6 @@ impl FetchRowsRequestBuilder {
             filter: self.filter,
             limit: self.limit,
             cursor: self.cursor,
-            start: self.start,
         }
     }
 }

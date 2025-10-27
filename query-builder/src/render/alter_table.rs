@@ -64,7 +64,7 @@ fn render_add_column(col: &ColumnDef, r: &mut Renderer) {
 
 #[cfg(test)]
 mod tests {
-    use common::types::DataType;
+    use data_model::core::types::DataType;
 
     use crate::{
         ast::{

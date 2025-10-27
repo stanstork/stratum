@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use query_builder::offsets::Cursor;
+use data_model::pagination::cursor::Cursor;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

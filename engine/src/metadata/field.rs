@@ -1,5 +1,5 @@
-use common::{types::DataType, value::Value};
 use csv::metadata::CsvColumnMetadata;
+use data_model::{core::types::DataType, core::value::Value};
 use postgres::data_type::PgDataType;
 use sql_adapter::metadata::column::ColumnMetadata;
 

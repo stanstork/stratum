@@ -3,10 +3,10 @@ use crate::{
     report::finding::{Finding, FindingKind},
     validation::key::{KeyCheckPolicy, KeyChecker},
 };
-use common::{
-    mapping::EntityMapping,
-    row_data::RowData,
-    value::{FieldValue, Value},
+use data_model::{
+    core::value::{FieldValue, Value},
+    records::row_data::RowData,
+    transform::mapping::EntityMapping,
 };
 use smql::statements::setting::{CopyColumns, Settings};
 use sql_adapter::{
@@ -263,9 +263,7 @@ impl DestinationSchemaValidator {
             .field_mappings
             .column_mappings
             .get(table_name)
-            .is_some_and(|map| {
-                map.source_to_target.values().any(|t| t == field_name)
-            })
+            .is_some_and(|map| map.source_to_target.values().any(|t| t == field_name))
     }
 
     fn validate_required_columns(

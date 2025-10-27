@@ -13,7 +13,7 @@ use crate::{
     source::Source,
 };
 use async_trait::async_trait;
-use common::{mapping::EntityMapping, types::DataType};
+use data_model::{core::types::DataType, transform::mapping::EntityMapping};
 use smql::statements::expr::Expression;
 use sql_adapter::{metadata::table::TableMetadata, query::column::ColumnDef};
 use std::sync::Arc;

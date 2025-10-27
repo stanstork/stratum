@@ -1,5 +1,5 @@
 use crate::metadata::column::ColumnMetadata;
-use common::{types::DataType, value::Value};
+use data_model::{core::types::DataType, core::value::Value};
 
 #[derive(Debug, Clone)]
 pub struct ColumnDef {

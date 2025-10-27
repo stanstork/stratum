@@ -5,7 +5,7 @@ use crate::{
     requests::FetchRowsRequest,
     sql_filter_expr,
 };
-use common::{row_data::RowData, types::DataType, value::Value};
+use data_model::{core::types::DataType, core::value::Value, records::row_data::RowData};
 use query_builder::{
     ast::{common::TypeName, expr::Expr},
     build::{
@@ -50,7 +50,7 @@ impl<'a> QueryGenerator<'a> {
         // Build the final AST
         let select_ast = select
             .limit(value!(Value::Int(request.limit as i64)))
-            .paginate(request.start.as_ref(), &request.cursor, request.limit)
+            .paginate(&request.cursor, request.limit)
             .build();
 
         self.render_ast(select_ast)

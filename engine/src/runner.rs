@@ -13,7 +13,7 @@ use crate::{
     source::{data::DataSource, linked::LinkedSource, Source},
     state::sled_store::SledStateStore,
 };
-use common::mapping::EntityMapping;
+use data_model::transform::mapping::EntityMapping;
 use smql::{
     plan::MigrationPlan,
     statements::{

@@ -1,9 +1,7 @@
 use crate::adapter::MySqlAdapter;
 use async_trait::async_trait;
-use chrono::Duration;
-use common::row_data::RowData;
+use data_model::{pagination::cursor::Cursor, records::row_data::RowData};
 use futures_util::future;
-use query_builder::offsets::{Cursor, OffsetStrategy};
 use sql_adapter::{
     adapter::SqlAdapter,
     error::db::DbError,
@@ -17,7 +15,6 @@ use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
-use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
 pub struct MySqlDataSource {
@@ -62,7 +59,6 @@ impl MySqlDataSource {
         join_clauses: &[JoinClause],
         batch_size: usize,
         cursor: Cursor,
-        start: &dyn OffsetStrategy,
         include_join_fields: bool,
     ) -> FetchRowsRequest {
         // base columns
@@ -88,7 +84,6 @@ impl MySqlDataSource {
             .filter(filter_clause)
             .limit(batch_size)
             .cursor(cursor)
-            .start(start)
             .build()
     }
 }
@@ -97,15 +92,8 @@ impl MySqlDataSource {
 impl DbDataSource for MySqlDataSource {
     type Error = DbError;
 
-    async fn fetch(
-        &self,
-        batch_size: usize,
-        max_ms: Duration,
-        cancel: &CancellationToken,
-        cursor: Cursor,
-        start: &dyn OffsetStrategy,
-    ) -> Result<Vec<RowData>, DbError> {
-        let requests = self.build_fetch_rows_requests(batch_size, cursor, start);
+    async fn fetch(&self, batch_size: usize, cursor: Cursor) -> Result<Vec<RowData>, DbError> {
+        let requests = self.build_fetch_rows_requests(batch_size, cursor);
         let futures = requests.into_iter().map(|req| self.adapter.fetch_rows(req));
 
         // Run all futures concurrently
@@ -125,7 +113,6 @@ impl DbDataSource for MySqlDataSource {
         &self,
         batch_size: usize,
         cursor: Cursor,
-        start: &dyn OffsetStrategy,
     ) -> Vec<FetchRowsRequest> {
         let mut reqs = Vec::new();
         let mut processed_tables = HashSet::new();
@@ -144,7 +131,6 @@ impl DbDataSource for MySqlDataSource {
                 &joins,
                 batch_size,
                 cursor.clone(),
-                start,
                 true,
             ));
             processed_tables.insert(meta.name.clone());
@@ -168,7 +154,6 @@ impl DbDataSource for MySqlDataSource {
                 &joins,
                 batch_size,
                 cursor.clone(),
-                start,
                 false,
             ));
         }

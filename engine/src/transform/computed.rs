@@ -1,10 +1,10 @@
 use super::pipeline::Transform;
 use crate::expr::eval::Evaluator;
-use common::{
-    mapping::EntityMapping,
-    record::Record,
-    row_data::RowData,
-    value::{FieldValue, Value},
+use data_model::{
+    core::value::{FieldValue, Value},
+    records::record::Record,
+    records::row_data::RowData,
+    transform::mapping::EntityMapping,
 };
 use smql::statements::expr::Expression;
 use tracing::warn;

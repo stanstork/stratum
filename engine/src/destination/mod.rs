@@ -1,5 +1,5 @@
-use common::record::Record;
 use data::DataDestination;
+use data_model::records::record::Record;
 use query_builder::dialect;
 use smql::statements::connection::DataFormat;
 use sql_adapter::{error::db::DbError, metadata::table::TableMetadata};

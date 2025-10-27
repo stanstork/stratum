@@ -1,5 +1,5 @@
 use crate::{context::global::GlobalContext, error::MigrationError};
-use common::{computed::ComputedField, mapping::EntityMapping};
+use data_model::{transform::computed::ComputedField, transform::mapping::EntityMapping};
 use smql::statements::{
     connection::DataFormat,
     expr::Expression,

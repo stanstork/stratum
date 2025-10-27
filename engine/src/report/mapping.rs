@@ -1,5 +1,5 @@
 use crate::expr::format_expr;
-use common::mapping::{EntityMapping, LookupField, NameMap};
+use data_model::transform::mapping::{EntityMapping, LookupField, NameMap};
 use serde::Serialize;
 use smql::statements::setting::CopyColumns;
 use std::collections::{HashMap, HashSet};

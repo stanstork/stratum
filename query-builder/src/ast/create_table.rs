@@ -1,7 +1,7 @@
 //! Defines the AST for a CREATE TABLE statement.
 
 use crate::ast::{common::TableRef, expr::Expr};
-use common::types::DataType;
+use data_model::core::types::DataType;
 
 /// Represents a complete CREATE TABLE statement.
 #[derive(Debug, Clone, Default)]

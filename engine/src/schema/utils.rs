@@ -1,5 +1,5 @@
 use crate::metadata::field::FieldMetadata;
-use common::types::DataType;
+use data_model::core::types::DataType;
 use sql_adapter::query::column::ColumnDef;
 
 pub fn create_column_def<T: Fn(&FieldMetadata) -> (DataType, Option<usize>)>(

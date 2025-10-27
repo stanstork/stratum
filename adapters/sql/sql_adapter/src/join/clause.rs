@@ -1,4 +1,4 @@
-use common::mapping::EntityMapping;
+use data_model::transform::mapping::EntityMapping;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JoinClause {

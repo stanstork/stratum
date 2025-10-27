@@ -7,10 +7,10 @@ use crate::{
     report::metrics::{send_report, MetricsReport},
 };
 use async_trait::async_trait;
-use common::{
-    mapping::EntityMapping,
-    record::{DataRecord, Record},
-    row_data::RowData,
+use data_model::{
+    records::record::{DataRecord, Record},
+    records::row_data::RowData,
+    transform::mapping::EntityMapping,
 };
 use sql_adapter::metadata::table::TableMetadata;
 use std::{collections::HashMap, sync::Arc, time::Instant};

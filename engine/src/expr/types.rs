@@ -4,7 +4,7 @@ use crate::{
     source::data::DataSource,
 };
 use async_trait::async_trait;
-use common::{mapping::EntityMapping, types::DataType};
+use data_model::{core::types::DataType, transform::mapping::EntityMapping};
 use smql::statements::expr::{Expression, Literal};
 use tracing::warn;
 

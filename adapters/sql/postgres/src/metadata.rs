@@ -1,5 +1,5 @@
 use crate::data_type::PgDataType;
-use common::types::DataType;
+use data_model::core::types::DataType;
 use sql_adapter::{metadata::column::ColumnMetadata, row::DbRow};
 use sqlx::postgres::PgRow;
 

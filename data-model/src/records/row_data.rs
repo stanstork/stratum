@@ -1,6 +1,6 @@
 use crate::{
-    record::DataRecord,
-    value::{FieldValue, Value},
+    core::value::{FieldValue, Value},
+    records::record::DataRecord,
 };
 use serde::{Deserialize, Serialize};
 

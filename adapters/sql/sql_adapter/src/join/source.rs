@@ -1,6 +1,6 @@
 use super::clause::JoinClause;
 use crate::{metadata::table::TableMetadata, query::select::SelectField};
-use common::mapping::EntityMapping;
+use data_model::transform::mapping::EntityMapping;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Debug, Clone)]

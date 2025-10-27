@@ -1,5 +1,5 @@
 use crate::data_type::MySqlColumnDataType;
-use common::types::DataType;
+use data_model::core::types::DataType;
 use sql_adapter::metadata::column::ColumnMetadata;
 use sql_adapter::row::DbRow;
 use sqlx::mysql::MySqlRow;

@@ -2,9 +2,9 @@ use crate::{
     destination::Destination,
     report::finding::{Finding, FindingKind},
 };
-use common::{
-    row_data::RowData,
-    value::{FieldValue, Value},
+use data_model::{
+    core::value::{FieldValue, Value},
+    records::row_data::RowData,
 };
 use sql_adapter::{error::db::DbError, metadata::table::TableMetadata};
 use std::collections::{HashMap, HashSet};

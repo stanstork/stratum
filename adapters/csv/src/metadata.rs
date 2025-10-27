@@ -1,5 +1,5 @@
 use crate::adapter::CsvAdapter;
-use common::types::DataType;
+use data_model::core::types::DataType;
 use serde::Serialize;
 use std::sync::Arc;
 

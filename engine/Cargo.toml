@@ -9,7 +9,7 @@ postgres = { path = "../adapters/sql/postgres" }
 csv = { path = "../adapters/csv" }
 sql_adapter = { path = "../adapters/sql/sql_adapter" }
 smql = { path = "../smql" }
-common = { path = "../common" }
+data-model = { path = "../data-model" }
 query-builder = { path = "../query-builder" }
 
 async-trait = "0.1.86"

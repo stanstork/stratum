@@ -1,6 +1,6 @@
 use crate::data_type::PgDataType;
 use async_trait::async_trait;
-use common::{row_data::RowData, types::DataType, value::Value};
+use data_model::{core::types::DataType, core::value::Value, records::row_data::RowData};
 use futures_util::TryStreamExt;
 use query_builder::dialect;
 use sql_adapter::{

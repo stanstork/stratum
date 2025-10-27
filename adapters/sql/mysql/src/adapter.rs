@@ -1,6 +1,6 @@
 use crate::data_type::MySqlColumnDataType;
 use async_trait::async_trait;
-use common::{row_data::RowData, types::DataType, value::Value};
+use data_model::{core::types::DataType, core::value::Value, records::row_data::RowData};
 use futures_util::stream::TryStreamExt;
 use query_builder::dialect::{self};
 use sql_adapter::{

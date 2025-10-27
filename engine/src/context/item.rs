@@ -6,7 +6,7 @@ use crate::{
     migration_state::MigrationState,
     source::{data::DataSource, Source},
 };
-use common::mapping::EntityMapping;
+use data_model::transform::mapping::EntityMapping;
 use smql::statements::connection::DataFormat;
 use sql_adapter::{
     error::db::DbError,

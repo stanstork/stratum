@@ -3,12 +3,9 @@ use crate::{
     transform::pipeline::TransformPipeline,
 };
 use async_trait::async_trait;
-use chrono::Duration;
 use futures::future::join_all;
-use query_builder::offsets::PkOffset;
 use std::sync::Arc;
 use tokio::sync::watch::Sender;
-use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 pub struct LiveProducer {
@@ -45,21 +42,7 @@ impl DataProducer for LiveProducer {
 
         loop {
             info!(batch_no, batch_size = self.batch_size, "Fetching batch.");
-
-            let i = PkOffset {
-                pk: "id".to_string(),
-            }; // Temporary; replace with dynamic offset strategy
-            match self
-                .source
-                .fetch_data(
-                    self.batch_size,
-                    Duration::seconds(60),
-                    &CancellationToken::new(),
-                    None,
-                    &i,
-                )
-                .await
-            {
+            match self.source.fetch_data(self.batch_size, None).await {
                 Ok(records) if records.is_empty() => {
                     info!("No more records to fetch. Terminating producer.");
                     break;

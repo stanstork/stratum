@@ -5,7 +5,7 @@ use crate::{
     metadata::{normalize_col_name, CsvMetadata, MetadataHelper},
     types::CsvType,
 };
-use common::{row_data::RowData, value::FieldValue};
+use data_model::{core::value::FieldValue, records::row_data::RowData};
 use std::sync::Arc;
 use tracing::warn;
 

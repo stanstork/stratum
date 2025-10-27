@@ -8,7 +8,7 @@ use crate::{
     settings::schema_manager::{LiveSchemaManager, SchemaManager, ValidationSchemaManager},
     source::{data::DataSource, Source},
 };
-use common::{mapping::EntityMapping, types::DataType};
+use data_model::{core::types::DataType, transform::mapping::EntityMapping};
 use smql::statements::setting::CopyColumns;
 use sql_adapter::{
     adapter::SqlAdapter,

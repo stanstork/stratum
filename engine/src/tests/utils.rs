@@ -7,8 +7,8 @@ use std::{
 
 use super::{mysql_pool, TEST_MYSQL_URL_ORDERS, TEST_MYSQL_URL_SAKILA, TEST_PG_URL};
 use crate::{runner::run, tests::pg_pool};
-use common::row_data::RowData;
 use csv::error::FileError;
+use data_model::records::row_data::RowData;
 use smql::parser::parse;
 use sql_adapter::row::DbRow;
 use sqlx::{mysql::MySqlRow, Row};

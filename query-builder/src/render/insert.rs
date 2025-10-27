@@ -38,7 +38,7 @@ impl Render for Insert {
 
 #[cfg(test)]
 mod tests {
-    use common::value::Value;
+    use data_model::core::value::Value;
 
     use crate::{
         ast::{common::TableRef, expr::Expr, insert::Insert},

@@ -6,7 +6,7 @@ use crate::ast::{
     create_table::{ColumnDef, TableConstraint},
     expr::Expr,
 };
-use common::types::DataType;
+use data_model::core::types::DataType;
 
 #[derive(Debug, Clone)]
 pub struct AlterTableBuilder {
@@ -96,7 +96,7 @@ impl AddColumnBuilder {
 
 #[cfg(test)]
 mod tests {
-    use common::types::DataType;
+    use data_model::core::types::DataType;
 
     use crate::{
         ast::{alter_table::AlterTableOperation, common::TableRef},

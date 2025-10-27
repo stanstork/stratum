@@ -4,7 +4,7 @@ use crate::{
     requests::FetchRowsRequest,
 };
 use async_trait::async_trait;
-use common::{row_data::RowData, value::Value};
+use data_model::{core::value::Value, records::row_data::RowData};
 
 #[async_trait]
 pub trait SqlAdapter {

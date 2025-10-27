@@ -1,4 +1,4 @@
-use crate::computed::ComputedField;
+use crate::transform::computed::ComputedField;
 use smql::statements::{expr::Expression, migrate::MigrateItem};
 use std::collections::HashMap;
 

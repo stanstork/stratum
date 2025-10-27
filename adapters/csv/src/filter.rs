@@ -1,6 +1,6 @@
 use crate::{metadata::CsvColumnMetadata, types::CsvType};
-use common::value::Value;
 use csv::StringRecord;
+use data_model::core::value::Value;
 use std::{cmp::Ordering, str::FromStr};
 
 /// A CSV‐side filter: holds an optional expression tree.

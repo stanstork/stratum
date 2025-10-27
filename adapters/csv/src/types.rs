@@ -2,7 +2,7 @@ use bigdecimal::BigDecimal;
 use bigdecimal::ToPrimitive;
 use chrono::Utc;
 use chrono::{DateTime, NaiveDate};
-use common::{types::DataType, value::Value};
+use data_model::{core::types::DataType, core::value::Value};
 use std::str::FromStr;
 
 /// The promotion sequence: start at the current type and widen until it fits.

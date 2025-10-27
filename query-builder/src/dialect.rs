@@ -1,6 +1,6 @@
 //! Defines the `Dialect` trait for database-specific SQL syntax.
 
-use common::types::DataType;
+use data_model::core::types::DataType;
 
 pub trait Dialect: Send + Sync {
     /// Wraps an identifier (like a table or column name) in the correct

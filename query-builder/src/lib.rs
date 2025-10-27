@@ -1,5 +1,5 @@
 use crate::ast::expr::{Expr, Ident};
-use common::value::Value;
+use data_model::core::value::Value;
 
 pub mod ast;
 pub mod build;

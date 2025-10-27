@@ -1,4 +1,4 @@
-use common::row_data::RowData;
+use data_model::records::row_data::RowData;
 use serde::Serialize;
 
 #[derive(Serialize, Debug, Clone)]

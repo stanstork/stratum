@@ -1,4 +1,4 @@
-use common::value::Value;
+use data_model::core::value::Value;
 use serde::Serialize;
 
 /// The type of SQL statement generated.

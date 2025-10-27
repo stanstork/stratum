@@ -99,7 +99,7 @@ impl Render for TableConstraint {
 
 #[cfg(test)]
 mod tests {
-    use common::types::DataType;
+    use data_model::core::types::DataType;
 
     use crate::{
         ast::{

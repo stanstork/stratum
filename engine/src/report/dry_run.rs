@@ -11,7 +11,7 @@ use crate::{
     source::{data::DataSource, Source},
 };
 use chrono::{DateTime, Utc};
-use common::mapping::EntityMapping;
+use data_model::transform::mapping::EntityMapping;
 use serde::Serialize;
 use smql::statements::setting::CopyColumns;
 

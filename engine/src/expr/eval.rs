@@ -1,4 +1,6 @@
-use common::{mapping::EntityMapping, row_data::RowData, value::Value};
+use data_model::{
+    core::value::Value, records::row_data::RowData, transform::mapping::EntityMapping,
+};
 use smql::statements::expr::{Expression, Literal, Operator};
 use tracing::warn;
 

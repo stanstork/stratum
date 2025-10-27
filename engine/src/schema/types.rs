@@ -2,7 +2,9 @@ use crate::{
     expr::types::ExpressionWrapper, metadata::field::FieldMetadata, source::data::DataSource,
 };
 use async_trait::async_trait;
-use common::{computed::ComputedField, mapping::EntityMapping, types::DataType};
+use data_model::{
+    core::types::DataType, transform::computed::ComputedField, transform::mapping::EntityMapping,
+};
 use smql::statements::expr::Expression;
 use sql_adapter::{
     adapter::SqlAdapter,

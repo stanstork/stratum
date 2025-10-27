@@ -1,5 +1,5 @@
 use crate::row::DbRow;
-use common::{types::DataType, value::Value};
+use data_model::{core::types::DataType, core::value::Value};
 use serde::Serialize;
 
 const COL_ORDINAL_POSITION: &str = "ordinal_position";

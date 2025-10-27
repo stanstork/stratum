@@ -1,10 +1,10 @@
 use bigdecimal::ToPrimitive;
-use common::{
-    row_data::RowData,
-    types::DataType,
-    value::{FieldValue, Value},
-};
 use core::fmt;
+use data_model::{
+    core::types::DataType,
+    core::value::{FieldValue, Value},
+    records::row_data::RowData,
+};
 use sqlx::{Column, Row, TypeInfo};
 use std::fmt::Formatter;
 use tracing::warn;

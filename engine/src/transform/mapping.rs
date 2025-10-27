@@ -1,7 +1,7 @@
 use super::pipeline::Transform;
-use common::{
-    mapping::{FieldMappings, NameMap},
-    record::Record,
+use data_model::{
+    records::record::Record,
+    transform::mapping::{FieldMappings, NameMap},
 };
 
 pub struct FieldMapper {

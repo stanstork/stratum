@@ -14,7 +14,7 @@ macro_rules! table_ref {
         }
     };
     ($schema:expr, $name:expr) => {
-        $crate::ast::common::TableRef {
+        $crate::ast::data_model::TableRef {
             schema: Some($schema.to_string()),
             name: $name.to_string(),
         }

@@ -108,7 +108,7 @@ impl Render for OrderByExpr {
 
 #[cfg(test)]
 mod tests {
-    use common::value::Value;
+    use data_model::core::value::Value;
 
     use crate::{
         ast::{

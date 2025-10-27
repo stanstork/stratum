@@ -5,7 +5,7 @@ use crate::ast::{
     create_table::{ColumnDef, CreateTable, TableConstraint},
     expr::Expr,
 };
-use common::types::DataType;
+use data_model::core::types::DataType;
 
 #[derive(Debug, Clone)]
 pub struct CreateTableBuilder {
@@ -100,7 +100,7 @@ mod tests {
         ast::{common::TableRef, expr::Expr},
         build::create_table::CreateTableBuilder,
     };
-    use common::{types::DataType, value::Value::Boolean};
+    use data_model::{core::types::DataType, core::value::Value::Boolean};
 
     fn table(name: &str) -> TableRef {
         TableRef {

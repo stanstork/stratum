@@ -1,5 +1,5 @@
 use crate::{destination::Destination, source::Source, state::StateStore};
-use common::row_data::RowData;
+use data_model::records::row_data::RowData;
 use std::sync::{
     atomic::{AtomicU64, AtomicU8},
     Arc,

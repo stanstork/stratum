@@ -4,7 +4,7 @@ use crate::{
     metadata::entity::EntityMetadata, migration_state::MigrationState, source::Source,
 };
 use async_trait::async_trait;
-use common::mapping::EntityMapping;
+use data_model::transform::mapping::EntityMapping;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
