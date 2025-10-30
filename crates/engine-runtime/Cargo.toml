@@ -1,0 +1,12 @@
+[package]
+name = "engine-runtime"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+model = { path = "../model" }
+connectors = { path = "../connectors" }
+smql-syntax = { path = "../smql-syntax" }
+planner = { path = "../planner" }
+
+tokio = { version = "1.43.0", features = ["full"] }

@@ -9,6 +9,11 @@ members = [
     "engine",
     "query-builder",
     "smql",
+    "crates/model",
+    "crates/smql-syntax",
+    "crates/planner",
+    "crates/connectors",
+    "crates/engine-core", "crates/engine-config", "crates/engine-runtime",
 ]
 
 resolver = "2"
