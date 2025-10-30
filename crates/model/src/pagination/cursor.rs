@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 /// Represents the pagination cursor.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Cursor {
-    /// No cursor, fetch the first page (unbounded lower range).
-    None,
+    /// No cursor specified.
+    None { offset: usize },
 
     /// Cursor for simple Primary Key offset (strictly increasing PK).
     Pk { pk_col: String, id: u64 },

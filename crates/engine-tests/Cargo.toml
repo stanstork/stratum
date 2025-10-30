@@ -1,0 +1,22 @@
+[package]
+name = "engine-tests"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+planner = { path = "../planner" }
+model = { path = "../model" }
+connectors = { path = "../connectors" }
+engine-runtime = { path = "../engine-runtime" }
+
+tracing-test = "0.2.5"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tokio = { version = "1.43.0", features = ["full"] }
+sqlx = { version = "0.8.3", features = [
+    "mysql",
+    "postgres",
+    "runtime-tokio",
+    "tls-native-tls",
+    "bigdecimal",
+] }

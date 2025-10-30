@@ -8,11 +8,11 @@ use connectors::{
         postgres::destination::PgDestination,
     },
 };
+use futures::lock::Mutex;
 use model::records::record::Record;
 use planner::query::dialect;
 use smql_syntax::ast::connection::DataFormat;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 #[derive(Clone)]
 pub enum DataDestination {

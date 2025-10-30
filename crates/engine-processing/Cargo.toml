@@ -1,0 +1,20 @@
+[package]
+name = "engine-processing"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+smql-syntax = { path = "../smql-syntax" }
+model = { path = "../model" }
+connectors = { path = "../connectors" }
+planner = { path = "../planner" }
+engine-core = { path = "../engine-core" }
+engine-config = { path = "../engine-config" }
+
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+async-trait = "0.1.86"
+tokio = { version = "1.43.0", features = ["full"] }
+thiserror = "2.0.12"
+serde_json = "1.0.138"
+futures = "0.3.31"

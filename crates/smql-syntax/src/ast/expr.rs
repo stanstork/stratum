@@ -150,4 +150,39 @@ impl Expression {
             _ => None,
         }
     }
+
+    pub fn format(&self) -> Result<String, Expression> {
+        match self {
+            Expression::Literal(lit) => Ok(match lit {
+                Literal::String(s) => s.trim_start_matches('"').trim_end_matches('"').to_string(),
+                Literal::Integer(i) => i.to_string(),
+                Literal::Float(f) => f.to_string(),
+                Literal::Boolean(b) => b.to_string(),
+            }),
+            Expression::Identifier(ident) => Ok(ident.clone()),
+
+            Expression::Lookup { entity, key, .. } => Ok(format!("{entity}.{key}")),
+
+            Expression::Arithmetic {
+                left,
+                operator,
+                right,
+            } => {
+                let l = left.format()?;
+                let r = right.format()?;
+                let op = match operator {
+                    Operator::Add => "+",
+                    Operator::Subtract => "-",
+                    Operator::Multiply => "*",
+                    Operator::Divide => "/",
+                };
+                Ok(format!("{l} {op} {r}"))
+            }
+            Expression::FunctionCall { name, arguments } => {
+                let args: Result<Vec<String>, Expression> =
+                    arguments.iter().map(Expression::format).collect();
+                Ok(format!("{}({})", name, args?.join(", ")))
+            }
+        }
+    }
 }

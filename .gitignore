@@ -29,3 +29,5 @@ migration_buffer_*/
 
 meta.json
 rep.json
+
+engine-tests/migration_buffer_*/

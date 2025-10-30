@@ -7,6 +7,8 @@ edition = "2024"
 planner = { path = "../planner" }
 model = { path = "../model" }
 smql-syntax = { path = "../smql-syntax" }
+engine-core = { path = "../engine-core" }
+connectors = { path = "../connectors" }
 
 serde = "1.0.217"
 chrono = { version = "0.4.39", features = ["serde"] }
@@ -18,3 +20,5 @@ reqwest = { version = "0.12.23", features = ["blocking", "json"] }
 tokio = { version = "1.43.0", features = ["full"] }
 thiserror = "2.0.12"
 uuid = { version = "1.13.1", features = ["serde", "v4"] }
+async-trait = "0.1.86"
+futures = "0.3.31"

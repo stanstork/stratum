@@ -31,7 +31,7 @@ pub enum ConnectionType {
 }
 
 bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     pub struct DataFormat: u8 {
         const MySql    = 0b0000_0001; // 1
         const Postgres = 0b0000_0010; // 2
@@ -39,25 +39,6 @@ bitflags! {
         const Mongo    = 0b0000_1000; // 8
         const Csv      = 0b0001_0000; // 16
         const Api      = 0b0010_0000; // 32
-    }
-}
-
-impl Serialize for DataFormat {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_u8(self.bits())
-    }
-}
-
-impl<'de> Deserialize<'de> for DataFormat {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let bits = u8::deserialize(deserializer)?;
-        Ok(DataFormat::from_bits_truncate(bits))
     }
 }
 
@@ -158,5 +139,28 @@ impl DataFormat {
         self.contains(DataFormat::MySql)
             || self.contains(DataFormat::Postgres)
             || self.contains(DataFormat::Sqlite)
+    }
+
+    fn to_names(self) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        if self.contains(DataFormat::MySql) {
+            out.push("MySql");
+        }
+        if self.contains(DataFormat::Postgres) {
+            out.push("Postgres");
+        }
+        if self.contains(DataFormat::Sqlite) {
+            out.push("Sqlite");
+        }
+        if self.contains(DataFormat::Mongo) {
+            out.push("Mongo");
+        }
+        if self.contains(DataFormat::Csv) {
+            out.push("Csv");
+        }
+        if self.contains(DataFormat::Api) {
+            out.push("Api");
+        }
+        out
     }
 }

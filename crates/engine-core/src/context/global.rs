@@ -1,10 +1,9 @@
+use crate::state::sled_store::SledStateStore;
 use connectors::{adapter::Adapter, error::AdapterError, file::csv::settings::CsvSettings};
 use futures::lock::Mutex;
 use planner::plan::MigrationPlan;
 use smql_syntax::ast::{connection::ConnectionPair, migrate::SpecKind};
 use std::{collections::HashMap, sync::Arc};
-
-use crate::{error::ContextError, state::sled_store::SledStateStore};
 
 /// Holds connections and file adapters for the duration of a migration.
 #[derive(Clone)]
@@ -45,12 +44,12 @@ impl GlobalContext {
     }
 
     /// Get a file adapter for the given path.
-    pub async fn get_file_adapter(&self, path: &str) -> Result<Adapter, ContextError> {
+    pub async fn get_file_adapter(&self, path: &str) -> Result<Adapter, AdapterError> {
         let cache = self.file_adapters.lock().await;
         cache
             .get(path)
             .cloned()
-            .ok_or_else(|| ContextError::AdapterNotFound(path.to_string()))
+            .ok_or_else(|| AdapterError::AdapterNotFound(path.to_string()))
     }
 
     /// Create an SQL adapter if configured, or None otherwise.

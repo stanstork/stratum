@@ -1,11 +1,4 @@
-use engine_config::{
-    error::ReportGenerationError,
-    report::dry_run::{DryRunParams, DryRunReport},
-};
 use smql_syntax::ast::setting::CopyColumns;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tracing::info;
 
 #[derive(Debug, Clone)]
 pub struct MigrationState {
@@ -17,17 +10,16 @@ pub struct MigrationState {
     create_missing_columns: bool,
     create_missing_tables: bool,
     is_dry_run: bool,
-    dry_run_report: Arc<Mutex<DryRunReport>>,
 }
 
 impl Default for MigrationState {
     fn default() -> Self {
-        Self::new()
+        Self::new(false)
     }
 }
 
 impl MigrationState {
-    pub fn new() -> Self {
+    pub fn new(dry_run: bool) -> Self {
         MigrationState {
             batch_size: 100,
             cascade_schema: false,
@@ -36,29 +28,16 @@ impl MigrationState {
             ignore_constraints: false,
             create_missing_columns: false,
             create_missing_tables: false,
-            is_dry_run: false,
-            dry_run_report: Arc::new(Mutex::new(DryRunReport::default())),
+            is_dry_run: dry_run,
         }
     }
 
-    /// Configures the migration for a dry run, generating a detailed report.
-    ///
-    /// This method initializes a new `DryRunReport` and sets the `is_dry_run` flag.
-    /// It returns an error if the report cannot be generated.
-    pub fn mark_dry_run(&mut self, params: DryRunParams<'_>) -> Result<(), ReportGenerationError> {
-        let report = DryRunReport::new(params)?;
-        self.is_dry_run = true;
-        self.dry_run_report = Arc::new(Mutex::new(report));
-        info!("Migration marked as dry run.");
-        Ok(())
+    pub fn mark_dry_run(&mut self, dry_run: bool) {
+        self.is_dry_run = dry_run;
     }
 
     pub fn is_dry_run(&self) -> bool {
         self.is_dry_run
-    }
-
-    pub fn dry_run_report(&self) -> Arc<Mutex<DryRunReport>> {
-        self.dry_run_report.clone()
     }
 
     pub fn set_batch_size(&mut self, size: usize) {

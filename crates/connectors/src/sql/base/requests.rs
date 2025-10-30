@@ -30,7 +30,7 @@ impl FetchRowsRequestBuilder {
             joins: Vec::new(),
             filter: None,
             limit: 0,
-            cursor: Cursor::None,
+            cursor: Cursor::None { offset: 0 },
         }
     }
 

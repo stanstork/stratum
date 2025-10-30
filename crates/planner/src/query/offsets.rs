@@ -45,6 +45,10 @@ pub struct TimestampOffset {
     pub tz: chrono_tz::Tz,
 }
 
+pub struct DefaultOffset {
+    pub offset: usize,
+}
+
 impl OffsetStrategy for PkOffset {
     fn apply_to_builder(
         &self,
@@ -95,7 +99,7 @@ impl OffsetStrategy for PkOffset {
                 pk_col: self.pk.clone(),
                 id,
             },
-            _ => Cursor::None, // Fallback for unexpected types
+            _ => Cursor::None { offset: 0 }, // TODO: better fallback
         }
     }
 
@@ -194,7 +198,7 @@ impl OffsetStrategy for NumericOffset {
                 val,
                 id,
             },
-            _ => Cursor::None,
+            _ => Cursor::None { offset: 0 }, // TODO: better fallback
         }
     }
 
@@ -275,7 +279,7 @@ impl OffsetStrategy for TimestampOffset {
                 ts,
                 id,
             },
-            _ => Cursor::None,
+            _ => Cursor::None { offset: 0 }, // TODO: better fallback
         }
     }
 
@@ -284,6 +288,37 @@ impl OffsetStrategy for TimestampOffset {
             ts_col: self.ts_col.clone(),
             pk: self.pk.clone(),
             tz: self.tz,
+        })
+    }
+}
+
+impl OffsetStrategy for DefaultOffset {
+    fn apply_to_builder(
+        &self,
+        mut builder: SelectBuilder<FromState>,
+        cursor: &Cursor,
+        limit: usize,
+    ) -> SelectBuilder<FromState> {
+        // Add offset based on cursor
+        if let Cursor::None { offset } = cursor {
+            // OFFSET ?
+            builder = builder.offset(value(Value::Uint(*offset as u64)));
+        }
+        // Add LIMIT
+        builder = builder.limit(value(Value::Uint(limit as u64)));
+
+        builder
+    }
+
+    fn next_cursor(&self, _row: &RowData) -> Cursor {
+        Cursor::None {
+            offset: self.offset + 1,
+        }
+    }
+
+    fn clone_box(&self) -> Box<dyn OffsetStrategy> {
+        Box::new(DefaultOffset {
+            offset: self.offset,
         })
     }
 }
@@ -376,6 +411,6 @@ pub fn offset_strategy_from_cursor(cursor: &Cursor) -> Box<dyn OffsetStrategy> {
             tz: chrono_tz::UTC,
         }),
 
-        Cursor::None => panic!("Cannot derive offset strategy from Cursor::None"),
+        Cursor::None { offset } => Box::new(DefaultOffset { offset: *offset }),
     }
 }

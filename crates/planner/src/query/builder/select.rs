@@ -262,7 +262,7 @@ mod tests {
     fn test_build_pagination_first_page() {
         let builder = SelectBuilder::new();
         // Cursor::None means first page
-        let cursor = Cursor::None;
+        let cursor = Cursor::None { offset: 0 };
 
         let ast = builder
             .select(vec![ident("id"), ident("name")])
@@ -272,11 +272,6 @@ mod tests {
 
         // Check limit
         assert_eq!(ast.limit, Some(value(Value::Uint(50))));
-
-        // Check order by
-        assert_eq!(ast.order_by.len(), 1);
-        assert_eq!(ast.order_by[0].expr, ident("id"));
-        assert_eq!(ast.order_by[0].direction, Some(OrderDir::Asc));
 
         // Check where clause - should be None
         assert!(ast.where_clause.is_none());

@@ -1,10 +1,24 @@
-use engine_runtime::connectors::destination::Destination;
+use crate::{
+    connectors::{
+        destination::{DataDestination, Destination},
+        source::{DataSource, Source},
+    },
+    migration_state::MigrationState,
+    state::buffer::SledBuffer,
+};
+use connectors::{
+    error::AdapterError,
+    metadata::entity::EntityMetadata,
+    sql::base::{
+        error::DbError,
+        metadata::{provider::MetadataHelper, table::TableMetadata},
+    },
+};
+use futures::lock::Mutex;
 use model::transform::mapping::EntityMapping;
+use smql_syntax::ast::connection::DataFormat;
 use std::{future::Future, sync::Arc};
-use tokio::sync::Mutex;
 use tracing::info;
-
-use crate::migration_state::MigrationState;
 
 /// Represents the context for a single item in the migration process.
 pub struct ItemContext {
@@ -51,7 +65,7 @@ impl ItemContext {
     }
 
     /// Fetch and apply source metadata (table or CSV) into the internal state.
-    pub async fn set_src_meta(&self) -> Result<(), MigrationError> {
+    pub async fn set_src_meta(&self) -> Result<(), AdapterError> {
         // Fetch metadata by source name
         let name = &self.source.name;
         let meta = self.source.primary.fetch_meta(name.clone()).await?;
@@ -71,7 +85,7 @@ impl ItemContext {
                 Ok(())
             }
             // Any other combination is an unexpected mismatch
-            _ => Err(MigrationError::InvalidMetadata(
+            _ => Err(AdapterError::InvalidMetadata(
                 "Mismatch between data source and fetched metadata".into(),
             )),
         }

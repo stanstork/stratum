@@ -1,14 +1,15 @@
-use crate::{
-    error::ReportGenerationError,
-    report::{
-        finding::Finding,
-        mapping::MappingReport,
-        schema::{SchemaReview, SchemaValidationReport},
-        sql::GeneratedSql,
-        transform::TransformationReport,
-    },
+use crate::report::{
+    finding::Finding,
+    mapping::MappingReport,
+    schema::{SchemaReview, SchemaValidationReport},
+    sql::GeneratedSql,
+    transform::TransformationReport,
 };
 use chrono::{DateTime, Utc};
+use engine_core::connectors::{
+    destination::{DataDestination, Destination},
+    source::{DataSource, Source},
+};
 use model::transform::mapping::EntityMapping;
 use serde::Serialize;
 use smql_syntax::ast::setting::CopyColumns;
@@ -76,19 +77,38 @@ pub struct DryRunParams<'a> {
 }
 
 impl DryRunReport {
-    pub fn new(params: DryRunParams) -> Result<Self, ReportGenerationError> {
+    pub fn new(params: DryRunParams) -> Self {
         let summary = DryRunSummary {
             timestamp: Utc::now(),
             ..Default::default()
         };
 
-        Ok(DryRunReport {
+        DryRunReport {
             run_id: uuid::Uuid::new_v4().to_string(),
             config_hash: params.config_hash.to_string(),
             engine_version: env!("CARGO_PKG_VERSION").to_string(),
             summary,
             mapping: MappingReport::from_mapping(params.mapping, &params.copy_columns),
             ..Default::default()
-        })
+        }
+    }
+}
+
+pub fn source_endpoint(source: &Source) -> EndpointType {
+    match &source.primary {
+        DataSource::Database(_) => EndpointType::Database {
+            dialect: source.dialect().name(),
+        },
+        DataSource::File(_) => EndpointType::File {
+            format: "CSV".to_string(), // Currently CSV is the only supported file type
+        },
+    }
+}
+
+pub fn dest_endpoint(destination: &Destination) -> EndpointType {
+    match &destination.data_dest {
+        DataDestination::Database(_) => EndpointType::Database {
+            dialect: destination.dialect().name(),
+        },
     }
 }

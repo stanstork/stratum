@@ -1,4 +1,3 @@
-use crate::format_expr;
 use model::transform::mapping::{EntityMapping, LookupField, NameMap};
 use serde::Serialize;
 use smql_syntax::ast::setting::CopyColumns;
@@ -153,7 +152,9 @@ impl MappingReport {
             .iter()
             .map(|c| ComputedPreview {
                 name: c.name.clone(),
-                expression_preview: format_expr(&c.expression)
+                expression_preview: c
+                    .expression
+                    .format()
                     .unwrap_or_else(|_| "<complex expression>".to_string()),
             })
             .collect::<Vec<_>>();
