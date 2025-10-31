@@ -60,11 +60,10 @@ impl FileDataSource for CsvDataSource {
         while result.len() < batch_size {
             match data_iter.next() {
                 Some(Ok(record)) => {
-                    if let Some(ref filter) = self.filter {
-                        if !filter.eval(&record, &headers_meta) {
+                    if let Some(ref filter) = self.filter
+                        && !filter.eval(&record, &headers_meta) {
                             continue;
                         }
-                    }
 
                     let mut fields = Vec::with_capacity(headers_meta.len());
                     let mut skip_row = false;

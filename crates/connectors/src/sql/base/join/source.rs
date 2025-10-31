@@ -114,11 +114,10 @@ impl JoinSource {
                         result_joins.push(join.clone());
                     }
 
-                    if let Some(next) = next_table {
-                        if visited.insert(next.table.clone()) {
+                    if let Some(next) = next_table
+                        && visited.insert(next.table.clone()) {
                             queue.push_back(next.table);
                         }
-                    }
                 } else {
                     unprocessed.push(join);
                 }

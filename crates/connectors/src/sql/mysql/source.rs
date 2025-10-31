@@ -67,11 +67,10 @@ impl MySqlDataSource {
         let mut columns = meta.select_fields();
 
         // optionally merge in the JoinSource's extra fields
-        if include_join_fields {
-            if let Some(join_source) = &self.join {
+        if include_join_fields
+            && let Some(join_source) = &self.join {
                 columns.extend(join_source.fields());
             }
-        }
 
         // optional filter scoped to this table + these clauses
         let filter_clause = self

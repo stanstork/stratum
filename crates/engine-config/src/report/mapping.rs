@@ -248,17 +248,13 @@ fn lookup_warnings(
         .entity_name_map
         .source_to_target
         .get(source_entity_key)
-    {
-        if let Some(nm) = mapping.field_mappings.column_mappings.get(dest_entity) {
-            if let Some(target) = &l.target {
-                if nm.source_to_target.values().any(|t| t == target) {
+        && let Some(nm) = mapping.field_mappings.column_mappings.get(dest_entity)
+            && let Some(target) = &l.target
+                && nm.source_to_target.values().any(|t| t == target) {
                     w.push(format!(
                         "Lookup target '{target}' collides with a renamed column in '{dest_entity}'"
                     ));
                 }
-            }
-        }
-    }
     w
 }
 

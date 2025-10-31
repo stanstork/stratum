@@ -31,6 +31,12 @@ pub struct SelectBuilder<State> {
 }
 
 /// Implementation for the initial state of the builder.
+impl Default for SelectBuilder<InitialState> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SelectBuilder<InitialState> {
     pub fn new() -> Self {
         Self {

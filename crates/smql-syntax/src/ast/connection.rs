@@ -140,27 +140,4 @@ impl DataFormat {
             || self.contains(DataFormat::Postgres)
             || self.contains(DataFormat::Sqlite)
     }
-
-    fn to_names(self) -> Vec<&'static str> {
-        let mut out = Vec::new();
-        if self.contains(DataFormat::MySql) {
-            out.push("MySql");
-        }
-        if self.contains(DataFormat::Postgres) {
-            out.push("Postgres");
-        }
-        if self.contains(DataFormat::Sqlite) {
-            out.push("Sqlite");
-        }
-        if self.contains(DataFormat::Mongo) {
-            out.push("Mongo");
-        }
-        if self.contains(DataFormat::Csv) {
-            out.push("Csv");
-        }
-        if self.contains(DataFormat::Api) {
-            out.push("Api");
-        }
-        out
-    }
 }

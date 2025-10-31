@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use connectors::sql::base::{error::DbError, query::generator::QueryGenerator};
 use engine_config::{
     report::{
-        dry_run::{DryRunParams, DryRunReport, DryRunStatus, dest_endpoint, source_endpoint},
+        dry_run::{DryRunReport, DryRunStatus},
         finding::{Finding, Severity},
         mapping::EntityMappingReport,
         sql::{SqlKind, SqlStatement},
@@ -189,14 +189,13 @@ impl ValidationProducer {
             return Ok(true);
         }
 
-        if let Some(computed_fields) = self.mapping.field_mappings.get_computed(table) {
-            if computed_fields
+        if let Some(computed_fields) = self.mapping.field_mappings.get_computed(table)
+            && computed_fields
                 .iter()
                 .any(|cf| cf.name.eq_ignore_ascii_case(field_name))
             {
                 return Ok(true);
             }
-        }
 
         Ok(false)
     }

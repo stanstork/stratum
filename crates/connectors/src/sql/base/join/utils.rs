@@ -89,8 +89,8 @@ pub fn build_join_clauses(
         let mut conditions = Vec::new();
 
         // Try next_table -> current_table FK
-        if let Some(next_meta) = graph.get(next_table) {
-            if let Some(fk) = next_meta
+        if let Some(next_meta) = graph.get(next_table)
+            && let Some(fk) = next_meta
                 .foreign_keys
                 .iter()
                 .find(|fk| fk.referenced_table.eq_ignore_ascii_case(&current_table))
@@ -106,12 +106,11 @@ pub fn build_join_clauses(
                     },
                 });
             }
-        }
 
         // Otherwise current_table -> next_table FK
-        if conditions.is_empty() {
-            if let Some(cur_meta) = graph.get(&current_table) {
-                if let Some(fk) = cur_meta
+        if conditions.is_empty()
+            && let Some(cur_meta) = graph.get(&current_table)
+                && let Some(fk) = cur_meta
                     .foreign_keys
                     .iter()
                     .find(|fk| fk.referenced_table.eq_ignore_ascii_case(next_table))
@@ -127,8 +126,6 @@ pub fn build_join_clauses(
                         },
                     });
                 }
-            }
-        }
 
         if conditions.is_empty() {
             warn!(
