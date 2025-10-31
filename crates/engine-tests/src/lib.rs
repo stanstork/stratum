@@ -61,11 +61,12 @@ pub fn reset_migration_buffer() -> io::Result<()> {
         // Check if it's a directory whose name starts with "migration_buffer_"
         if path.is_dir()
             && let Some(name) = path.file_name().and_then(|n| n.to_str())
-                && name.starts_with("migration_buffer_") {
-                    // Recursively delete it
-                    fs::remove_dir_all(&path)?;
-                    println!("Removed buffer directory: {}", path.display());
-                }
+            && name.starts_with("migration_buffer_")
+        {
+            // Recursively delete it
+            fs::remove_dir_all(&path)?;
+            println!("Removed buffer directory: {}", path.display());
+        }
     }
 
     Ok(())

@@ -21,7 +21,7 @@ use engine_core::{
 use futures::lock::Mutex;
 use model::transform::mapping::EntityMapping;
 use smql_syntax::ast::connection::DataFormat;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, slice, sync::Arc};
 use tracing::info;
 
 pub struct CascadeSchemaSetting {
@@ -80,7 +80,7 @@ impl CascadeSchemaSetting {
 
         // Build just the one‐table graph
         let meta_graph = {
-            let tables = &[table_name.clone()];
+            let tables = slice::from_ref(&table_name);
             MetadataProvider::build_metadata_graph(&*adapter, tables).await?
         };
 
@@ -101,7 +101,7 @@ impl CascadeSchemaSetting {
         let adapter = self.context.destination_adapter().await?;
 
         let meta_graph = {
-            let tables = &[dest_name.clone()];
+            let tables = slice::from_ref(&dest_name);
             MetadataProvider::build_metadata_graph(&*adapter, tables).await?
         };
 

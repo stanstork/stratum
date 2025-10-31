@@ -94,38 +94,38 @@ pub fn build_join_clauses(
                 .foreign_keys
                 .iter()
                 .find(|fk| fk.referenced_table.eq_ignore_ascii_case(&current_table))
-            {
-                conditions.push(JoinCondition {
-                    left: JoinColumn {
-                        alias: next_alias.clone(),
-                        column: fk.column.clone(),
-                    },
-                    right: JoinColumn {
-                        alias: current_alias.clone(),
-                        column: fk.referenced_column.clone(),
-                    },
-                });
-            }
+        {
+            conditions.push(JoinCondition {
+                left: JoinColumn {
+                    alias: next_alias.clone(),
+                    column: fk.column.clone(),
+                },
+                right: JoinColumn {
+                    alias: current_alias.clone(),
+                    column: fk.referenced_column.clone(),
+                },
+            });
+        }
 
         // Otherwise current_table -> next_table FK
         if conditions.is_empty()
             && let Some(cur_meta) = graph.get(&current_table)
-                && let Some(fk) = cur_meta
-                    .foreign_keys
-                    .iter()
-                    .find(|fk| fk.referenced_table.eq_ignore_ascii_case(next_table))
-                {
-                    conditions.push(JoinCondition {
-                        left: JoinColumn {
-                            alias: next_alias.clone(),
-                            column: fk.referenced_column.clone(),
-                        },
-                        right: JoinColumn {
-                            alias: current_alias.clone(),
-                            column: fk.column.clone(),
-                        },
-                    });
-                }
+            && let Some(fk) = cur_meta
+                .foreign_keys
+                .iter()
+                .find(|fk| fk.referenced_table.eq_ignore_ascii_case(next_table))
+        {
+            conditions.push(JoinCondition {
+                left: JoinColumn {
+                    alias: next_alias.clone(),
+                    column: fk.referenced_column.clone(),
+                },
+                right: JoinColumn {
+                    alias: current_alias.clone(),
+                    column: fk.column.clone(),
+                },
+            });
+        }
 
         if conditions.is_empty() {
             warn!(

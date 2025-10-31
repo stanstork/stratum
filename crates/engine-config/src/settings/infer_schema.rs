@@ -17,7 +17,7 @@ use engine_core::{
 use futures::lock::Mutex;
 use model::transform::mapping::EntityMapping;
 use smql_syntax::ast::connection::DataFormat;
-use std::sync::Arc;
+use std::{slice, sync::Arc};
 use tracing::info;
 
 pub struct InferSchemaSetting {
@@ -78,7 +78,7 @@ impl InferSchemaSetting {
         info!("Destination table not found—applying schema inference");
 
         // Build metadata graph for source tables
-        let sources = &[ctx.source.name.clone()];
+        let sources = slice::from_ref(&ctx.source.name);
         let meta_graph = MetadataProvider::build_metadata_graph(&*adapter, sources).await?;
 
         // Add only those metadata entries that aren't already in schema plan

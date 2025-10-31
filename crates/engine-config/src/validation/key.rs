@@ -5,7 +5,10 @@ use model::{
     core::value::{FieldValue, Value},
     records::row::RowData,
 };
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    slice,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub enum KeyCheckPolicy {
@@ -73,7 +76,7 @@ impl KeyChecker {
                 self.record_key(
                     table,
                     KeyKind::Unique(col.name.clone()),
-                    &[col.name.clone()],
+                    slice::from_ref(&col.name.clone()),
                     row,
                     findings,
                 );

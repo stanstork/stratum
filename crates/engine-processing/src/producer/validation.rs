@@ -17,7 +17,6 @@ use engine_core::connectors::{
 };
 use futures::lock::Mutex;
 use model::{pagination::cursor::Cursor, records::row::RowData, transform::mapping::EntityMapping};
-use planner::query::offsets::PkOffset;
 use smql_syntax::ast::setting::{CopyColumns, Settings};
 use std::{
     collections::{HashMap, HashSet},
@@ -193,9 +192,9 @@ impl ValidationProducer {
             && computed_fields
                 .iter()
                 .any(|cf| cf.name.eq_ignore_ascii_case(field_name))
-            {
-                return Ok(true);
-            }
+        {
+            return Ok(true);
+        }
 
         Ok(false)
     }
@@ -261,9 +260,6 @@ impl ValidationProducer {
     ) -> SampleResult {
         let mut prune_findings = Vec::new();
         let mut omitted_columns: HashMap<String, HashSet<String>> = HashMap::new();
-        let i = PkOffset {
-            pk: "id".to_string(),
-        }; // Temporary; replace with dynamic offset strategy
 
         match self.source.fetch_data(self.sample_size(), None).await {
             Ok(data) => {
