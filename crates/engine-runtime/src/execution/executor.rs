@@ -1,271 +1,104 @@
-use crate::error::MigrationError;
-use connectors::{
-    adapter::Adapter, metadata::entity::EntityMetadata,
-    sql::base::metadata::provider::MetadataProvider,
-};
-use engine_config::{
-    report::{
-        dry_run::{DryRunParams, DryRunReport, dest_endpoint, source_endpoint},
-        summary::SummaryReport,
+use crate::{
+    error::MigrationError,
+    execution::{
+        factory,
+        metadata::{self},
+        settings::{self},
+        workers,
     },
-    settings::collect_settings,
+};
+use engine_config::report::{
+    dry_run::{DryRunParams, DryRunReport, dest_endpoint, source_endpoint},
+    summary::SummaryReport,
 };
 use engine_core::{
-    connectors::{
-        destination::{DataDestination, Destination},
-        filter::Filter,
-        linked::LinkedSource,
-        source::{DataSource, Source},
-    },
     context::{global::GlobalContext, item::ItemContext},
     migration_state::MigrationState,
     state::sled_store::SledStateStore,
 };
-use engine_processing::{
-    consumer::create_consumer,
-    filter::{compiler::FilterCompiler, csv::CsvFilterCompiler, sql::SqlFilterCompiler},
-    producer::create_producer,
-};
 use futures::lock::Mutex;
 use model::transform::mapping::EntityMapping;
 use planner::plan::MigrationPlan;
-use smql_syntax::ast::{
-    connection::{Connection, ConnectionPair, DataFormat},
-    migrate::{MigrateItem, SpecKind},
-    setting::Settings,
-};
+use smql_syntax::ast::migrate::MigrateItem;
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::watch;
-use tracing::{error, info};
+use tracing::info;
 
 pub async fn run(
     plan: MigrationPlan,
     dry_run: bool,
 ) -> Result<HashMap<String, SummaryReport>, MigrationError> {
-    info!("Running migration v2");
+    MigrationExecutor::new(plan, dry_run).await?.execute().await
+}
 
-    // Keep track of per-item states
-    let mut states = HashMap::new();
+struct MigrationExecutor {
+    plan: MigrationPlan,
+    dry_run: bool,
+    global_ctx: GlobalContext,
+}
 
-    let home_dir = dirs::home_dir().ok_or_else(|| {
-        MigrationError::InitializationError("Could not determine home directory".to_string())
-    })?;
-    let state = Arc::new(SledStateStore::open(home_dir.join(".stratum/state"))?);
-    let global_ctx = GlobalContext::new(&plan, state).await?;
+impl MigrationExecutor {
+    async fn new(plan: MigrationPlan, dry_run: bool) -> Result<Self, MigrationError> {
+        let home_dir = dirs::home_dir().ok_or_else(|| {
+            MigrationError::InitializationError("Could not determine home directory".to_string())
+        })?;
+        let state = Arc::new(SledStateStore::open(home_dir.join(".stratum/state"))?);
+        let global_ctx = GlobalContext::new(&plan, state).await?;
 
-    // Run each migration item sequentially
-    for mi in plan.migration.migrate_items.iter() {
-        let gc = global_ctx.clone();
-        let conn = plan.connections.clone();
+        Ok(Self {
+            plan,
+            dry_run,
+            global_ctx,
+        })
+    }
 
-        // Prepare per-item state
+    async fn execute(self) -> Result<HashMap<String, SummaryReport>, MigrationError> {
+        info!("Running migration v2");
+        let mut report = HashMap::new();
+
+        for mi in self.plan.migration.migrate_items.iter() {
+            let summary = self.run_item(mi).await?;
+            report.insert(mi.destination.name().clone(), summary);
+        }
+
+        info!("Migration completed");
+        Ok(report)
+    }
+
+    async fn run_item(&self, mi: &MigrateItem) -> Result<SummaryReport, MigrationError> {
+        info!("Starting migration item {}", mi.destination.name());
+
         let mapping = EntityMapping::new(mi);
-        let source = create_source(&gc, &conn, &mapping, mi).await?;
-        let destination = create_destination(&gc, &conn, mi).await?;
-        let dry_run_report = if dry_run {
+        let source =
+            factory::create_source(&self.global_ctx, &self.plan.connections, &mapping, mi).await?;
+        let destination =
+            factory::create_destination(&self.global_ctx, &self.plan.connections, mi).await?;
+
+        let dry_run_report = if self.dry_run {
             Arc::new(Mutex::new(Some(DryRunReport::new(DryRunParams {
                 source: source_endpoint(&source),
                 destination: dest_endpoint(&destination),
                 mapping: &mapping,
-                config_hash: &plan.hash(),
+                config_hash: &self.plan.hash(),
                 copy_columns: mi.settings.copy_columns,
             }))))
         } else {
             Arc::new(Mutex::new(None))
         };
 
-        let state = MigrationState::new(dry_run);
+        let state = MigrationState::new(self.dry_run);
         let mut item_ctx = ItemContext::new(source, destination, mapping.clone(), state);
 
-        // Apply all settings
-        apply_settings(&mut item_ctx, &mi.settings, &dry_run_report).await?;
-        set_meta(&mut item_ctx).await?;
+        settings::apply_all(&mut item_ctx, &mi.settings, &dry_run_report).await?;
+        metadata::load(&mut item_ctx).await?;
 
-        // Spawn producer & consumer
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let ctx = Arc::new(Mutex::new(item_ctx));
-
-        let mut prod = create_producer(&ctx, shutdown_tx, &mi.settings, &dry_run_report).await;
-        let prod_handle = tokio::spawn(async move { prod.run().await });
-
-        let mut cons = create_consumer(&ctx, shutdown_rx).await;
-        let cons_handle = tokio::spawn(async move { cons.run().await });
-
-        // await both before moving on
-        match tokio::try_join!(prod_handle, cons_handle) {
-            Ok((_, cons_result)) => match cons_result {
-                Ok(()) => info!("Item {} migrated successfully", mi.destination.name()),
-                Err(e) => {
-                    error!("Consumer error ({}): {}", mi.destination.name(), e);
-                    // decide: return Err(e.into())? or continue to next?
-                }
-            },
-            Err(e) => {
-                error!("Migration item error ({}): {}", mi.destination.name(), e);
-                // decide: return Err(e.into())? or continue to next?
-            }
-        }
+        workers::spawn(ctx, &mi.settings, &dry_run_report).await?;
 
         info!("Migration item {} completed", mi.destination.name());
 
-        // Store the final state
-        let final_report = dry_run_report.lock().await;
-        states.insert(
-            mi.destination.name().clone(),
-            SummaryReport {
-                dry_run_report: final_report.clone(),
-            },
-        );
+        let final_report = dry_run_report.lock().await.clone();
+        Ok(SummaryReport {
+            dry_run_report: final_report,
+        })
     }
-
-    info!("Migration completed");
-    Ok(states)
-}
-
-pub async fn load_src_metadata(
-    conn_str: &str,
-    format: DataFormat,
-) -> Result<HashMap<String, EntityMetadata>, MigrationError> {
-    info!("Loading source metadata");
-
-    let adapter = Adapter::sql(format, conn_str).await?;
-    let names = adapter.get_sql().list_tables().await?;
-
-    info!("Found {} source tables: {:?}", names.len(), names);
-
-    let meta_graph = MetadataProvider::build_metadata_graph(adapter.get_sql(), &names).await?;
-
-    info!(
-        "Source metadata graph built with {} tables",
-        meta_graph.len()
-    );
-
-    Ok(meta_graph
-        .iter()
-        .map(|(name, meta)| (name.clone(), EntityMetadata::Table(meta.clone())))
-        .collect())
-}
-
-async fn create_source(
-    ctx: &GlobalContext,
-    conn: &Connection,
-    mapping: &EntityMapping,
-    migrate_item: &MigrateItem,
-) -> Result<Source, MigrationError> {
-    let name = migrate_item.source.name();
-    let format = get_data_format(migrate_item, conn).0;
-
-    // build the optional LinkedSource
-    let linked = if let Some(load) = migrate_item.load.as_ref() {
-        Some(LinkedSource::new(ctx, format, load, mapping).await?)
-    } else {
-        None
-    };
-
-    let adapter = get_adapter(ctx, &format, &name).await?;
-    let filter = create_filter(migrate_item, format)?;
-    let primary = DataSource::from_adapter(format, &adapter, &linked, &filter)?;
-
-    Ok(Source::new(name, format, primary, linked, filter))
-}
-
-async fn get_adapter(
-    ctx: &GlobalContext,
-    format: &DataFormat,
-    name: &str,
-) -> Result<Option<Adapter>, MigrationError> {
-    match format {
-        f if f.is_sql() => {
-            // for SQL just clone the existing connection handle
-            Ok(ctx.src_conn.clone())
-        }
-        f if f.is_file() => {
-            // for file-based sources instantiate a new adapter
-            let file_adapter = ctx.get_file_adapter(name).await?;
-            Ok(Some(file_adapter))
-        }
-        _ => Err(MigrationError::UnsupportedFormat(format.to_string())),
-    }
-}
-
-fn create_filter(
-    migrate_item: &MigrateItem,
-    format: DataFormat,
-) -> Result<Option<Filter>, MigrationError> {
-    match format {
-        // If the format is SQL, try to build a SQL filter.
-        DataFormat::MySql | DataFormat::Postgres => {
-            // Create a new SQL filter
-            let filter = migrate_item
-                .filter
-                .as_ref()
-                .map(|ast| Filter::Sql(SqlFilterCompiler::compile(&ast.expression)));
-            Ok(filter)
-        }
-        DataFormat::Csv => {
-            let filter = migrate_item
-                .filter
-                .as_ref()
-                .map(|ast| Filter::Csv(CsvFilterCompiler::compile(&ast.expression)));
-            Ok(filter)
-        }
-        _ => {
-            // Unsupported format
-            Ok(None)
-        }
-    }
-}
-
-async fn create_destination(
-    ctx: &GlobalContext,
-    conn: &Connection,
-    migrate_item: &MigrateItem,
-) -> Result<Destination, MigrationError> {
-    let name = migrate_item.destination.name();
-    let format = get_data_format(migrate_item, conn).1;
-    let data_dest = DataDestination::from_adapter(format, &ctx.dst_conn)?;
-    Ok(Destination::new(name, format, data_dest))
-}
-
-async fn apply_settings(
-    ctx: &mut ItemContext,
-    settings: &Settings,
-    dry_run_report: &Arc<Mutex<Option<DryRunReport>>>,
-) -> Result<(), MigrationError> {
-    info!("Applying migration settings");
-
-    let mut settings = collect_settings(settings, ctx, dry_run_report).await;
-    for setting in settings.iter_mut() {
-        if setting.can_apply(ctx) {
-            setting.apply(ctx).await?;
-        }
-    }
-
-    Ok(())
-}
-
-async fn set_meta(ctx: &mut ItemContext) -> Result<(), MigrationError> {
-    ctx.set_src_meta().await?;
-    ctx.set_dest_meta().await?;
-
-    Ok(())
-}
-
-fn get_data_format(item: &MigrateItem, conn: &Connection) -> (DataFormat, DataFormat) {
-    // helper for one side (source or destination)
-    fn format_for(kind: &SpecKind, conn: &Option<ConnectionPair>, label: &str) -> DataFormat {
-        match kind {
-            SpecKind::Table => {
-                conn.as_ref()
-                    .unwrap_or_else(|| panic!("Connection {label} is required"))
-                    .format
-            }
-            SpecKind::Api => DataFormat::Api,
-            SpecKind::Csv => DataFormat::Csv,
-        }
-    }
-
-    let source_format = format_for(&item.source.kind, &conn.source, "source");
-    let dest_format = format_for(&item.destination.kind, &conn.dest, "destination");
-    (source_format, dest_format)
 }

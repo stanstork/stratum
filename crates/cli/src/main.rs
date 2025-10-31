@@ -4,7 +4,7 @@ use crate::{
 };
 use clap::Parser;
 use commands::Commands;
-use engine_runtime::execution::executor;
+use engine_runtime::execution::{executor, source::load_metadata};
 use planner::plan::MigrationPlan;
 use std::str::FromStr;
 use tracing::{Level, info};
@@ -59,7 +59,7 @@ async fn main() -> Result<(), CliError> {
             } => {
                 let kind = ConnectionKind::from_str(&format)
                     .map_err(|_| CliError::InvalidConnectionFormat(format.clone()))?;
-                let metadata = executor::load_src_metadata(&conn_str, kind.data_format()).await?;
+                let metadata = load_metadata(&conn_str, kind.data_format()).await?;
 
                 let metadata_json =
                     serde_json::to_string_pretty(&metadata).map_err(CliError::JsonSerialize)?;
