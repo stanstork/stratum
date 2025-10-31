@@ -616,7 +616,7 @@ mod tests {
         reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
-        let csv_path = "src/tests/data/customers.csv";
+        let csv_path = "src/data/customers.csv";
         let tmpl = r#"
             CONNECTIONS(
                 DESTINATION(POSTGRES, "{pg_url}")
@@ -646,7 +646,7 @@ mod tests {
         reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
-        let csv_path = "src/tests/data/customers.csv";
+        let csv_path = "src/data/customers.csv";
         let tmpl = r#"
             CONNECTIONS(
                 DESTINATION(POSTGRES, "{pg_url}")
@@ -691,7 +691,7 @@ mod tests {
         // Create the customers table in Postgres without the full_name column
         execute(CUSTOMERS_TABLE_DDL).await;
 
-        let csv_path = "src/tests/data/customers.csv";
+        let csv_path = "src/data/customers.csv";
         let tmpl = r#"
             CONNECTIONS(
                 DESTINATION(POSTGRES, "{pg_url}")
@@ -744,7 +744,7 @@ mod tests {
         reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
-        let csv_path = "src/tests/data/customers.csv";
+        let csv_path = "src/data/customers.csv";
         let tmpl = r#"
             CONNECTIONS(
                 DESTINATION(POSTGRES, "{pg_url}")
@@ -792,7 +792,7 @@ mod tests {
         reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
-        let csv_path = "src/tests/data/customers.csv";
+        let csv_path = "src/data/customers.csv";
         let tmpl = r#"
             CONNECTIONS(
                 DESTINATION(POSTGRES, "{pg_url}")

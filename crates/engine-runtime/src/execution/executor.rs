@@ -4,7 +4,10 @@ use connectors::{
     sql::base::metadata::provider::MetadataProvider,
 };
 use engine_config::{
-    report::dry_run::{DryRunParams, DryRunReport, dest_endpoint, source_endpoint},
+    report::{
+        dry_run::{DryRunParams, DryRunReport, dest_endpoint, source_endpoint},
+        summary::SummaryReport,
+    },
     settings::collect_settings,
 };
 use engine_core::{
@@ -38,7 +41,7 @@ use tracing::{error, info};
 pub async fn run(
     plan: MigrationPlan,
     dry_run: bool,
-) -> Result<HashMap<String, MigrationState>, MigrationError> {
+) -> Result<HashMap<String, SummaryReport>, MigrationError> {
     info!("Running migration v2");
 
     // Keep track of per-item states
@@ -106,8 +109,13 @@ pub async fn run(
         info!("Migration item {} completed", mi.destination.name());
 
         // Store the final state
-        let final_state = ctx.lock().await.state.lock().await.clone();
-        states.insert(mi.destination.name().clone(), final_state);
+        let final_report = dry_run_report.lock().await;
+        states.insert(
+            mi.destination.name().clone(),
+            SummaryReport {
+                dry_run_report: final_report.clone(),
+            },
+        );
     }
 
     info!("Migration completed");

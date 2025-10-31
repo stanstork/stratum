@@ -4,4 +4,5 @@ pub mod mapping;
 pub mod metrics;
 pub mod schema;
 pub mod sql;
+pub mod summary;
 pub mod transform;
