@@ -79,27 +79,36 @@ impl OffsetStrategy for PkOffset {
             }
         }
 
-        // If Cursor::None, we are on the first page, so no WHERE clause is added.
+        // Cursor::None => no WHERE (start from beginning)
 
-        // Add ORDER BY
-        // ORDER BY pk ASC
+        // ORDER BY pk ASC, LIMIT ?
         builder = builder.order_by(ident(&self.pk), Some(OrderDir::Asc));
-
-        // Add LIMIT
-        // LIMIT ?
         builder = builder.limit(value(Value::Uint(limit as u64)));
 
         builder
     }
 
     fn next_cursor(&self, row: &RowData) -> Cursor {
-        let pk_value = row.get_value(&self.pk);
-        match pk_value {
+        match row.get_value(&self.pk) {
             Value::Uint(id) => Cursor::Pk {
                 pk_col: self.pk.clone(),
                 id,
             },
-            _ => Cursor::None { offset: 0 }, // TODO: better fallback
+            Value::Int(i) if i >= 0 => Cursor::Pk {
+                pk_col: self.pk.clone(),
+                id: i as u64,
+            },
+            Value::String(s) => {
+                if let Ok(id) = s.parse::<u64>() {
+                    Cursor::Pk {
+                        pk_col: self.pk.clone(),
+                        id,
+                    }
+                } else {
+                    Cursor::None // couldn't advance; treat as end/error path
+                }
+            }
+            _ => Cursor::None, // unexpected type; upstream should normalize PKs to Uint
         }
     }
 
@@ -198,7 +207,7 @@ impl OffsetStrategy for NumericOffset {
                 val,
                 id,
             },
-            _ => Cursor::None { offset: 0 }, // TODO: better fallback
+            _ => Cursor::Default { offset: 0 }, // TODO: better fallback
         }
     }
 
@@ -279,7 +288,7 @@ impl OffsetStrategy for TimestampOffset {
                 ts,
                 id,
             },
-            _ => Cursor::None { offset: 0 }, // TODO: better fallback
+            _ => Cursor::Default { offset: 0 }, // TODO: better fallback
         }
     }
 
@@ -300,7 +309,7 @@ impl OffsetStrategy for DefaultOffset {
         limit: usize,
     ) -> SelectBuilder<FromState> {
         // Add offset based on cursor
-        if let Cursor::None { offset } = cursor {
+        if let Cursor::Default { offset } = cursor {
             // OFFSET ?
             builder = builder.offset(value(Value::Uint(*offset as u64)));
         }
@@ -311,7 +320,7 @@ impl OffsetStrategy for DefaultOffset {
     }
 
     fn next_cursor(&self, _row: &RowData) -> Cursor {
-        Cursor::None {
+        Cursor::Default {
             offset: self.offset + 1,
         }
     }
@@ -411,6 +420,8 @@ pub fn offset_strategy_from_cursor(cursor: &Cursor) -> Box<dyn OffsetStrategy> {
             tz: chrono_tz::UTC,
         }),
 
-        Cursor::None { offset } => Box::new(DefaultOffset { offset: *offset }),
+        Cursor::Default { offset } => Box::new(DefaultOffset { offset: *offset }),
+
+        Cursor::None => Box::new(DefaultOffset { offset: 0 }), // start from beginning
     }
 }

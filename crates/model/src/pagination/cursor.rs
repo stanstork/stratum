@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Cursor {
     /// No cursor specified.
-    None { offset: usize },
+    None,
+
+    /// Default cursor with an offset.
+    Default { offset: usize },
 
     /// Cursor for simple Primary Key offset (strictly increasing PK).
     Pk { pk_col: String, id: u64 },

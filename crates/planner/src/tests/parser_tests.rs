@@ -197,4 +197,25 @@ mod tests {
         "#;
         assert_parses(config);
     }
+
+    #[test]
+    fn test_offset_clause() {
+        let config = r#"
+            CONNECTIONS (
+                SOURCE(MYSQL, "mysql://user:password@localhost:3306/db"),
+                DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/db")
+            );
+
+            MIGRATE (
+                SOURCE(TABLE, foo) -> DEST(TABLE, bar) [
+                    OFFSET(
+                        STRATEGY -> pk,
+                        CURSOR -> id
+                    )
+                ]
+            );
+            "#;
+
+        assert_parses(&config);
+    }
 }

@@ -42,8 +42,8 @@ impl DataProducer for LiveProducer {
         loop {
             info!(batch_no, batch_size = self.batch_size, "Fetching batch.");
 
-            let cursor = Cursor::None { offset };
-            match self.source.fetch_data(self.batch_size, Some(cursor)).await {
+            let cursor = Cursor::Default { offset };
+            match self.source.fetch_data(10, Some(cursor)).await {
                 Ok(records) if records.is_empty() => {
                     info!("No more records to fetch. Terminating producer.");
                     break;
@@ -65,7 +65,7 @@ impl DataProducer for LiveProducer {
                             .map_err(|e| ProducerError::Store(e.to_string()))?;
                     }
 
-                    offset += self.batch_size;
+                    offset += 10;
                     self.buffer
                         .store_last_offset(offset)
                         .map_err(|e| ProducerError::StoreOffset(e.to_string()))?;

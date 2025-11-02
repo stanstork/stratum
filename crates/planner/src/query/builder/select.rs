@@ -268,7 +268,7 @@ mod tests {
     fn test_build_pagination_first_page() {
         let builder = SelectBuilder::new();
         // Cursor::None means first page
-        let cursor = Cursor::None { offset: 0 };
+        let cursor = Cursor::Default { offset: 0 };
 
         let ast = builder
             .select(vec![ident("id"), ident("name")])

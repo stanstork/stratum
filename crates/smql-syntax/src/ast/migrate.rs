@@ -1,5 +1,8 @@
 use super::{filter::Filter, load::Load, mapping::MapSpec, setting::Settings};
-use crate::parser::{Rule, StatementParser};
+use crate::{
+    ast::offset::Offset,
+    parser::{Rule, StatementParser},
+};
 use pest::iterators::Pair;
 use serde::{Deserialize, Serialize};
 
@@ -17,6 +20,7 @@ pub struct MigrateItem {
     pub filter: Option<Filter>,
     pub load: Option<Load>,
     pub map: Option<MapSpec>,
+    pub offset: Offset,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +79,11 @@ impl StatementParser for MigrateBlock {
                             Rule::map_clause => {
                                 let map = MapSpec::parse(clause);
                                 migrate_item.map = Some(map);
+                            }
+                            Rule::offset_clause => {
+                                // Currently, offset is part of settings
+                                let offset = Offset::parse(clause);
+                                migrate_item.offset = offset;
                             }
                             _ => {}
                         }

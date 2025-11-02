@@ -22,7 +22,7 @@ use model::{
 use planner::query::dialect;
 use sqlx::{MySql, Pool, Row, query::Query};
 use std::collections::HashMap;
-use tracing::{debug, trace};
+use tracing::{debug, info, trace};
 
 fn bind_values<'q>(
     mut query: Query<'q, MySql, sqlx::mysql::MySqlArguments>,
@@ -138,8 +138,8 @@ impl SqlAdapter for MySqlAdapter {
         let (sql, params) = generator.select(&request);
 
         // Log the generated SQL query for debugging
-        debug!("Generated SQL: {}", sql);
-        trace!("Parameters: {:?}", params);
+        info!("Generated SQL: {}", sql);
+        info!("Parameters: {:?}", params);
 
         // Bind parameters and execute
         let query = sqlx::query(&sql);

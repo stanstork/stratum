@@ -1,6 +1,7 @@
 use crate::sql::base::{filter::SqlFilter, join::clause::JoinClause, query::select::SelectField};
 use model::pagination::cursor::Cursor;
 
+#[derive(Debug)]
 pub struct FetchRowsRequest {
     pub table: String,
     pub alias: Option<String>,
@@ -30,7 +31,7 @@ impl FetchRowsRequestBuilder {
             joins: Vec::new(),
             filter: None,
             limit: 0,
-            cursor: Cursor::None { offset: 0 },
+            cursor: Cursor::Default { offset: 0 },
         }
     }
 

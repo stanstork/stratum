@@ -71,6 +71,18 @@ dest_clause = {
 dest_type = { ^"TABLE" | ^"FILE" }
 
 // ==============================
+//        Offset Clause
+// ==============================
+offset_key = { ^"STRATEGY" | ^"CURSOR" | ^"TIEBREAKER" | ^"TIMEZONE" }
+offset_pair = { offset_key ~ WHITESPACE* ~ "->" ~ WHITESPACE* ~ expression }
+
+offset_clause = {
+    ^"OFFSET" ~ WHITESPACE* ~ "("  
+    ~ WHITESPACE* ~ offset_pair ~ ("," ~ WHITESPACE* ~ offset_pair)*
+    ~ WHITESPACE* ~ ")"
+}
+
+// ==============================
 //         MIGRATE
 // ==============================
 
@@ -110,7 +122,7 @@ setting_pair = {
 //       Clause Definitions
 // ==============================
 
-migrate_clause = _{ settings_clause | filter_clause | load_clause | map_clause }
+migrate_clause = _{ settings_clause | filter_clause | load_clause | map_clause | offset_clause }
 
 settings_clause = {
     ^"SETTINGS" ~ WHITESPACE* ~ "("  

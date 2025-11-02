@@ -318,7 +318,7 @@ impl ValidationProducer {
                 let generator = QueryGenerator::new(dialect.as_ref());
 
                 let requests =
-                    db.build_fetch_rows_requests(self.sample_size(), Cursor::None { offset: 0 });
+                    db.build_fetch_rows_requests(self.sample_size(), Cursor::Default { offset: 0 });
                 let statements = requests
                     .into_iter()
                     .map(|req| {

@@ -126,10 +126,13 @@ impl Source {
             DataSource::Database(db) => {
                 let db = db.lock().await;
                 let rows = db
-                    .fetch(batch_size, cursor.unwrap_or(Cursor::None { offset: 0 }))
+                    .fetch(batch_size, cursor.unwrap_or(Cursor::Default { offset: 0 }))
                     .await?;
-                let records = rows.into_iter().map(Record::RowData).collect();
-                Ok(records)
+                println!("===========================================");
+                println!("Result rows: {:#?}", rows.next_cursor);
+                // let records = rows.into_iter().map(Record::RowData).collect();
+                // Ok(records)
+                todo!("Implement fetch data conversion")
             }
             DataSource::File(file) => {
                 let mut file = file.lock().await;

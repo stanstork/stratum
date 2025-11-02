@@ -3,7 +3,11 @@ use crate::sql::{
         adapter::SqlAdapter,
         error::DbError,
         filter::SqlFilter,
-        join::{clause::JoinClause, source::JoinSource},
+        join::{
+            clause::{JoinClause, JoinType},
+            source::JoinSource,
+            utils::{build_join_clauses, find_join_path},
+        },
         metadata::{provider::MetadataHelper, table::TableMetadata},
         requests::{FetchRowsRequest, FetchRowsRequestBuilder},
         source::DbDataSource,
@@ -12,10 +16,15 @@ use crate::sql::{
 };
 use async_trait::async_trait;
 use futures_util::future;
-use model::{pagination::cursor::Cursor, records::row::RowData};
+use model::{
+    pagination::{cursor::Cursor, page::FetchResult},
+    records::row::RowData,
+};
+use planner::query::offsets::offset_strategy_from_cursor;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
+    time::Instant,
 };
 
 #[derive(Clone)]
@@ -92,20 +101,55 @@ impl MySqlDataSource {
 impl DbDataSource for MySqlDataSource {
     type Error = DbError;
 
-    async fn fetch(&self, batch_size: usize, cursor: Cursor) -> Result<Vec<RowData>, DbError> {
-        let requests = self.build_fetch_rows_requests(batch_size, cursor);
+    async fn fetch(&self, batch_size: usize, cursor: Cursor) -> Result<FetchResult, DbError> {
+        let start = Instant::now();
+        let requests = self.build_fetch_rows_requests(batch_size, cursor.clone());
         let futures = requests.into_iter().map(|req| self.adapter.fetch_rows(req));
 
         // Run all futures concurrently
         let results = future::join_all(futures).await;
 
-        let mut all_rows = Vec::new();
-        for result in results {
+        let mut all_rows: Vec<RowData> = Vec::new();
+        let mut primary_rows_count: Option<usize> = None;
+        let mut primary_last_row: Option<RowData> = None;
+
+        for (idx, result) in results.into_iter().enumerate() {
             let mut fetched_rows = result?;
+
+            if idx == 0 {
+                primary_rows_count = Some(fetched_rows.len());
+                if let Some(last_row) = fetched_rows.last() {
+                    primary_last_row = Some(last_row.clone());
+                }
+            }
+
             all_rows.append(&mut fetched_rows);
         }
 
-        Ok(all_rows)
+        let reference_count = primary_rows_count.unwrap_or(all_rows.len());
+        let reached_end = reference_count < batch_size;
+
+        let next_cursor = if !reached_end {
+            primary_last_row
+                .or_else(|| all_rows.last().cloned())
+                .map(|row| {
+                    let strategy = offset_strategy_from_cursor(&cursor);
+                    strategy.next_cursor(&row)
+                })
+        } else {
+            None
+        };
+
+        let took_ms = start.elapsed().as_millis();
+        let row_count = all_rows.len();
+
+        Ok(FetchResult {
+            rows: all_rows,
+            next_cursor,
+            reached_end,
+            row_count,
+            took_ms,
+        })
     }
 
     /// Build all requests: primary with join-fields, then the related ones without them.
@@ -116,6 +160,7 @@ impl DbDataSource for MySqlDataSource {
     ) -> Vec<FetchRowsRequest> {
         let mut reqs = Vec::new();
         let mut processed_tables = HashSet::new();
+        let primary_table_name = self.primary_meta.as_ref().map(|meta| meta.name.clone());
 
         // primary table
         if let Some(meta) = &self.primary_meta {
@@ -143,11 +188,34 @@ impl DbDataSource for MySqlDataSource {
                 continue;
             }
 
-            let joins = self
-                .cascade_joins
-                .get(table)
-                .unwrap_or(&Vec::new())
-                .to_vec();
+            let mut joins = Vec::new();
+
+            if let Some(primary_name) = primary_table_name.as_ref() {
+                if !table.eq_ignore_ascii_case(primary_name) {
+                    if let Some(path) =
+                        find_join_path(&self.related_meta, table.as_str(), primary_name.as_str())
+                    {
+                        let join_path: Vec<String> = path.into_iter().skip(1).collect();
+                        if !join_path.is_empty() {
+                            joins.extend(build_join_clauses(
+                                table.as_str(),
+                                &join_path,
+                                &self.related_meta,
+                                JoinType::Inner,
+                            ));
+                        }
+                    }
+                }
+            }
+
+            if let Some(extra_joins) = self.cascade_joins.get(table) {
+                for clause in extra_joins {
+                    if !joins.iter().any(|existing| existing == clause) {
+                        joins.push(clause.clone());
+                    }
+                }
+            }
+
             reqs.push(self.build_request_for(
                 table,
                 meta,

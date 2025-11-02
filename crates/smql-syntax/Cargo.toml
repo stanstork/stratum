@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bitflags = "2.9.0"
+bitflags = { version = "2.9.0", features = ["serde"] }
 pest = "2.7.15"
 pest_derive = "2.7.15"
 tracing = "0.1.41"
