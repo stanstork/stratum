@@ -258,56 +258,57 @@ impl ValidationProducer {
         &self,
         validator: &mut DestinationSchemaValidator,
     ) -> SampleResult {
-        let mut prune_findings = Vec::new();
-        let mut omitted_columns: HashMap<String, HashSet<String>> = HashMap::new();
+        // let mut prune_findings = Vec::new();
+        // let mut omitted_columns: HashMap<String, HashSet<String>> = HashMap::new();
 
-        match self.source.fetch_data(self.sample_size(), None).await {
-            Ok(data) => {
-                let total = data.len();
-                let sample: Vec<TransformationRecord> = data
-                    .into_iter()
-                    .filter_map(|record| {
-                        let input_row = record.to_row_data().cloned()?;
-                        let transformed = self.pipeline.apply(&record);
-                        let mut output_row_opt = transformed.to_row_data().cloned();
+        // match self.source.fetch_data(self.sample_size(), None).await {
+        //     Ok(data) => {
+        //         let total = data.len();
+        //         let sample: Vec<TransformationRecord> = data
+        //             .into_iter()
+        //             .filter_map(|record| {
+        //                 let input_row = record.to_row_data().cloned()?;
+        //                 let transformed = self.pipeline.apply(&record);
+        //                 let mut output_row_opt = transformed.to_row_data().cloned();
 
-                        if let Some(ref mut output_row) = output_row_opt {
-                            if output_row.entity.is_empty() {
-                                output_row.entity = input_row.entity.clone();
-                            }
-                            self.prune_row(output_row, &mut prune_findings, &mut omitted_columns);
-                            validator.validate(output_row);
-                        }
+        //                 if let Some(ref mut output_row) = output_row_opt {
+        //                     if output_row.entity.is_empty() {
+        //                         output_row.entity = input_row.entity.clone();
+        //                     }
+        //                     self.prune_row(output_row, &mut prune_findings, &mut omitted_columns);
+        //                     validator.validate(output_row);
+        //                 }
 
-                        Some(TransformationRecord {
-                            input: input_row,
-                            output: output_row_opt,
-                            error: None,
-                            warnings: None,
-                        })
-                    })
-                    .collect();
+        //                 Some(TransformationRecord {
+        //                     input: input_row,
+        //                     output: output_row_opt,
+        //                     error: None,
+        //                     warnings: None,
+        //                 })
+        //             })
+        //             .collect();
 
-                let ok = sample.iter().filter(|r| r.output.is_some()).count();
-                let failed = total.saturating_sub(ok);
-                let report = TransformationReport { ok, failed, sample };
+        //         let ok = sample.iter().filter(|r| r.output.is_some()).count();
+        //         let failed = total.saturating_sub(ok);
+        //         let report = TransformationReport { ok, failed, sample };
 
-                SampleResult {
-                    records_sampled: total,
-                    transform_report: Some(report),
-                    fetch_error: None,
-                    prune_findings,
-                    omitted_columns,
-                }
-            }
-            Err(e) => SampleResult {
-                records_sampled: 0,
-                transform_report: None,
-                fetch_error: Some(Finding::new_fetch_error(&e.to_string())),
-                prune_findings,
-                omitted_columns,
-            },
-        }
+        //         SampleResult {
+        //             records_sampled: total,
+        //             transform_report: Some(report),
+        //             fetch_error: None,
+        //             prune_findings,
+        //             omitted_columns,
+        //         }
+        //     }
+        //     Err(e) => SampleResult {
+        //         records_sampled: 0,
+        //         transform_report: None,
+        //         fetch_error: Some(Finding::new_fetch_error(&e.to_string())),
+        //         prune_findings,
+        //         omitted_columns,
+        //     },
+        // }
+        todo!("")
     }
 
     async fn generate_sql_statements(&self) -> (Vec<SqlStatement>, Vec<Finding>) {

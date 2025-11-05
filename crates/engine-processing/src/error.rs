@@ -1,3 +1,4 @@
+use connectors::error::{self, AdapterError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -22,11 +23,8 @@ pub enum ConsumerError {
 
 #[derive(Error, Debug)]
 pub enum ProducerError {
-    #[error("Failed to fetch data: {source}")]
-    Fetch {
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
+    #[error("Failed to fetch data: {0}")]
+    Fetch(#[from] AdapterError),
 
     #[error("Failed to store data in the buffer: {0}")]
     Store(String),
@@ -39,4 +37,13 @@ pub enum ProducerError {
 
     #[error("Other error: {0}")]
     Other(String),
+
+    #[error("Unexpected error: {0}")]
+    Unexpected(#[from] Box<dyn std::error::Error + Send + Sync>),
+
+    #[error("State store error: {0}")]
+    StateStore(String),
+
+    #[error("Failed to send batch: {0}")]
+    ChannelSend(String),
 }

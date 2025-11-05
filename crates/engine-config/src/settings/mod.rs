@@ -45,7 +45,7 @@ pub async fn collect_settings(
 ) -> Vec<Box<dyn MigrationSetting>> {
     let src = ctx.source.clone();
     let dest = ctx.destination.clone();
-    let state = ctx.state.clone();
+    let settings = ctx.settings.clone();
     let mapping = ctx.mapping.clone();
 
     let mut all_settings: Vec<Box<dyn MigrationSetting>> = Vec::new();
@@ -58,8 +58,14 @@ pub async fn collect_settings(
     }
 
     if cfg.create_missing_columns {
-        let missing_cols_setting =
-            CreateMissingColumnsSetting::new(&src, &dest, &mapping, &state, dry_run_report).await;
+        let missing_cols_setting = CreateMissingColumnsSetting::new(
+            &src,
+            &dest,
+            &mapping,
+            settings.clone(),
+            dry_run_report,
+        )
+        .await;
         all_settings.push(Box::new(missing_cols_setting) as _);
     }
 
@@ -69,20 +75,27 @@ pub async fn collect_settings(
     }
 
     if cfg.create_missing_tables {
-        let missing_tables_setting =
-            CreateMissingTablesSetting::new(&src, &dest, &mapping, &state, dry_run_report).await;
+        let missing_tables_setting = CreateMissingTablesSetting::new(
+            &src,
+            &dest,
+            &mapping,
+            settings.clone(),
+            dry_run_report,
+        )
+        .await;
         all_settings.push(Box::new(missing_tables_setting) as _);
     }
 
     if cfg.infer_schema {
         let infer_schema_setting =
-            InferSchemaSetting::new(&src, &dest, &mapping, &state, dry_run_report).await;
+            InferSchemaSetting::new(&src, &dest, &mapping, settings.clone(), dry_run_report).await;
         all_settings.push(Box::new(infer_schema_setting) as _);
     }
 
     if cfg.cascade_schema {
         let cascade_schema_setting =
-            CascadeSchemaSetting::new(&src, &dest, &mapping, &state, dry_run_report).await;
+            CascadeSchemaSetting::new(&src, &dest, &mapping, settings.clone(), dry_run_report)
+                .await;
         all_settings.push(Box::new(cascade_schema_setting) as _);
     }
 

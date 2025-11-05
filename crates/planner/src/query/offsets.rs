@@ -12,6 +12,7 @@ use model::{
     pagination::{cursor::Cursor, offset_config::OffsetConfig},
     records::row::RowData,
 };
+use std::sync::Arc;
 
 #[async_trait]
 pub trait OffsetStrategy: Send + Sync {
@@ -331,20 +332,20 @@ impl OffsetStrategy for DefaultOffset {
         })
     }
 }
+pub struct OffsetStrategyFactory;
 
-pub fn strategy_from_config(config: &OffsetConfig) -> Box<dyn OffsetStrategy> {
-    // If user didn't specify a cursor column -> default PK "id".
-    let default_pk = "id".to_string();
+impl OffsetStrategyFactory {
+    /// Build a strategy from configuration.
+    pub fn from_config(config: &OffsetConfig) -> Arc<dyn OffsetStrategy> {
+        // If user didn't specify a cursor column -> default PK "id".
+        let default_pk = "id".to_string();
 
-    // If the config includes a 'strategy' hint, use it; otherwise infer:
-    // - no cursor  -> PK
-    // - cursor + no tiebreaker -> Numeric (single) by default
-    // - cursor + tiebreaker    -> use Timestamp if name suggests time, else Numeric
-    let strategy =
-        config
-            .strategy
-            .as_deref()
-            .unwrap_or_else(|| match (&config.cursor, &config.tiebreaker) {
+        // If the config includes a 'strategy' hint, use it; otherwise infer:
+        // - no cursor  -> PK
+        // - cursor + no tiebreaker -> Numeric (single) by default
+        // - cursor + tiebreaker    -> use Timestamp if name suggests time, else Numeric
+        let strategy = config.strategy.as_deref().unwrap_or_else(|| {
+            match (&config.cursor, &config.tiebreaker) {
                 (None, _) => "pk",
                 (Some(_), None) => "numeric",
                 (Some(c), Some(_))
@@ -353,75 +354,111 @@ pub fn strategy_from_config(config: &OffsetConfig) -> Box<dyn OffsetStrategy> {
                     "timestamp"
                 }
                 _ => "numeric",
-            });
+            }
+        });
 
-    match strategy {
-        "pk" => Box::new(PkOffset {
-            pk: config.cursor.clone().unwrap_or(default_pk),
-        }),
+        match strategy {
+            "pk" => Arc::new(PkOffset {
+                pk: config.cursor.clone().unwrap_or(default_pk),
+            }),
 
-        "numeric" => {
-            let col = config
-                .cursor
-                .clone()
-                .unwrap_or_else(|| panic!("Numeric offset requires 'cursor' column"));
-            let pk = config.tiebreaker.clone().unwrap_or(default_pk);
-            Box::new(NumericOffset { col, pk })
+            "numeric" => {
+                let col = config
+                    .cursor
+                    .clone()
+                    .unwrap_or_else(|| panic!("Numeric offset requires 'cursor' column"));
+                let pk = config.tiebreaker.clone().unwrap_or(default_pk);
+                Arc::new(NumericOffset { col, pk })
+            }
+
+            "timestamp" => {
+                let ts_col = config
+                    .cursor
+                    .clone()
+                    .unwrap_or_else(|| panic!("Timestamp offset requires 'cursor' column"));
+                let pk = config.tiebreaker.clone().unwrap_or(default_pk);
+                let tz = config
+                    .timezone
+                    .as_deref()
+                    .unwrap_or("UTC")
+                    .parse::<chrono_tz::Tz>()
+                    .unwrap_or(chrono_tz::UTC);
+                Arc::new(TimestampOffset { ts_col, pk, tz })
+            }
+
+            other => panic!("Unsupported offset strategy: {other}"),
         }
-
-        "timestamp" => {
-            let ts_col = config
-                .cursor
-                .clone()
-                .unwrap_or_else(|| panic!("Timestamp offset requires 'cursor' column"));
-            let pk = config.tiebreaker.clone().unwrap_or(default_pk);
-            let tz = config
-                .timezone
-                .as_deref()
-                .unwrap_or("UTC")
-                .parse::<chrono_tz::Tz>()
-                .unwrap_or(chrono_tz::UTC);
-            Box::new(TimestampOffset { ts_col, pk, tz })
-        }
-
-        other => panic!("Unsupported offset strategy: {other}"),
     }
-}
 
-/// Build a strategy from a concrete cursor (e.g., when resuming).
-pub fn offset_strategy_from_cursor(cursor: &Cursor) -> Box<dyn OffsetStrategy> {
-    match cursor {
-        Cursor::Pk { pk_col, .. } => Box::new(PkOffset { pk: pk_col.clone() }),
+    /// Build a strategy from a concrete cursor (e.g., when resuming).
+    pub fn from_cursor(cursor: &Cursor) -> Arc<dyn OffsetStrategy> {
+        match cursor {
+            Cursor::Pk { pk_col, .. } => Arc::new(PkOffset { pk: pk_col.clone() }),
 
-        Cursor::Numeric { col, .. } => {
-            // Without a pk in the cursor, default tiebreaker to "id".
-            Box::new(NumericOffset {
-                col: col.clone(),
+            Cursor::Numeric { col, .. } => {
+                // Without a pk in the cursor, default tiebreaker to "id".
+                Arc::new(NumericOffset {
+                    col: col.clone(),
+                    pk: "id".to_string(),
+                })
+            }
+
+            Cursor::CompositeNumPk {
+                num_col, pk_col, ..
+            } => Arc::new(NumericOffset {
+                col: num_col.clone(),
+                pk: pk_col.clone(),
+            }),
+
+            Cursor::Timestamp { col, .. } => Arc::new(TimestampOffset {
+                ts_col: col.clone(),
                 pk: "id".to_string(),
-            })
+                tz: chrono_tz::UTC,
+            }),
+
+            Cursor::CompositeTsPk { ts_col, pk_col, .. } => Arc::new(TimestampOffset {
+                ts_col: ts_col.clone(),
+                pk: pk_col.clone(),
+                tz: chrono_tz::UTC,
+            }),
+
+            Cursor::Default { offset } => Arc::new(DefaultOffset { offset: *offset }),
+
+            Cursor::None => Arc::new(DefaultOffset { offset: 0 }), // start from beginning
+        }
+    }
+
+    /// Build a strategy from SMQL offset syntax.
+    pub fn from_smql(smql_offset: &smql_syntax::ast::offset::Offset) -> Arc<dyn OffsetStrategy> {
+        let mut strategy: Option<String> = None;
+        let mut cursor: Option<String> = None;
+        let mut tiebreaker: Option<String> = None;
+        let mut timezone: Option<String> = None;
+
+        for pair in &smql_offset.pairs {
+            match pair.key {
+                smql_syntax::ast::offset::OffsetKey::Strategy => {
+                    strategy = Some(pair.value.clone())
+                }
+                smql_syntax::ast::offset::OffsetKey::Cursor => cursor = Some(pair.value.clone()),
+                smql_syntax::ast::offset::OffsetKey::TieBreaker => {
+                    tiebreaker = Some(pair.value.clone())
+                }
+                smql_syntax::ast::offset::OffsetKey::TimeZone => {
+                    timezone = Some(pair.value.clone())
+                }
+            }
         }
 
-        Cursor::CompositeNumPk {
-            num_col, pk_col, ..
-        } => Box::new(NumericOffset {
-            col: num_col.clone(),
-            pk: pk_col.clone(),
-        }),
+        let config = OffsetConfig {
+            strategy,
+            cursor,
+            tiebreaker,
+            timezone,
+        };
 
-        Cursor::Timestamp { col, .. } => Box::new(TimestampOffset {
-            ts_col: col.clone(),
-            pk: "id".to_string(),
-            tz: chrono_tz::UTC,
-        }),
+        println!("OffsetConfig from SMQL: {:?}", config);
 
-        Cursor::CompositeTsPk { ts_col, pk_col, .. } => Box::new(TimestampOffset {
-            ts_col: ts_col.clone(),
-            pk: pk_col.clone(),
-            tz: chrono_tz::UTC,
-        }),
-
-        Cursor::Default { offset } => Box::new(DefaultOffset { offset: *offset }),
-
-        Cursor::None => Box::new(DefaultOffset { offset: 0 }), // start from beginning
+        Self::from_config(&config)
     }
 }

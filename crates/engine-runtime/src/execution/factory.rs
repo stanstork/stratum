@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::error::MigrationError;
 use connectors::adapter::Adapter;
 use engine_core::{
@@ -8,11 +10,13 @@ use engine_core::{
         source::{DataSource, Source},
     },
     context::global::GlobalContext,
+    state::StateStore,
 };
 use engine_processing::filter::{
     compiler::FilterCompiler, csv::CsvFilterCompiler, sql::SqlFilterCompiler,
 };
-use model::transform::mapping::EntityMapping;
+use model::{pagination::cursor::Cursor, transform::mapping::EntityMapping};
+use planner::query::offsets::{OffsetStrategy, OffsetStrategyFactory};
 use smql_syntax::ast::{
     connection::{Connection, ConnectionPair, DataFormat},
     migrate::{MigrateItem, SpecKind},
@@ -23,6 +27,8 @@ pub async fn create_source(
     conn: &Connection,
     mapping: &EntityMapping,
     migrate_item: &MigrateItem,
+    offset_strategy: Arc<dyn OffsetStrategy>,
+    cursor: Cursor,
 ) -> Result<Source, MigrationError> {
     let name = migrate_item.source.name();
     let format = get_data_format(migrate_item, conn).0;
@@ -35,7 +41,8 @@ pub async fn create_source(
 
     let adapter = get_adapter(ctx, &format, &name).await?;
     let filter = create_filter(migrate_item, format)?;
-    let primary = DataSource::from_adapter(format, &adapter, &linked, &filter)?;
+    let primary =
+        DataSource::from_adapter(format, &adapter, &linked, &filter, offset_strategy, cursor)?;
 
     Ok(Source::new(name, format, primary, linked, filter))
 }

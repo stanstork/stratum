@@ -1,6 +1,6 @@
 use crate::state::{
     StateStore,
-    models::{Checkpoint, WallEntry},
+    models::{Checkpoint, WalEntry},
 };
 use async_trait::async_trait;
 use std::{error::Error, path::Path};
@@ -39,7 +39,7 @@ impl StateStore for SledStateStore {
         })
     }
 
-    async fn append_wal(&self, entry: &WallEntry) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn append_wal(&self, entry: &WalEntry) -> Result<(), Box<dyn Error + Send + Sync>> {
         let seq = chrono::Utc::now()
             .timestamp_nanos_opt()
             .ok_or("Timestamp overflow")?;
@@ -49,13 +49,13 @@ impl StateStore for SledStateStore {
         Ok(())
     }
 
-    async fn iter_wal(&self, run_id: &str) -> Result<Vec<WallEntry>, Box<dyn Error + Send + Sync>> {
+    async fn iter_wal(&self, run_id: &str) -> Result<Vec<WalEntry>, Box<dyn Error + Send + Sync>> {
         let prefix = format!("wal:{}:", run_id);
         let mut entries = Vec::new();
 
         for item in self.db.scan_prefix(prefix) {
             let (_key, value) = item?;
-            let entry: WallEntry = bincode::deserialize(&value)?;
+            let entry: WalEntry = bincode::deserialize(&value)?;
             entries.push(entry);
         }
 

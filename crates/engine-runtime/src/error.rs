@@ -35,4 +35,8 @@ pub enum MigrationError {
     /// Setting error.
     #[error("Settings error: {0}")]
     Settings(#[from] SettingsError),
+
+    /// Unknown error.
+    #[error("Unknown error: {0}")]
+    Unknown(#[from] Box<dyn std::error::Error + Send + Sync>),
 }

@@ -29,6 +29,16 @@ impl Record {
             Record::RowData(data) => Some(data),
         }
     }
+
+    pub(crate) fn canonical_bytes(&self) -> Vec<u8> {
+        match self {
+            Record::RowData(data) => {
+                let mut bytes = data.serialize();
+                bytes.sort();
+                bytes
+            }
+        }
+    }
 }
 
 pub trait DataRecord: Send + Sync {

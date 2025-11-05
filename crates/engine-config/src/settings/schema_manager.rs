@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use connectors::sql::base::query::{column::ColumnDef, generator::QueryGenerator};
 use engine_core::{
     connectors::destination::{DataDestination, Destination},
-    migration_state::MigrationState,
+    migration_state::MigrationSettings,
     schema::plan::SchemaPlan,
 };
 use futures::lock::Mutex;
@@ -86,14 +86,13 @@ impl SchemaManager for LiveSchemaManager {
 
 pub struct ValidationSchemaManager {
     pub report: Arc<Mutex<DryRunReport>>,
-    pub state: Arc<Mutex<MigrationState>>,
+    pub settings: MigrationSettings,
 }
 
 #[async_trait::async_trait]
 impl SchemaManager for ValidationSchemaManager {
     async fn add_column(&mut self, table: &str, column: &ColumnDef) -> Result<(), SettingsError> {
-        let state = self.state.lock().await;
-        if state.infer_schema() {
+        if self.settings.infer_schema() {
             info!(
                 "Skipping add_column for '{}' on table '{}' due to infer_schema being enabled.",
                 column.name, table
@@ -152,8 +151,8 @@ impl SchemaManager for ValidationSchemaManager {
 
         // Mark that schema inference has been performed.
         {
-            let mut state = self.state.lock().await;
-            state.set_infer_schema(true);
+            let mut settings = self.settings.clone();
+            settings.set_infer_schema(true);
         }
 
         Ok(())

@@ -16,7 +16,7 @@ use engine_core::{
         source::{DataSource, Source},
     },
     context::item::ItemContext,
-    migration_state::MigrationState,
+    migration_state::MigrationSettings,
     schema::{plan::SchemaPlan, types::TypeEngine},
 };
 use futures::lock::Mutex;
@@ -28,7 +28,7 @@ pub struct SchemaSettingContext {
     pub source: Source,
     pub destination: Destination,
     pub mapping: EntityMapping,
-    pub state: Arc<Mutex<MigrationState>>,
+    pub settings: MigrationSettings,
     pub dry_run_report: Arc<Mutex<Option<DryRunReport>>>,
     pub schema_manager: Box<dyn SchemaManager>,
 }
@@ -38,10 +38,10 @@ impl SchemaSettingContext {
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
-        state: &Arc<Mutex<MigrationState>>,
+        settings: MigrationSettings,
         dry_run_report: &Arc<Mutex<Option<DryRunReport>>>,
     ) -> Self {
-        let is_dry_run = state.lock().await.is_dry_run();
+        let is_dry_run = settings.is_dry_run();
         let schema_manager: Box<dyn SchemaManager + Send> = if is_dry_run {
             // Create validation manager for dry-run mode
             let report = dry_run_report
@@ -53,7 +53,7 @@ impl SchemaSettingContext {
 
             Box::new(ValidationSchemaManager {
                 report: Arc::new(Mutex::new(report)),
-                state: state.clone(),
+                settings: settings.clone(),
             })
         } else {
             // Create live manager for real migration
@@ -66,7 +66,7 @@ impl SchemaSettingContext {
             source: src.clone(),
             destination: dest.clone(),
             mapping: mapping.clone(),
-            state: state.clone(),
+            settings: settings.clone(),
             dry_run_report: dry_run_report.clone(),
             schema_manager,
         }
@@ -117,8 +117,8 @@ impl SchemaSettingContext {
     }
 
     pub async fn build_schema_plan(&self) -> Result<SchemaPlan, SettingsError> {
-        let ignore_constraints = self.state.lock().await.ignore_constraints();
-        let mapped_columns_only = self.state.lock().await.copy_columns() == CopyColumns::MapOnly;
+        let ignore_constraints = self.settings.ignore_constraints();
+        let mapped_columns_only = self.settings.copy_columns() == CopyColumns::MapOnly;
         let source = self.source.primary.clone();
 
         let type_engine = TypeEngine::new(

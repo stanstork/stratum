@@ -11,7 +11,7 @@ use connectors::{
 use engine_core::{
     connectors::{destination::Destination, source::Source},
     context::item::ItemContext,
-    migration_state::MigrationState,
+    migration_state::MigrationSettings,
     schema::plan::SchemaPlan,
 };
 use futures::lock::Mutex;
@@ -40,10 +40,10 @@ impl MigrationSetting for InferSchemaSetting {
     async fn apply(&mut self, _ctx: &mut ItemContext) -> Result<(), SettingsError> {
         self.apply_schema().await?;
 
-        // Set the infer schema flag to global state
+        // Set the infer schema flag to global settings
         {
-            let mut state = self.context.state.lock().await;
-            state.set_infer_schema(true);
+            let mut settings = self.context.settings.clone();
+            settings.set_infer_schema(true);
         }
 
         info!("Infer schema setting applied");
@@ -56,11 +56,11 @@ impl InferSchemaSetting {
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
-        state: &Arc<Mutex<MigrationState>>,
+        settings: MigrationSettings,
         dry_run_report: &Arc<Mutex<Option<DryRunReport>>>,
     ) -> Self {
         Self {
-            context: SchemaSettingContext::new(src, dest, mapping, state, dry_run_report).await,
+            context: SchemaSettingContext::new(src, dest, mapping, settings, dry_run_report).await,
         }
     }
 

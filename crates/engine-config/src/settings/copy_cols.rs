@@ -14,8 +14,7 @@ impl MigrationSetting for CopyColumnsSetting {
     }
 
     async fn apply(&mut self, ctx: &mut ItemContext) -> Result<(), SettingsError> {
-        let mut state = ctx.state.lock().await;
-        state.set_copy_columns(self.0);
+        ctx.settings.set_copy_columns(self.0);
         info!("Copy columns setting applied");
         Ok(())
     }

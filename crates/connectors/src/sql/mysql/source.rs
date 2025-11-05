@@ -20,7 +20,7 @@ use model::{
     pagination::{cursor::Cursor, page::FetchResult},
     records::row::RowData,
 };
-use planner::query::offsets::offset_strategy_from_cursor;
+use planner::query::offsets::OffsetStrategy;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -47,10 +47,19 @@ pub struct MySqlDataSource {
     /// Optional JOIN graph to be applied to the related tables
     /// (if any) when cascading
     cascade_joins: HashMap<String, Vec<JoinClause>>,
+
+    offset_strategy: Arc<dyn OffsetStrategy>,
+    cursor: Cursor,
 }
 
 impl MySqlDataSource {
-    pub fn new(adapter: MySqlAdapter, join: Option<JoinSource>, filter: Option<SqlFilter>) -> Self {
+    pub fn new(
+        adapter: MySqlAdapter,
+        join: Option<JoinSource>,
+        filter: Option<SqlFilter>,
+        offset_strategy: Arc<dyn OffsetStrategy>,
+        cursor: Cursor,
+    ) -> Self {
         Self {
             adapter,
             join,
@@ -58,6 +67,8 @@ impl MySqlDataSource {
             primary_meta: None,
             related_meta: HashMap::new(),
             cascade_joins: HashMap::new(),
+            offset_strategy,
+            cursor,
         }
     }
 
@@ -93,6 +104,7 @@ impl MySqlDataSource {
             .filter(filter_clause)
             .limit(batch_size)
             .cursor(cursor)
+            .strategy(self.offset_strategy.clone())
             .build()
     }
 }
@@ -109,7 +121,7 @@ impl DbDataSource for MySqlDataSource {
         // Run all futures concurrently
         let results = future::join_all(futures).await;
 
-        let mut all_rows: Vec<RowData> = Vec::new();
+        let mut rows: Vec<RowData> = Vec::new();
         let mut primary_rows_count: Option<usize> = None;
         let mut primary_last_row: Option<RowData> = None;
 
@@ -123,28 +135,25 @@ impl DbDataSource for MySqlDataSource {
                 }
             }
 
-            all_rows.append(&mut fetched_rows);
+            rows.append(&mut fetched_rows);
         }
 
-        let reference_count = primary_rows_count.unwrap_or(all_rows.len());
+        let reference_count = primary_rows_count.unwrap_or(rows.len());
         let reached_end = reference_count < batch_size;
 
         let next_cursor = if !reached_end {
             primary_last_row
-                .or_else(|| all_rows.last().cloned())
-                .map(|row| {
-                    let strategy = offset_strategy_from_cursor(&cursor);
-                    strategy.next_cursor(&row)
-                })
+                .or_else(|| rows.last().cloned())
+                .map(|row| self.offset_strategy.next_cursor(&row))
         } else {
             None
         };
 
         let took_ms = start.elapsed().as_millis();
-        let row_count = all_rows.len();
+        let row_count = rows.len();
 
         Ok(FetchResult {
-            rows: all_rows,
+            rows,
             next_cursor,
             reached_end,
             row_count,

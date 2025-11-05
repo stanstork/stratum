@@ -16,6 +16,7 @@ pub struct GlobalContext {
     /// Cache of file-backed adapters (e.g. CSV readers) by file path
     file_adapters: Arc<Mutex<HashMap<String, Adapter>>>,
 
+    pub run_id: String,
     pub state: Arc<SledStateStore>,
 }
 
@@ -29,6 +30,7 @@ impl GlobalContext {
         let src_conn = Self::create_sql_adapter(&plan.connections.source).await?;
         let dst_conn = Self::create_sql_adapter(&plan.connections.dest).await?;
         let batch_size = plan.migration.settings.batch_size;
+        let run_id = uuid::Uuid::new_v4().to_string();
 
         // Pre-build file adapters for all CSV sources
         let initial_adapters = Self::build_file_adapters(plan)?;
@@ -39,6 +41,7 @@ impl GlobalContext {
             dst_conn,
             batch_size,
             file_adapters,
+            run_id,
             state,
         })
     }
@@ -60,6 +63,10 @@ impl GlobalContext {
             Some(c) => Adapter::sql(c.format, &c.conn_str).await.map(Some),
             None => Ok(None),
         }
+    }
+
+    pub fn run_id(&self) -> String {
+        self.run_id.clone()
     }
 
     /// Scan the migration plan and build adapters for every CSV source.

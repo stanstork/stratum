@@ -12,8 +12,14 @@ use connectors::{
         mysql::source::MySqlDataSource,
     },
 };
-use model::{pagination::cursor::Cursor, records::record::Record};
-use planner::query::dialect::{self, Dialect};
+use model::{
+    pagination::{cursor::Cursor, page::FetchResult},
+    records::record::Record,
+};
+use planner::query::{
+    dialect::{self, Dialect},
+    offsets::OffsetStrategy,
+};
 use smql_syntax::ast::connection::DataFormat;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -43,6 +49,8 @@ impl DataSource {
         adapter: &Option<Adapter>,
         linked: &Option<LinkedSource>,
         filter: &Option<Filter>,
+        offset_strategy: Arc<dyn OffsetStrategy>,
+        cursor: Cursor,
     ) -> Result<Self, AdapterError> {
         match (format, adapter) {
             // MySQL + MySqlAdapter -> build a MySqlDataSource
@@ -59,7 +67,13 @@ impl DataSource {
                     }
                 });
 
-                let ds = MySqlDataSource::new(mysql_adapter.clone(), join, sql_filter);
+                let ds = MySqlDataSource::new(
+                    mysql_adapter.clone(),
+                    join,
+                    sql_filter,
+                    offset_strategy,
+                    cursor,
+                );
                 Ok(DataSource::Database(Arc::new(Mutex::new(ds))))
             }
 
@@ -120,14 +134,12 @@ impl Source {
     pub async fn fetch_data(
         &self,
         batch_size: usize,
-        cursor: Option<Cursor>,
-    ) -> Result<Vec<Record>, AdapterError> {
+        cursor: Cursor,
+    ) -> Result<FetchResult, AdapterError> {
         match &self.primary {
             DataSource::Database(db) => {
                 let db = db.lock().await;
-                let rows = db
-                    .fetch(batch_size, cursor.unwrap_or(Cursor::Default { offset: 0 }))
-                    .await?;
+                let rows = db.fetch(batch_size, cursor).await?;
                 println!("===========================================");
                 println!("Result rows: {:#?}", rows.next_cursor);
                 // let records = rows.into_iter().map(Record::RowData).collect();
@@ -135,10 +147,11 @@ impl Source {
                 todo!("Implement fetch data conversion")
             }
             DataSource::File(file) => {
-                let mut file = file.lock().await;
-                let rows = file.fetch(batch_size)?;
-                let records = rows.into_iter().map(Record::RowData).collect();
-                Ok(records)
+                // let mut file = file.lock().await;
+                // let rows = file.fetch(batch_size)?;
+                // let records = rows.into_iter().map(Record::RowData).collect();
+                // Ok(records)
+                todo!("Implement file data fetching")
             }
         }
     }

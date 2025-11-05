@@ -6,9 +6,10 @@ use crate::query::{
         expr::Expr,
         select::{FromClause, JoinClause, OrderByExpr, Select},
     },
-    offsets::offset_strategy_from_cursor,
+    offsets::OffsetStrategy,
 };
 use model::pagination::cursor::Cursor;
+use std::sync::Arc;
 
 /// The initial state of the builder before any clauses have been added.
 #[derive(Debug, Default, Clone)]
@@ -110,12 +111,8 @@ impl SelectBuilder<FromState> {
         self
     }
 
-    /// Applies an offset-based pagination strategy to the query.
-    /// This will add the appropriate WHERE, ORDER BY, and LIMIT clauses
-    /// based on the cursor.
-    pub fn paginate(self, cursor: &Cursor, limit: usize) -> Self {
-        let strategy = offset_strategy_from_cursor(cursor);
-        strategy.apply_to_builder(self, cursor, limit)
+    pub fn paginate(self, start: Arc<dyn OffsetStrategy>, cursor: &Cursor, limit: usize) -> Self {
+        start.apply_to_builder(self, cursor, limit)
     }
 
     /// Finalizes and returns the constructed `Select` AST.
@@ -126,12 +123,14 @@ impl SelectBuilder<FromState> {
 
 #[cfg(test)]
 mod tests {
+
     use crate::query::{
         ast::{
             common::{JoinKind, OrderDir, TableRef},
             expr::{BinaryOp, BinaryOperator, Expr, Ident},
         },
         builder::select::SelectBuilder,
+        offsets::OffsetStrategyFactory,
     };
     use model::{core::value::Value, pagination::cursor::Cursor};
 
@@ -236,11 +235,12 @@ mod tests {
             pk_col: "id".to_string(),
             id: 100,
         };
+        let start = OffsetStrategyFactory::from_cursor(&cursor);
 
         let ast = builder
             .select(vec![ident("id"), ident("name")])
             .from(table("users"), None)
-            .paginate(&cursor, 50)
+            .paginate(start, &cursor, 50)
             .build();
 
         // Check limit
@@ -269,11 +269,12 @@ mod tests {
         let builder = SelectBuilder::new();
         // Cursor::None means first page
         let cursor = Cursor::Default { offset: 0 };
+        let start = OffsetStrategyFactory::from_cursor(&cursor);
 
         let ast = builder
             .select(vec![ident("id"), ident("name")])
             .from(table("users"), None)
-            .paginate(&cursor, 50)
+            .paginate(start, &cursor, 50)
             .build();
 
         // Check limit
@@ -292,6 +293,7 @@ mod tests {
             ts: 123456789,
             id: 42,
         };
+        let start = OffsetStrategyFactory::from_cursor(&cursor);
 
         let original_where = Expr::BinaryOp(Box::new(BinaryOp {
             left: ident("status"),
@@ -303,7 +305,7 @@ mod tests {
             .select(vec![ident("id")])
             .from(table("posts"), None)
             .where_clause(original_where.clone())
-            .paginate(&cursor, 25)
+            .paginate(start, &cursor, 25)
             .build();
 
         // Check limit

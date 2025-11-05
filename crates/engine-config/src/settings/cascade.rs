@@ -16,7 +16,7 @@ use engine_core::{
         source::{DataSource, Source},
     },
     context::item::ItemContext,
-    migration_state::MigrationState,
+    migration_state::MigrationSettings,
 };
 use futures::lock::Mutex;
 use model::transform::mapping::EntityMapping;
@@ -48,10 +48,10 @@ impl MigrationSetting for CascadeSchemaSetting {
         // Handle destination metadata
         self.apply_destination().await?;
 
-        // Set the cascade flag to global state
+        // Set the cascade flag to global settings
         {
-            let mut state = self.context.state.lock().await;
-            state.set_cascade(true);
+            let mut settings = self.context.settings.clone();
+            settings.set_cascade(true);
         }
 
         info!("Cascade schema setting applied");
@@ -64,11 +64,11 @@ impl CascadeSchemaSetting {
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
-        state: &Arc<Mutex<MigrationState>>,
+        settings: MigrationSettings,
         dry_run_report: &Arc<Mutex<Option<DryRunReport>>>,
     ) -> Self {
         Self {
-            context: SchemaSettingContext::new(src, dest, mapping, state, dry_run_report).await,
+            context: SchemaSettingContext::new(src, dest, mapping, settings, dry_run_report).await,
         }
     }
 

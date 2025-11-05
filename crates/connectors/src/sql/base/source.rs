@@ -1,9 +1,6 @@
 use crate::sql::base::{metadata::provider::MetadataHelper, requests::FetchRowsRequest};
 use async_trait::async_trait;
-use model::{
-    pagination::{cursor::Cursor, page::FetchResult},
-    records::row::RowData,
-};
+use model::pagination::{cursor::Cursor, page::FetchResult};
 
 #[async_trait]
 pub trait DbDataSource: MetadataHelper + Send + Sync {

@@ -12,7 +12,7 @@ use connectors::{
 use engine_core::{
     connectors::{destination::Destination, source::Source},
     context::item::ItemContext,
-    migration_state::MigrationState,
+    migration_state::MigrationSettings,
     schema::{
         types::{ExpressionWrapper, TypeInferencer},
         utils::create_column_def,
@@ -59,8 +59,8 @@ impl MigrationSetting for CreateMissingColumnsSetting {
             .await?;
 
         {
-            let mut state = self.context.state.lock().await;
-            state.set_create_missing_columns(true);
+            let mut settings = self.context.settings.clone();
+            settings.set_create_missing_columns(true);
         }
 
         Ok(())
@@ -134,11 +134,11 @@ impl CreateMissingColumnsSetting {
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
-        state: &Arc<Mutex<MigrationState>>,
+        settings: MigrationSettings,
         dry_run_report: &Arc<Mutex<Option<DryRunReport>>>,
     ) -> Self {
         Self {
-            context: SchemaSettingContext::new(src, dest, mapping, state, dry_run_report).await,
+            context: SchemaSettingContext::new(src, dest, mapping, settings, dry_run_report).await,
         }
     }
 }

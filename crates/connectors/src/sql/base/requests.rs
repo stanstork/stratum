@@ -1,7 +1,8 @@
 use crate::sql::base::{filter::SqlFilter, join::clause::JoinClause, query::select::SelectField};
 use model::pagination::cursor::Cursor;
+use planner::query::offsets::{DefaultOffset, OffsetStrategy};
+use std::sync::Arc;
 
-#[derive(Debug)]
 pub struct FetchRowsRequest {
     pub table: String,
     pub alias: Option<String>,
@@ -10,6 +11,7 @@ pub struct FetchRowsRequest {
     pub filter: Option<SqlFilter>,
     pub limit: usize,
     pub cursor: Cursor,
+    pub strategy: Arc<dyn OffsetStrategy>,
 }
 
 pub struct FetchRowsRequestBuilder {
@@ -20,6 +22,7 @@ pub struct FetchRowsRequestBuilder {
     filter: Option<SqlFilter>,
     limit: usize,
     cursor: Cursor,
+    strategy: Arc<dyn OffsetStrategy>,
 }
 
 impl FetchRowsRequestBuilder {
@@ -32,6 +35,7 @@ impl FetchRowsRequestBuilder {
             filter: None,
             limit: 0,
             cursor: Cursor::Default { offset: 0 },
+            strategy: Arc::new(DefaultOffset { offset: 0 }),
         }
     }
 
@@ -65,6 +69,11 @@ impl FetchRowsRequestBuilder {
         self
     }
 
+    pub fn strategy(mut self, strategy: Arc<dyn OffsetStrategy>) -> Self {
+        self.strategy = strategy;
+        self
+    }
+
     pub fn build(self) -> FetchRowsRequest {
         FetchRowsRequest {
             table: self.table,
@@ -74,6 +83,7 @@ impl FetchRowsRequestBuilder {
             filter: self.filter,
             limit: self.limit,
             cursor: self.cursor,
+            strategy: self.strategy,
         }
     }
 }

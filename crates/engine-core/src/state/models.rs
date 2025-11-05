@@ -15,10 +15,14 @@ pub struct Checkpoint {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum WallEntry {
+pub enum WalEntry {
     RunStart {
         run_id: String,
-        spec_id: String,
+        plan_hash: String,
+    },
+    ItemStart {
+        run_id: String,
+        item_id: String,
     },
     BatchBegin {
         run_id: String,
@@ -39,16 +43,24 @@ pub enum WallEntry {
     RunDone {
         run_id: String,
     },
+    Heartbeat {
+        run_id: String,
+        item_id: String,
+        part_id: String,
+        at: DateTime<Utc>,
+    },
 }
 
-impl WallEntry {
+impl WalEntry {
     pub fn run_id(&self) -> &str {
         match self {
-            WallEntry::RunStart { run_id, .. } => run_id,
-            WallEntry::BatchBegin { run_id, .. } => run_id,
-            WallEntry::BatchCommit { run_id, .. } => run_id,
-            WallEntry::ItemDone { run_id, .. } => run_id,
-            WallEntry::RunDone { run_id } => run_id,
+            WalEntry::RunStart { run_id, .. } => run_id,
+            WalEntry::BatchBegin { run_id, .. } => run_id,
+            WalEntry::BatchCommit { run_id, .. } => run_id,
+            WalEntry::ItemDone { run_id, .. } => run_id,
+            WalEntry::RunDone { run_id } => run_id,
+            WalEntry::ItemStart { run_id, .. } => run_id,
+            WalEntry::Heartbeat { run_id, .. } => run_id,
         }
     }
 }

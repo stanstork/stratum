@@ -11,10 +11,11 @@ use async_trait::async_trait;
 use engine_config::report::dry_run::DryRunReport;
 use engine_core::context::item::ItemContext;
 use futures::lock::Mutex;
-use model::transform::mapping::EntityMapping;
+use model::{records::batch::Batch, transform::mapping::EntityMapping};
 use smql_syntax::ast::setting::Settings;
 use std::sync::Arc;
-use tokio::sync::watch::Sender;
+use tokio::sync::{mpsc, watch::Sender};
+use tokio_util::sync::CancellationToken;
 
 pub mod live;
 pub mod validation;
@@ -45,49 +46,11 @@ pub trait DataProducer {
 pub async fn create_producer(
     ctx: &Arc<Mutex<ItemContext>>,
     shutdown_tx: Sender<bool>,
+    batch_tx: mpsc::Sender<Batch>,
     settings: &Settings,
+    cancel: CancellationToken,
     report: &Arc<Mutex<Option<DryRunReport>>>,
 ) -> Box<dyn DataProducer + Send> {
-    let (state, source, destination, buffer, mapping) = {
-        let c = ctx.lock().await;
-        (
-            c.state.clone(),
-            c.source.clone(),
-            c.destination.clone(),
-            Arc::clone(&c.buffer),
-            c.mapping.clone(),
-        )
-    };
-
-    let (is_dry_run, batch_size) = {
-        let st = state.lock().await;
-        (st.is_dry_run(), st.batch_size())
-    };
-
-    let pipeline = pipeline_for_mapping(&mapping);
-
-    if is_dry_run {
-        let report = report
-            .lock()
-            .await
-            .as_ref()
-            .cloned()
-            .expect("Dry run report should be initialized in dry run mode");
-        Box::new(ValidationProducer::new(
-            source,
-            destination,
-            pipeline,
-            mapping,
-            settings.clone(),
-            Arc::new(Mutex::new(report)),
-        ))
-    } else {
-        Box::new(LiveProducer::new(
-            buffer,
-            source,
-            pipeline,
-            shutdown_tx,
-            batch_size,
-        ))
-    }
+    let live_prod = LiveProducer::new(ctx, shutdown_tx, batch_tx, settings, cancel).await;
+    Box::new(live_prod)
 }

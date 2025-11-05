@@ -3,8 +3,8 @@ use crate::{
         destination::{DataDestination, Destination},
         source::{DataSource, Source},
     },
-    migration_state::MigrationState,
-    state::buffer::SledBuffer,
+    migration_state::MigrationSettings,
+    state::sled_store::SledStateStore,
 };
 use connectors::{
     error::AdapterError,
@@ -15,52 +15,48 @@ use connectors::{
     },
 };
 use futures::lock::Mutex;
-use model::transform::mapping::EntityMapping;
+use model::{pagination::cursor::Cursor, transform::mapping::EntityMapping};
+use planner::query::offsets::OffsetStrategy;
 use smql_syntax::ast::connection::DataFormat;
 use std::{future::Future, sync::Arc};
 use tracing::info;
 
 /// Represents the context for a single item in the migration process.
 pub struct ItemContext {
-    /// Shared migration state used for coordination and progress tracking.
-    pub state: Arc<Mutex<MigrationState>>,
-
-    /// Input data source (e.g., databases, files).
+    pub run_id: String,
+    pub item_id: String,
     pub source: Source,
-
-    /// Output data destination (e.g., databases, files).
     pub destination: Destination,
-
-    /// Temporary storage for intermediate migration data
-    ///
-    /// This buffer is backed by Sled (a high-performance embedded key-value store)
-    /// and helps facilitate efficient data transfer between sources and destinations.
-    pub buffer: Arc<SledBuffer>,
-
-    /// Mapping of entity names between source and destination.
     pub mapping: EntityMapping,
+    pub state: Arc<SledStateStore>,
+    pub offset_strategy: Arc<dyn OffsetStrategy>,
+    pub cursor: Cursor,
+    pub settings: MigrationSettings,
 }
 
 impl ItemContext {
     /// Initializes a new `ItemContext` with the provided source, destination, and mapping.
     pub fn new(
+        run_id: String,
+        item_id: String,
         source: Source,
         destination: Destination,
         mapping: EntityMapping,
-        state: MigrationState,
+        state: Arc<SledStateStore>,
+        offset_strategy: Arc<dyn OffsetStrategy>,
+        cursor: Cursor,
+        settings: MigrationSettings,
     ) -> Self {
-        let state = Arc::new(Mutex::new(state));
-        let buffer = Arc::new(SledBuffer::new(&format!(
-            "migration_buffer_{}",
-            source.name
-        )));
-
         ItemContext {
-            state,
+            run_id,
+            item_id,
             source,
             destination,
-            buffer,
             mapping,
+            state,
+            offset_strategy,
+            cursor,
+            settings,
         }
     }
 
@@ -101,11 +97,6 @@ impl ItemContext {
         Self::set_meta(name, db, fetch_meta_fn).await?;
 
         Ok(())
-    }
-
-    pub async fn debug_state(&self) {
-        let state = self.state.lock().await;
-        info!("State: {:#?}", state);
     }
 
     pub fn sql_databases() -> DataFormat {

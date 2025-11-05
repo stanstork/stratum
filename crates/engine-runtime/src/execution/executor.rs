@@ -12,15 +12,17 @@ use engine_config::report::{
     summary::SummaryReport,
 };
 use engine_core::{
+    connectors::{destination::Destination, source::Source},
     context::{global::GlobalContext, item::ItemContext},
-    migration_state::MigrationState,
-    state::sled_store::SledStateStore,
+    migration_state::MigrationSettings,
+    state::{StateStore, models::WalEntry, sled_store::SledStateStore},
 };
 use futures::lock::Mutex;
-use model::transform::mapping::EntityMapping;
-use planner::plan::MigrationPlan;
+use model::{pagination::cursor::Cursor, transform::mapping::EntityMapping};
+use planner::{plan::MigrationPlan, query::offsets::OffsetStrategyFactory};
 use smql_syntax::ast::migrate::MigrateItem;
 use std::{collections::HashMap, sync::Arc};
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 pub async fn run(
@@ -53,10 +55,19 @@ impl MigrationExecutor {
 
     async fn execute(self) -> Result<HashMap<String, SummaryReport>, MigrationError> {
         info!("Running migration v2");
-        let mut report = HashMap::new();
+        info!("Migration run ID: {}", self.global_ctx.run_id());
 
-        for mi in self.plan.migration.migrate_items.iter() {
-            let summary = self.run_item(mi).await?;
+        self.global_ctx
+            .state
+            .append_wal(&WalEntry::RunStart {
+                run_id: self.global_ctx.run_id(),
+                plan_hash: self.plan.hash(),
+            })
+            .await?;
+
+        let mut report = HashMap::new();
+        for (idx, mi) in self.plan.migration.migrate_items.iter().enumerate() {
+            let summary = self.run_item(idx, mi).await?;
             report.insert(mi.destination.name().clone(), summary);
         }
 
@@ -64,35 +75,59 @@ impl MigrationExecutor {
         Ok(report)
     }
 
-    async fn run_item(&self, mi: &MigrateItem) -> Result<SummaryReport, MigrationError> {
+    async fn run_item(
+        &self,
+        idx: usize,
+        mi: &MigrateItem,
+    ) -> Result<SummaryReport, MigrationError> {
         info!("Starting migration item {}", mi.destination.name());
 
+        let run_id = self.global_ctx.run_id();
+        let item_id = Self::make_item_id(&self.plan.hash(), mi, idx);
+
+        let offset_strategy = OffsetStrategyFactory::from_smql(&mi.offset);
+        let cursor = Cursor::None;
+
         let mapping = EntityMapping::new(mi);
-        let source =
-            factory::create_source(&self.global_ctx, &self.plan.connections, &mapping, mi).await?;
+        let source = factory::create_source(
+            &self.global_ctx,
+            &self.plan.connections,
+            &mapping,
+            mi,
+            offset_strategy.clone(),
+            cursor.clone(),
+        )
+        .await?;
         let destination =
             factory::create_destination(&self.global_ctx, &self.plan.connections, mi).await?;
 
-        let dry_run_report = if self.dry_run {
-            Arc::new(Mutex::new(Some(DryRunReport::new(DryRunParams {
-                source: source_endpoint(&source),
-                destination: dest_endpoint(&destination),
-                mapping: &mapping,
-                config_hash: &self.plan.hash(),
-                copy_columns: mi.settings.copy_columns,
-            }))))
-        } else {
-            Arc::new(Mutex::new(None))
-        };
+        let state = self.global_ctx.state.clone();
+        let settings = MigrationSettings::new(self.dry_run);
+        let mut item_ctx = ItemContext::new(
+            run_id.clone(),
+            item_id.clone(),
+            source.clone(),
+            destination.clone(),
+            mapping.clone(),
+            state.clone(),
+            offset_strategy.clone(),
+            cursor,
+            settings.clone(),
+        );
 
-        let state = MigrationState::new(self.dry_run);
-        let mut item_ctx = ItemContext::new(source, destination, mapping.clone(), state);
+        item_ctx
+            .state
+            .append_wal(&WalEntry::ItemStart { run_id, item_id })
+            .await?;
+
+        let dry_run_report = self.dry_run_report(&source, &destination, &mapping, mi);
 
         settings::apply_all(&mut item_ctx, &mi.settings, &dry_run_report).await?;
         metadata::load(&mut item_ctx).await?;
 
         let ctx = Arc::new(Mutex::new(item_ctx));
-        workers::spawn(ctx, &mi.settings, &dry_run_report).await?;
+        let cancel = CancellationToken::new();
+        workers::spawn(ctx, &mi.settings, cancel, &dry_run_report).await?;
 
         info!("Migration item {} completed", mi.destination.name());
 
@@ -100,5 +135,35 @@ impl MigrationExecutor {
         Ok(SummaryReport {
             dry_run_report: final_report,
         })
+    }
+
+    fn dry_run_report(
+        &self,
+        source: &Source,
+        destination: &Destination,
+        mapping: &EntityMapping,
+        mi: &MigrateItem,
+    ) -> Arc<Mutex<Option<DryRunReport>>> {
+        if self.dry_run {
+            return Arc::new(Mutex::new(Some(DryRunReport::new(DryRunParams {
+                source: source_endpoint(&source),
+                destination: dest_endpoint(&destination),
+                mapping: &mapping,
+                config_hash: &self.plan.hash(),
+                copy_columns: mi.settings.copy_columns,
+            }))));
+        }
+        Arc::new(Mutex::new(None))
+    }
+
+    fn make_item_id(plan_hash: &str, mi: &MigrateItem, idx: usize) -> String {
+        // Stable & human-ish: plan-hash + item-index + dest-name
+        let mut h = blake3::Hasher::new();
+        h.update(plan_hash.as_bytes());
+        h.update(b":");
+        h.update(idx.to_string().as_bytes());
+        h.update(b":");
+        h.update(mi.destination.name().as_bytes());
+        format!("itm-{}", &h.finalize().to_hex()[..16])
     }
 }

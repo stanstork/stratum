@@ -1,7 +1,7 @@
 use smql_syntax::ast::setting::CopyColumns;
 
 #[derive(Debug, Clone)]
-pub struct MigrationState {
+pub struct MigrationSettings {
     batch_size: usize,
     cascade_schema: bool,
     copy_columns: CopyColumns,
@@ -12,15 +12,15 @@ pub struct MigrationState {
     is_dry_run: bool,
 }
 
-impl Default for MigrationState {
+impl Default for MigrationSettings {
     fn default() -> Self {
         Self::new(false)
     }
 }
 
-impl MigrationState {
+impl MigrationSettings {
     pub fn new(dry_run: bool) -> Self {
-        MigrationState {
+        MigrationSettings {
             batch_size: 100,
             cascade_schema: false,
             copy_columns: CopyColumns::All,
