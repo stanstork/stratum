@@ -14,10 +14,11 @@ use engine_core::{
 };
 use futures::{StreamExt, lock::Mutex, stream};
 use model::{
-    pagination::cursor::Cursor,
+    pagination::{cursor::Cursor, page::FetchResult},
     records::{
         batch::{Batch, manifest_for},
         record::Record,
+        row::RowData,
     },
 };
 use planner::query::offsets::OffsetStrategy;
@@ -27,30 +28,62 @@ use tokio::sync::{mpsc, watch::Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
+#[derive(Clone)]
+struct Identity {
+    run_id: String,
+    item_id: String,
+    part_id: String,
+}
+
+impl Identity {
+    fn new(run_id: String, item_id: String, part_id: String) -> Self {
+        Self {
+            run_id,
+            item_id,
+            part_id,
+        }
+    }
+
+    fn run_id(&self) -> &str {
+        &self.run_id
+    }
+
+    fn item_id(&self) -> &str {
+        &self.item_id
+    }
+
+    fn part_id(&self) -> &str {
+        &self.part_id
+    }
+}
+
+enum BatchFetchResult {
+    Batch(FetchResult),
+    AdvanceOnly(Cursor),
+    Finished,
+}
+
 pub struct LiveProducer {
-    // Identity
-    pub run_id: String,
-    pub item_id: String,
-    pub part_id: String,
+    identity: Identity,
 
     // Strategy & state
-    pub strategy: Arc<dyn OffsetStrategy>,
+    pub offset: Arc<dyn OffsetStrategy>,
     pub cursor: Cursor,
-    pub state_store: Arc<dyn StateStore>,
+    pub state: Arc<dyn StateStore>,
 
     // Transform
-    pub pipeline: TransformPipeline,
+    pub transform_pipeline: TransformPipeline,
     pub transform_concurrency: usize,
 
     // Control
     pub cancel: CancellationToken,
-    pub heartbeat_every: usize,
+    pub heartbeat_interval: usize,
 
     // IO
-    pub src: Source,
-    pub tx: Sender<bool>,
+    pub source: Source,
+    pub shutdown_tx: Sender<bool>,
     pub batch_tx: mpsc::Sender<Batch>,
-    pub batch_rows: usize,
+    pub batch_size: usize,
 }
 
 impl LiveProducer {
@@ -61,7 +94,7 @@ impl LiveProducer {
         settings: &Settings,
         cancel: CancellationToken,
     ) -> Self {
-        let (run_id, item_id, part_id, strategy, cursor, state, source, mapping) = {
+        let (run_id, item_id, part_id, offset, cursor, state, source, mapping) = {
             let c = ctx.lock().await;
             (
                 c.run_id.clone(),
@@ -77,46 +110,166 @@ impl LiveProducer {
         let pipeline = pipeline_for_mapping(&mapping);
 
         LiveProducer {
-            run_id,
-            item_id,
-            part_id,
-            strategy,
+            identity: Identity::new(run_id, item_id, part_id),
+            offset,
             cursor,
-            state_store: state,
-            pipeline,
+            state,
+            transform_pipeline: pipeline,
             transform_concurrency: 8, // TODO: make configurable
             cancel,
-            heartbeat_every: 10, // TODO: make configurable,
-            src: source,
-            tx: shutdown_tx,
+            heartbeat_interval: 10, // TODO: make configurable,
+            source,
+            shutdown_tx,
             batch_tx,
-            batch_rows: settings.batch_size,
+            batch_size: settings.batch_size,
         }
     }
 
     fn make_batch_id(&self, next: &Cursor) -> String {
         let mut h = blake3::Hasher::new();
-        h.update(self.run_id.as_bytes());
-        h.update(self.item_id.as_bytes());
-        h.update(self.part_id.as_bytes());
+        h.update(self.identity.run_id.as_bytes());
+        h.update(self.identity.item_id.as_bytes());
+        h.update(self.identity.part_id.as_bytes());
         h.update(format!("{next:?}").as_bytes());
         h.finalize().to_hex().to_string()
+    }
+
+    async fn starting_cursor(&self) -> Cursor {
+        self.state
+            .load_checkpoint(
+                self.identity.run_id(),
+                self.identity.item_id(),
+                self.identity.part_id(),
+            )
+            .await
+            .ok()
+            .flatten()
+            .map(|cp| cp.src_offset)
+            .unwrap_or(self.cursor.clone())
+    }
+
+    async fn fetch_next_batch(&self, cursor: &Cursor) -> Result<BatchFetchResult, ProducerError> {
+        let res = self
+            .source
+            .fetch_data(self.batch_size, cursor.clone())
+            .await?;
+
+        if res.reached_end && res.row_count == 0 {
+            info!("No more records to fetch. Terminating producer.");
+            return Ok(BatchFetchResult::Finished);
+        }
+
+        if res.row_count == 0 {
+            if let Some(next) = res.next_cursor {
+                return Ok(BatchFetchResult::AdvanceOnly(next));
+            }
+            return Ok(BatchFetchResult::Finished);
+        }
+
+        Ok(BatchFetchResult::Batch(res))
+    }
+
+    fn next_cursor(&self, res: &FetchResult, current: &Cursor) -> Option<Cursor> {
+        match res.next_cursor.clone() {
+            Some(next) => Some(next),
+            None if res.reached_end => Some(current.clone()),
+            None => {
+                warn!("Batch had rows but no next_cursor and not reached_end; skipping.");
+                None
+            }
+        }
+    }
+
+    async fn record_batch_start(
+        &self,
+        batch_id: &str,
+        next: &Cursor,
+        row_count: usize,
+    ) -> Result<(), ProducerError> {
+        self.state
+            .append_wal(&WalEntry::BatchBegin {
+                run_id: self.identity.run_id.clone(),
+                item_id: self.identity.item_id.clone(),
+                part_id: self.identity.part_id.clone(),
+                batch_id: batch_id.to_string(),
+            })
+            .await
+            .map_err(|e| ProducerError::StateStore(e.to_string()))?;
+
+        self.state
+            .save_checkpoint(&Checkpoint {
+                run_id: self.identity.run_id.clone(),
+                item_id: self.identity.item_id.clone(),
+                part_id: self.identity.part_id.clone(),
+                stage: "read".to_string(),
+                src_offset: next.clone(),
+                batch_id: batch_id.to_string(),
+                rows_done: row_count as u64,
+                updated_at: chrono::Utc::now(),
+            })
+            .await
+            .map_err(|e| ProducerError::StateStore(e.to_string()))
+    }
+
+    async fn transform(&self, rows: Vec<RowData>) -> Vec<Record> {
+        stream::iter(rows.into_iter().map(|row| {
+            let transform_pipeline = &self.transform_pipeline;
+            async move {
+                let record = Record::RowData(row);
+                transform_pipeline.apply(&record)
+            }
+        }))
+        .buffer_unordered(self.transform_concurrency)
+        .collect()
+        .await
+    }
+
+    async fn send_batch(
+        &self,
+        batch_id: String,
+        records: Vec<Record>,
+        next: Cursor,
+    ) -> Result<(), ProducerError> {
+        let manifest = manifest_for(&records);
+        let batch = Batch {
+            id: batch_id,
+            rows: records,
+            next,
+            manifest,
+            ts: chrono::Utc::now(),
+        };
+
+        self.batch_tx
+            .send(batch)
+            .await
+            .map_err(|e| ProducerError::ChannelSend(e.to_string()))
+    }
+
+    async fn heartbeat(&self, batches: usize) {
+        if self.heartbeat_interval == 0 || batches % self.heartbeat_interval != 0 {
+            return;
+        }
+
+        let _ = self
+            .state
+            .append_wal(&WalEntry::Heartbeat {
+                run_id: self.identity.run_id.clone(),
+                item_id: self.identity.item_id.clone(),
+                part_id: self.identity.part_id.clone(),
+                at: chrono::Utc::now(),
+            })
+            .await;
+    }
+
+    fn notify_shutdown(&self) {
+        let _ = self.shutdown_tx.send(true);
     }
 }
 
 #[async_trait]
 impl DataProducer for LiveProducer {
     async fn run(&mut self) -> Result<usize, ProducerError> {
-        // Start from checkpoint if present
-        let mut cur = self
-            .state_store
-            .load_checkpoint(&self.run_id, &self.item_id, &self.part_id)
-            .await
-            .ok()
-            .flatten()
-            .map(|cp| cp.src_offset)
-            .unwrap_or(self.cursor.clone());
-
+        let mut cur = self.starting_cursor().await;
         let mut batches = 0usize;
 
         loop {
@@ -125,105 +278,40 @@ impl DataProducer for LiveProducer {
                 break;
             }
 
-            let res = self.src.fetch_data(self.batch_rows, cur.clone()).await?;
-            if res.reached_end && res.row_count == 0 {
-                info!("No more records to fetch. Terminating producer.");
-                break;
-            }
-
-            if res.row_count == 0 {
-                // Defensive: skip empty batch but advance cursor if provided
-                if let Some(next) = res.next_cursor {
+            match self.fetch_next_batch(&cur).await? {
+                BatchFetchResult::Finished => break,
+                BatchFetchResult::AdvanceOnly(next) => {
                     cur = next;
                     continue;
                 }
-                // No rows and no next cursor: treat as end
-                break;
-            }
+                BatchFetchResult::Batch(res) => {
+                    let next = match self.next_cursor(&res, &cur) {
+                        Some(cursor) => cursor,
+                        None => break,
+                    };
 
-            let next = match res.next_cursor {
-                Some(n) => n,
-                None if res.reached_end => cur.clone(), // last batch; 'next' equals current end
-                None => {
-                    warn!("Batch had rows but no next_cursor and not reached_end; skipping.");
-                    break;
+                    let batch_id = self.make_batch_id(&next);
+                    info!(
+                        batch_no = batches + 1,
+                        batch_id = %batch_id,
+                        rows = res.row_count,
+                        "Fetched batch."
+                    );
+
+                    self.record_batch_start(&batch_id, &next, res.row_count)
+                        .await?;
+
+                    let records = self.transform(res.rows).await;
+                    self.send_batch(batch_id, records, next.clone()).await?;
+
+                    cur = next;
+                    batches += 1;
+                    self.heartbeat(batches).await;
                 }
-            };
-
-            let batch_id = self.make_batch_id(&next);
-            info!(batch_no = batches + 1, batch_id = %batch_id, rows = res.row_count, "Fetched batch.");
-
-            // WAL + checkpoint BEFORE enqueue (stage = read)
-            self.state_store
-                .append_wal(&WalEntry::BatchBegin {
-                    run_id: self.run_id.clone(),
-                    item_id: self.item_id.clone(),
-                    part_id: self.part_id.clone(),
-                    batch_id: batch_id.clone(),
-                })
-                .await
-                .map_err(|e| ProducerError::StateStore(e.to_string()))?;
-
-            self.state_store
-                .save_checkpoint(&Checkpoint {
-                    run_id: self.run_id.clone(),
-                    item_id: self.item_id.clone(),
-                    part_id: self.part_id.clone(),
-                    stage: "read".to_string(),
-                    src_offset: next.clone(),
-                    batch_id: batch_id.clone(),
-                    rows_done: res.row_count as u64,
-                    updated_at: chrono::Utc::now(),
-                })
-                .await
-                .map_err(|e| ProducerError::StateStore(e.to_string()))?;
-
-            // Transform with bounded concurrency
-            let records: Vec<Record> = stream::iter(res.rows.into_iter().map(|record| {
-                let p = &self.pipeline;
-                async move { p.apply(&Record::RowData(record)) }
-            }))
-            .buffer_unordered(self.transform_concurrency)
-            .collect()
-            .await;
-
-            // Manifest (counts + checksum) for validation/ops
-            let manifest = manifest_for(&records);
-
-            // Enqueue batch (applies backpressure if consumer lags)
-            let batch = Batch {
-                id: batch_id,
-                rows: records,
-                next: next.clone(),
-                manifest,
-                ts: chrono::Utc::now(),
-            };
-
-            self.batch_tx
-                .send(batch)
-                .await
-                .map_err(|e| ProducerError::ChannelSend(e.to_string()))?;
-
-            // Advance and heartbeat
-            cur = next;
-            batches += 1;
-
-            if batches % self.heartbeat_every == 0 {
-                // lightweight liveness ping
-                let _ = self
-                    .state_store
-                    .append_wal(&WalEntry::Heartbeat {
-                        run_id: self.run_id.clone(),
-                        item_id: self.item_id.clone(),
-                        part_id: self.part_id.clone(),
-                        at: chrono::Utc::now(),
-                    })
-                    .await;
             }
         }
 
-        // Try to notify consumer; do not crash if the receiver is gone.
-        let _ = self.tx.send(true);
+        self.notify_shutdown();
 
         Ok(batches) // Return the number of batches processed
     }
