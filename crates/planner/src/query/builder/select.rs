@@ -133,6 +133,7 @@ mod tests {
         ident_q,
         offsets::OffsetStrategyFactory,
     };
+    use chrono::{TimeZone, Utc};
     use model::{
         core::value::Value,
         pagination::cursor::{Cursor, QualCol},
@@ -312,7 +313,7 @@ mod tests {
                 table: "posts".to_string(),
                 column: "id".to_string(),
             },
-            ts: 123456789,
+            ts: Utc.timestamp_micros(13_3456789).unwrap(),
             id: 42,
         };
         let start = OffsetStrategyFactory::from_cursor(&cursor);
@@ -378,7 +379,7 @@ mod tests {
                     column: "created_at".to_string(),
                 }),
                 op: BinaryOperator::Gt,
-                right: value(Value::Int(123456789)),
+                right: value(Value::Timestamp(Utc.timestamp_micros(13_3456789).unwrap())),
             }))
         );
 
@@ -397,7 +398,7 @@ mod tests {
                     column: "created_at".to_string(),
                 }),
                 op: BinaryOperator::Eq,
-                right: value(Value::Int(123456789)),
+                right: value(Value::Timestamp(Utc.timestamp_micros(13_3456789).unwrap())),
             }))
         );
         assert_eq!(

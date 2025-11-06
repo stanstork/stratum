@@ -4,7 +4,7 @@ use crate::query::{
         expr::{BinaryOp, BinaryOperator, Expr},
     },
     builder::select::{FromState, SelectBuilder},
-    ident, ident_q, value,
+    ident_q, value,
 };
 use async_trait::async_trait;
 use model::{
@@ -15,7 +15,7 @@ use model::{
     },
     records::row::RowData,
 };
-use std::sync::Arc;
+use std::{convert::TryFrom, sync::Arc};
 
 #[async_trait]
 pub trait OffsetStrategy: Send + Sync {
@@ -53,6 +53,59 @@ pub struct DefaultOffset {
     pub offset: usize,
 }
 
+/// Helper for constructing a binary expression.
+fn binary_expr(left: Expr, op: BinaryOperator, right: Expr) -> Expr {
+    Expr::BinaryOp(Box::new(BinaryOp { left, op, right }))
+}
+
+/// Helper for chaining a new predicate onto the existing WHERE clause.
+fn append_where(
+    mut builder: SelectBuilder<FromState>,
+    predicate: Expr,
+) -> SelectBuilder<FromState> {
+    let combined = match builder.ast.where_clause.take() {
+        Some(existing) => binary_expr(existing, BinaryOperator::And, predicate),
+        None => predicate,
+    };
+    builder.ast.where_clause = Some(combined);
+    builder
+}
+
+fn limit_expr(limit: usize) -> Expr {
+    value(Value::Uint(limit as u64))
+}
+
+fn offset_expr(offset: usize) -> Expr {
+    value(Value::Uint(offset as u64))
+}
+
+fn uint_literal(val: u64) -> Expr {
+    value(Value::Uint(val))
+}
+
+fn int_literal(val: i64) -> Expr {
+    value(Value::Int(val))
+}
+
+fn numeric_literal(val: i128) -> Expr {
+    if let Ok(casted) = i64::try_from(val) {
+        int_literal(casted)
+    } else if val >= 0 {
+        let casted =
+            u64::try_from(val).expect("numeric cursor value exceeds supported unsigned range");
+        uint_literal(casted)
+    } else {
+        panic!("numeric cursor value below supported signed range: {val}");
+    }
+}
+
+fn default_pk() -> QualCol {
+    QualCol {
+        table: "".to_string(),
+        column: "id".to_string(),
+    }
+}
+
 impl OffsetStrategy for PkOffset {
     fn apply_to_builder(
         &self,
@@ -63,31 +116,16 @@ impl OffsetStrategy for PkOffset {
         // Add WHERE clause based on cursor
         if let Cursor::Pk { pk_col, id } = cursor {
             // WHERE pk > ?
-            let where_cond = Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident_q(pk_col),
-                op: BinaryOperator::Gt,
-                right: value(Value::Uint(*id)),
-            }));
+            let where_cond = binary_expr(ident_q(pk_col), BinaryOperator::Gt, uint_literal(*id));
 
-            // Check if a WHERE clause already exists
-            if let Some(existing_where) = builder.ast.where_clause {
-                // If so, combine with AND
-                builder.ast.where_clause = Some(Expr::BinaryOp(Box::new(BinaryOp {
-                    left: existing_where,
-                    op: BinaryOperator::And,
-                    right: where_cond,
-                })));
-            } else {
-                // Otherwise, just set it
-                builder.ast.where_clause = Some(where_cond);
-            }
+            builder = append_where(builder, where_cond);
         }
 
         // Cursor::None => no WHERE (start from beginning)
 
         // ORDER BY pk ASC, LIMIT ?
         builder = builder.order_by(ident_q(&self.pk), Some(OrderDir::Asc));
-        builder = builder.limit(value(Value::Uint(limit as u64)));
+        builder = builder.limit(limit_expr(limit));
 
         builder
     }
@@ -130,63 +168,14 @@ impl OffsetStrategy for NumericOffset {
         cursor: &Cursor,
         limit: usize,
     ) -> SelectBuilder<FromState> {
-        // Add WHERE clause based on cursor
-        if let Cursor::CompositeTsPk { ts, id, .. } = cursor {
-            // WHERE (ts_col > ?) OR (ts_col = ? AND pk_col > ?)
-
-            // (col > ?)
-            let cond1 = Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident_q(&self.col),
-                op: BinaryOperator::Gt,
-                right: value(Value::Int(*ts)),
-            }));
-
-            // (col = ?)
-            let cond2_left = Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident_q(&self.col),
-                op: BinaryOperator::Eq,
-                right: value(Value::Int(*ts)),
-            }));
-
-            // (pk > ?)
-            let cond2_right = Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident_q(&self.pk),
-                op: BinaryOperator::Gt,
-                right: value(Value::Uint(*id)),
-            }));
-
-            // (col = ? AND pk > ?)
-            let cond2 = Expr::BinaryOp(Box::new(BinaryOp {
-                left: cond2_left,
-                op: BinaryOperator::And,
-                right: cond2_right,
-            }));
-
-            // (cond1) OR (cond2)
-            let where_cond = Expr::BinaryOp(Box::new(BinaryOp {
-                left: cond1,
-                op: BinaryOperator::Or,
-                right: cond2,
-            }));
-
-            // Combine with existing WHERE clause
-            if let Some(existing_where) = builder.ast.where_clause {
-                builder.ast.where_clause = Some(Expr::BinaryOp(Box::new(BinaryOp {
-                    left: existing_where,
-                    op: BinaryOperator::And,
-                    right: where_cond,
-                })));
-            } else {
-                builder.ast.where_clause = Some(where_cond);
-            }
+        if let Some(predicate) = self.where_clause(cursor) {
+            builder = append_where(builder, predicate);
         }
 
-        // Add ORDER BY
         builder = builder.order_by(ident_q(&self.col), Some(OrderDir::Asc));
         builder = builder.order_by(ident_q(&self.pk), Some(OrderDir::Asc));
 
-        // Add LIMIT
-        builder = builder.limit(value(Value::Uint(limit as u64)));
+        builder = builder.limit(limit_expr(limit));
 
         builder
     }
@@ -195,16 +184,7 @@ impl OffsetStrategy for NumericOffset {
         let num_v = row.get_value(&self.col.column);
         let pk_v = row.get_value(&self.pk.column);
 
-        let to_i128 = |v: &Value| -> Option<i128> {
-            match v {
-                Value::Int(i) => Some(*i as i128),
-                Value::Uint(u) => Some(*u as i128),
-                Value::Float(d) => Some(d.to_string().parse::<i128>().ok()?),
-                _ => None,
-            }
-        };
-
-        match (to_i128(&num_v), pk_v) {
+        match (extract_numeric_value(&num_v), pk_v) {
             (Some(val), Value::Uint(id)) => Cursor::CompositeNumPk {
                 num_col: self.col.clone(),
                 pk_col: self.pk.clone(),
@@ -223,6 +203,40 @@ impl OffsetStrategy for NumericOffset {
     }
 }
 
+impl NumericOffset {
+    fn where_clause(&self, cursor: &Cursor) -> Option<Expr> {
+        match cursor {
+            Cursor::CompositeNumPk {
+                num_col: _,
+                pk_col: _,
+                val,
+                id,
+            } => {
+                let gt_value = binary_expr(
+                    ident_q(&self.col),
+                    BinaryOperator::Gt,
+                    numeric_literal(*val),
+                );
+                let eq_value = binary_expr(
+                    ident_q(&self.col),
+                    BinaryOperator::Eq,
+                    numeric_literal(*val),
+                );
+                let pk_gt = binary_expr(ident_q(&self.pk), BinaryOperator::Gt, uint_literal(*id));
+                let tie_breaker = binary_expr(eq_value, BinaryOperator::And, pk_gt);
+
+                Some(binary_expr(gt_value, BinaryOperator::Or, tie_breaker))
+            }
+            Cursor::Numeric { val, .. } => Some(binary_expr(
+                ident_q(&self.col),
+                BinaryOperator::Gt,
+                numeric_literal(*val),
+            )),
+            _ => None,
+        }
+    }
+}
+
 impl OffsetStrategy for TimestampOffset {
     fn apply_to_builder(
         &self,
@@ -233,41 +247,21 @@ impl OffsetStrategy for TimestampOffset {
         // Add WHERE clause based on cursor
         if let Cursor::CompositeTsPk { ts, id, .. } = cursor {
             // WHERE (ts > ?) OR (ts = ? AND pk > ?)
-            let cond1 = Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident_q(&self.ts_col),
-                op: BinaryOperator::Gt,
-                right: value(Value::Int(*ts)),
-            }));
-            let cond2_left = Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident_q(&self.ts_col),
-                op: BinaryOperator::Eq,
-                right: value(Value::Int(*ts)),
-            }));
-            let cond2_right = Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident_q(&self.pk),
-                op: BinaryOperator::Gt,
-                right: value(Value::Uint(*id)),
-            }));
-            let cond2 = Expr::BinaryOp(Box::new(BinaryOp {
-                left: cond2_left,
-                op: BinaryOperator::And,
-                right: cond2_right,
-            }));
-            let where_cond = Expr::BinaryOp(Box::new(BinaryOp {
-                left: cond1,
-                op: BinaryOperator::Or,
-                right: cond2,
-            }));
+            let cond1 = binary_expr(
+                ident_q(&self.ts_col),
+                BinaryOperator::Gt,
+                value(Value::Timestamp(*ts)),
+            );
+            let cond2_left = binary_expr(
+                ident_q(&self.ts_col),
+                BinaryOperator::Eq,
+                value(Value::Timestamp(*ts)),
+            );
+            let cond2_right = binary_expr(ident_q(&self.pk), BinaryOperator::Gt, uint_literal(*id));
+            let cond2 = binary_expr(cond2_left, BinaryOperator::And, cond2_right);
+            let where_cond = binary_expr(cond1, BinaryOperator::Or, cond2);
 
-            if let Some(existing_where) = builder.ast.where_clause {
-                builder.ast.where_clause = Some(Expr::BinaryOp(Box::new(BinaryOp {
-                    left: existing_where,
-                    op: BinaryOperator::And,
-                    right: where_cond,
-                })));
-            } else {
-                builder.ast.where_clause = Some(where_cond);
-            }
+            builder = append_where(builder, where_cond);
         }
 
         // Add ORDER BY
@@ -275,7 +269,7 @@ impl OffsetStrategy for TimestampOffset {
         builder = builder.order_by(ident_q(&self.pk), Some(OrderDir::Asc));
 
         // Add LIMIT
-        builder = builder.limit(value(Value::Uint(limit as u64)));
+        builder = builder.limit(limit_expr(limit));
 
         builder
     }
@@ -284,9 +278,20 @@ impl OffsetStrategy for TimestampOffset {
         let ts_v = row.get_value(&self.ts_col.column);
         let pk_v = row.get_value(&self.pk.column);
 
+        println!(
+            "TimestampOffset next_cursor: ts_v={:?}, pk_v={:?}",
+            ts_v, pk_v
+        );
+
         // Expect ts is stored canonically as micros (i64) in RowData (after normalization).
         match (ts_v, pk_v) {
-            (Value::Int(ts), Value::Uint(id)) => Cursor::CompositeTsPk {
+            (Value::Timestamp(ts), Value::Int(id)) => Cursor::CompositeTsPk {
+                ts_col: self.ts_col.clone(),
+                pk_col: self.pk.clone(),
+                ts,
+                id: id as u64,
+            },
+            (Value::Timestamp(ts), Value::Uint(id)) => Cursor::CompositeTsPk {
                 ts_col: self.ts_col.clone(),
                 pk_col: self.pk.clone(),
                 ts,
@@ -315,10 +320,10 @@ impl OffsetStrategy for DefaultOffset {
         // Add offset based on cursor
         if let Cursor::Default { offset } = cursor {
             // OFFSET ?
-            builder = builder.offset(value(Value::Uint(*offset as u64)));
+            builder = builder.offset(offset_expr(*offset));
         }
         // Add LIMIT
-        builder = builder.limit(value(Value::Uint(limit as u64)));
+        builder = builder.limit(limit_expr(limit));
 
         builder
     }
@@ -341,7 +346,6 @@ impl OffsetStrategyFactory {
     /// Build a strategy from configuration.
     pub fn from_config(config: &OffsetConfig) -> Arc<dyn OffsetStrategy> {
         // If user didn't specify a cursor column -> default PK "id".
-        let default_pk = "id".to_string();
         let strategy = config
             .strategy
             .as_deref()
@@ -386,6 +390,8 @@ impl OffsetStrategyFactory {
                 Arc::new(TimestampOffset { ts_col, pk, tz })
             }
 
+            "default" => Arc::new(DefaultOffset { offset: 0 }),
+
             other => panic!("Unsupported offset strategy: {other}"),
         }
     }
@@ -399,10 +405,7 @@ impl OffsetStrategyFactory {
                 // Without a pk in the cursor, default tiebreaker to "id".
                 Arc::new(NumericOffset {
                     col: col.clone(),
-                    pk: QualCol {
-                        table: "".to_string(),
-                        column: "id".to_string(),
-                    },
+                    pk: default_pk(),
                 })
             }
 
@@ -415,10 +418,7 @@ impl OffsetStrategyFactory {
 
             Cursor::Timestamp { col, .. } => Arc::new(TimestampOffset {
                 ts_col: col.clone(),
-                pk: QualCol {
-                    table: "".to_string(),
-                    column: "id".to_string(),
-                },
+                pk: default_pk(),
                 tz: chrono_tz::UTC,
             }),
 
@@ -499,8 +499,23 @@ impl OffsetStrategyFactory {
             timezone,
         };
 
-        println!("OffsetConfig from SMQL: {:?}", config);
-
         Self::from_config(&config)
+    }
+}
+
+fn extract_numeric_value(val: &Value) -> Option<i128> {
+    match val {
+        Value::Int(i) => Some(*i as i128),
+        Value::Uint(u) => Some(*u as i128),
+        Value::Usize(u) => Some(*u as i128),
+        Value::Float(f) => {
+            if f.is_finite() {
+                Some(*f as i128)
+            } else {
+                None
+            }
+        }
+        Value::String(s) => s.parse::<i128>().ok(),
+        _ => None,
     }
 }
