@@ -130,9 +130,13 @@ mod tests {
             expr::{BinaryOp, BinaryOperator, Expr, Ident},
         },
         builder::select::SelectBuilder,
+        ident_q,
         offsets::OffsetStrategyFactory,
     };
-    use model::{core::value::Value, pagination::cursor::Cursor};
+    use model::{
+        core::value::Value,
+        pagination::cursor::{Cursor, QualCol},
+    };
 
     fn ident(name: &str) -> Expr {
         Expr::Identifier(Ident {
@@ -232,7 +236,10 @@ mod tests {
     fn test_build_with_pagination_pk() {
         let builder = SelectBuilder::new();
         let cursor = Cursor::Pk {
-            pk_col: "id".to_string(),
+            pk_col: QualCol {
+                table: "users".to_string(),
+                column: "id".to_string(),
+            },
             id: 100,
         };
         let start = OffsetStrategyFactory::from_cursor(&cursor);
@@ -248,7 +255,13 @@ mod tests {
 
         // Check order by
         assert_eq!(ast.order_by.len(), 1);
-        assert_eq!(ast.order_by[0].expr, ident("id"));
+        assert_eq!(
+            ast.order_by[0].expr,
+            ident_q(&QualCol {
+                table: "users".to_string(),
+                column: "id".to_string(),
+            })
+        );
         assert_eq!(ast.order_by[0].direction, Some(OrderDir::Asc));
 
         // Check where clause
@@ -257,7 +270,10 @@ mod tests {
         assert_eq!(
             where_clause,
             Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident("id"),
+                left: ident_q(&QualCol {
+                    table: "users".to_string(),
+                    column: "id".to_string(),
+                }),
                 op: BinaryOperator::Gt,
                 right: value(Value::Uint(100)),
             }))
@@ -288,8 +304,14 @@ mod tests {
     fn test_build_pagination_with_existing_where() {
         let builder = SelectBuilder::new();
         let cursor = Cursor::CompositeTsPk {
-            ts_col: "created_at".to_string(),
-            pk_col: "id".to_string(),
+            ts_col: QualCol {
+                table: "posts".to_string(),
+                column: "created_at".to_string(),
+            },
+            pk_col: QualCol {
+                table: "posts".to_string(),
+                column: "id".to_string(),
+            },
             ts: 123456789,
             id: 42,
         };
@@ -313,8 +335,20 @@ mod tests {
 
         // Check order by
         assert_eq!(ast.order_by.len(), 2);
-        assert_eq!(ast.order_by[0].expr, ident("created_at"));
-        assert_eq!(ast.order_by[1].expr, ident("id"));
+        assert_eq!(
+            ast.order_by[0].expr,
+            ident_q(&QualCol {
+                table: "posts".to_string(),
+                column: "created_at".to_string(),
+            })
+        );
+        assert_eq!(
+            ast.order_by[1].expr,
+            ident_q(&QualCol {
+                table: "posts".to_string(),
+                column: "id".to_string(),
+            })
+        );
 
         // Check where clause
         // Expected: (status = 'active') AND ((created_at > 123...) OR (created_at = 123... AND id > 42))
@@ -339,7 +373,10 @@ mod tests {
         assert_eq!(
             cond1,
             Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident("created_at"),
+                left: ident_q(&QualCol {
+                    table: "posts".to_string(),
+                    column: "created_at".to_string(),
+                }),
                 op: BinaryOperator::Gt,
                 right: value(Value::Int(123456789)),
             }))
@@ -355,7 +392,10 @@ mod tests {
         assert_eq!(
             cond2_left,
             Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident("created_at"),
+                left: ident_q(&QualCol {
+                    table: "posts".to_string(),
+                    column: "created_at".to_string(),
+                }),
                 op: BinaryOperator::Eq,
                 right: value(Value::Int(123456789)),
             }))
@@ -363,7 +403,10 @@ mod tests {
         assert_eq!(
             cond2_right,
             Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident("id"),
+                left: ident_q(&QualCol {
+                    table: "posts".to_string(),
+                    column: "id".to_string(),
+                }),
                 op: BinaryOperator::Gt,
                 right: value(Value::Uint(42)),
             }))

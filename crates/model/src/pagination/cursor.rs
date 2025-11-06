@@ -1,5 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct QualCol {
+    pub table: String, // table or alias as used in FROM/JOINs
+    pub column: String,
+}
+
 /// Represents the pagination cursor.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Cursor {
@@ -10,28 +16,28 @@ pub enum Cursor {
     Default { offset: usize },
 
     /// Cursor for simple Primary Key offset (strictly increasing PK).
-    Pk { pk_col: String, id: u64 },
+    Pk { pk_col: QualCol, id: u64 },
 
     /// Cursor for a single numeric column (append-only; not unique).
     /// NOTE: Without a tie-breaker this can be ambiguous; prefer CompositeNumPk.
-    Numeric { col: String, val: i128 },
+    Numeric { col: QualCol, val: i128 },
 
     /// Cursor for a single timestamp column in microseconds (not unique).
     /// NOTE: Without a tie-breaker this can be ambiguous; prefer CompositeTsPk.
-    Timestamp { col: String, ts: i64 },
+    Timestamp { col: QualCol, ts: i64 },
 
     /// Composite cursor for NUMERIC + PK (tie-break).
     CompositeNumPk {
-        num_col: String,
-        pk_col: String,
+        num_col: QualCol,
+        pk_col: QualCol,
         val: i128, // numeric value
         id: u64,   // tie-breaker id
     },
 
     /// Composite cursor for TIMESTAMP (micros) + PK (tie-break).
     CompositeTsPk {
-        ts_col: String,
-        pk_col: String,
+        ts_col: QualCol,
+        pk_col: QualCol,
         ts: i64, // timestamp in micros
         id: u64, // tie-breaker id
     },

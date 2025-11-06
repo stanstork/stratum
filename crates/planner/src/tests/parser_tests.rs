@@ -210,7 +210,7 @@ mod tests {
                 SOURCE(TABLE, foo) -> DEST(TABLE, bar) [
                     OFFSET(
                         STRATEGY -> pk,
-                        CURSOR -> id
+                        CURSOR -> foo[id]
                     )
                 ]
             );

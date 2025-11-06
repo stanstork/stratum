@@ -4,12 +4,15 @@ use crate::query::{
         expr::{BinaryOp, BinaryOperator, Expr},
     },
     builder::select::{FromState, SelectBuilder},
-    ident, value,
+    ident, ident_q, value,
 };
 use async_trait::async_trait;
 use model::{
     core::value::Value,
-    pagination::{cursor::Cursor, offset_config::OffsetConfig},
+    pagination::{
+        cursor::{Cursor, QualCol},
+        offset_config::OffsetConfig,
+    },
     records::row::RowData,
 };
 use std::sync::Arc;
@@ -32,17 +35,17 @@ pub trait OffsetStrategy: Send + Sync {
 }
 
 pub struct PkOffset {
-    pub pk: String,
+    pub pk: QualCol,
 }
 
 pub struct NumericOffset {
-    pub col: String,
-    pub pk: String,
+    pub col: QualCol,
+    pub pk: QualCol,
 }
 
 pub struct TimestampOffset {
-    pub ts_col: String,
-    pub pk: String,
+    pub ts_col: QualCol,
+    pub pk: QualCol,
     pub tz: chrono_tz::Tz,
 }
 
@@ -61,7 +64,7 @@ impl OffsetStrategy for PkOffset {
         if let Cursor::Pk { pk_col, id } = cursor {
             // WHERE pk > ?
             let where_cond = Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident(pk_col),
+                left: ident_q(pk_col),
                 op: BinaryOperator::Gt,
                 right: value(Value::Uint(*id)),
             }));
@@ -83,14 +86,14 @@ impl OffsetStrategy for PkOffset {
         // Cursor::None => no WHERE (start from beginning)
 
         // ORDER BY pk ASC, LIMIT ?
-        builder = builder.order_by(ident(&self.pk), Some(OrderDir::Asc));
+        builder = builder.order_by(ident_q(&self.pk), Some(OrderDir::Asc));
         builder = builder.limit(value(Value::Uint(limit as u64)));
 
         builder
     }
 
     fn next_cursor(&self, row: &RowData) -> Cursor {
-        match row.get_value(&self.pk) {
+        match row.get_value(&self.pk.column) {
             Value::Uint(id) => Cursor::Pk {
                 pk_col: self.pk.clone(),
                 id,
@@ -133,21 +136,21 @@ impl OffsetStrategy for NumericOffset {
 
             // (col > ?)
             let cond1 = Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident(&self.col),
+                left: ident_q(&self.col),
                 op: BinaryOperator::Gt,
                 right: value(Value::Int(*ts)),
             }));
 
             // (col = ?)
             let cond2_left = Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident(&self.col),
+                left: ident_q(&self.col),
                 op: BinaryOperator::Eq,
                 right: value(Value::Int(*ts)),
             }));
 
             // (pk > ?)
             let cond2_right = Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident(&self.pk),
+                left: ident_q(&self.pk),
                 op: BinaryOperator::Gt,
                 right: value(Value::Uint(*id)),
             }));
@@ -179,8 +182,8 @@ impl OffsetStrategy for NumericOffset {
         }
 
         // Add ORDER BY
-        builder = builder.order_by(ident(&self.col), Some(OrderDir::Asc));
-        builder = builder.order_by(ident(&self.pk), Some(OrderDir::Asc));
+        builder = builder.order_by(ident_q(&self.col), Some(OrderDir::Asc));
+        builder = builder.order_by(ident_q(&self.pk), Some(OrderDir::Asc));
 
         // Add LIMIT
         builder = builder.limit(value(Value::Uint(limit as u64)));
@@ -189,8 +192,8 @@ impl OffsetStrategy for NumericOffset {
     }
 
     fn next_cursor(&self, row: &RowData) -> Cursor {
-        let num_v = row.get_value(&self.col);
-        let pk_v = row.get_value(&self.pk);
+        let num_v = row.get_value(&self.col.column);
+        let pk_v = row.get_value(&self.pk.column);
 
         let to_i128 = |v: &Value| -> Option<i128> {
             match v {
@@ -231,17 +234,17 @@ impl OffsetStrategy for TimestampOffset {
         if let Cursor::CompositeTsPk { ts, id, .. } = cursor {
             // WHERE (ts > ?) OR (ts = ? AND pk > ?)
             let cond1 = Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident(&self.ts_col),
+                left: ident_q(&self.ts_col),
                 op: BinaryOperator::Gt,
                 right: value(Value::Int(*ts)),
             }));
             let cond2_left = Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident(&self.ts_col),
+                left: ident_q(&self.ts_col),
                 op: BinaryOperator::Eq,
                 right: value(Value::Int(*ts)),
             }));
             let cond2_right = Expr::BinaryOp(Box::new(BinaryOp {
-                left: ident(&self.pk),
+                left: ident_q(&self.pk),
                 op: BinaryOperator::Gt,
                 right: value(Value::Uint(*id)),
             }));
@@ -268,8 +271,8 @@ impl OffsetStrategy for TimestampOffset {
         }
 
         // Add ORDER BY
-        builder = builder.order_by(ident(&self.ts_col), Some(OrderDir::Asc));
-        builder = builder.order_by(ident(&self.pk), Some(OrderDir::Asc));
+        builder = builder.order_by(ident_q(&self.ts_col), Some(OrderDir::Asc));
+        builder = builder.order_by(ident_q(&self.pk), Some(OrderDir::Asc));
 
         // Add LIMIT
         builder = builder.limit(value(Value::Uint(limit as u64)));
@@ -278,8 +281,8 @@ impl OffsetStrategy for TimestampOffset {
     }
 
     fn next_cursor(&self, row: &RowData) -> Cursor {
-        let ts_v = row.get_value(&self.ts_col);
-        let pk_v = row.get_value(&self.pk);
+        let ts_v = row.get_value(&self.ts_col.column);
+        let pk_v = row.get_value(&self.pk.column);
 
         // Expect ts is stored canonically as micros (i64) in RowData (after normalization).
         match (ts_v, pk_v) {
@@ -339,35 +342,29 @@ impl OffsetStrategyFactory {
     pub fn from_config(config: &OffsetConfig) -> Arc<dyn OffsetStrategy> {
         // If user didn't specify a cursor column -> default PK "id".
         let default_pk = "id".to_string();
+        let strategy = config
+            .strategy
+            .as_deref()
+            .unwrap_or("default")
+            .to_lowercase();
 
-        // If the config includes a 'strategy' hint, use it; otherwise infer:
-        // - no cursor  -> PK
-        // - cursor + no tiebreaker -> Numeric (single) by default
-        // - cursor + tiebreaker    -> use Timestamp if name suggests time, else Numeric
-        let strategy = config.strategy.as_deref().unwrap_or_else(|| {
-            match (&config.cursor, &config.tiebreaker) {
-                (None, _) => "pk",
-                (Some(_), None) => "numeric",
-                (Some(c), Some(_))
-                    if c.to_lowercase().contains("time") || c.to_lowercase().contains("date") =>
-                {
-                    "timestamp"
-                }
-                _ => "numeric",
-            }
-        });
-
-        match strategy {
+        match strategy.as_str() {
             "pk" => Arc::new(PkOffset {
-                pk: config.cursor.clone().unwrap_or(default_pk),
+                pk: config
+                    .cursor
+                    .clone()
+                    .expect("PK offset requires 'cursor' column"),
             }),
 
             "numeric" => {
                 let col = config
                     .cursor
                     .clone()
-                    .unwrap_or_else(|| panic!("Numeric offset requires 'cursor' column"));
-                let pk = config.tiebreaker.clone().unwrap_or(default_pk);
+                    .expect("Numeric offset requires 'cursor' column");
+                let pk = config
+                    .tiebreaker
+                    .clone()
+                    .expect("Numeric offset requires 'tiebreaker' column");
                 Arc::new(NumericOffset { col, pk })
             }
 
@@ -376,7 +373,10 @@ impl OffsetStrategyFactory {
                     .cursor
                     .clone()
                     .unwrap_or_else(|| panic!("Timestamp offset requires 'cursor' column"));
-                let pk = config.tiebreaker.clone().unwrap_or(default_pk);
+                let pk = config
+                    .tiebreaker
+                    .clone()
+                    .expect("Timestamp offset requires 'tiebreaker' column");
                 let tz = config
                     .timezone
                     .as_deref()
@@ -399,7 +399,10 @@ impl OffsetStrategyFactory {
                 // Without a pk in the cursor, default tiebreaker to "id".
                 Arc::new(NumericOffset {
                     col: col.clone(),
-                    pk: "id".to_string(),
+                    pk: QualCol {
+                        table: "".to_string(),
+                        column: "id".to_string(),
+                    },
                 })
             }
 
@@ -412,7 +415,10 @@ impl OffsetStrategyFactory {
 
             Cursor::Timestamp { col, .. } => Arc::new(TimestampOffset {
                 ts_col: col.clone(),
-                pk: "id".to_string(),
+                pk: QualCol {
+                    table: "".to_string(),
+                    column: "id".to_string(),
+                },
                 tz: chrono_tz::UTC,
             }),
 
@@ -431,21 +437,57 @@ impl OffsetStrategyFactory {
     /// Build a strategy from SMQL offset syntax.
     pub fn from_smql(smql_offset: &smql_syntax::ast::offset::Offset) -> Arc<dyn OffsetStrategy> {
         let mut strategy: Option<String> = None;
-        let mut cursor: Option<String> = None;
-        let mut tiebreaker: Option<String> = None;
+        let mut cursor: Option<QualCol> = None;
+        let mut tiebreaker: Option<QualCol> = None;
         let mut timezone: Option<String> = None;
 
         for pair in &smql_offset.pairs {
             match pair.key {
                 smql_syntax::ast::offset::OffsetKey::Strategy => {
-                    strategy = Some(pair.value.clone())
+                    strategy = match &pair.value {
+                        smql_syntax::ast::expr::Expression::Identifier(s) => Some(s.clone()),
+                        _ => panic!("Offset strategy must be an identifier"),
+                    }
                 }
-                smql_syntax::ast::offset::OffsetKey::Cursor => cursor = Some(pair.value.clone()),
+                smql_syntax::ast::offset::OffsetKey::Cursor => {
+                    cursor = match &pair.value {
+                        smql_syntax::ast::expr::Expression::Identifier(s) => Some(QualCol {
+                            table: "".to_string(),
+                            column: s.clone(),
+                        }),
+                        smql_syntax::ast::expr::Expression::Lookup {
+                            entity,
+                            key,
+                            field: _,
+                        } => Some(QualCol {
+                            table: entity.clone(),
+                            column: key.clone(),
+                        }),
+                        _ => panic!("Offset cursor must be an identifier"),
+                    }
+                }
                 smql_syntax::ast::offset::OffsetKey::TieBreaker => {
-                    tiebreaker = Some(pair.value.clone())
+                    tiebreaker = match &pair.value {
+                        smql_syntax::ast::expr::Expression::Identifier(s) => Some(QualCol {
+                            table: "".to_string(),
+                            column: s.clone(),
+                        }),
+                        smql_syntax::ast::expr::Expression::Lookup {
+                            entity,
+                            key,
+                            field: _,
+                        } => Some(QualCol {
+                            table: entity.clone(),
+                            column: key.clone(),
+                        }),
+                        _ => panic!("Offset tiebreaker must be an identifier"),
+                    }
                 }
                 smql_syntax::ast::offset::OffsetKey::TimeZone => {
-                    timezone = Some(pair.value.clone())
+                    timezone = match &pair.value {
+                        smql_syntax::ast::expr::Expression::Identifier(s) => Some(s.clone()),
+                        _ => panic!("Offset timezone must be an identifier"),
+                    }
                 }
             }
         }

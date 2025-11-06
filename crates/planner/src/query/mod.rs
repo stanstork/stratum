@@ -1,5 +1,5 @@
 use crate::query::ast::expr::{Expr, Ident};
-use model::core::value::Value;
+use model::{core::value::Value, pagination::cursor::QualCol};
 
 pub mod ast;
 pub mod builder;
@@ -17,4 +17,11 @@ pub fn ident(name: &str) -> Expr {
 
 pub fn value(val: Value) -> Expr {
     Expr::Value(val)
+}
+
+fn ident_q(q: &QualCol) -> Expr {
+    Expr::Identifier(Ident {
+        qualifier: Some(q.table.clone()),
+        name: q.column.clone(),
+    })
 }

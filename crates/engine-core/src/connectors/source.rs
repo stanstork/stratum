@@ -141,7 +141,7 @@ impl Source {
                 let db = db.lock().await;
                 let rows = db.fetch(batch_size, cursor).await?;
                 println!("===========================================");
-                println!("Result rows: {:#?}", rows.next_cursor);
+                // println!("Result: {:#?}", rows);
                 // let records = rows.into_iter().map(Record::RowData).collect();
                 // Ok(records)
                 todo!("Implement fetch data conversion")

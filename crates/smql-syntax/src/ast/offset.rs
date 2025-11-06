@@ -1,16 +1,19 @@
-use crate::parser::{Rule, StatementParser};
+use crate::{
+    ast::expr::Expression,
+    parser::{Rule, StatementParser},
+};
 use pest::iterators::Pair;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Offset {
     pub pairs: Vec<OffsetPair>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct OffsetPair {
     pub key: OffsetKey,
-    pub value: String,
+    pub value: Expression,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -32,7 +35,7 @@ impl Default for Offset {
         Offset {
             pairs: vec![OffsetPair {
                 key: OffsetKey::Strategy,
-                value: "default".to_string(),
+                value: Expression::Identifier("default".to_string()),
             }],
         }
     }
@@ -57,7 +60,7 @@ impl StatementParser for OffsetPair {
             _ => panic!("Unknown offset key: {}", key_pair.as_str()),
         };
 
-        let value = value_pair.as_str().to_string();
+        let value = Expression::parse(value_pair);
 
         OffsetPair { key, value }
     }

@@ -22,6 +22,7 @@ pub async fn create_consumer(
     ctx: &Arc<Mutex<ItemContext>>,
     receiver: Receiver<bool>,
 ) -> Box<dyn DataConsumer + Send> {
+    Box::new(ValidationConsumer::new())
     // let ctx_guard = ctx.lock().await;
     // let state_guard = ctx_guard.state.lock().await;
 
@@ -45,5 +46,5 @@ pub async fn create_consumer(
     //         batch_size,
     //     ))
     // }
-    todo!("Implement consumer creation based on context and settings")
+    // todo!("Implement consumer creation based on context and settings")
 }
