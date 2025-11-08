@@ -7,6 +7,8 @@ use crate::query::{
     ident_q, value,
 };
 use async_trait::async_trait;
+use chrono::{TimeZone, Utc};
+use chrono_tz::Tz;
 use model::{
     core::value::Value,
     pagination::{
@@ -246,16 +248,17 @@ impl OffsetStrategy for TimestampOffset {
     ) -> SelectBuilder<FromState> {
         // Add WHERE clause based on cursor
         if let Cursor::CompositeTsPk { ts, id, .. } = cursor {
+            let ts_sql = utc_to_local_sql(*ts, &self.tz);
             // WHERE (ts > ?) OR (ts = ? AND pk > ?)
             let cond1 = binary_expr(
                 ident_q(&self.ts_col),
                 BinaryOperator::Gt,
-                value(Value::Timestamp(*ts)),
+                value(Value::String(ts_sql.clone())),
             );
             let cond2_left = binary_expr(
                 ident_q(&self.ts_col),
                 BinaryOperator::Eq,
-                value(Value::Timestamp(*ts)),
+                value(Value::String(ts_sql)),
             );
             let cond2_right = binary_expr(ident_q(&self.pk), BinaryOperator::Gt, uint_literal(*id));
             let cond2 = binary_expr(cond2_left, BinaryOperator::And, cond2_right);
@@ -278,26 +281,32 @@ impl OffsetStrategy for TimestampOffset {
         let ts_v = row.get_value(&self.ts_col.column);
         let pk_v = row.get_value(&self.pk.column);
 
-        println!(
-            "TimestampOffset next_cursor: ts_v={:?}, pk_v={:?}",
-            ts_v, pk_v
-        );
-
-        // Expect ts is stored canonically as micros (i64) in RowData (after normalization).
-        match (ts_v, pk_v) {
-            (Value::Timestamp(ts), Value::Int(id)) => Cursor::CompositeTsPk {
-                ts_col: self.ts_col.clone(),
-                pk_col: self.pk.clone(),
-                ts,
-                id: id as u64,
-            },
-            (Value::Timestamp(ts), Value::Uint(id)) => Cursor::CompositeTsPk {
-                ts_col: self.ts_col.clone(),
-                pk_col: self.pk.clone(),
-                ts,
-                id,
-            },
-            _ => Cursor::Default { offset: 0 }, // TODO: better fallback
+        match ts_v {
+            Value::Timestamp(dt_local) => {
+                // Convert local timestamp to UTC micros
+                if let Some(dt_utc) = self
+                    .tz
+                    .from_local_datetime(&dt_local.naive_local())
+                    .single()
+                {
+                    let utc_ts = dt_utc.timestamp_micros();
+                    let id = match pk_v {
+                        Value::Uint(id) => id,
+                        Value::Int(i) if i >= 0 => i as u64,
+                        Value::String(ref s) => s.parse::<u64>().unwrap_or(0),
+                        _ => 0,
+                    };
+                    Cursor::CompositeTsPk {
+                        ts_col: self.ts_col.clone(),
+                        pk_col: self.pk.clone(),
+                        ts: utc_ts,
+                        id,
+                    }
+                } else {
+                    Cursor::None
+                }
+            }
+            _ => Cursor::None,
         }
     }
 
@@ -518,4 +527,10 @@ fn extract_numeric_value(val: &Value) -> Option<i128> {
         Value::String(s) => s.parse::<i128>().ok(),
         _ => None,
     }
+}
+
+fn utc_to_local_sql(ts_utc: i64, user_tz: &Tz) -> String {
+    let dt_utc = Utc.timestamp_micros(ts_utc).unwrap();
+    let dt_local = dt_utc.with_timezone(user_tz);
+    format!("{}", dt_local.format("%Y-%m-%d %H:%M:%S"))
 }

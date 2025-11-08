@@ -50,7 +50,7 @@ impl DataDestination {
         match &self {
             DataDestination::Database(db) => {
                 let db = db.lock().await.adapter();
-                let metadata = db.fetch_metadata(&table).await?;
+                let metadata = db.table_metadata(&table).await?;
                 Ok(metadata)
             }
         }

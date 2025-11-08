@@ -1,13 +1,17 @@
 use crate::sql::base::{
-    metadata::{provider::MetadataHelper, table::TableMetadata},
+    capabilities::DbCapabilities,
+    metadata::{provider::MetadataStore, table::TableMetadata},
     query::column::ColumnDef,
 };
 use async_trait::async_trait;
 use model::records::row::RowData;
 
 #[async_trait]
-pub trait DbDataDestination: MetadataHelper + Send + Sync {
+pub trait DbDataDestination: MetadataStore + Send + Sync {
     type Error;
+
+    // Introspection / negotiation
+    async fn capabilities(&self) -> DbCapabilities;
 
     async fn write_batch(
         &self,

@@ -8,7 +8,7 @@ use crate::sql::{
             source::JoinSource,
             utils::{build_join_clauses, find_join_path},
         },
-        metadata::{provider::MetadataHelper, table::TableMetadata},
+        metadata::{provider::MetadataStore, table::TableMetadata},
         requests::{FetchRowsRequest, FetchRowsRequestBuilder},
         source::DbDataSource,
     },
@@ -239,8 +239,8 @@ impl DbDataSource for MySqlDataSource {
     }
 }
 
-impl MetadataHelper for MySqlDataSource {
-    fn get_metadata(&self) -> &Option<TableMetadata> {
+impl MetadataStore for MySqlDataSource {
+    fn metadata(&self) -> &Option<TableMetadata> {
         &self.primary_meta
     }
 

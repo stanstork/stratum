@@ -313,7 +313,7 @@ mod tests {
                 table: "posts".to_string(),
                 column: "id".to_string(),
             },
-            ts: Utc.timestamp_micros(13_3456789).unwrap(),
+            ts: 13_3456789,
             id: 42,
         };
         let start = OffsetStrategyFactory::from_cursor(&cursor);
@@ -379,7 +379,7 @@ mod tests {
                     column: "created_at".to_string(),
                 }),
                 op: BinaryOperator::Gt,
-                right: value(Value::Timestamp(Utc.timestamp_micros(13_3456789).unwrap())),
+                right: value(Value::String("'1970-01-01 00:02:13'".to_string())),
             }))
         );
 
@@ -398,7 +398,7 @@ mod tests {
                     column: "created_at".to_string(),
                 }),
                 op: BinaryOperator::Eq,
-                right: value(Value::Timestamp(Utc.timestamp_micros(13_3456789).unwrap())),
+                right: value(Value::String("'1970-01-01 00:02:13'".to_string())),
             }))
         );
         assert_eq!(

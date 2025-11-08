@@ -139,7 +139,7 @@ impl SchemaPlan {
                 _ => panic!("Enum queries are only supported for SQL data sources"),
             };
 
-            let enum_type = adapter.fetch_column_type(table, column).await?;
+            let enum_type = adapter.column_db_type(table, column).await?;
             let variants = Self::parse_enum(&enum_type);
             let (sql, _) = QueryGenerator::new(&dialect::Postgres).create_enum(column, &variants);
 

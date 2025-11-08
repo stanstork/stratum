@@ -102,7 +102,7 @@ impl DataSource {
         match &self {
             DataSource::Database(db) => {
                 let db = db.lock().await.adapter();
-                let meta = db.fetch_metadata(&entity).await?;
+                let meta = db.table_metadata(&entity).await?;
                 Ok(EntityMetadata::Table(meta))
             }
             DataSource::File(file) => {
@@ -143,7 +143,6 @@ impl Source {
                 println!("===========================================");
                 println!("Result cursor: {:?}", rows.next_cursor);
                 println!("===========================================");
-                // let records = rows.into_iter().map(Record::RowData).collect();
                 Ok(rows)
             }
             DataSource::File(file) => {

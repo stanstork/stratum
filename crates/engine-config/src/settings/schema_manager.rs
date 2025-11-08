@@ -69,7 +69,7 @@ impl SchemaManager for LiveSchemaManager {
 
         for query in all_queries {
             info!("Executing schema change: {}", query.0);
-            if let Err(err) = dest.data_dest.adapter().await.execute(&query.0).await {
+            if let Err(err) = dest.data_dest.adapter().await.exec(&query.0).await {
                 error!(
                     "Failed to apply schema change: {}\nError: {:?}",
                     query.0, err

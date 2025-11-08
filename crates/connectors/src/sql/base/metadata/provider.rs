@@ -7,9 +7,10 @@ use std::{
     sync::Arc,
 };
 
-pub trait MetadataHelper {
-    fn get_metadata(&self) -> &Option<TableMetadata>;
+pub trait MetadataStore {
+    fn metadata(&self) -> &Option<TableMetadata>;
     fn set_metadata(&mut self, meta: TableMetadata);
+
     fn set_related_meta(&mut self, meta: HashMap<String, TableMetadata>);
     fn set_cascade_joins(&mut self, table: String, joins: Vec<JoinClause>);
 
@@ -92,7 +93,7 @@ impl MetadataProvider {
                 )));
             }
 
-            let mut metadata = adapter.fetch_metadata(table_name).await?;
+            let mut metadata = adapter.table_metadata(table_name).await?;
             graph.insert(table_name.to_string(), metadata.clone());
 
             // Fetch forward and backward references
@@ -150,7 +151,7 @@ impl MetadataProvider {
         visited: &'a mut HashSet<String>,
     ) -> MetadataFuture<'a, ()> {
         Box::pin(async move {
-            let referencing_tables = adapter.fetch_referencing_tables(table_name).await?;
+            let referencing_tables = adapter.referencing_tables(table_name).await?;
 
             for ref_table in referencing_tables {
                 let ref_metadata =

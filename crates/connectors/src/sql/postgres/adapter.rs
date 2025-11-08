@@ -1,17 +1,19 @@
 use crate::sql::{
     base::{
-        adapter::SqlAdapter,
+        adapter::{DatabaseKind, SqlAdapter},
+        capabilities::DbCapabilities,
         error::{ConnectorError, DbError},
         metadata::{
             column::{COL_REFERENCING_TABLE, ColumnMetadata},
             provider::MetadataProvider,
             table::TableMetadata,
         },
+        probe::CapabilityProbe,
         query::generator::QueryGenerator,
         requests::FetchRowsRequest,
         row::DbRow,
     },
-    postgres::data_type::PgDataType,
+    postgres::{data_type::PgDataType, probe::PgCapabilityProbe},
 };
 use async_trait::async_trait;
 use futures_util::TryStreamExt;
@@ -69,61 +71,29 @@ impl SqlAdapter for PgAdapter {
         })
     }
 
-    async fn table_exists(&self, table: &str) -> Result<bool, DbError> {
-        let row = sqlx::query(QUERY_TABLE_EXISTS_SQL)
-            .bind(table)
-            .fetch_one(&self.pool)
-            .await?;
-        Ok(row.get(0))
-    }
-
-    async fn truncate_table(&self, table: &str) -> Result<(), DbError> {
-        sqlx::query(QUERY_TRUNCATE_TABLE_SQL)
-            .bind(table)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    async fn execute(&self, query: &str) -> Result<(), DbError> {
+    async fn exec(&self, query: &str) -> Result<(), DbError> {
         sqlx::query(query).execute(&self.pool).await?;
         Ok(())
     }
 
-    async fn execute_with_params(&self, query: &str, params: Vec<Value>) -> Result<(), DbError> {
+    async fn exec_params(&self, query: &str, params: Vec<Value>) -> Result<(), DbError> {
         let query = sqlx::query(query);
         let bound_query = bind_values(query, &params);
         bound_query.execute(&self.pool).await?;
         Ok(())
     }
 
-    async fn fetch_metadata(&self, table: &str) -> Result<TableMetadata, DbError> {
-        let query = QUERY_TABLE_METADATA_SQL.replace("{table}", table);
-        let rows = sqlx::query(&query).fetch_all(&self.pool).await?;
-        let columns = rows
+    async fn query_rows(&self, sql: &str) -> Result<Vec<RowData>, DbError> {
+        let rows = sqlx::query(sql).fetch_all(&self.pool).await?;
+        let result = rows
             .iter()
-            .map(|row| {
-                let data_type = DataType::parse_from_row(row);
-                let column_metadata = ColumnMetadata::from_row(&DbRow::PostgresRow(row), data_type);
-                Ok((column_metadata.name.clone(), column_metadata))
-            })
-            .collect::<Result<HashMap<_, _>, DbError>>()?;
-
-        MetadataProvider::construct_table_metadata(table, columns)
+            .map(|row| DbRow::PostgresRow(row).to_row_data(""))
+            .collect();
+        Ok(result)
     }
 
-    async fn fetch_referencing_tables(&self, table: &str) -> Result<Vec<String>, DbError> {
-        let rows = sqlx::query(QUERY_TABLE_REFERENCING_SQL)
-            .bind(table)
-            .fetch_all(&self.pool)
-            .await?;
-
-        let tables = rows
-            .iter()
-            .map(|row| row.try_get::<String, _>(COL_REFERENCING_TABLE))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(tables)
+    async fn fetch_rows(&self, _request: FetchRowsRequest) -> Result<Vec<RowData>, DbError> {
+        todo!("Implement fetch_all for Postgres")
     }
 
     async fn fetch_existing_keys(
@@ -142,22 +112,71 @@ impl SqlAdapter for PgAdapter {
 
         let rows_stream = query.fetch(&self.pool);
         let result = rows_stream
-            .map_ok(|row| DbRow::PostgresRow(&row).get_row_data(table))
+            .map_ok(|row| DbRow::PostgresRow(&row).to_row_data(table))
             .try_collect::<Vec<RowData>>()
             .await?;
 
         Ok(result)
     }
 
-    async fn fetch_rows(&self, _request: FetchRowsRequest) -> Result<Vec<RowData>, DbError> {
-        todo!("Implement fetch_all for Postgres")
-    }
-
-    async fn fetch_column_type(&self, _table: &str, _column: &str) -> Result<String, DbError> {
-        todo!("Implement fetch_column_type for Postgres");
+    async fn table_exists(&self, table: &str) -> Result<bool, DbError> {
+        let row = sqlx::query(QUERY_TABLE_EXISTS_SQL)
+            .bind(table)
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(row.get(0))
     }
 
     async fn list_tables(&self) -> Result<Vec<String>, DbError> {
         todo!("Implement list_tables for Postgres");
+    }
+
+    async fn table_metadata(&self, table: &str) -> Result<TableMetadata, DbError> {
+        let query = QUERY_TABLE_METADATA_SQL.replace("{table}", table);
+        let rows = sqlx::query(&query).fetch_all(&self.pool).await?;
+        let columns = rows
+            .iter()
+            .map(|row| {
+                let data_type = DataType::parse_from_row(row);
+                let column_metadata = ColumnMetadata::from_row(&DbRow::PostgresRow(row), data_type);
+                Ok((column_metadata.name.clone(), column_metadata))
+            })
+            .collect::<Result<HashMap<_, _>, DbError>>()?;
+
+        MetadataProvider::construct_table_metadata(table, columns)
+    }
+
+    async fn referencing_tables(&self, table: &str) -> Result<Vec<String>, DbError> {
+        let rows = sqlx::query(QUERY_TABLE_REFERENCING_SQL)
+            .bind(table)
+            .fetch_all(&self.pool)
+            .await?;
+
+        let tables = rows
+            .iter()
+            .map(|row| row.try_get::<String, _>(COL_REFERENCING_TABLE))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(tables)
+    }
+
+    async fn column_db_type(&self, _table: &str, _column: &str) -> Result<String, DbError> {
+        todo!("Implement fetch_column_type for Postgres");
+    }
+
+    async fn truncate_table(&self, table: &str) -> Result<(), DbError> {
+        sqlx::query(QUERY_TRUNCATE_TABLE_SQL)
+            .bind(table)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    fn kind(&self) -> DatabaseKind {
+        DatabaseKind::Postgres
+    }
+
+    async fn capabilities(&self) -> Result<DbCapabilities, DbError> {
+        PgCapabilityProbe::detect(self).await
     }
 }

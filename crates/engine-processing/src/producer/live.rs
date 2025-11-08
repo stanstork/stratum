@@ -23,19 +23,19 @@ use model::{
 };
 use planner::query::offsets::OffsetStrategy;
 use smql_syntax::ast::setting::Settings;
-use std::sync::Arc;
+use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 use tokio::sync::{mpsc, watch::Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 #[derive(Clone)]
-struct Identity {
+struct ItemId {
     run_id: String,
     item_id: String,
     part_id: String,
 }
 
-impl Identity {
+impl ItemId {
     fn new(run_id: String, item_id: String, part_id: String) -> Self {
         Self {
             run_id,
@@ -57,27 +57,28 @@ impl Identity {
     }
 }
 
-enum BatchFetchResult {
-    Batch(FetchResult),
-    AdvanceOnly(Cursor),
-    Finished,
+enum FetchOutcome {
+    Page(FetchResult),
+    Advance(Cursor),
+    End,
 }
 
+#[derive(Clone)]
 pub struct LiveProducer {
-    identity: Identity,
+    ids: ItemId,
 
     // Strategy & state
-    pub offset: Arc<dyn OffsetStrategy>,
+    pub offset_strategy: Arc<dyn OffsetStrategy>,
     pub cursor: Cursor,
-    pub state: Arc<dyn StateStore>,
+    pub state_store: Arc<dyn StateStore>,
 
     // Transform
-    pub transform_pipeline: TransformPipeline,
-    pub transform_concurrency: usize,
+    pub pipeline: TransformPipeline,
+    pub transform_concurrency: NonZeroUsize,
 
     // Control
-    pub cancel: CancellationToken,
-    pub heartbeat_interval: usize,
+    pub cancel_token: CancellationToken,
+    pub heartbeat_interval: Duration,
 
     // IO
     pub source: Source,
@@ -92,14 +93,14 @@ impl LiveProducer {
         shutdown_tx: Sender<bool>,
         batch_tx: mpsc::Sender<Batch>,
         settings: &Settings,
-        cancel: CancellationToken,
+        cancel_token: CancellationToken,
     ) -> Self {
-        let (run_id, item_id, part_id, offset, cursor, state, source, mapping) = {
+        let (run_id, item_id, part_id, offset_strategy, cursor, state_store, source, mapping) = {
             let c = ctx.lock().await;
             (
                 c.run_id.clone(),
                 c.item_id.clone(),
-                "part-0".to_string(), // For simplicity, using a fixed part ID for now
+                "part-0".to_string(), // fixed part for now
                 c.offset_strategy.clone(),
                 c.cursor.clone(),
                 c.state.clone(),
@@ -107,17 +108,18 @@ impl LiveProducer {
                 c.mapping.clone(),
             )
         };
+
         let pipeline = pipeline_for_mapping(&mapping);
 
-        LiveProducer {
-            identity: Identity::new(run_id, item_id, part_id),
-            offset,
+        Self {
+            ids: ItemId::new(run_id, item_id, part_id),
+            offset_strategy,
             cursor,
-            state,
-            transform_pipeline: pipeline,
-            transform_concurrency: 8, // TODO: make configurable
-            cancel,
-            heartbeat_interval: 10, // TODO: make configurable,
+            state_store,
+            pipeline,
+            transform_concurrency: NonZeroUsize::new(8).unwrap(), // TODO: configurable
+            cancel_token,
+            heartbeat_interval: Duration::from_secs(30), // send every 30s by default. TODO: configurable
             source,
             shutdown_tx,
             batch_tx,
@@ -125,22 +127,18 @@ impl LiveProducer {
         }
     }
 
-    fn make_batch_id(&self, next: &Cursor) -> String {
+    fn batch_id(&self, next: &Cursor) -> String {
         let mut h = blake3::Hasher::new();
-        h.update(self.identity.run_id.as_bytes());
-        h.update(self.identity.item_id.as_bytes());
-        h.update(self.identity.part_id.as_bytes());
+        h.update(self.ids.run_id.as_bytes());
+        h.update(self.ids.item_id.as_bytes());
+        h.update(self.ids.part_id.as_bytes());
         h.update(format!("{next:?}").as_bytes());
         h.finalize().to_hex().to_string()
     }
 
-    async fn starting_cursor(&self) -> Cursor {
-        self.state
-            .load_checkpoint(
-                self.identity.run_id(),
-                self.identity.item_id(),
-                self.identity.part_id(),
-            )
+    async fn start_cursor(&self) -> Cursor {
+        self.state_store
+            .load_checkpoint(self.ids.run_id(), self.ids.item_id(), self.ids.part_id())
             .await
             .ok()
             .flatten()
@@ -148,7 +146,7 @@ impl LiveProducer {
             .unwrap_or(self.cursor.clone())
     }
 
-    async fn fetch_next_batch(&self, cursor: &Cursor) -> Result<BatchFetchResult, ProducerError> {
+    async fn next_page(&self, cursor: &Cursor) -> Result<FetchOutcome, ProducerError> {
         let res = self
             .source
             .fetch_data(self.batch_size, cursor.clone())
@@ -156,51 +154,42 @@ impl LiveProducer {
 
         if res.reached_end && res.row_count == 0 {
             info!("No more records to fetch. Terminating producer.");
-            return Ok(BatchFetchResult::Finished);
+            return Ok(FetchOutcome::End);
         }
 
         if res.row_count == 0 {
-            if let Some(next) = res.next_cursor {
-                return Ok(BatchFetchResult::AdvanceOnly(next));
+            if let Some(next) = res.next_cursor
+                && next != Cursor::None
+            {
+                return Ok(FetchOutcome::Advance(next));
             }
-            return Ok(BatchFetchResult::Finished);
+            return Ok(FetchOutcome::End);
         }
 
-        Ok(BatchFetchResult::Batch(res))
+        Ok(FetchOutcome::Page(res))
     }
 
-    fn next_cursor(&self, res: &FetchResult, current: &Cursor) -> Option<Cursor> {
-        match res.next_cursor.clone() {
-            Some(next) => Some(next),
-            None if res.reached_end => Some(current.clone()),
-            None => {
-                warn!("Batch had rows but no next_cursor and not reached_end; skipping.");
-                None
-            }
-        }
-    }
-
-    async fn record_batch_start(
+    async fn log_batch_start(
         &self,
         batch_id: &str,
         next: &Cursor,
         row_count: usize,
     ) -> Result<(), ProducerError> {
-        self.state
+        self.state_store
             .append_wal(&WalEntry::BatchBegin {
-                run_id: self.identity.run_id.clone(),
-                item_id: self.identity.item_id.clone(),
-                part_id: self.identity.part_id.clone(),
+                run_id: self.ids.run_id.clone(),
+                item_id: self.ids.item_id.clone(),
+                part_id: self.ids.part_id.clone(),
                 batch_id: batch_id.to_string(),
             })
             .await
             .map_err(|e| ProducerError::StateStore(e.to_string()))?;
 
-        self.state
+        self.state_store
             .save_checkpoint(&Checkpoint {
-                run_id: self.identity.run_id.clone(),
-                item_id: self.identity.item_id.clone(),
-                part_id: self.identity.part_id.clone(),
+                run_id: self.ids.run_id.clone(),
+                item_id: self.ids.item_id.clone(),
+                part_id: self.ids.part_id.clone(),
                 stage: "read".to_string(),
                 src_offset: next.clone(),
                 batch_id: batch_id.to_string(),
@@ -213,13 +202,13 @@ impl LiveProducer {
 
     async fn transform(&self, rows: Vec<RowData>) -> Vec<Record> {
         stream::iter(rows.into_iter().map(|row| {
-            let transform_pipeline = &self.transform_pipeline;
+            let transform_pipeline = &self.pipeline;
             async move {
                 let record = Record::RowData(row);
                 transform_pipeline.apply(&record)
             }
         }))
-        .buffer_unordered(self.transform_concurrency)
+        .buffer_unordered(self.transform_concurrency.get())
         .collect()
         .await
     }
@@ -245,23 +234,29 @@ impl LiveProducer {
             .map_err(|e| ProducerError::ChannelSend(e.to_string()))
     }
 
-    async fn heartbeat(&self, batches: usize) {
-        if self.heartbeat_interval == 0 || batches % self.heartbeat_interval != 0 {
-            return;
+    async fn heartbeat(self: Arc<Self>) {
+        let mut interval = tokio::time::interval(self.heartbeat_interval);
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    if self.cancel_token.is_cancelled() {
+                        break;
+                    }
+                    let _ = self.state_store
+                        .append_wal(&WalEntry::Heartbeat {
+                            run_id: self.ids.run_id.clone(),
+                            item_id: self.ids.item_id.clone(),
+                            part_id: self.ids.part_id.clone(),
+                            at: chrono::Utc::now(),
+                        })
+                        .await;
+                }
+                _ = self.cancel_token.cancelled() => break,
+            }
         }
-
-        let _ = self
-            .state
-            .append_wal(&WalEntry::Heartbeat {
-                run_id: self.identity.run_id.clone(),
-                item_id: self.identity.item_id.clone(),
-                part_id: self.identity.part_id.clone(),
-                at: chrono::Utc::now(),
-            })
-            .await;
     }
 
-    fn notify_shutdown(&self) {
+    fn signal_shutdown(&self) {
         let _ = self.shutdown_tx.send(true);
     }
 }
@@ -269,28 +264,30 @@ impl LiveProducer {
 #[async_trait]
 impl DataProducer for LiveProducer {
     async fn run(&mut self) -> Result<usize, ProducerError> {
-        let mut cur = self.starting_cursor().await;
+        let mut cur = self.start_cursor().await;
         let mut batches = 0usize;
 
+        // Start heartbeat loop
+        let heartbeat_self = Arc::new(self.clone());
+        let hb_handle = {
+            let cloned = heartbeat_self.clone();
+            tokio::spawn(async move { cloned.heartbeat().await });
+        };
+
         loop {
-            if self.cancel.is_cancelled() {
+            if self.cancel_token.is_cancelled() {
                 info!("Cancellation requested. Terminating producer.");
                 break;
             }
 
-            match self.fetch_next_batch(&cur).await? {
-                BatchFetchResult::Finished => break,
-                BatchFetchResult::AdvanceOnly(next) => {
+            match self.next_page(&cur).await? {
+                FetchOutcome::End => break,
+                FetchOutcome::Advance(next) => {
                     cur = next;
                     continue;
                 }
-                BatchFetchResult::Batch(res) => {
-                    let next = match self.next_cursor(&res, &cur) {
-                        Some(cursor) => cursor,
-                        None => break,
-                    };
-
-                    let batch_id = self.make_batch_id(&next);
+                FetchOutcome::Page(res) => {
+                    let batch_id = self.batch_id(&cur);
                     info!(
                         batch_no = batches + 1,
                         batch_id = %batch_id,
@@ -298,20 +295,27 @@ impl DataProducer for LiveProducer {
                         "Fetched batch."
                     );
 
-                    self.record_batch_start(&batch_id, &next, res.row_count)
-                        .await?;
+                    self.log_batch_start(&batch_id, &cur, res.row_count).await?;
 
                     let records = self.transform(res.rows).await;
-                    self.send_batch(batch_id, records, next.clone()).await?;
+                    self.send_batch(batch_id, records, cur.clone()).await?;
 
-                    cur = next;
-                    batches += 1;
-                    self.heartbeat(batches).await;
+                    if let Some(next) = res.next_cursor
+                        && next != Cursor::None
+                    {
+                        cur = next;
+                        batches += 1;
+                    } else {
+                        warn!("No next cursor available; terminating producer.");
+                        break;
+                    }
                 }
             }
         }
 
-        self.notify_shutdown();
+        self.signal_shutdown();
+        self.cancel_token.cancel();
+        let _ = hb_handle; // Wait for heartbeat loop to finish
 
         Ok(batches) // Return the number of batches processed
     }

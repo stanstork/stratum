@@ -11,7 +11,7 @@ use connectors::{
     metadata::entity::EntityMetadata,
     sql::base::{
         error::DbError,
-        metadata::{provider::MetadataHelper, table::TableMetadata},
+        metadata::{provider::MetadataStore, table::TableMetadata},
     },
 };
 use futures::lock::Mutex;
@@ -113,7 +113,7 @@ impl ItemContext {
     where
         F: Fn(String) -> Fut,
         Fut: Future<Output = Result<TableMetadata, DbError>>,
-        M: MetadataHelper + Send + Sync + ?Sized,
+        M: MetadataStore + Send + Sync + ?Sized,
     {
         let db = match db {
             Some(db) => db,

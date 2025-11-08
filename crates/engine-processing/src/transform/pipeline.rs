@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use model::records::record::Record;
 
 pub trait Transform: Send + Sync {
@@ -11,8 +13,9 @@ pub trait TransformPipelineExt {
         F: FnOnce() -> T;
 }
 
+#[derive(Clone)]
 pub struct TransformPipeline {
-    transforms: Vec<Box<dyn Transform>>,
+    transforms: Vec<Arc<dyn Transform>>,
 }
 
 impl TransformPipeline {
@@ -29,7 +32,7 @@ impl TransformPipeline {
     }
 
     pub fn add_transform<T: Transform + 'static>(mut self, transform: T) -> Self {
-        self.transforms.push(Box::new(transform));
+        self.transforms.push(Arc::new(transform));
         self
     }
 }

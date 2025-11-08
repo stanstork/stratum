@@ -116,6 +116,29 @@ impl Value {
         }
     }
 
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Value::Int(v) => Some(*v != 0),
+            Value::Uint(v) => Some(*v != 0),
+            Value::Usize(v) => Some(*v != 0),
+            Value::Float(v) => Some(*v != 0.0),
+            Value::String(v) => match v.to_lowercase().as_str() {
+                "true" | "1" => Some(true),
+                "false" | "0" => Some(false),
+                _ => None,
+            },
+            Value::Boolean(v) => Some(*v),
+            Value::Json(v) => v.as_bool(),
+            Value::Uuid(_) => None,
+            Value::Bytes(_) => None,
+            Value::Date(_) => None,
+            Value::Timestamp(_) => None,
+            Value::Null => None,
+            Value::Enum(_, _) => None,
+            Value::StringArray(_) => None,
+        }
+    }
+
     pub fn compare(&self, other: &Value) -> Option<Ordering> {
         use Value::*;
         match (self, other) {

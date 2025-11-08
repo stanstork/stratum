@@ -1,10 +1,11 @@
 use crate::sql::{
     base::{
         adapter::SqlAdapter,
+        capabilities::DbCapabilities,
         destination::DbDataDestination,
         error::DbError,
         join::clause::JoinClause,
-        metadata::{provider::MetadataHelper, table::TableMetadata},
+        metadata::{provider::MetadataStore, table::TableMetadata},
         query::{column::ColumnDef, generator::QueryGenerator},
     },
     postgres::adapter::PgAdapter,
@@ -52,7 +53,7 @@ impl DbDataDestination for PgDestination {
         let (sql, params) = generator.insert_batch(meta, rows);
 
         info!("Inserting {} rows into {}", num_rows, meta.name);
-        self.adapter.execute_with_params(&sql, params).await?;
+        self.adapter.exec_params(&sql, params).await?;
 
         Ok(())
     }
@@ -65,7 +66,7 @@ impl DbDataDestination for PgDestination {
             if enable { "Enabling" } else { "Disabling" },
             table
         );
-        self.adapter.execute(&sql).await?;
+        self.adapter.exec(&sql).await?;
 
         Ok(())
     }
@@ -78,14 +79,18 @@ impl DbDataDestination for PgDestination {
         let (sql, _params) = QueryGenerator::new(&self.dialect).add_column(table, column.clone());
 
         info!("Adding column {} to table {}", column.name, table);
-        self.adapter.execute(&sql).await?;
+        self.adapter.exec(&sql).await?;
 
         Ok(())
     }
+
+    async fn capabilities(&self) -> DbCapabilities {
+        self.adapter.capabilities().await.unwrap()
+    }
 }
 
-impl MetadataHelper for PgDestination {
-    fn get_metadata(&self) -> &Option<TableMetadata> {
+impl MetadataStore for PgDestination {
+    fn metadata(&self) -> &Option<TableMetadata> {
         &self.primary_meta
     }
 

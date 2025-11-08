@@ -17,7 +17,7 @@ pub enum DbRow<'a> {
 }
 
 impl DbRow<'_> {
-    pub fn get_row_data(&self, table: &str) -> RowData {
+    pub fn to_row_data(&self, table: &str) -> RowData {
         let columns = self
             .columns()
             .iter()

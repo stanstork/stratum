@@ -92,7 +92,7 @@ impl KeyChecker {
     ) -> Result<(), DbError> {
         for ((table, kind), keys) in self.pending.drain() {
             let adapter = destination.data_dest.adapter().await;
-            let table_meta = adapter.fetch_metadata(&table).await?;
+            let table_meta = adapter.table_metadata(&table).await?;
 
             for key_batch in keys.chunks(batch_size) {
                 let key_columns: &Vec<String> = match &kind {

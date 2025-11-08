@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -39,7 +38,7 @@ pub enum Cursor {
     CompositeTsPk {
         ts_col: QualCol,
         pk_col: QualCol,
-        ts: DateTime<Utc>, // timestamp value
-        id: u64,           // tie-breaker id
+        ts: i64, // timestamp in microseconds
+        id: u64, // tie-breaker id
     },
 }

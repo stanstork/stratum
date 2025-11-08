@@ -46,7 +46,7 @@ impl LinkedSource {
         // fetch metadata for all tables
         let mut meta = HashMap::new();
         for table in &load.entities {
-            let table_meta = src_adapter.get_sql().fetch_metadata(table).await?;
+            let table_meta = src_adapter.get_sql().table_metadata(table).await?;
             meta.insert(table.clone(), table_meta);
         }
 

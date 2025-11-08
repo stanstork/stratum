@@ -251,7 +251,7 @@ pub async fn fetch_rows(
             let rows = sqlx::query(query).fetch_all(&mysql).await?;
             Ok(rows
                 .into_iter()
-                .map(|row| DbRow::MySqlRow(&row).get_row_data("source_table"))
+                .map(|row| DbRow::MySqlRow(&row).to_row_data("source_table"))
                 .collect())
         }
         DbType::Postgres => {
@@ -259,7 +259,7 @@ pub async fn fetch_rows(
             let rows = sqlx::query(query).fetch_all(&pg).await?;
             Ok(rows
                 .into_iter()
-                .map(|row| DbRow::PostgresRow(&row).get_row_data("source_table"))
+                .map(|row| DbRow::PostgresRow(&row).to_row_data("source_table"))
                 .collect())
         }
     }
