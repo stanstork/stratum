@@ -1,7 +1,9 @@
 #![allow(dead_code)]
 
-use sqlx::{Executor, MySqlPool, PgPool, mysql::MySqlPoolOptions, postgres::PgPoolOptions};
-use std::{env, fs, io, path::PathBuf};
+use connectors::sql::postgres::utils::connect_client;
+use mysql_async::Pool;
+use std::{env, fs, io, path::PathBuf, sync::Arc};
+use tokio_postgres::Client;
 
 pub mod integration;
 pub mod utils;
@@ -11,33 +13,25 @@ const TEST_MYSQL_URL_SAKILA: &str = "mysql://sakila_user:qwerty123@localhost:330
 const TEST_MYSQL_URL_ORDERS: &str = "mysql://user:password@localhost:3306/testdb";
 const TEST_PG_URL: &str = "postgres://user:password@localhost:5432/testdb";
 
-async fn mysql_pool(source_db: &str) -> MySqlPool {
-    MySqlPoolOptions::new()
-        .max_connections(5)
-        .acquire_timeout(std::time::Duration::from_secs(10))
-        .connect(match source_db {
-            "sakila" => TEST_MYSQL_URL_SAKILA,
-            "orders" => TEST_MYSQL_URL_ORDERS,
-            _ => panic!("Unknown source database: {source_db}"),
-        })
-        .await
-        .expect("connect mysql")
+async fn mysql_pool(source_db: &str) -> Pool {
+    Pool::from_url(match source_db {
+        "sakila" => TEST_MYSQL_URL_SAKILA,
+        "orders" => TEST_MYSQL_URL_ORDERS,
+        _ => panic!("Unknown source database: {source_db}"),
+    })
+    .expect("connect mysql")
 }
 
-async fn pg_pool() -> PgPool {
-    PgPoolOptions::new()
-        .max_connections(5)
-        .acquire_timeout(std::time::Duration::from_secs(10))
-        .connect(TEST_PG_URL)
-        .await
-        .expect("connect postgres")
+async fn pg_pool() -> Arc<Client> {
+    let client = Arc::new(connect_client(TEST_PG_URL).await.expect("connect postgres"));
+    client
 }
 
 /// Drop & recreate the public schema in Postgres so it's empty.
 async fn reset_postgres_schema() {
     let pool = pg_pool().await;
     // This will drop all tables, types, etc. in `public` and re-create it.
-    pool.execute(
+    pool.batch_execute(
         r#"
         DROP SCHEMA public CASCADE;
         CREATE SCHEMA public;

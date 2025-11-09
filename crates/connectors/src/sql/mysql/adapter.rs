@@ -1,4 +1,5 @@
 use crate::sql::base::probe::CapabilityProbe;
+use crate::sql::mysql::params::MySqlParamStore;
 use crate::sql::{
     base::{
         adapter::{DatabaseKind, SqlAdapter},
@@ -16,44 +17,18 @@ use crate::sql::{
     mysql::{data_type::MySqlColumnDataType, probe::MySqlCapabilityProbe},
 };
 use async_trait::async_trait;
-use futures_util::TryStreamExt;
 use model::{
     core::{data_type::DataType, value::Value},
     records::row::RowData,
 };
+use mysql_async::{Pool, Row as MySqlRow, prelude::Queryable};
 use planner::query::dialect;
-use sqlx::{MySql, Pool, Row, query::Query};
 use std::collections::HashMap;
 use tracing::info;
 
-fn bind_values<'q>(
-    mut query: Query<'q, MySql, sqlx::mysql::MySqlArguments>,
-    params: &'q [Value],
-) -> Query<'q, MySql, sqlx::mysql::MySqlArguments> {
-    for p in params {
-        query = match p {
-            Value::Int(i) => query.bind(*i),
-            Value::Uint(u) => query.bind(*u),
-            Value::Usize(u) => query.bind(*u as u64),
-            Value::Float(f) => query.bind(*f),
-            Value::String(s) => query.bind(s),
-            Value::Boolean(b) => query.bind(*b),
-            Value::Json(j) => query.bind(j),
-            Value::Uuid(u) => query.bind(*u),
-            Value::Bytes(b) => query.bind(b),
-            Value::Date(d) => query.bind(*d),
-            Value::Timestamp(t) => query.bind(*t),
-            Value::Null => query.bind(None::<String>),
-            Value::Enum(_, v) => query.bind(v),
-            Value::StringArray(v) => query.bind(format!("{v:?}")), // Bind as a string representation of the array
-        };
-    }
-    query
-}
-
 #[derive(Clone)]
 pub struct MySqlAdapter {
-    pool: Pool<MySql>,
+    pool: Pool,
     dialect: dialect::MySql,
 }
 
@@ -66,7 +41,7 @@ const QUERY_COLUMN_TYPE_SQL: &str = include_str!("sql/column_type.sql");
 #[async_trait]
 impl SqlAdapter for MySqlAdapter {
     async fn connect(url: &str) -> Result<Self, ConnectorError> {
-        let pool = Pool::connect(url).await?;
+        let pool = Pool::from_url(url)?;
         Ok(MySqlAdapter {
             pool,
             dialect: dialect::MySql,
@@ -74,47 +49,41 @@ impl SqlAdapter for MySqlAdapter {
     }
 
     async fn exec(&self, query: &str) -> Result<(), DbError> {
-        sqlx::query(query).execute(&self.pool).await?;
+        let mut conn = self.pool.get_conn().await?;
+        conn.query_drop(query).await?;
         Ok(())
     }
 
     async fn exec_params(&self, query: &str, params: Vec<Value>) -> Result<(), DbError> {
-        let query = sqlx::query(query);
-        let bound_query = bind_values(query, &params);
-        bound_query.execute(&self.pool).await?;
+        let params = MySqlParamStore::from_values(&params).params();
+        let mut conn = self.pool.get_conn().await?;
+        conn.exec_drop(query, params).await?;
         Ok(())
     }
 
     async fn query_rows(&self, sql: &str) -> Result<Vec<RowData>, DbError> {
-        let rows = sqlx::query(sql).fetch_all(&self.pool).await?;
-
-        let result = rows
+        let mut conn = self.pool.get_conn().await?;
+        let rows: Vec<MySqlRow> = conn.query(sql).await?;
+        Ok(rows
             .iter()
-            .map(|row| DbRow::MySqlRow(row).to_row_data("")) // Table name is unknown here
-            .collect::<Vec<RowData>>();
-
-        Ok(result)
+            .map(|row| DbRow::MySqlRow(row).to_row_data(""))
+            .collect())
     }
 
     async fn fetch_rows(&self, request: FetchRowsRequest) -> Result<Vec<RowData>, DbError> {
         let generator = QueryGenerator::new(&self.dialect);
         let (sql, params) = generator.select(&request);
 
-        // Log the generated SQL query for debugging
         info!("Generated SQL: {}", sql);
         info!("Parameters: {:?}", params);
 
-        // Bind parameters and execute
-        let query = sqlx::query(&sql);
-        let bound_query = bind_values(query, &params);
-
-        let result = bound_query
-            .fetch(&self.pool) // returns a stream of results
-            .map_ok(|row| DbRow::MySqlRow(&row).to_row_data(&request.table))
-            .try_collect::<Vec<RowData>>() // gathers the items into a collection, stopping at the first error
-            .await?;
-
-        Ok(result)
+        let mut conn = self.pool.get_conn().await?;
+        let params = MySqlParamStore::from_values(&params).params();
+        let rows: Vec<MySqlRow> = conn.exec(sql, params).await?;
+        Ok(rows
+            .iter()
+            .map(|row| DbRow::MySqlRow(row).to_row_data(&request.table))
+            .collect())
     }
 
     async fn fetch_existing_keys(
@@ -127,38 +96,28 @@ impl SqlAdapter for MySqlAdapter {
     }
 
     async fn table_exists(&self, table: &str) -> Result<bool, DbError> {
-        let row = sqlx::query(QUERY_TABLE_EXISTS_SQL)
-            .bind(table)
-            .fetch_one(&self.pool)
-            .await?;
-        Ok(row.get(0))
+        let mut conn = self.pool.get_conn().await?;
+        let exists: Option<(bool,)> = conn.exec_first(QUERY_TABLE_EXISTS_SQL, (table,)).await?;
+        Ok(exists.map(|row| row.0).unwrap_or(false))
     }
 
     async fn list_tables(&self) -> Result<Vec<String>, DbError> {
-        let rows = sqlx::query("SHOW TABLES").fetch_all(&self.pool).await?;
+        let mut conn = self.pool.get_conn().await?;
+        let rows: Vec<MySqlRow> = conn.query("SHOW TABLES").await?;
 
-        // extract each row's first column as Vec<u8> and then utf8‐decode
-        let tables = rows
-            .into_iter()
+        rows.into_iter()
             .map(|row| {
-                // get the VARBINARY column as Vec<u8>
-                let raw: Vec<u8> = row.try_get(0)?;
-                // convert to String
-                String::from_utf8(raw)
-                    .map_err(|e| DbError::Unknown(format!("invalid UTF-8 in table name: {e}")))
+                row.get_opt::<String, _>(0)
+                    .and_then(|res| res.ok())
+                    .ok_or_else(|| DbError::Unknown("failed to read table name".to_string()))
             })
-            .collect::<Result<_, _>>()?;
-
-        Ok(tables)
+            .collect()
     }
 
     async fn table_metadata(&self, table: &str) -> Result<TableMetadata, DbError> {
-        let rows = sqlx::query(QUERY_TABLE_METADATA_SQL)
-            .bind(table)
-            .bind(table)
-            .bind(table)
-            .bind(table)
-            .fetch_all(&self.pool)
+        let mut conn = self.pool.get_conn().await?;
+        let rows: Vec<MySqlRow> = conn
+            .exec(QUERY_TABLE_METADATA_SQL, (table, table, table, table))
             .await?;
         let columns = rows
             .iter()
@@ -173,34 +132,38 @@ impl SqlAdapter for MySqlAdapter {
     }
 
     async fn referencing_tables(&self, table: &str) -> Result<Vec<String>, DbError> {
-        let rows = sqlx::query(QUERY_TABLE_REFERENCING_SQL)
-            .bind(table)
-            .fetch_all(&self.pool)
-            .await?;
+        let mut conn = self.pool.get_conn().await?;
+        let rows: Vec<MySqlRow> = conn.exec(QUERY_TABLE_REFERENCING_SQL, (table,)).await?;
 
-        let tables = rows
-            .iter()
-            .map(|row| row.try_get::<String, _>(COL_REFERENCING_TABLE))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(tables)
+        rows.into_iter()
+            .map(|row| {
+                row.get_opt::<String, _>(COL_REFERENCING_TABLE)
+                    .and_then(|res| res.ok())
+                    .ok_or_else(|| {
+                        DbError::Unknown("missing referencing_table column in metadata".to_string())
+                    })
+            })
+            .collect()
     }
 
     async fn column_db_type(&self, table: &str, column: &str) -> Result<String, DbError> {
-        let row = sqlx::query(QUERY_COLUMN_TYPE_SQL)
-            .bind(table)
-            .bind(column)
-            .fetch_one(&self.pool)
-            .await?;
-        let data_type = row.try_get::<Vec<u8>, _>("column_type")?;
-        String::from_utf8(data_type).map_err(|err| err.into())
+        let mut conn = self.pool.get_conn().await?;
+        let row = conn
+            .exec_first::<MySqlRow, _, _>(QUERY_COLUMN_TYPE_SQL, (table, column))
+            .await?
+            .ok_or_else(|| {
+                DbError::Unknown(format!("column `{column}` not found for table `{table}`"))
+            })?;
+
+        row.get_opt::<String, _>("column_type")
+            .and_then(|res| res.ok())
+            .ok_or_else(|| DbError::Unknown("column_type missing in metadata".into()))
     }
 
     async fn truncate_table(&self, table: &str) -> Result<(), DbError> {
-        sqlx::query(QUERY_TRUNCATE_TABLE_SQL)
-            .bind(table)
-            .execute(&self.pool)
-            .await?;
+        let sql = QUERY_TRUNCATE_TABLE_SQL.replace("$1", &escape_identifier(table));
+        let mut conn = self.pool.get_conn().await?;
+        conn.query_drop(sql).await?;
         Ok(())
     }
 
@@ -211,4 +174,9 @@ impl SqlAdapter for MySqlAdapter {
     async fn capabilities(&self) -> Result<DbCapabilities, DbError> {
         MySqlCapabilityProbe::detect(self).await
     }
+}
+
+fn escape_identifier(name: &str) -> String {
+    let escaped = name.replace('`', "``");
+    format!("`{escaped}`")
 }

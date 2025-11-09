@@ -7,13 +7,15 @@ use model::{
     },
     records::row::RowData,
 };
-use sqlx::{Column, Row, TypeInfo};
+use mysql_async::Row as MySqlRow;
 use std::fmt::Formatter;
 use tokio_postgres::{Column as PgColumn, Row as PgRow, types::Json as PgJson};
 use tracing::warn;
 
+use crate::sql::base::utils::mysql_col_type;
+
 pub enum DbRow<'a> {
-    MySqlRow(&'a sqlx::mysql::MySqlRow),
+    MySqlRow(&'a MySqlRow),
     PostgresRow(&'a PgRow),
 }
 
@@ -70,16 +72,29 @@ impl DbRow<'_> {
         }
     }
 
-    pub fn columns(&self) -> Vec<&str> {
+    pub fn columns(&self) -> Vec<String> {
         match self {
-            DbRow::MySqlRow(row) => row.columns().iter().map(|col| col.name()).collect(),
-            DbRow::PostgresRow(row) => row.columns().iter().map(|col| col.name()).collect(),
+            DbRow::MySqlRow(row) => row
+                .columns_ref()
+                .iter()
+                .map(|col| col.name_str().into_owned())
+                .collect(),
+            DbRow::PostgresRow(row) => row
+                .columns()
+                .iter()
+                .map(|col| col.name().to_string())
+                .collect(),
         }
     }
 
     pub fn column_type(&self, name: &str) -> &str {
         match self {
-            DbRow::MySqlRow(row) => row.column(name).type_info().name(),
+            DbRow::MySqlRow(row) => row
+                .columns_ref()
+                .iter()
+                .find(|col| col.name_ref() == name.as_bytes())
+                .map(|col| mysql_col_type(col.column_type()))
+                .unwrap_or("VARCHAR"),
             DbRow::PostgresRow(row) => {
                 let col: &PgColumn = row
                     .columns()
@@ -93,56 +108,58 @@ impl DbRow<'_> {
 
     pub fn try_get_i32(&self, name: &str) -> Option<i32> {
         match self {
-            DbRow::MySqlRow(row) => row.try_get::<i32, _>(name).ok(),
+            DbRow::MySqlRow(row) => row.get_opt::<i32, _>(name).and_then(|res| res.ok()),
             DbRow::PostgresRow(row) => row.try_get::<_, i32>(name).ok(),
         }
     }
 
     pub fn try_get_u32(&self, name: &str) -> Option<u32> {
         match self {
-            DbRow::MySqlRow(row) => row.try_get::<u32, _>(name).ok(),
+            DbRow::MySqlRow(row) => row.get_opt::<u32, _>(name).and_then(|res| res.ok()),
             DbRow::PostgresRow(row) => row.try_get::<_, u32>(name).map(|v| v as u32).ok(),
         }
     }
 
     pub fn try_get_u64(&self, name: &str) -> Option<u64> {
         match self {
-            DbRow::MySqlRow(row) => row.try_get::<u64, _>(name).ok(),
+            DbRow::MySqlRow(row) => row.get_opt::<u64, _>(name).and_then(|res| res.ok()),
             DbRow::PostgresRow(row) => row.try_get::<_, i64>(name).map(|v| v as u64).ok(),
         }
     }
 
     pub fn try_get_i64(&self, name: &str) -> Option<i64> {
         match self {
-            DbRow::MySqlRow(row) => row.try_get::<i64, _>(name).ok(),
+            DbRow::MySqlRow(row) => row.get_opt::<i64, _>(name).and_then(|res| res.ok()),
             DbRow::PostgresRow(row) => row.try_get::<_, i64>(name).ok(),
         }
     }
 
     pub fn try_get_f64(&self, name: &str) -> Option<f64> {
         match self {
-            DbRow::MySqlRow(row) => row.try_get::<f64, _>(name).ok(),
+            DbRow::MySqlRow(row) => row.get_opt::<f64, _>(name).and_then(|res| res.ok()),
             DbRow::PostgresRow(row) => row.try_get::<_, f64>(name).ok(),
         }
     }
 
     pub fn try_get_string(&self, name: &str) -> Option<String> {
         match self {
-            DbRow::MySqlRow(row) => row.try_get::<String, _>(name).ok(),
+            DbRow::MySqlRow(row) => row.get_opt::<String, _>(name).and_then(|res| res.ok()),
             DbRow::PostgresRow(row) => row.try_get::<_, String>(name).ok(),
         }
     }
 
     pub fn try_get_bool(&self, name: &str) -> Option<bool> {
         match self {
-            DbRow::MySqlRow(row) => row.try_get::<bool, _>(name).ok(),
+            DbRow::MySqlRow(row) => row.get_opt::<bool, _>(name).and_then(|res| res.ok()),
             DbRow::PostgresRow(row) => row.try_get::<_, bool>(name).ok(),
         }
     }
 
     pub fn try_get_json(&self, name: &str) -> Option<serde_json::Value> {
         match self {
-            DbRow::MySqlRow(row) => row.try_get::<serde_json::Value, _>(name).ok(),
+            DbRow::MySqlRow(row) => row
+                .get_opt::<serde_json::Value, _>(name)
+                .and_then(|res| res.ok()),
             DbRow::PostgresRow(row) => row
                 .try_get::<_, PgJson<serde_json::Value>>(name)
                 .ok()
@@ -152,7 +169,9 @@ impl DbRow<'_> {
 
     pub fn try_get_bigdecimal(&self, name: &str) -> Option<bigdecimal::BigDecimal> {
         match self {
-            DbRow::MySqlRow(row) => row.try_get::<bigdecimal::BigDecimal, _>(name).ok(),
+            DbRow::MySqlRow(row) => row
+                .get_opt::<bigdecimal::BigDecimal, _>(name)
+                .and_then(|res| res.ok()),
             DbRow::PostgresRow(row) => row
                 .try_get::<_, f64>(name)
                 .ok()
@@ -162,21 +181,28 @@ impl DbRow<'_> {
 
     pub fn try_get_timestamp(&self, name: &str) -> Option<chrono::DateTime<chrono::Utc>> {
         match self {
-            DbRow::MySqlRow(row) => row.try_get::<chrono::DateTime<chrono::Utc>, _>(name).ok(),
+            DbRow::MySqlRow(row) => row
+                .get_opt::<chrono::NaiveDateTime, _>(name)
+                .and_then(|res| res.ok())
+                .map(|naive: chrono::NaiveDateTime| {
+                    chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(naive, chrono::Utc)
+                }),
             DbRow::PostgresRow(row) => row.try_get::<_, chrono::DateTime<chrono::Utc>>(name).ok(),
         }
     }
 
     pub fn try_get_date(&self, name: &str) -> Option<chrono::NaiveDate> {
         match self {
-            DbRow::MySqlRow(row) => row.try_get::<chrono::NaiveDate, _>(name).ok(),
+            DbRow::MySqlRow(row) => row
+                .get_opt::<chrono::NaiveDate, _>(name)
+                .and_then(|res| res.ok()),
             DbRow::PostgresRow(row) => row.try_get::<_, chrono::NaiveDate>(name).ok(),
         }
     }
 
     pub fn try_get_bytes(&self, name: &str) -> Option<Vec<u8>> {
         match self {
-            DbRow::MySqlRow(row) => row.try_get::<Vec<u8>, _>(name).ok(),
+            DbRow::MySqlRow(row) => row.get_opt::<Vec<u8>, _>(name).and_then(|res| res.ok()),
             DbRow::PostgresRow(row) => row.try_get::<_, Vec<u8>>(name).ok(),
         }
     }

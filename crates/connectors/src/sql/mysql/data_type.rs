@@ -1,6 +1,5 @@
 use model::core::data_type::DataType;
-use sqlx::Row;
-use sqlx::mysql::MySqlRow;
+use mysql_async::Row as MySqlRow;
 
 pub trait MySqlColumnDataType {
     fn from_mysql_row(row: &MySqlRow) -> DataType;
@@ -8,7 +7,10 @@ pub trait MySqlColumnDataType {
 
 impl MySqlColumnDataType for DataType {
     fn from_mysql_row(row: &MySqlRow) -> DataType {
-        let data_type_str: String = row.try_get("data_type").unwrap_or_default();
+        let data_type_str = row
+            .get_opt::<String, _>("data_type")
+            .and_then(|res| res.ok())
+            .unwrap_or_default();
         DataType::try_from(data_type_str.as_str()).unwrap_or(DataType::String)
     }
 }

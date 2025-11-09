@@ -1,0 +1,33 @@
+use mysql_async::consts::ColumnType::{self, *};
+
+pub(crate) fn mysql_col_type(column_type: ColumnType) -> &'static str {
+    match column_type {
+        MYSQL_TYPE_DECIMAL | MYSQL_TYPE_NEWDECIMAL => "DECIMAL",
+        MYSQL_TYPE_TINY => "TINYINT",
+        MYSQL_TYPE_SHORT => "SMALLINT",
+        MYSQL_TYPE_LONG | MYSQL_TYPE_INT24 => "INT",
+        MYSQL_TYPE_FLOAT => "FLOAT",
+        MYSQL_TYPE_DOUBLE => "DOUBLE",
+        MYSQL_TYPE_NULL => "NULL",
+        MYSQL_TYPE_TIMESTAMP | MYSQL_TYPE_TIMESTAMP2 => "TIMESTAMP",
+        MYSQL_TYPE_LONGLONG => "BIGINT",
+        MYSQL_TYPE_DATE | MYSQL_TYPE_NEWDATE => "DATE",
+        MYSQL_TYPE_TIME | MYSQL_TYPE_TIME2 => "TIME",
+        MYSQL_TYPE_DATETIME | MYSQL_TYPE_DATETIME2 => "DATETIME",
+        MYSQL_TYPE_YEAR => "YEAR",
+        MYSQL_TYPE_VARCHAR | MYSQL_TYPE_VAR_STRING => "VARCHAR",
+        MYSQL_TYPE_BIT => "BIT",
+        MYSQL_TYPE_TYPED_ARRAY => "ARRAY",
+        MYSQL_TYPE_VECTOR => "VARBINARY",
+        MYSQL_TYPE_UNKNOWN => "VARCHAR",
+        MYSQL_TYPE_JSON => "JSON",
+        MYSQL_TYPE_ENUM => "ENUM",
+        MYSQL_TYPE_SET => "SET",
+        MYSQL_TYPE_TINY_BLOB => "TINYBLOB",
+        MYSQL_TYPE_MEDIUM_BLOB => "MEDIUMBLOB",
+        MYSQL_TYPE_LONG_BLOB => "LONGBLOB",
+        MYSQL_TYPE_BLOB => "BLOB",
+        MYSQL_TYPE_STRING => "VARCHAR",
+        MYSQL_TYPE_GEOMETRY => "GEOMETRY",
+    }
+}

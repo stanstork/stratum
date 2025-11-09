@@ -12,10 +12,7 @@ use connectors::{
         mysql::source::MySqlDataSource,
     },
 };
-use model::{
-    pagination::{cursor::Cursor, page::FetchResult},
-    records::record::Record,
-};
+use model::pagination::{cursor::Cursor, page::FetchResult};
 use planner::query::{
     dialect::{self, Dialect},
     offsets::OffsetStrategy,
@@ -31,7 +28,6 @@ pub enum DataSource {
     Database(Arc<Mutex<dyn DbDataSource<Error = DbError>>>),
     File(Arc<Mutex<dyn FileDataSource<Error = FileError>>>),
 }
-
 /// Represents a migration source,
 /// such as a database table, file, or API to be transformed and written to a destination.
 #[derive(Clone)]
@@ -142,6 +138,7 @@ impl Source {
                 let rows = db.fetch(batch_size, cursor).await?;
                 println!("===========================================");
                 println!("Result cursor: {:?}", rows.next_cursor);
+                println!("Fetched {} rows", rows.row_count);
                 println!("===========================================");
                 Ok(rows)
             }

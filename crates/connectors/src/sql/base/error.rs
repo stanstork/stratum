@@ -8,13 +8,13 @@ pub enum DbError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// Any SQL driver error.
-    #[error("SQL error: {0}")]
-    Sql(#[from] sqlx::Error),
+    /// Any MySQL driver error.
+    #[error("MySQL error: {0}")]
+    MySqlError(#[from] mysql_async::Error),
 
-    /// Any SQL driver error.
-    #[error("SQL error: {0}")]
-    Sql2(#[from] tokio_postgres::Error),
+    /// Any Pg driver error.
+    #[error("Pg error: {0}")]
+    PgError(#[from] tokio_postgres::Error),
 
     /// We detected a circular reference in the metadata graph.
     #[error("Circular reference detected: {0}")]
@@ -43,9 +43,9 @@ pub enum DbError {
 /// Errors happening during adapter or connection setup.
 #[derive(Debug, Error)]
 pub enum ConnectorError {
-    /// SQLx failed to build the connection or pool.
-    #[error("SQLx connector creation failed: {0}")]
-    Sqlx(#[from] sqlx::Error),
+    /// The MySQL driver failed to build the connection or pool.
+    #[error("MySQL connector creation failed: {0}")]
+    MySql(#[from] mysql_async::Error),
 
     /// An invalid database URL was provided.
     #[error("Invalid database URL: {0}")]

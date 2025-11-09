@@ -3,7 +3,7 @@ use crate::sql::{
     mysql::data_type::MySqlColumnDataType,
 };
 use model::core::data_type::DataType;
-use sqlx::mysql::MySqlRow;
+use mysql_async::Row as MySqlRow;
 
 pub trait ColumnMetadataMapper {
     fn from_mysql_row(row: &MySqlRow) -> ColumnMetadata;

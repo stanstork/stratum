@@ -5,7 +5,7 @@ use postgres_native_tls::MakeTlsConnector;
 use tokio_postgres::{Client, Config, NoTls, config::SslMode};
 use tracing::{error, warn};
 
-pub(crate) async fn connect_client(url: &str) -> Result<Client, ConnectorError> {
+pub async fn connect_client(url: &str) -> Result<Client, ConnectorError> {
     let config = url
         .parse::<Config>()
         .map_err(|e| ConnectorError::InvalidUrl(e.to_string()))?;

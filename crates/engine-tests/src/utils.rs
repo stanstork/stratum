@@ -5,8 +5,9 @@ use crate::pg_pool;
 use connectors::{file::csv::error::FileError, sql::base::row::DbRow};
 use engine_runtime::execution::executor::run;
 use model::records::row::RowData;
+use mysql_async::Row as MySqlRow;
+use mysql_async::prelude::Queryable;
 use planner::plan::parse;
-use sqlx::{Row, mysql::MySqlRow};
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -85,20 +86,17 @@ pub async fn run_smql(template: &str, source_db: &str) {
 /// Assert that a table exists (or not) in Postgres
 pub async fn assert_table_exists(table: &str, should: bool) {
     let pg = pg_pool().await;
-    let (exists,): (bool,) = sqlx::query_as(
-        r#"
+    let query = r#"
         SELECT EXISTS (
           SELECT 1
             FROM information_schema.tables
            WHERE table_schema='public'
              AND table_name=$1
         );
-        "#,
-    )
-    .bind(table)
-    .fetch_one(&pg)
-    .await
-    .unwrap();
+    "#;
+    let row = pg.query_one(query, &[&table]).await.unwrap();
+    let exists: bool = row.get(0);
+
     assert_eq!(
         exists, should,
         "expected table '{table}' existence == {should}"
@@ -107,8 +105,7 @@ pub async fn assert_table_exists(table: &str, should: bool) {
 
 pub async fn assert_column_exists(table: &str, column: &str, should: bool) {
     let pg = pg_pool().await;
-    let (exists,): (bool,) = sqlx::query_as(
-        r#"
+    let query = r#"
         SELECT EXISTS (
           SELECT 1
             FROM information_schema.columns
@@ -116,13 +113,10 @@ pub async fn assert_column_exists(table: &str, column: &str, should: bool) {
              AND table_name=$1
              AND column_name=$2
         );
-        "#,
-    )
-    .bind(table)
-    .bind(column)
-    .fetch_one(&pg)
-    .await
-    .unwrap();
+    "#;
+    let row = pg.query_one(query, &[&table, &column]).await.unwrap();
+    let exists: bool = row.get(0);
+
     assert_eq!(
         exists, should,
         "expected column '{column}' existence == {should}"
@@ -149,18 +143,22 @@ pub async fn get_row_count(table: &str, source_db: &str, db: DbType) -> i64 {
     match db {
         DbType::MySql => {
             let mysql = mysql_pool(source_db).await;
-            let (count,): (i64,) = sqlx::query_as(&query).fetch_one(&mysql).await.unwrap();
-            count
+            let mut conn = mysql.get_conn().await.unwrap();
+            let res = conn.query_first(query).await.unwrap();
+            res.unwrap_or(0)
         }
         DbType::Postgres => {
             let pg = pg_pool().await;
-            let (count,): (i64,) = sqlx::query_as(&query).fetch_one(&pg).await.unwrap();
+            let count: i64 = pg.query_one(&query, &[]).await.unwrap().get(0);
             count
         }
     }
 }
 
-pub async fn get_table_names(db: DbType, source_db: &str) -> Result<Vec<String>, sqlx::Error> {
+pub async fn get_table_names(
+    db: DbType,
+    source_db: &str,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     match db {
         DbType::MySql => {
             let pool = mysql_pool(source_db).await;
@@ -171,15 +169,13 @@ pub async fn get_table_names(db: DbType, source_db: &str) -> Result<Vec<String>,
                  WHERE table_schema = DATABASE()
                    AND table_type   = 'BASE TABLE';
             "#;
-            let raw_names: Vec<Vec<u8>> = sqlx::query(sql)
-                .map(|row: MySqlRow| row.get::<Vec<u8>, _>(0))
-                .fetch_all(&pool)
-                .await?;
+            let mut conn = pool.get_conn().await.unwrap();
+            let rows: Vec<MySqlRow> = conn.exec(sql, ()).await?;
 
             // Convert each raw Vec<u8> into a String
-            let names = raw_names
+            let names = rows
                 .into_iter()
-                .map(|bytes| String::from_utf8(bytes).expect("table name was not valid UTF-8"))
+                .map(|row| row.get::<String, _>("table_name").unwrap())
                 .collect();
 
             Ok(names)
@@ -187,16 +183,17 @@ pub async fn get_table_names(db: DbType, source_db: &str) -> Result<Vec<String>,
 
         DbType::Postgres => {
             let pool = pg_pool().await;
-            let names: Vec<String> = sqlx::query_scalar(
-                r#"
+            let sql = r#"
                 SELECT table_name
                   FROM information_schema.tables
                  WHERE table_schema = 'public'
                    AND table_type   = 'BASE TABLE';
-                "#,
-            )
-            .fetch_all(&pool)
-            .await?;
+            "#;
+            let rows = pool.query(sql, &[]).await?;
+            let names: Vec<String> = rows
+                .iter()
+                .map(|row| row.get::<_, String>("table_name"))
+                .collect();
 
             Ok(names)
         }
@@ -207,10 +204,11 @@ pub async fn get_column_names(
     db: DbType,
     source_db: &str,
     table: &str,
-) -> Result<Vec<String>, sqlx::Error> {
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     match db {
         DbType::MySql => {
             let pool = mysql_pool(source_db).await;
+            let mut conn = pool.get_conn().await.unwrap();
             let sql = r#"
                 SELECT column_name
                   FROM information_schema.columns
@@ -219,7 +217,11 @@ pub async fn get_column_names(
             "#;
 
             // query_scalar will pull out the first column of each row as String
-            let names: Vec<String> = sqlx::query_scalar(sql).bind(table).fetch_all(&pool).await?;
+            let rows: Vec<MySqlRow> = conn.exec(sql, (table,)).await?;
+            let names = rows
+                .into_iter()
+                .map(|row| row.get::<String, _>("column_name").unwrap())
+                .collect();
 
             Ok(names)
         }
@@ -233,7 +235,11 @@ pub async fn get_column_names(
                    AND table_name   = $1
             "#;
 
-            let names: Vec<String> = sqlx::query_scalar(sql).bind(table).fetch_all(&pool).await?;
+            let rows = pool.query(sql, &[&table]).await?;
+            let names: Vec<String> = rows
+                .iter()
+                .map(|row| row.get::<_, String>("column_name"))
+                .collect();
 
             Ok(names)
         }
@@ -244,24 +250,24 @@ pub async fn fetch_rows(
     query: &str,
     source_db: &str,
     db: DbType,
-) -> Result<Vec<RowData>, sqlx::Error> {
+) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
     match db {
         DbType::MySql => {
             let mysql = mysql_pool(source_db).await;
-            let rows = sqlx::query(query).fetch_all(&mysql).await?;
+            let mut conn = mysql.get_conn().await?;
+            let rows: Vec<MySqlRow> = conn.query(query).await?;
             Ok(rows
                 .into_iter()
                 .map(|row| DbRow::MySqlRow(&row).to_row_data("source_table"))
                 .collect())
         }
         DbType::Postgres => {
-            // let pg = pg_pool().await;
-            // let rows = sqlx::query(query).fetch_all(&pg).await?;
-            // Ok(rows
-            //     .into_iter()
-            //     .map(|row| DbRow::PostgresRow(&row).to_row_data("source_table"))
-            //     .collect())
-            todo!("Implement fetch_rows for Postgres");
+            let pg = pg_pool().await;
+            let rows = pg.query(query, &[]).await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| DbRow::PostgresRow(&row).to_row_data("source_table"))
+                .collect())
         }
     }
 }
@@ -328,7 +334,7 @@ pub async fn get_cell_as_usize(query: &str, schema: &str, db: DbType, column: &s
 /// Execute a SQL statement in Postgres, panicking on any error
 pub async fn execute(sql: &str) {
     let pg = pg_pool().await;
-    sqlx::query(sql).execute(&pg).await.expect("execute SQL");
+    pg.batch_execute(sql).await.expect("execute sql");
 }
 
 /// Count the number of data rows in a CSV file, optionally excluding the header row
