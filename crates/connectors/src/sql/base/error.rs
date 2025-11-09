@@ -12,6 +12,10 @@ pub enum DbError {
     #[error("SQL error: {0}")]
     Sql(#[from] sqlx::Error),
 
+    /// Any SQL driver error.
+    #[error("SQL error: {0}")]
+    Sql2(#[from] tokio_postgres::Error),
+
     /// We detected a circular reference in the metadata graph.
     #[error("Circular reference detected: {0}")]
     CircularReference(String),
@@ -42,4 +46,16 @@ pub enum ConnectorError {
     /// SQLx failed to build the connection or pool.
     #[error("SQLx connector creation failed: {0}")]
     Sqlx(#[from] sqlx::Error),
+
+    /// An invalid database URL was provided.
+    #[error("Invalid database URL: {0}")]
+    InvalidUrl(String),
+
+    /// TLS configuration error.
+    #[error("TLS configuration error: {0}")]
+    TlsConfig(#[from] native_tls::Error),
+
+    /// Connection error.
+    #[error("Connection error: {0}")]
+    Connection(#[from] tokio_postgres::Error),
 }

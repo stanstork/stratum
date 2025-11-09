@@ -3,7 +3,7 @@ use crate::sql::{
     postgres::data_type::PgDataType,
 };
 use model::core::data_type::DataType;
-use sqlx::postgres::PgRow;
+use tokio_postgres::Row as PgRow;
 
 pub trait ColumnMetadataMapper {
     fn from_pg_row(row: &PgRow) -> ColumnMetadata;

@@ -1,7 +1,6 @@
 use crate::sql::base::metadata::column::ColumnMetadata;
 use model::core::data_type::DataType;
-use sqlx::Row;
-use sqlx::postgres::PgRow;
+use tokio_postgres::Row as PgRow;
 
 pub trait PgDataType {
     fn parse_from_row(row: &PgRow) -> DataType;

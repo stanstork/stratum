@@ -1,4 +1,4 @@
-use bigdecimal::ToPrimitive;
+use bigdecimal::{BigDecimal, FromPrimitive, ToPrimitive};
 use core::fmt;
 use model::{
     core::{
@@ -9,11 +9,12 @@ use model::{
 };
 use sqlx::{Column, Row, TypeInfo};
 use std::fmt::Formatter;
+use tokio_postgres::{Column as PgColumn, Row as PgRow, types::Json as PgJson};
 use tracing::warn;
 
 pub enum DbRow<'a> {
     MySqlRow(&'a sqlx::mysql::MySqlRow),
-    PostgresRow(&'a sqlx::postgres::PgRow),
+    PostgresRow(&'a PgRow),
 }
 
 impl DbRow<'_> {
@@ -79,91 +80,104 @@ impl DbRow<'_> {
     pub fn column_type(&self, name: &str) -> &str {
         match self {
             DbRow::MySqlRow(row) => row.column(name).type_info().name(),
-            DbRow::PostgresRow(row) => row.column(name).type_info().name(),
+            DbRow::PostgresRow(row) => {
+                let col: &PgColumn = row
+                    .columns()
+                    .iter()
+                    .find(|c| c.name() == name)
+                    .expect("Column not found");
+                col.type_().name()
+            }
         }
     }
 
     pub fn try_get_i32(&self, name: &str) -> Option<i32> {
         match self {
             DbRow::MySqlRow(row) => row.try_get::<i32, _>(name).ok(),
-            DbRow::PostgresRow(row) => row.try_get::<i32, _>(name).ok(),
+            DbRow::PostgresRow(row) => row.try_get::<_, i32>(name).ok(),
         }
     }
 
     pub fn try_get_u32(&self, name: &str) -> Option<u32> {
         match self {
             DbRow::MySqlRow(row) => row.try_get::<u32, _>(name).ok(),
-            DbRow::PostgresRow(row) => row.try_get::<i32, _>(name).map(|v| v as u32).ok(),
+            DbRow::PostgresRow(row) => row.try_get::<_, u32>(name).map(|v| v as u32).ok(),
         }
     }
 
     pub fn try_get_u64(&self, name: &str) -> Option<u64> {
         match self {
             DbRow::MySqlRow(row) => row.try_get::<u64, _>(name).ok(),
-            DbRow::PostgresRow(row) => row.try_get::<i64, _>(name).map(|v| v as u64).ok(),
+            DbRow::PostgresRow(row) => row.try_get::<_, i64>(name).map(|v| v as u64).ok(),
         }
     }
 
     pub fn try_get_i64(&self, name: &str) -> Option<i64> {
         match self {
             DbRow::MySqlRow(row) => row.try_get::<i64, _>(name).ok(),
-            DbRow::PostgresRow(row) => row.try_get::<i64, _>(name).ok(),
+            DbRow::PostgresRow(row) => row.try_get::<_, i64>(name).ok(),
         }
     }
 
     pub fn try_get_f64(&self, name: &str) -> Option<f64> {
         match self {
             DbRow::MySqlRow(row) => row.try_get::<f64, _>(name).ok(),
-            DbRow::PostgresRow(row) => row.try_get::<f64, _>(name).ok(),
+            DbRow::PostgresRow(row) => row.try_get::<_, f64>(name).ok(),
         }
     }
 
     pub fn try_get_string(&self, name: &str) -> Option<String> {
         match self {
             DbRow::MySqlRow(row) => row.try_get::<String, _>(name).ok(),
-            DbRow::PostgresRow(row) => row.try_get::<String, _>(name).ok(),
+            DbRow::PostgresRow(row) => row.try_get::<_, String>(name).ok(),
         }
     }
 
     pub fn try_get_bool(&self, name: &str) -> Option<bool> {
         match self {
             DbRow::MySqlRow(row) => row.try_get::<bool, _>(name).ok(),
-            DbRow::PostgresRow(row) => row.try_get::<bool, _>(name).ok(),
+            DbRow::PostgresRow(row) => row.try_get::<_, bool>(name).ok(),
         }
     }
 
     pub fn try_get_json(&self, name: &str) -> Option<serde_json::Value> {
         match self {
             DbRow::MySqlRow(row) => row.try_get::<serde_json::Value, _>(name).ok(),
-            DbRow::PostgresRow(row) => row.try_get::<serde_json::Value, _>(name).ok(),
+            DbRow::PostgresRow(row) => row
+                .try_get::<_, PgJson<serde_json::Value>>(name)
+                .ok()
+                .map(|json| json.0),
         }
     }
 
     pub fn try_get_bigdecimal(&self, name: &str) -> Option<bigdecimal::BigDecimal> {
         match self {
             DbRow::MySqlRow(row) => row.try_get::<bigdecimal::BigDecimal, _>(name).ok(),
-            DbRow::PostgresRow(row) => row.try_get::<bigdecimal::BigDecimal, _>(name).ok(),
+            DbRow::PostgresRow(row) => row
+                .try_get::<_, f64>(name)
+                .ok()
+                .and_then(BigDecimal::from_f64),
         }
     }
 
     pub fn try_get_timestamp(&self, name: &str) -> Option<chrono::DateTime<chrono::Utc>> {
         match self {
             DbRow::MySqlRow(row) => row.try_get::<chrono::DateTime<chrono::Utc>, _>(name).ok(),
-            DbRow::PostgresRow(row) => row.try_get::<chrono::DateTime<chrono::Utc>, _>(name).ok(),
+            DbRow::PostgresRow(row) => row.try_get::<_, chrono::DateTime<chrono::Utc>>(name).ok(),
         }
     }
 
     pub fn try_get_date(&self, name: &str) -> Option<chrono::NaiveDate> {
         match self {
             DbRow::MySqlRow(row) => row.try_get::<chrono::NaiveDate, _>(name).ok(),
-            DbRow::PostgresRow(row) => row.try_get::<chrono::NaiveDate, _>(name).ok(),
+            DbRow::PostgresRow(row) => row.try_get::<_, chrono::NaiveDate>(name).ok(),
         }
     }
 
     pub fn try_get_bytes(&self, name: &str) -> Option<Vec<u8>> {
         match self {
             DbRow::MySqlRow(row) => row.try_get::<Vec<u8>, _>(name).ok(),
-            DbRow::PostgresRow(row) => row.try_get::<Vec<u8>, _>(name).ok(),
+            DbRow::PostgresRow(row) => row.try_get::<_, Vec<u8>>(name).ok(),
         }
     }
 }

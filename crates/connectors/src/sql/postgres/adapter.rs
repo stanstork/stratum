@@ -13,46 +13,25 @@ use crate::sql::{
         requests::FetchRowsRequest,
         row::DbRow,
     },
-    postgres::{data_type::PgDataType, probe::PgCapabilityProbe},
+    postgres::{
+        data_type::PgDataType,
+        params::PgParamStore,
+        probe::PgCapabilityProbe,
+        utils::{connect_client, flatten_values},
+    },
 };
 use async_trait::async_trait;
-use futures_util::TryStreamExt;
 use model::{
     core::{data_type::DataType, value::Value},
     records::row::RowData,
 };
 use planner::query::dialect;
-use sqlx::{Pool, Postgres, Row, query::Query};
-use std::collections::HashMap;
-
-fn bind_values<'q>(
-    mut query: Query<'q, Postgres, sqlx::postgres::PgArguments>,
-    params: &'q [Value],
-) -> Query<'q, Postgres, sqlx::postgres::PgArguments> {
-    for p in params {
-        query = match p {
-            Value::Int(i) => query.bind(*i),
-            Value::Uint(u) => query.bind(*u as i64),
-            Value::Usize(u) => query.bind(*u as i64),
-            Value::Float(f) => query.bind(*f),
-            Value::String(s) => query.bind(s),
-            Value::Boolean(b) => query.bind(*b),
-            Value::Json(j) => query.bind(j),
-            Value::Uuid(u) => query.bind(*u),
-            Value::Bytes(b) => query.bind(b),
-            Value::Date(d) => query.bind(*d),
-            Value::Timestamp(t) => query.bind(*t),
-            Value::Null => query.bind(None::<String>),
-            Value::Enum(_, v) => query.bind(v),
-            Value::StringArray(arr) => query.bind(arr),
-        };
-    }
-    query
-}
+use std::{collections::HashMap, sync::Arc};
+use tokio_postgres::Client;
 
 #[derive(Clone)]
 pub struct PgAdapter {
-    pool: Pool<Postgres>,
+    client: Arc<Client>,
     dialect: dialect::Postgres,
 }
 
@@ -64,27 +43,26 @@ const QUERY_TABLE_REFERENCING_SQL: &str = include_str!("sql/table_referencing.sq
 #[async_trait]
 impl SqlAdapter for PgAdapter {
     async fn connect(url: &str) -> Result<Self, ConnectorError> {
-        let pool = Pool::connect(url).await?;
+        let client = Arc::new(connect_client(url).await?);
         Ok(PgAdapter {
-            pool,
+            client,
             dialect: dialect::Postgres,
         })
     }
 
     async fn exec(&self, query: &str) -> Result<(), DbError> {
-        sqlx::query(query).execute(&self.pool).await?;
+        self.client.batch_execute(query).await?;
         Ok(())
     }
 
     async fn exec_params(&self, query: &str, params: Vec<Value>) -> Result<(), DbError> {
-        let query = sqlx::query(query);
-        let bound_query = bind_values(query, &params);
-        bound_query.execute(&self.pool).await?;
+        let bindings = PgParamStore::from_values(params);
+        self.client.execute(query, &bindings.as_refs()).await?;
         Ok(())
     }
 
     async fn query_rows(&self, sql: &str) -> Result<Vec<RowData>, DbError> {
-        let rows = sqlx::query(sql).fetch_all(&self.pool).await?;
+        let rows = self.client.query(sql, &[]).await?;
         let result = rows
             .iter()
             .map(|row| DbRow::PostgresRow(row).to_row_data(""))
@@ -105,24 +83,23 @@ impl SqlAdapter for PgAdapter {
         let generator = QueryGenerator::new(&self.dialect);
         let sql = generator.key_existence(table, key_columns, keys_batch.len());
 
-        let mut query = sqlx::query(&sql);
-        for key_value in keys_batch {
-            query = bind_values(query, key_value);
-        }
+        let flat_values = flatten_values(keys_batch);
+        let bindings = PgParamStore::from_values(flat_values);
+        let refs = bindings.as_refs();
 
-        let rows_stream = query.fetch(&self.pool);
-        let result = rows_stream
-            .map_ok(|row| DbRow::PostgresRow(&row).to_row_data(table))
-            .try_collect::<Vec<RowData>>()
-            .await?;
+        let rows = self.client.query(&sql, &refs).await?;
+        let result = rows
+            .iter()
+            .map(|row| DbRow::PostgresRow(row).to_row_data(table))
+            .collect();
 
         Ok(result)
     }
 
     async fn table_exists(&self, table: &str) -> Result<bool, DbError> {
-        let row = sqlx::query(QUERY_TABLE_EXISTS_SQL)
-            .bind(table)
-            .fetch_one(&self.pool)
+        let row = self
+            .client
+            .query_one(QUERY_TABLE_EXISTS_SQL, &[&table])
             .await?;
         Ok(row.get(0))
     }
@@ -133,7 +110,7 @@ impl SqlAdapter for PgAdapter {
 
     async fn table_metadata(&self, table: &str) -> Result<TableMetadata, DbError> {
         let query = QUERY_TABLE_METADATA_SQL.replace("{table}", table);
-        let rows = sqlx::query(&query).fetch_all(&self.pool).await?;
+        let rows = self.client.query(&query, &[]).await?;
         let columns = rows
             .iter()
             .map(|row| {
@@ -147,14 +124,14 @@ impl SqlAdapter for PgAdapter {
     }
 
     async fn referencing_tables(&self, table: &str) -> Result<Vec<String>, DbError> {
-        let rows = sqlx::query(QUERY_TABLE_REFERENCING_SQL)
-            .bind(table)
-            .fetch_all(&self.pool)
+        let rows = self
+            .client
+            .query(QUERY_TABLE_REFERENCING_SQL, &[&table])
             .await?;
 
         let tables = rows
             .iter()
-            .map(|row| row.try_get::<String, _>(COL_REFERENCING_TABLE))
+            .map(|row| row.try_get::<_, String>(COL_REFERENCING_TABLE))
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(tables)
@@ -165,9 +142,8 @@ impl SqlAdapter for PgAdapter {
     }
 
     async fn truncate_table(&self, table: &str) -> Result<(), DbError> {
-        sqlx::query(QUERY_TRUNCATE_TABLE_SQL)
-            .bind(table)
-            .execute(&self.pool)
+        self.client
+            .execute(QUERY_TRUNCATE_TABLE_SQL, &[&table])
             .await?;
         Ok(())
     }

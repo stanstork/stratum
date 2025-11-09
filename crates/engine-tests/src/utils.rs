@@ -255,12 +255,13 @@ pub async fn fetch_rows(
                 .collect())
         }
         DbType::Postgres => {
-            let pg = pg_pool().await;
-            let rows = sqlx::query(query).fetch_all(&pg).await?;
-            Ok(rows
-                .into_iter()
-                .map(|row| DbRow::PostgresRow(&row).to_row_data("source_table"))
-                .collect())
+            // let pg = pg_pool().await;
+            // let rows = sqlx::query(query).fetch_all(&pg).await?;
+            // Ok(rows
+            //     .into_iter()
+            //     .map(|row| DbRow::PostgresRow(&row).to_row_data("source_table"))
+            //     .collect())
+            todo!("Implement fetch_rows for Postgres");
         }
     }
 }
