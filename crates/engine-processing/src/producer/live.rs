@@ -23,7 +23,7 @@ use model::{
 };
 use planner::query::offsets::OffsetStrategy;
 use smql_syntax::ast::setting::Settings;
-use std::{num::NonZeroUsize, sync::Arc, time::Duration};
+use std::{collections::HashMap, num::NonZeroUsize, sync::Arc, time::Duration};
 use tokio::sync::{mpsc, watch::Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
@@ -216,7 +216,7 @@ impl LiveProducer {
     async fn send_batch(
         &self,
         batch_id: String,
-        records: Vec<Record>,
+        records: HashMap<String, Vec<Record>>,
         next: Cursor,
     ) -> Result<(), ProducerError> {
         let manifest = manifest_for(&records);
@@ -297,8 +297,31 @@ impl DataProducer for LiveProducer {
 
                     self.log_batch_start(&batch_id, &cur, res.row_count).await?;
 
-                    let records = self.transform(res.rows).await;
-                    self.send_batch(batch_id, records, cur.clone()).await?;
+                    // Group rows by entity name
+                    let groups = res.rows.iter().fold(HashMap::new(), |mut acc, row| {
+                        let entity_name = row.entity_name();
+                        acc.entry(entity_name)
+                            .or_insert_with(Vec::new)
+                            .push(row.clone());
+                        acc
+                    });
+
+                    info!(
+                        batch_id = %batch_id,
+                        entities = ?groups,
+                        "Rows grouped by entity."
+                    );
+
+                    // Transform each group
+                    let transformed: HashMap<_, Vec<_>> = groups
+                        .into_iter()
+                        .map(|(entity, rows)| {
+                            let records = futures::executor::block_on(self.transform(rows));
+                            (entity, records)
+                        })
+                        .collect();
+
+                    self.send_batch(batch_id, transformed, cur.clone()).await?;
 
                     if let Some(next) = res.next_cursor
                         && next != Cursor::None

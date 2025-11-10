@@ -29,6 +29,10 @@ impl RowData {
             .and_then(|f| f.value.clone())
             .unwrap_or(Value::Null)
     }
+
+    pub fn entity_name(&self) -> String {
+        self.entity.clone()
+    }
 }
 
 impl DataRecord for RowData {
