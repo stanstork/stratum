@@ -1,3 +1,4 @@
+use crate::connectors::sink::{Sink, postgres::PostgresSink};
 use connectors::{
     adapter::Adapter,
     sql::{
@@ -15,8 +16,14 @@ use smql_syntax::ast::connection::DataFormat;
 use std::sync::Arc;
 
 #[derive(Clone)]
+pub struct DatabaseDestination {
+    pub data: Arc<Mutex<dyn DbDataDestination<Error = DbError>>>,
+    pub sink: Arc<dyn Sink + Send + Sync>,
+}
+
+#[derive(Clone)]
 pub enum DataDestination {
-    Database(Arc<Mutex<dyn DbDataDestination<Error = DbError>>>),
+    Database(DatabaseDestination),
 }
 
 #[derive(Clone)]
@@ -32,7 +39,11 @@ impl DataDestination {
             DataFormat::Postgres => match adapter {
                 Some(Adapter::Postgres(adapter)) => {
                     let destination = PgDestination::new(adapter.clone());
-                    Ok(DataDestination::Database(Arc::new(Mutex::new(destination))))
+                    let sink = Arc::new(PostgresSink::new(adapter.clone()));
+                    Ok(DataDestination::Database(DatabaseDestination {
+                        data: Arc::new(Mutex::new(destination)),
+                        sink,
+                    }))
                 }
                 _ => panic!("Expected Postgres adapter, but got a different type"),
             },
@@ -49,7 +60,7 @@ impl DataDestination {
     pub async fn fetch_meta(&self, table: String) -> Result<TableMetadata, DbError> {
         match &self {
             DataDestination::Database(db) => {
-                let db = db.lock().await.adapter();
+                let db = db.data.lock().await.adapter();
                 let metadata = db.table_metadata(&table).await?;
                 Ok(metadata)
             }
@@ -58,7 +69,7 @@ impl DataDestination {
 
     pub async fn adapter(&self) -> Arc<dyn SqlAdapter + Send + Sync> {
         match &self {
-            DataDestination::Database(db) => db.lock().await.adapter(),
+            DataDestination::Database(db) => db.data.lock().await.adapter(),
         }
     }
 }
@@ -79,7 +90,8 @@ impl Destination {
     ) -> Result<(), DbError> {
         match &self.data_dest {
             DataDestination::Database(db) => {
-                db.lock()
+                db.data
+                    .lock()
                     .await
                     .write_batch(
                         metadata,
@@ -96,7 +108,9 @@ impl Destination {
 
     pub async fn toggle_trigger(&self, table: &str, enable: bool) -> Result<(), DbError> {
         match &self.data_dest {
-            DataDestination::Database(db) => db.lock().await.toggle_trigger(table, enable).await,
+            DataDestination::Database(db) => {
+                db.data.lock().await.toggle_trigger(table, enable).await
+            }
         }
     }
 

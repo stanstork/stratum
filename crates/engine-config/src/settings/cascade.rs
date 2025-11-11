@@ -106,7 +106,7 @@ impl CascadeSchemaSetting {
         };
 
         let DataDestination::Database(db_mutex) = &self.context.destination.data_dest;
-        let mut db = db_mutex.lock().await;
+        let mut db = db_mutex.data.lock().await;
         db.set_related_meta(meta_graph);
 
         Ok(())

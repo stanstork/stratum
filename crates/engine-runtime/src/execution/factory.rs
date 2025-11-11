@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::error::MigrationError;
 use connectors::adapter::Adapter;
 use engine_core::{
@@ -10,17 +8,17 @@ use engine_core::{
         source::{DataSource, Source},
     },
     context::global::GlobalContext,
-    state::StateStore,
 };
 use engine_processing::filter::{
     compiler::FilterCompiler, csv::CsvFilterCompiler, sql::SqlFilterCompiler,
 };
 use model::{pagination::cursor::Cursor, transform::mapping::EntityMapping};
-use planner::query::offsets::{OffsetStrategy, OffsetStrategyFactory};
+use planner::query::offsets::OffsetStrategy;
 use smql_syntax::ast::{
     connection::{Connection, ConnectionPair, DataFormat},
     migrate::{MigrateItem, SpecKind},
 };
+use std::sync::Arc;
 
 pub async fn create_source(
     ctx: &GlobalContext,

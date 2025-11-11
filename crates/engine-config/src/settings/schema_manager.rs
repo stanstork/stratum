@@ -33,7 +33,7 @@ impl SchemaManager for LiveSchemaManager {
     async fn add_column(&mut self, table: &str, column: &ColumnDef) -> Result<(), SettingsError> {
         let dest = self.destination.lock().await;
         let DataDestination::Database(db) = &dest.data_dest;
-        let result = db.lock().await.add_column(table, column).await;
+        let result = db.data.lock().await.add_column(table, column).await;
 
         match result {
             Ok(_) => {

@@ -16,6 +16,7 @@ pub enum DataType {
     Timestamp,
     LongLong,
     Int,
+    Int4,
     IntUnsigned,
     Time,
     Year,
@@ -50,6 +51,7 @@ lazy_static! {
         m.insert("TINYINT", DataType::Short);
         m.insert("SMALLINT", DataType::Short);
         m.insert("INT", DataType::Int);
+        m.insert("INT4", DataType::Int4);
         m.insert("INT8", DataType::Int);
         m.insert("MEDIUMINT", DataType::Int);
         m.insert("BIGINT", DataType::Long);
@@ -114,6 +116,7 @@ impl fmt::Display for DataType {
             DataType::Timestamp => write!(f, "TIMESTAMP"),
             DataType::LongLong => write!(f, "BIGINT"),
             DataType::Int => write!(f, "INT"),
+            DataType::Int4 => write!(f, "INT4"),
             DataType::Time => write!(f, "TIME"),
             DataType::Year => write!(f, "YEAR"),
             DataType::VarChar => write!(f, "VARCHAR"),
@@ -153,6 +156,7 @@ impl DataType {
             | (DataType::IntUnsigned, DataType::Long)
             | (DataType::LongLong, DataType::Long)
             | (DataType::Long, DataType::LongLong) => true,
+            (DataType::Int4, DataType::Int) | (DataType::Int, DataType::Int4) => true,
             (DataType::Int, DataType::Short) | (DataType::Short, DataType::Int) => true, // Int can hold Short values
             (DataType::String, DataType::VarChar) | (DataType::VarChar, DataType::String) => true,
             (DataType::Geometry, DataType::Bytea) | (DataType::Bytea, DataType::Geometry) => true,

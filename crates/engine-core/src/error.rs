@@ -1,4 +1,3 @@
-use connectors::error;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -38,4 +37,10 @@ pub enum SinkError {
 
     #[error("Other error: {0}")]
     Other(String),
+
+    #[error("Failed to get capabilities")]
+    Capabilities,
+
+    #[error("Fast-path not supported: {0}")]
+    FastPathNotSupported(String),
 }

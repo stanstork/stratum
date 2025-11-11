@@ -25,7 +25,7 @@ pub async fn spawn(
         create_producer(&ctx, shutdown_tx, tx, settings, cancel, dry_run_report).await;
     let producer_handle = tokio::spawn(async move { producer.run().await });
 
-    let mut consumer = create_consumer(&ctx, shutdown_rx).await;
+    let mut consumer = create_consumer(&ctx, rx, shutdown_rx).await;
     let consumer_handle = tokio::spawn(async move { consumer.run().await });
 
     let (producer_result, consumer_result) = tokio::try_join!(producer_handle, consumer_handle)?;

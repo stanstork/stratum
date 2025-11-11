@@ -85,13 +85,14 @@ impl SchemaSettingContext {
         &self,
     ) -> Result<Arc<dyn SqlAdapter + Send + Sync>, SettingsError> {
         match &self.destination.data_dest {
-            DataDestination::Database(dest) => Ok(dest.lock().await.adapter()),
+            DataDestination::Database(dest) => Ok(dest.data.lock().await.adapter()),
         }
     }
 
     pub async fn destination_exists(&self) -> Result<bool, SettingsError> {
         match &self.destination.data_dest {
             DataDestination::Database(dest) => Ok(dest
+                .data
                 .lock()
                 .await
                 .table_exists(&self.destination.name)

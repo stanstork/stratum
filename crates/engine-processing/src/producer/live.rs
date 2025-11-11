@@ -306,12 +306,6 @@ impl DataProducer for LiveProducer {
                         acc
                     });
 
-                    info!(
-                        batch_id = %batch_id,
-                        entities = ?groups,
-                        "Rows grouped by entity."
-                    );
-
                     // Transform each group
                     let transformed: HashMap<_, Vec<_>> = groups
                         .into_iter()

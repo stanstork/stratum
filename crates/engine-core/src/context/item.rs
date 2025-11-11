@@ -90,7 +90,7 @@ impl ItemContext {
     pub async fn set_dest_meta(&self) -> Result<(), DbError> {
         let name = &self.destination.name;
         let db = match &self.destination.data_dest {
-            DataDestination::Database(db) => Some(db),
+            DataDestination::Database(db) => Some(&db.data),
         };
 
         let fetch_meta_fn = |tbl: String| self.destination.data_dest.fetch_meta(tbl);

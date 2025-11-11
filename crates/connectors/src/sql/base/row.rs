@@ -46,6 +46,7 @@ impl DbRow<'_> {
             DataType::Int | DataType::Long | DataType::Short => {
                 self.try_get_i64(name).map(Value::Int)
             }
+            DataType::Int4 => self.try_get_i32(name).map(|v| Value::Int(v as i64)),
             DataType::IntUnsigned | DataType::ShortUnsigned | DataType::Year => {
                 self.try_get_u64(name).map(|v| Value::Int(v as i64))
             }
@@ -124,6 +125,13 @@ impl DbRow<'_> {
         match self {
             DbRow::MySqlRow(row) => row.get_opt::<u64, _>(name).and_then(|res| res.ok()),
             DbRow::PostgresRow(row) => row.try_get::<_, i64>(name).map(|v| v as u64).ok(),
+        }
+    }
+
+    pub fn try_get_i4(&self, name: &str) -> Option<i32> {
+        match self {
+            DbRow::MySqlRow(row) => row.get_opt::<i32, _>(name).and_then(|res| res.ok()),
+            DbRow::PostgresRow(row) => row.try_get::<_, i32>(name).ok(),
         }
     }
 

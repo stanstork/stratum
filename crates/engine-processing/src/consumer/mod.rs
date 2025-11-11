@@ -1,12 +1,10 @@
-use crate::{
-    consumer::{live::LiveConsumer, validation::ValidationConsumer},
-    error::ConsumerError,
-};
+use crate::{consumer::live::LiveConsumer, error::ConsumerError};
 use async_trait::async_trait;
 use engine_core::context::item::ItemContext;
 use futures::lock::Mutex;
+use model::records::batch::Batch;
 use std::sync::Arc;
-use tokio::sync::watch::Receiver;
+use tokio::sync::{mpsc, watch::Receiver};
 
 pub mod live;
 pub mod trigger;
@@ -20,9 +18,15 @@ pub trait DataConsumer {
 
 pub async fn create_consumer(
     ctx: &Arc<Mutex<ItemContext>>,
+    batch_rx: mpsc::Receiver<Batch>,
     receiver: Receiver<bool>,
 ) -> Box<dyn DataConsumer + Send> {
-    Box::new(ValidationConsumer::new())
+    let ctx_guard = ctx.lock().await;
+    let destination = ctx_guard.destination.clone();
+    let mappings = ctx_guard.mapping.clone();
+
+    Box::new(LiveConsumer::new(batch_rx, destination, mappings, receiver))
+    // Box::new(ValidationConsumer::new())
     // let ctx_guard = ctx.lock().await;
     // let state_guard = ctx_guard.state.lock().await;
 

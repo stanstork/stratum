@@ -26,3 +26,9 @@ pub fn manifest_for(rows: &HashMap<String, Vec<Record>>) -> Manifest {
         checksum_xxh3: h,
     }
 }
+
+impl Batch {
+    pub fn is_empty(&self) -> bool {
+        self.manifest.row_count == 0
+    }
+}

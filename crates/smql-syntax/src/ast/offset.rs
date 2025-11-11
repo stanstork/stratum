@@ -80,8 +80,6 @@ impl StatementParser for Offset {
             }
         }
 
-        let offset = Offset { pairs };
-        println!("Parsed Offset: {:?}", offset);
-        offset
+        Offset { pairs }
     }
 }
