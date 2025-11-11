@@ -1,7 +1,7 @@
 use crate::sql::base::{
     capabilities::DbCapabilities,
     error::{ConnectorError, DbError},
-    metadata::table::TableMetadata,
+    metadata::{column::ColumnMetadata, table::TableMetadata},
     requests::FetchRowsRequest,
 };
 use async_trait::async_trait;
@@ -45,4 +45,15 @@ pub trait SqlAdapter {
     // Dialect & capabilities
     fn kind(&self) -> DatabaseKind;
     async fn capabilities(&self) -> Result<DbCapabilities, DbError>;
+
+    async fn copy_rows(
+        &self,
+        _table: &str,
+        _columns: &Vec<ColumnMetadata>,
+        _rows: &Vec<RowData>,
+    ) -> Result<(), DbError> {
+        Err(DbError::Unknown(
+            "Streaming COPY not implemented for this adapter".to_string(),
+        ))
+    }
 }

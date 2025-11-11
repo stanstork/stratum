@@ -31,3 +31,4 @@ postgres-native-tls = "0.5.0"
 native-tls = "0.2"
 mysql_async = { version = "0.36.1", features = ["chrono", "bigdecimal"] }
 mysql_common = "0.35.5"
+bytes = "1.7.1"

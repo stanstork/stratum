@@ -1,3 +1,4 @@
+use connectors::sql::base::error::DbError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -43,4 +44,7 @@ pub enum SinkError {
 
     #[error("Fast-path not supported: {0}")]
     FastPathNotSupported(String),
+
+    #[error("DB Error: {0}")]
+    Db(#[from] DbError),
 }

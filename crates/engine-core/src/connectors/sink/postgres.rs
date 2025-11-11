@@ -1,10 +1,17 @@
 use crate::{connectors::sink::Sink, error::SinkError};
 use async_trait::async_trait;
 use connectors::sql::{
-    base::{adapter::SqlAdapter, metadata::table::TableMetadata},
+    base::{
+        adapter::SqlAdapter,
+        metadata::{column::ColumnMetadata, table::TableMetadata},
+        query::generator::QueryGenerator,
+    },
     postgres::adapter::PgAdapter,
 };
-use model::records::batch::Batch;
+use model::{
+    core::value::Value,
+    records::{batch::Batch, row::RowData},
+};
 use planner::query::dialect;
 use uuid::Uuid;
 
@@ -21,10 +28,35 @@ impl PostgresSink {
         }
     }
 
-    fn ordered_columns(&self, table: &TableMetadata) -> Vec<String> {
-        let mut columns = table.columns.keys().cloned().collect::<Vec<String>>();
-        columns.sort_by_key(|col| table.columns[col].ordinal);
+    fn ordered_columns(&self, table: &TableMetadata) -> Vec<ColumnMetadata> {
+        let mut columns = table.columns.values().cloned().collect::<Vec<_>>();
+        columns.sort_by_key(|col| col.ordinal);
         columns
+    }
+
+    async fn create_staging_table(
+        &self,
+        meta: &TableMetadata,
+        name: &str,
+    ) -> Result<(), SinkError> {
+        let generator = QueryGenerator::new(&self.dialect);
+        let column_defs = meta.column_defs(&|col| (col.data_type.clone(), col.char_max_length));
+        let (sql, params) = generator.create_table(name, &column_defs, true);
+        let temp_sql = sql.replacen("CREATE TABLE", "CREATE TEMP TABLE", 1);
+
+        println!("Creating staging table with SQL: {}", temp_sql);
+
+        self.exec(&temp_sql, params).await
+    }
+
+    async fn exec(&self, sql: &str, params: Vec<Value>) -> Result<(), SinkError> {
+        if params.is_empty() {
+            self.adapter.exec(sql).await?;
+        } else {
+            self.adapter.exec_params(sql, params).await?;
+        }
+
+        Ok(())
     }
 }
 
@@ -55,6 +87,20 @@ impl Sink for PostgresSink {
 
         println!("Staging table: {}", staging_table);
         println!("Ordered columns: {:?}", ordered_cols);
+
+        self.create_staging_table(table, &staging_table).await?;
+
+        let rows = batch
+            .rows
+            .values()
+            .flatten()
+            .filter_map(|r| r.to_row_data().cloned())
+            .collect::<Vec<RowData>>();
+
+        let copy_result = self
+            .adapter
+            .copy_rows(&staging_table, &ordered_cols, &rows)
+            .await;
 
         todo!("Implement fast-path write for PostgresSink");
     }
