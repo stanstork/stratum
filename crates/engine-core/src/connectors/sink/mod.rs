@@ -11,7 +11,4 @@ pub trait Sink: Send + Sync {
 
     /// Executes the fast-path write (COPY -> MERGE).
     async fn write_fast_path(&self, table: &TableMetadata, batch: &Batch) -> Result<(), SinkError>;
-
-    /// Executes the standard write (INSERT/UPDATE/DELETE).
-    async fn write_batch(&self, table: &TableMetadata, batch: &Batch) -> Result<(), SinkError>;
 }

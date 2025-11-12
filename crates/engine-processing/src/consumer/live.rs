@@ -3,7 +3,7 @@ use crate::{
     error::ConsumerError,
 };
 use async_trait::async_trait;
-use connectors::sql::base::metadata::table::TableMetadata;
+use connectors::sql::base::{capabilities, metadata::table::TableMetadata};
 use engine_config::report::metrics::{MetricsReport, send_report};
 use engine_core::{
     connectors::destination::{DataDestination, Destination},
@@ -45,8 +45,18 @@ impl DataConsumer for LiveConsumer {
             let table = &tables[0];
             match &self.destination.data_dest {
                 DataDestination::Database(db) => {
-                    db.sink.write_fast_path(table, &batch).await.unwrap();
-                    todo!("Implement fast path write logic")
+                    let support_fast_path = db.sink.support_fast_path().await.unwrap_or(false);
+                    if support_fast_path {
+                        db.sink.write_fast_path(table, &batch).await.unwrap();
+                    } else {
+                        let rows = batch
+                            .rows
+                            .values()
+                            .flatten()
+                            .filter_map(|r| r.to_row_data().cloned())
+                            .collect::<Vec<RowData>>();
+                        db.data.lock().await.write_batch(table, rows).await.unwrap();
+                    }
                 }
             }
         }
