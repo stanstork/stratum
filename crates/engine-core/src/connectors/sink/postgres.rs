@@ -13,7 +13,6 @@ use model::{
     records::{batch::Batch, row::RowData},
 };
 use planner::query::dialect::{self, Dialect};
-use std::collections::HashSet;
 use uuid::Uuid;
 
 pub struct PostgresSink {
@@ -37,17 +36,6 @@ impl PostgresSink {
 
     fn quote_ident(&self, ident: &str) -> String {
         self.dialect.quote_identifier(ident)
-    }
-
-    fn qualify_table(&self, metadata: &TableMetadata) -> String {
-        match &metadata.schema {
-            Some(schema) if !schema.is_empty() => format!(
-                "{}.{}",
-                self.quote_ident(schema),
-                self.quote_ident(&metadata.name)
-            ),
-            _ => self.quote_ident(&metadata.name),
-        }
     }
 
     async fn create_staging_table(
@@ -85,130 +73,20 @@ impl PostgresSink {
             ));
         }
 
-        let pk_set = meta
-            .primary_keys
-            .iter()
-            .map(|pk| pk.to_lowercase())
-            .collect::<HashSet<_>>();
-
-        let target = self.qualify_table(meta);
-        let staging = self.quote_ident(staging_table);
-
         let has_merge = self.adapter.capabilities().await?.merge_statements;
+        let generator = QueryGenerator::new(&self.dialect);
 
-        if has_merge {
-            // Aliases
-            let t = "t";
-            let s = "s";
-
-            // t.pk = s.pk AND ...
-            let match_clause = meta
-                .primary_keys
-                .iter()
-                .map(|pk| {
-                    let col = self.quote_ident(pk);
-                    format!("{t}.{col} = {s}.{col}")
-                })
-                .collect::<Vec<_>>()
-                .join(" AND ");
-
-            // Build non-PK SET assignments
-            let non_pk_updates = columns
-                .iter()
-                .filter(|c| !pk_set.contains(&c.name.to_lowercase()))
-                .map(|c| {
-                    let col = self.quote_ident(&c.name);
-                    format!("{col} = {s}.{col}")
-                })
-                .collect::<Vec<_>>();
-
-            let update_clause = if non_pk_updates.is_empty() {
-                // No non-PK columns to update - do nothing on match
-                "WHEN MATCHED THEN DO NOTHING".to_string()
-            } else {
-                format!("WHEN MATCHED THEN UPDATE SET {}", non_pk_updates.join(", "))
-            };
-
-            // INSERT column list and VALUES
-            let ordered_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
-            let insert_columns = ordered_names
-                .iter()
-                .map(|name| self.quote_ident(name))
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            let insert_values = ordered_names
-                .iter()
-                .map(|name| format!("{s}.{}", self.quote_ident(name)))
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            let insert_clause =
-                format!("WHEN NOT MATCHED THEN INSERT ({insert_columns}) VALUES ({insert_values})");
-
-            // Final SQL (PostgreSQL 15+ MERGE)
-            let sql = format!(
-                "MERGE INTO {target} AS {t} \
-         USING {staging} AS {s} \
-         ON {match_clause} \
-         {update_clause} \
-         {insert_clause}"
-            );
-
-            println!("MERGE SQL: {}", sql);
-
-            self.adapter.exec(&sql).await?;
+        let (sql, params) = if has_merge {
+            let output = generator.merge_from_staging(meta, staging_table, columns);
+            println!("MERGE SQL: {}", output.0);
+            output
         } else {
-            // Fallback to separate UPDATE and INSERT statements
+            let output = generator.upsert_from_staging(meta, staging_table, columns);
+            println!("UPSERT SQL: {}", output.0);
+            output
+        };
 
-            let insert_columns = columns
-                .iter()
-                .map(|c| self.quote_ident(&c.name))
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            let select_columns = columns
-                .iter()
-                .map(|c| format!("{staging}.{}", self.quote_ident(&c.name)))
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            let update_assignments = columns
-                .iter()
-                .filter(|c| !pk_set.contains(&c.name.to_lowercase()))
-                .map(|c| {
-                    let col = self.quote_ident(&c.name);
-                    format!("{col} = EXCLUDED.{col}")
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            let pk_list = meta
-                .primary_keys
-                .iter()
-                .map(|pk| self.quote_ident(pk))
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            let sql = if update_assignments.is_empty() {
-                format!(
-                    "INSERT INTO {target} ({insert_columns}) \
-                 SELECT {select_columns} FROM {staging} \
-                 ON CONFLICT ({pk_list}) DO NOTHING"
-                )
-            } else {
-                format!(
-                    "INSERT INTO {target} ({insert_columns}) \
-                 SELECT {select_columns} FROM {staging} \
-                 ON CONFLICT ({pk_list}) DO UPDATE SET {update_assignments}"
-                )
-            };
-
-            println!("UPSERT SQL: {}", sql);
-            self.adapter.exec(&sql).await?;
-        }
-
-        Ok(())
+        self.exec(&sql, params).await
     }
 
     async fn exec(&self, sql: &str, params: Vec<Value>) -> Result<(), SinkError> {

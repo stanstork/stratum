@@ -1,14 +1,15 @@
 //! Defines the core rendering trait and context for converting AST to SQL.
 
+use crate::query::{ast::common::TableRef, dialect::Dialect};
 use model::core::value::Value;
 
-use crate::query::dialect::Dialect;
-
 pub mod alter_table;
+pub mod copy;
 pub mod create_enum;
 pub mod create_table;
 pub mod expr;
 pub mod insert;
+pub mod merge;
 pub mod select;
 
 /// A trait for any AST node that can be rendered into a SQL string.
@@ -44,5 +45,14 @@ impl<'a> Renderer<'a> {
         self.params.push(value);
         let placeholder = self.dialect.get_placeholder(self.params.len() - 1);
         self.sql.push_str(&placeholder);
+    }
+
+    pub fn render_table_ref(&mut self, table: &TableRef) {
+        if let Some(schema) = &table.schema {
+            self.sql.push_str(&self.dialect.quote_identifier(schema));
+            self.sql.push('.');
+        }
+        self.sql
+            .push_str(&self.dialect.quote_identifier(&table.name));
     }
 }

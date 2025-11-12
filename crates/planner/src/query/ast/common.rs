@@ -6,7 +6,7 @@ pub struct TableRef {
     pub name: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JoinKind {
     Inner,
     Left,

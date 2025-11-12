@@ -9,16 +9,23 @@ use model::{
     records::row::RowData,
 };
 use planner::query::{
-    ast::{common::TypeName, expr::Expr},
+    ast::{
+        common::TypeName,
+        copy::{CopyDirection, CopyEndpoint},
+        expr::{BinaryOp, BinaryOperator, Expr, Ident},
+        insert::{ConflictAction, ConflictAssignment, Insert, OnConflict},
+        merge::MergeAssignment,
+    },
     builder::{
-        alter_table::AlterTableBuilder, create_enum::CreateEnumBuilder,
-        create_table::CreateTableBuilder, insert::InsertBuilder, select::SelectBuilder,
+        alter_table::AlterTableBuilder, copy::CopyBuilder, create_enum::CreateEnumBuilder,
+        create_table::CreateTableBuilder, insert::InsertBuilder, merge::MergeBuilder,
+        select::SelectBuilder,
     },
     dialect::{self, Dialect},
     renderer::{Render, Renderer},
 };
 use planner::{table_ref, value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub struct QueryGenerator<'a> {
     dialect: &'a dyn Dialect,
@@ -98,6 +105,105 @@ impl<'a> QueryGenerator<'a> {
         }
 
         self.render_ast(builder.build())
+    }
+
+    pub fn copy_from_stdin(&self, table: &str, columns: &[ColumnMetadata]) -> String {
+        let column_names = columns
+            .iter()
+            .map(|col| col.name.as_str())
+            .collect::<Vec<_>>();
+
+        let copy_ast = CopyBuilder::new(table_ref!(table))
+            .columns(&column_names)
+            .direction(CopyDirection::From)
+            .endpoint(CopyEndpoint::Stdin)
+            .option("FORMAT", Some("TEXT"))
+            .build();
+
+        let (sql, _) = self.render_ast(copy_ast);
+        sql
+    }
+
+    pub fn merge_from_staging(
+        &self,
+        meta: &TableMetadata,
+        staging: &str,
+        columns: &[ColumnMetadata],
+    ) -> (String, Vec<Value>) {
+        let target_ref = table_ref!(meta.name);
+        let staging_ref = table_ref!(staging);
+        let target_alias = "t";
+        let staging_alias = "s";
+
+        let pk_set = primary_key_set(meta);
+
+        let mut builder = MergeBuilder::new(target_ref, staging_ref)
+            .target_alias(target_alias)
+            .source_alias(staging_alias)
+            .on(build_pk_match_expr(meta, target_alias, staging_alias));
+
+        let assignments: Vec<MergeAssignment> = columns
+            .iter()
+            .filter(|col| !pk_set.contains(&col.name.to_lowercase()))
+            .map(|col| MergeAssignment {
+                column: col.name.clone(),
+                value: aliased_ident(staging_alias, &col.name),
+            })
+            .collect();
+
+        builder = if assignments.is_empty() {
+            builder.when_matched_do_nothing()
+        } else {
+            builder.when_matched_update(assignments)
+        };
+
+        let insert_columns = columns.iter().map(|c| c.name.clone()).collect();
+        let insert_values = columns
+            .iter()
+            .map(|c| aliased_ident(staging_alias, &c.name))
+            .collect();
+
+        builder = builder.when_not_matched_insert(insert_columns, insert_values);
+
+        self.render_ast(builder.build())
+    }
+
+    pub fn upsert_from_staging(
+        &self,
+        meta: &TableMetadata,
+        staging_table: &str,
+        columns: &[ColumnMetadata],
+    ) -> (String, Vec<Value>) {
+        let pk_set = primary_key_set(meta);
+        let staging_alias = "s";
+        let select_columns = columns
+            .iter()
+            .map(|col| aliased_ident(staging_alias, &col.name))
+            .collect();
+
+        let select_ast = SelectBuilder::new()
+            .select(select_columns)
+            .from(table_ref!(staging_table), Some(staging_alias))
+            .build();
+
+        let conflict_clause = if meta.primary_keys.is_empty() {
+            None
+        } else {
+            Some(OnConflict {
+                columns: meta.primary_keys.clone(),
+                action: self.build_conflict_action(columns, &pk_set),
+            })
+        };
+
+        let insert_ast = Insert {
+            table: table_ref!(meta.name),
+            columns: columns.iter().map(|c| c.name.clone()).collect(),
+            values: vec![],
+            select: Some(select_ast),
+            on_conflict: conflict_clause,
+        };
+
+        self.render_ast(insert_ast)
     }
 
     pub fn toggle_triggers(&self, table: &str, enable: bool) -> (String, Vec<Value>) {
@@ -205,6 +311,34 @@ impl<'a> QueryGenerator<'a> {
         ast.render(&mut renderer);
         renderer.finish()
     }
+
+    fn build_conflict_action(
+        &self,
+        columns: &[ColumnMetadata],
+        pk_set: &HashSet<String>,
+    ) -> ConflictAction {
+        let assignments: Vec<ConflictAssignment> = columns
+            .iter()
+            .filter(|col| !pk_set.contains(&col.name.to_lowercase()))
+            .map(|col| ConflictAssignment {
+                column: col.name.clone(),
+                value: self.excluded_column_expr(&col.name),
+            })
+            .collect();
+
+        if assignments.is_empty() {
+            ConflictAction::DoNothing
+        } else {
+            ConflictAction::DoUpdate { assignments }
+        }
+    }
+
+    fn excluded_column_expr(&self, column: &str) -> Expr {
+        Expr::Literal(format!(
+            "EXCLUDED.{}",
+            self.dialect.quote_identifier(column)
+        ))
+    }
 }
 
 // TODO: Split functionality by dialect
@@ -248,4 +382,41 @@ fn map_value_to_expr(value: Value, col_meta: &ColumnMetadata) -> Expr {
         // For all other standard data types, just use the value directly.
         _ => Expr::Value(value),
     }
+}
+
+fn primary_key_set(meta: &TableMetadata) -> HashSet<String> {
+    meta.primary_keys
+        .iter()
+        .map(|pk| pk.to_lowercase())
+        .collect()
+}
+
+fn aliased_ident(alias: &str, column: &str) -> Expr {
+    Expr::Identifier(Ident {
+        qualifier: Some(alias.to_string()),
+        name: column.to_string(),
+    })
+}
+
+fn build_pk_match_expr(meta: &TableMetadata, target_alias: &str, source_alias: &str) -> Expr {
+    let mut pk_iter = meta.primary_keys.iter().map(|pk| {
+        Expr::BinaryOp(Box::new(BinaryOp {
+            left: aliased_ident(target_alias, pk),
+            op: BinaryOperator::Eq,
+            right: aliased_ident(source_alias, pk),
+        }))
+    });
+
+    let first = match pk_iter.next() {
+        Some(expr) => expr,
+        None => Expr::Literal("TRUE".to_string()),
+    };
+
+    pk_iter.fold(first, |acc, expr| {
+        Expr::BinaryOp(Box::new(BinaryOp {
+            left: acc,
+            op: BinaryOperator::And,
+            right: expr,
+        }))
+    })
 }

@@ -169,16 +169,8 @@ impl SqlAdapter for PgAdapter {
             return Ok(());
         }
 
-        let column_list = columns
-            .iter()
-            .map(|col| self.dialect.quote_identifier(&col.name))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let table_ident = self.dialect.quote_identifier(table);
-        let statement = format!(
-            "COPY {} ({}) FROM STDIN WITH (FORMAT TEXT)",
-            table_ident, column_list
-        );
+        let generator = QueryGenerator::new(&self.dialect);
+        let statement = generator.copy_from_stdin(table, columns);
 
         println!("COPY statement: {}", statement);
 

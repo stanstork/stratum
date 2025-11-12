@@ -5,7 +5,7 @@ use crate::query::ast::{
     expr::Expr,
 };
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Select {
     /// The list of columns or expressions to be returned.
     /// e.g., `id`, `name`, `COUNT(*)`
@@ -31,13 +31,13 @@ pub struct Select {
     pub offset: Option<Expr>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FromClause {
     pub table: TableRef,
     pub alias: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct JoinClause {
     pub kind: JoinKind,
     pub table: TableRef,
@@ -46,7 +46,7 @@ pub struct JoinClause {
     pub on: Expr,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OrderByExpr {
     pub expr: Expr,
     pub direction: Option<OrderDir>,

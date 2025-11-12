@@ -133,7 +133,6 @@ mod tests {
         ident_q,
         offsets::OffsetStrategyFactory,
     };
-    use chrono::{TimeZone, Utc};
     use model::{
         core::value::Value,
         pagination::cursor::{Cursor, QualCol},
