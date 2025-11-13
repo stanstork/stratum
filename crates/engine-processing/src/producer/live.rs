@@ -1,5 +1,6 @@
 use crate::{
     error::ProducerError,
+    item::ItemId,
     producer::{DataProducer, pipeline_for_mapping},
     transform::pipeline::TransformPipeline,
 };
@@ -23,39 +24,10 @@ use model::{
 };
 use planner::query::offsets::OffsetStrategy;
 use smql_syntax::ast::setting::Settings;
-use std::{collections::HashMap, num::NonZeroUsize, sync::Arc, time::Duration};
+use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 use tokio::sync::{mpsc, watch::Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
-
-#[derive(Clone)]
-struct ItemId {
-    run_id: String,
-    item_id: String,
-    part_id: String,
-}
-
-impl ItemId {
-    fn new(run_id: String, item_id: String, part_id: String) -> Self {
-        Self {
-            run_id,
-            item_id,
-            part_id,
-        }
-    }
-
-    fn run_id(&self) -> &str {
-        &self.run_id
-    }
-
-    fn item_id(&self) -> &str {
-        &self.item_id
-    }
-
-    fn part_id(&self) -> &str {
-        &self.part_id
-    }
-}
 
 enum FetchOutcome {
     Page(FetchResult),
@@ -77,12 +49,12 @@ pub struct LiveProducer {
     pub transform_concurrency: NonZeroUsize,
 
     // Control
+    pub shutdown_tx: Sender<bool>,
     pub cancel_token: CancellationToken,
     pub heartbeat_interval: Duration,
 
     // IO
     pub source: Source,
-    pub shutdown_tx: Sender<bool>,
     pub batch_tx: mpsc::Sender<Batch>,
     pub batch_size: usize,
 }
@@ -129,16 +101,16 @@ impl LiveProducer {
 
     fn batch_id(&self, next: &Cursor) -> String {
         let mut h = blake3::Hasher::new();
-        h.update(self.ids.run_id.as_bytes());
-        h.update(self.ids.item_id.as_bytes());
-        h.update(self.ids.part_id.as_bytes());
+        h.update(self.ids.run_id().as_bytes());
+        h.update(self.ids.item_id().as_bytes());
+        h.update(self.ids.part_id().as_bytes());
         h.update(format!("{next:?}").as_bytes());
         h.finalize().to_hex().to_string()
     }
 
     async fn start_cursor(&self) -> Cursor {
         self.state_store
-            .load_checkpoint(self.ids.run_id(), self.ids.item_id(), self.ids.part_id())
+            .load_checkpoint(&self.ids.run_id(), &self.ids.item_id(), &self.ids.part_id())
             .await
             .ok()
             .flatten()
@@ -149,7 +121,8 @@ impl LiveProducer {
     async fn next_page(&self, cursor: &Cursor) -> Result<FetchOutcome, ProducerError> {
         let res = self
             .source
-            .fetch_data(self.batch_size, cursor.clone())
+            // .fetch_data(self.batch_size, cursor.clone())
+            .fetch_data(20000, cursor.clone())
             .await?;
 
         if res.reached_end && res.row_count == 0 {
@@ -177,9 +150,9 @@ impl LiveProducer {
     ) -> Result<(), ProducerError> {
         self.state_store
             .append_wal(&WalEntry::BatchBegin {
-                run_id: self.ids.run_id.clone(),
-                item_id: self.ids.item_id.clone(),
-                part_id: self.ids.part_id.clone(),
+                run_id: self.ids.run_id(),
+                item_id: self.ids.item_id(),
+                part_id: self.ids.part_id(),
                 batch_id: batch_id.to_string(),
             })
             .await
@@ -187,9 +160,9 @@ impl LiveProducer {
 
         self.state_store
             .save_checkpoint(&Checkpoint {
-                run_id: self.ids.run_id.clone(),
-                item_id: self.ids.item_id.clone(),
-                part_id: self.ids.part_id.clone(),
+                run_id: self.ids.run_id(),
+                item_id: self.ids.item_id(),
+                part_id: self.ids.part_id(),
                 stage: "read".to_string(),
                 src_offset: next.clone(),
                 batch_id: batch_id.to_string(),
@@ -216,13 +189,21 @@ impl LiveProducer {
     async fn send_batch(
         &self,
         batch_id: String,
-        records: HashMap<String, Vec<Record>>,
+        records: Vec<Record>,
         next: Cursor,
     ) -> Result<(), ProducerError> {
         let manifest = manifest_for(&records);
+        let rows = records
+            .into_iter()
+            .filter_map(|r| match r {
+                Record::RowData(rd) => Some(rd),
+                _ => None,
+            })
+            .collect::<Vec<RowData>>();
+
         let batch = Batch {
             id: batch_id,
-            rows: records,
+            rows,
             next,
             manifest,
             ts: chrono::Utc::now(),
@@ -244,9 +225,9 @@ impl LiveProducer {
                     }
                     let _ = self.state_store
                         .append_wal(&WalEntry::Heartbeat {
-                            run_id: self.ids.run_id.clone(),
-                            item_id: self.ids.item_id.clone(),
-                            part_id: self.ids.part_id.clone(),
+                            run_id: self.ids.run_id(),
+                            item_id: self.ids.item_id(),
+                            part_id: self.ids.part_id(),
                             at: chrono::Utc::now(),
                         })
                         .await;
@@ -297,24 +278,7 @@ impl DataProducer for LiveProducer {
 
                     self.log_batch_start(&batch_id, &cur, res.row_count).await?;
 
-                    // Group rows by entity name
-                    let groups = res.rows.iter().fold(HashMap::new(), |mut acc, row| {
-                        let entity_name = row.entity_name();
-                        acc.entry(entity_name)
-                            .or_insert_with(Vec::new)
-                            .push(row.clone());
-                        acc
-                    });
-
-                    // Transform each group
-                    let transformed: HashMap<_, Vec<_>> = groups
-                        .into_iter()
-                        .map(|(entity, rows)| {
-                            let records = futures::executor::block_on(self.transform(rows));
-                            (entity, records)
-                        })
-                        .collect();
-
+                    let transformed = self.transform(res.rows).await;
                     self.send_batch(batch_id, transformed, cur.clone()).await?;
 
                     if let Some(next) = res.next_cursor
@@ -331,7 +295,6 @@ impl DataProducer for LiveProducer {
         }
 
         self.signal_shutdown();
-        self.cancel_token.cancel();
         let _ = hb_handle; // Wait for heartbeat loop to finish
 
         Ok(batches) // Return the number of batches processed

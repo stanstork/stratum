@@ -135,12 +135,8 @@ impl Source {
         match &self.primary {
             DataSource::Database(db) => {
                 let db = db.lock().await;
-                let rows = db.fetch(batch_size, cursor).await?;
-                println!("===========================================");
-                println!("Result cursor: {:?}", rows.next_cursor);
-                println!("Fetched {} rows", rows.row_count);
-                println!("===========================================");
-                Ok(rows)
+                let res = db.fetch(batch_size, cursor).await?;
+                Ok(res)
             }
             DataSource::File(file) => {
                 // let mut file = file.lock().await;

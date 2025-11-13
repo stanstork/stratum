@@ -10,6 +10,7 @@ pub struct CreateTable {
     pub columns: Vec<ColumnDef>,
     pub constraints: Vec<TableConstraint>,
     pub if_not_exists: bool,
+    pub temp: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -1,14 +1,16 @@
 use crate::sql::base::{
     adapter::SqlAdapter, capabilities::DbCapabilities, error::DbError, probe::CapabilityProbe,
 };
+use async_trait::async_trait;
 use tracing::warn;
 
 const PG_CAPABILITIES_SQL: &str = include_str!("sql/capabilities.sql");
 
 pub struct PgCapabilityProbe;
 
+#[async_trait]
 impl CapabilityProbe for PgCapabilityProbe {
-    async fn detect(adapter: &impl SqlAdapter) -> Result<DbCapabilities, DbError> {
+    async fn detect(adapter: &(dyn SqlAdapter + Send + Sync)) -> Result<DbCapabilities, DbError> {
         let mut capabilities = DbCapabilities::default();
         let rows = adapter.query_rows(PG_CAPABILITIES_SQL).await?;
 

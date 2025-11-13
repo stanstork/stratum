@@ -89,6 +89,7 @@ impl SchemaPlan {
                 &resolved_table,
                 &resolved_columns,
                 self.ignore_constraints,
+                false,
             );
 
             queries.insert((sql, resolved_table));

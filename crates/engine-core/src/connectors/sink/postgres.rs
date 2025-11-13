@@ -3,21 +3,23 @@ use async_trait::async_trait;
 use connectors::sql::{
     base::{
         adapter::SqlAdapter,
+        capabilities::DbCapabilities,
+        error::DbError,
         metadata::{column::ColumnMetadata, table::TableMetadata},
         query::generator::QueryGenerator,
     },
     postgres::adapter::PgAdapter,
 };
-use model::{
-    core::value::Value,
-    records::{batch::Batch, row::RowData},
-};
-use planner::query::dialect::{self, Dialect};
+use model::{core::value::Value, records::batch::Batch};
+use planner::query::dialect;
+use tokio::sync::OnceCell;
+use tracing::debug;
 use uuid::Uuid;
 
 pub struct PostgresSink {
     adapter: PgAdapter,
     dialect: dialect::Postgres,
+    capabilities: OnceCell<DbCapabilities>,
 }
 
 impl PostgresSink {
@@ -25,6 +27,7 @@ impl PostgresSink {
         Self {
             adapter,
             dialect: dialect::Postgres,
+            capabilities: OnceCell::new(),
         }
     }
 
@@ -34,10 +37,6 @@ impl PostgresSink {
         columns
     }
 
-    fn quote_ident(&self, ident: &str) -> String {
-        self.dialect.quote_identifier(ident)
-    }
-
     async fn create_staging_table(
         &self,
         meta: &TableMetadata,
@@ -45,20 +44,18 @@ impl PostgresSink {
     ) -> Result<(), SinkError> {
         let generator = QueryGenerator::new(&self.dialect);
         let column_defs = meta.column_defs(&|col| (col.data_type.clone(), col.char_max_length));
-        let (sql, params) = generator.create_table(name, &column_defs, true);
-        let temp_sql = sql.replacen("CREATE TABLE", "CREATE TEMP TABLE", 1);
+        let (sql, params) = generator.create_table(name, &column_defs, true, true);
 
-        println!("Creating staging table with SQL: {}", temp_sql);
-
-        self.exec(&temp_sql, params).await
+        debug!("Creating staging table with SQL: {}", sql);
+        self.exec(&sql, params).await
     }
 
     async fn drop_staging_table(&self, name: &str) -> Result<(), SinkError> {
-        let staging_ident = self.quote_ident(name);
-        let drop_sql = format!("DROP TABLE IF EXISTS {staging_ident}");
-        println!("Dropping staging table with SQL: {}", drop_sql);
-        self.adapter.exec(&drop_sql).await?;
-        Ok(())
+        let generator = QueryGenerator::new(&self.dialect);
+        let (sql, params) = generator.drop_table(name, true);
+
+        debug!("Dropping staging table with SQL: {}", sql);
+        self.exec(&sql, params).await
     }
 
     async fn merge_staging(
@@ -73,18 +70,16 @@ impl PostgresSink {
             ));
         }
 
-        let has_merge = self.adapter.capabilities().await?.merge_statements;
+        let has_merge = self.cached_capabilities().await?.merge_statements;
         let generator = QueryGenerator::new(&self.dialect);
 
         let (sql, params) = if has_merge {
-            let output = generator.merge_from_staging(meta, staging_table, columns);
-            println!("MERGE SQL: {}", output.0);
-            output
+            generator.merge_from_staging(meta, staging_table, columns)
         } else {
-            let output = generator.upsert_from_staging(meta, staging_table, columns);
-            println!("UPSERT SQL: {}", output.0);
-            output
+            generator.upsert_from_staging(meta, staging_table, columns)
         };
+
+        debug!("Merging staging table with SQL: {}", sql);
 
         self.exec(&sql, params).await
     }
@@ -98,14 +93,22 @@ impl PostgresSink {
 
         Ok(())
     }
+
+    async fn cached_capabilities(&self) -> Result<DbCapabilities, DbError> {
+        let capabilities = self
+            .capabilities
+            .get_or_try_init(|| async { self.adapter.capabilities().await })
+            .await?;
+
+        Ok(*capabilities)
+    }
 }
 
 #[async_trait]
 impl Sink for PostgresSink {
     async fn support_fast_path(&self) -> Result<bool, SinkError> {
         let capabilities = self
-            .adapter
-            .capabilities()
+            .cached_capabilities()
             .await
             .map_err(|_| SinkError::Capabilities)?;
         Ok(capabilities.copy_streaming && capabilities.merge_statements)
@@ -125,21 +128,13 @@ impl Sink for PostgresSink {
         let staging_table = format!("__stratum_stage_{}", Uuid::new_v4().simple());
         let ordered_cols = self.ordered_columns(table);
 
-        println!("Staging table: {}", staging_table);
-        println!("Ordered columns: {:?}", ordered_cols);
+        debug!("Staging table: {}", staging_table);
 
         self.create_staging_table(table, &staging_table).await?;
 
-        let rows = batch
-            .rows
-            .values()
-            .flatten()
-            .filter_map(|r| r.to_row_data().cloned())
-            .collect::<Vec<RowData>>();
-
         let copy_result = self
             .adapter
-            .copy_rows(&staging_table, &ordered_cols, &rows)
+            .copy_rows(&staging_table, &ordered_cols, &batch.rows)
             .await;
 
         if let Err(err) = copy_result {

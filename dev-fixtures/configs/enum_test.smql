@@ -4,7 +4,7 @@ CONNECTIONS(
 );
 MIGRATE(
     SOURCE(TABLE, rental) -> DEST(TABLE, rental) [
-        SETTINGS(INFER_SCHEMA=TRUE,IGNORE_CONSTRAINTS=TRUE),
+        SETTINGS(CREATE_MISSING_TABLES=TRUE,IGNORE_CONSTRAINTS=TRUE),
         OFFSET(
             STRATEGY -> timestamp, 
             CURSOR -> rental[rental_date],

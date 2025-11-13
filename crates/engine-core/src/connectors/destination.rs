@@ -10,7 +10,7 @@ use connectors::{
     },
 };
 use futures::lock::Mutex;
-use model::records::record::Record;
+use model::records::row::RowData;
 use planner::query::dialect;
 use smql_syntax::ast::connection::DataFormat;
 use std::sync::Arc;
@@ -85,24 +85,11 @@ impl Destination {
 
     pub async fn write_batch(
         &self,
-        metadata: &TableMetadata,
-        records: Vec<Record>,
+        meta: &TableMetadata,
+        rows: &Vec<RowData>,
     ) -> Result<(), DbError> {
         match &self.data_dest {
-            DataDestination::Database(db) => {
-                db.data
-                    .lock()
-                    .await
-                    .write_batch(
-                        metadata,
-                        records
-                            .iter()
-                            .filter_map(|r| r.to_row_data())
-                            .cloned()
-                            .collect(),
-                    )
-                    .await
-            }
+            DataDestination::Database(db) => db.data.lock().await.write_batch(meta, rows).await,
         }
     }
 
@@ -120,5 +107,11 @@ impl Destination {
 
     pub fn name(&self) -> String {
         self.name.clone()
+    }
+
+    pub fn sink(&self) -> Arc<dyn Sink + Send + Sync> {
+        match &self.data_dest {
+            DataDestination::Database(db) => db.sink.clone(),
+        }
     }
 }

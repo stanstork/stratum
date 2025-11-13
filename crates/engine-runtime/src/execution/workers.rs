@@ -19,13 +19,20 @@ pub async fn spawn(
     info!("Launching workers");
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let (tx, mut rx) = mpsc::channel::<Batch>(64);
+    let (batch_tx, mut batch_rx) = mpsc::channel::<Batch>(64);
 
-    let mut producer =
-        create_producer(&ctx, shutdown_tx, tx, settings, cancel, dry_run_report).await;
+    let mut producer = create_producer(
+        &ctx,
+        shutdown_tx,
+        batch_tx,
+        settings,
+        cancel.clone(),
+        dry_run_report,
+    )
+    .await;
     let producer_handle = tokio::spawn(async move { producer.run().await });
 
-    let mut consumer = create_consumer(&ctx, rx, shutdown_rx).await;
+    let mut consumer = create_consumer(&ctx, batch_rx, shutdown_rx, cancel).await;
     let consumer_handle = tokio::spawn(async move { consumer.run().await });
 
     let (producer_result, consumer_result) = tokio::try_join!(producer_handle, consumer_handle)?;

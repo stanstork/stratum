@@ -18,8 +18,8 @@ use planner::query::{
     },
     builder::{
         alter_table::AlterTableBuilder, copy::CopyBuilder, create_enum::CreateEnumBuilder,
-        create_table::CreateTableBuilder, insert::InsertBuilder, merge::MergeBuilder,
-        select::SelectBuilder,
+        create_table::CreateTableBuilder, drop_table::DropTableBuilder, insert::InsertBuilder,
+        merge::MergeBuilder, select::SelectBuilder,
     },
     dialect::{self, Dialect},
     renderer::{Render, Renderer},
@@ -65,7 +65,7 @@ impl<'a> QueryGenerator<'a> {
         self.render_ast(select_ast)
     }
 
-    pub fn insert_batch(&self, meta: &TableMetadata, rows: Vec<RowData>) -> (String, Vec<Value>) {
+    pub fn insert_batch(&self, meta: &TableMetadata, rows: &Vec<RowData>) -> (String, Vec<Value>) {
         if rows.is_empty() {
             return (String::new(), Vec::new());
         }
@@ -81,10 +81,11 @@ impl<'a> QueryGenerator<'a> {
         let mut builder = InsertBuilder::new(table_ref!(meta.name))
             .columns(&col_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
 
-        for row in rows {
+        for row in rows.iter() {
             // Create a HashMap for efficient, case-insensitive lookup of values by column name
             let field_map: HashMap<String, Value> = row
                 .field_values
+                .clone()
                 .into_iter()
                 .filter_map(|rc| rc.value.map(|v| (rc.name.to_lowercase(), v)))
                 .collect();
@@ -117,7 +118,7 @@ impl<'a> QueryGenerator<'a> {
             .columns(&column_names)
             .direction(CopyDirection::From)
             .endpoint(CopyEndpoint::Stdin)
-            .option("FORMAT", Some("TEXT"))
+            .option("FORMAT", Some("csv, NULL '\\N'"))
             .build();
 
         let (sql, _) = self.render_ast(copy_ast);
@@ -226,6 +227,7 @@ impl<'a> QueryGenerator<'a> {
         table: &str,
         columns: &[ColumnDef],
         ignore_constraints: bool,
+        temp: bool,
     ) -> (String, Vec<Value>) {
         // Find all primary key columns upfront
         let primary_keys: Vec<String> = if ignore_constraints {
@@ -238,26 +240,29 @@ impl<'a> QueryGenerator<'a> {
                 .collect()
         };
 
-        let builder_with_cols = columns.iter().fold(
-            CreateTableBuilder::new(table_ref!(table)),
-            |builder, col| {
-                let mut col_builder =
-                    builder.column(&col.name, col.data_type.clone(), col.char_max_length);
+        let initial_builder = if temp {
+            CreateTableBuilder::new(table_ref!(table)).temporary()
+        } else {
+            CreateTableBuilder::new(table_ref!(table))
+        };
 
-                // Only add PRIMARY KEY to the column definition if it's the *only* primary key.
-                if primary_keys.len() == 1 && primary_keys[0] == col.name.as_str() {
-                    col_builder = col_builder.primary_key();
-                }
-                if col.is_nullable {
-                    col_builder = col_builder.nullable();
-                }
-                if let Some(default_val) = &col.default {
-                    col_builder = col_builder.default_value(Expr::Value(default_val.clone()));
-                }
+        let builder_with_cols = columns.iter().fold(initial_builder, |builder, col| {
+            let mut col_builder =
+                builder.column(&col.name, col.data_type.clone(), col.char_max_length);
 
-                col_builder.add() // .add() returns the CreateTableBuilder for the next fold iteration
-            },
-        );
+            // Only add PRIMARY KEY to the column definition if it's the *only* primary key.
+            if primary_keys.len() == 1 && primary_keys[0] == col.name.as_str() {
+                col_builder = col_builder.primary_key();
+            }
+            if col.is_nullable {
+                col_builder = col_builder.nullable();
+            }
+            if let Some(default_val) = &col.default {
+                col_builder = col_builder.default_value(Expr::Value(default_val.clone()));
+            }
+
+            col_builder.add() // .add() returns the CreateTableBuilder for the next fold iteration
+        });
 
         // Add the composite primary key constraint at the table level if necessary
         let final_builder = if primary_keys.len() > 1 {
@@ -267,6 +272,14 @@ impl<'a> QueryGenerator<'a> {
         };
 
         self.render_ast(final_builder.build())
+    }
+
+    pub fn drop_table(&self, table: &str, if_exists: bool) -> (String, Vec<Value>) {
+        let mut builder = DropTableBuilder::new(table_ref!(table));
+        if if_exists {
+            builder = builder.if_exists();
+        }
+        self.render_ast(builder.build())
     }
 
     pub fn add_foreign_key(

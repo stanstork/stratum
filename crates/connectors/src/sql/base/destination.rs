@@ -16,7 +16,7 @@ pub trait DbDataDestination: MetadataStore + Send + Sync {
     async fn write_batch(
         &self,
         meta: &TableMetadata,
-        rows: Vec<RowData>,
+        rows: &Vec<RowData>,
     ) -> Result<(), Self::Error>;
 
     async fn toggle_trigger(&self, table: &str, enable: bool) -> Result<(), Self::Error>;

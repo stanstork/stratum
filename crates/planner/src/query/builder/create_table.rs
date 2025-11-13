@@ -27,6 +27,11 @@ impl CreateTableBuilder {
         self
     }
 
+    pub fn temporary(mut self) -> Self {
+        self.ast.temp = true;
+        self
+    }
+
     pub fn column(
         self,
         name: &str,

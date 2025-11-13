@@ -22,15 +22,15 @@ use crate::sql::{
 };
 use async_trait::async_trait;
 use bytes::Bytes;
-use chrono::SecondsFormat;
 use futures_util::{SinkExt, pin_mut};
 use model::{
     core::{data_type::DataType, value::Value},
     records::row::RowData,
 };
-use planner::query::dialect::{self, Dialect};
-use std::{collections::HashMap, fmt::Write, sync::Arc};
+use planner::query::dialect::{self};
+use std::{collections::HashMap, sync::Arc};
 use tokio_postgres::Client;
+use tracing::debug;
 
 #[derive(Clone)]
 pub struct PgAdapter {
@@ -172,7 +172,7 @@ impl SqlAdapter for PgAdapter {
         let generator = QueryGenerator::new(&self.dialect);
         let statement = generator.copy_from_stdin(table, columns);
 
-        println!("COPY statement: {}", statement);
+        debug!("COPY statement: {}", statement);
 
         let sink = self.client.copy_in(&statement).await?;
         pin_mut!(sink);
@@ -181,75 +181,15 @@ impl SqlAdapter for PgAdapter {
             let mut line = String::new();
             for (i, col) in columns.iter().enumerate() {
                 if i > 0 {
-                    line.push('\t');
+                    line.push(',');
                 }
-                line.push_str(&encode_copy_value(row, col));
+                line.push_str(&row.encode_csv_value(&col.name));
             }
             line.push('\n');
-            println!("COPY line: {}", line);
             sink.as_mut().send(Bytes::from(line)).await?;
         }
 
         sink.as_mut().close().await?;
         Ok(())
     }
-}
-
-fn encode_copy_value(row: &RowData, column: &ColumnMetadata) -> String {
-    let value = row
-        .field_values
-        .iter()
-        .find(|field| field.name.eq_ignore_ascii_case(&column.name))
-        .and_then(|field| field.value.as_ref());
-
-    match value {
-        None => r"\N".to_string(),
-        Some(Value::Null) => r"\N".to_string(),
-        Some(Value::String(s)) => escape_copy_text(s),
-        Some(Value::Json(v)) => escape_copy_text(&v.to_string()),
-        Some(Value::Enum(_, v)) => escape_copy_text(v),
-        Some(Value::StringArray(values)) => {
-            let json = serde_json::to_string(values).unwrap_or_default();
-            escape_copy_text(&json)
-        }
-        Some(Value::Bytes(bytes)) => encode_bytea(bytes),
-        Some(Value::Boolean(v)) => v.to_string(),
-        Some(Value::Int(v)) => v.to_string(),
-        Some(Value::Uint(v)) => v.to_string(),
-        Some(Value::Usize(v)) => v.to_string(),
-        Some(Value::Float(v)) => v.to_string(),
-        Some(Value::Uuid(v)) => v.to_string(),
-        Some(Value::Date(d)) => d.to_string(),
-        Some(Value::Timestamp(ts)) => ts.to_rfc3339_opts(SecondsFormat::Micros, true),
-    }
-}
-
-fn escape_copy_text(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '\n' => escaped.push_str(r"\n"),
-            '\r' => escaped.push_str(r"\r"),
-            '\t' => escaped.push_str(r"\t"),
-            '\\' => escaped.push_str(r"\\"),
-            '\0' => escaped.push_str(r"\000"),
-            _ => escaped.push(ch),
-        }
-    }
-    escaped
-}
-
-fn encode_bytea(bytes: &[u8]) -> String {
-    if bytes.is_empty() {
-        return String::from(r"\\x");
-    }
-
-    let mut hex = String::with_capacity(bytes.len() * 2 + 2);
-    hex.push_str(r"\\x");
-
-    for byte in bytes {
-        let _ = write!(hex, "{byte:02x}");
-    }
-
-    hex
 }

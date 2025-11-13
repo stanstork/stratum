@@ -1,4 +1,5 @@
-use connectors::error::{self, AdapterError};
+use connectors::error::AdapterError;
+use engine_core::error::SinkError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -19,6 +20,12 @@ pub enum ConsumerError {
 
     #[error("Failed to deserialize record: {0}")]
     Deserialization(String),
+
+    #[error("Unexpected error: {0}")]
+    Unexpected(#[from] Box<dyn std::error::Error + Send + Sync>),
+
+    #[error("Sink error: {0}")]
+    Sink(#[from] SinkError),
 }
 
 #[derive(Error, Debug)]

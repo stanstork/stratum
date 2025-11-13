@@ -5,7 +5,11 @@ use crate::query::{
 
 impl Render for CreateTable {
     fn render(&self, r: &mut Renderer) {
-        r.sql.push_str("CREATE TABLE ");
+        r.sql.push_str("CREATE ");
+        if self.temp {
+            r.sql.push_str("TEMP ");
+        }
+        r.sql.push_str("TABLE ");
         if self.if_not_exists {
             r.sql.push_str("IF NOT EXISTS ");
         }
@@ -118,6 +122,7 @@ mod tests {
                 name: "users".to_string(),
             },
             if_not_exists: true,
+            temp: false,
             columns: vec![
                 ColumnDef {
                     name: "id".to_string(),

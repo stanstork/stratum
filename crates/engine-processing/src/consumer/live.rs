@@ -1,158 +1,304 @@
-use crate::{
-    consumer::{DataConsumer, trigger::TriggerGuard},
-    error::ConsumerError,
-};
+use crate::{consumer::DataConsumer, error::ConsumerError, item::ItemId};
 use async_trait::async_trait;
-use connectors::sql::base::{capabilities, metadata::table::TableMetadata};
+use connectors::sql::base::metadata::table::TableMetadata;
 use engine_config::report::metrics::{MetricsReport, send_report};
 use engine_core::{
-    connectors::destination::{DataDestination, Destination},
-    metrics::Metrics,
-    state::buffer::SledBuffer,
-};
-use model::{
-    records::{
-        batch::Batch,
-        record::{DataRecord, Record},
-        row::RowData,
+    connectors::{
+        destination::{DataDestination, Destination},
+        sink::Sink,
     },
-    transform::mapping::EntityMapping,
+    context::item::ItemContext,
+    metrics::Metrics,
+    state::{
+        StateStore,
+        models::{Checkpoint, WalEntry},
+    },
 };
-use std::{collections::HashMap, sync::Arc, time::Instant};
-use tokio::sync::{mpsc, watch::Receiver};
+use futures::lock::Mutex;
+use model::{pagination::cursor::Cursor, records::batch::Batch};
+use std::{sync::Arc, time::Instant};
+use tokio::sync::{mpsc, mpsc::error::TryRecvError, watch::Receiver};
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 pub struct LiveConsumer {
-    batch_rx: mpsc::Receiver<Batch>,
-    destination: Destination,
-    mappings: EntityMapping,
-    shutdown_receiver: Receiver<bool>,
+    ids: ItemId,
+
+    // Shared context
+    pub state_store: Arc<dyn StateStore>,
+    pub destination: Destination,
+    pub meta: Vec<TableMetadata>,
+
+    // IO
+    pub batch_rx: mpsc::Receiver<Batch>,
+
+    // Control
+    pub shutdown_rx: Receiver<bool>,
+    pub cancel: CancellationToken,
 }
 
 #[async_trait]
 impl DataConsumer for LiveConsumer {
+    /// Main entry point for the consumer.
+    /// Runs a loop to receive and process batches until the channel closes or cancellation is requested.
     async fn run(&mut self) -> Result<(), ConsumerError> {
-        let tables = match &self.destination.data_dest {
-            DataDestination::Database(db) => db.data.lock().await.tables(),
-        };
-
-        // Guard to ensure triggers are restored on exit
-        let _trigger_guard = TriggerGuard::new(&self.destination, &tables, false).await?;
-
+        let start_time = Instant::now();
+        let sink = self.destination.sink();
         let metrics = Metrics::new();
 
-        while let Some(batch) = self.batch_rx.recv().await {
-            let table = &tables[0];
-            match &self.destination.data_dest {
-                DataDestination::Database(db) => {
-                    let support_fast_path = db.sink.support_fast_path().await.unwrap_or(false);
-                    if support_fast_path {
-                        db.sink.write_fast_path(table, &batch).await.unwrap();
-                    } else {
-                        let rows = batch
-                            .rows
-                            .values()
-                            .flatten()
-                            .filter_map(|r| r.to_row_data().cloned())
-                            .collect::<Vec<RowData>>();
-                        db.data.lock().await.write_batch(table, rows).await.unwrap();
+        info!("Consumer starting. Listening for batches...");
+
+        loop {
+            tokio::select! {
+                biased;
+
+                _ = self.cancel.cancelled() => {
+                    info!("Cancellation requested. Exiting consumer loop.");
+                    break;
+                }
+
+                batch = self.batch_rx.recv() => {
+                    match batch {
+                        Some(batch) => {
+                            // Process the batch, propagating any errors to stop the consumer
+                            self.process_batch(batch, sink.as_ref(), &metrics).await?;
+                        }
+                        None => {
+                            info!("Batch channel closed. Exiting consumer loop.");
+                            break;
+                        }
+                    }
+                }
+
+                changed = self.shutdown_rx.changed() => {
+                    match changed {
+                        Ok(_) if *self.shutdown_rx.borrow() => {
+                            info!("Shutdown signal received. Draining pending batches before exit.");
+                            self
+                                .drain_pending_batches(sink.as_ref(), &metrics)
+                                .await?;
+                            break;
+                        }
+                        Ok(_) => {}
+                        Err(_) => {
+                            info!("Shutdown channel closed. Exiting consumer loop.");
+                            break;
+                        }
                     }
                 }
             }
         }
 
-        // loop {
-        //     match self.buffer.read_next() {
-        //         Some(record) => {
-        //             self.process_record(record, &tables, &metrics).await?;
-        //         }
-        //         None => {
-        //             self.flush_all(&tables).await?;
+        // Post-loop cleanup and final state update
+        info!("Batch channel closed. Writing final state.");
 
-        //             // If the shutdown signal is received, it means the producer has finished
-        //             // processing all records and the consumer can safely exit if the buffer is empty
-        //             if *self.shutdown_receiver.borrow() {
-        //                 info!("Shutdown signal received and buffer is empty. Exiting.");
-        //                 break;
-        //             }
+        self.state_store.append_wal(&self.wal_item_done()).await?;
 
-        //             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        //         }
-        //     }
-        // }
+        let duration = start_time.elapsed();
+        info!(duration = ?duration, "Consumer finished");
 
-        // self.send_final_report(&metrics).await;
-        info!("Consumer finished");
+        self.send_final_report(&metrics).await;
+
         Ok(())
     }
 }
 
 impl LiveConsumer {
-    pub fn new(
+    pub async fn new(
+        ctx: &Arc<Mutex<ItemContext>>,
         batch_rx: mpsc::Receiver<Batch>,
-        destination: Destination,
-        mappings: EntityMapping,
-        receiver: Receiver<bool>,
+        shutdown_rx: Receiver<bool>,
+        cancel: CancellationToken,
     ) -> Self {
+        let (run_id, item_id, state_store, destination) = {
+            let c = ctx.lock().await;
+            (
+                c.run_id.clone(),
+                c.item_id.clone(),
+                c.state.clone(),
+                c.destination.clone(),
+            )
+        };
+
+        let tables = match &destination.data_dest {
+            DataDestination::Database(db) => db.data.lock().await.tables(),
+        };
+
+        // TODO: Part ID is hardcoded for now
+        let part_id = "part-0".to_string();
+
         Self {
-            batch_rx,
+            ids: ItemId::new(run_id, item_id, part_id),
+            state_store,
             destination,
-            mappings,
-            shutdown_receiver: receiver,
+            meta: tables,
+            batch_rx,
+            shutdown_rx,
+            cancel,
         }
     }
 
-    async fn process_record(
+    async fn process_batch(
         &mut self,
-        record: Vec<u8>,
-        tables: &[TableMetadata],
+        batch: Batch,
+        sink: &dyn Sink,
         metrics: &Metrics,
     ) -> Result<(), ConsumerError> {
-        // metrics.increment_records(1).await;
-        // metrics.increment_bytes(record.len() as u64).await;
+        let start_time = Instant::now();
 
-        // let row_data = RowData::deserialize(record);
-        // let table_name = row_data.entity.clone(); //self.table_name_map.resolve(&row_data.table);
+        let batch_id = batch.id.clone();
+        let batch_rows = batch.rows.len();
+        let next_cursor = batch.next.clone();
 
-        // let batch = self.batch_map.entry(table_name.clone()).or_default();
-        // batch.push(Record::RowData(row_data));
+        info!(batch_id = %batch_id, rows = batch_rows, "Processing received batch");
 
-        // if batch.len() >= self.batch_size {
-        //     self.flush_all(tables).await?;
-        // }
+        // For now we support only single destination table
+        let meta = self.meta[0].clone();
+
+        // Pre-write state management
+        self.state_store
+            .append_wal(&self.wal_batch_begin(batch_id.clone()))
+            .await?;
+
+        let write_checkpoint = self.build_checkpoint(
+            "write".to_string(),
+            batch_id.clone(),
+            next_cursor.clone(),
+            batch_rows as u64,
+        );
+        self.state_store.save_checkpoint(&write_checkpoint).await?;
+
+        // Write data to destination
+        self.write_batch(sink, &meta, &batch).await?;
+
+        // Post-write state management
+        self.state_store
+            .append_wal(&self.wal_batch_commit(batch_id.clone()))
+            .await?;
+
+        let committed_checkpoint = self.build_checkpoint(
+            "committed".to_string(),
+            batch_id,
+            next_cursor,
+            batch_rows as u64,
+        );
+        self.state_store
+            .save_checkpoint(&committed_checkpoint)
+            .await?;
+
+        // Metrics
+        metrics.increment_bytes(batch.size_bytes() as u64).await;
+        metrics.increment_records(batch_rows as u64).await;
+
+        let duration = start_time.elapsed();
+        info!(duration = ?duration, "Batch processed successfully");
+
         Ok(())
     }
 
-    async fn flush_all(&mut self, tables: &[TableMetadata]) -> Result<(), ConsumerError> {
-        // for table in tables.iter() {
-        //     // Get the table name from the map or use the original name if no mapping is found
-        //     // This is needed when the source and destination table names are different
-        //     let table_name = self.mappings.entity_name_map.resolve(&table.name);
+    /// Handles the logic for writing a batch to the data sink,
+    /// preferring the fast path if supported.
+    async fn write_batch(
+        &self,
+        sink: &dyn Sink,
+        meta: &TableMetadata,
+        batch: &Batch,
+    ) -> Result<(), ConsumerError> {
+        let fast = sink.support_fast_path().await?;
 
-        //     if let Some(records) = self.batch_map.remove(&table_name) {
-        //         if records.is_empty() {
-        //             continue;
-        //         }
+        let write_result = if fast {
+            info!("Using fast path for batch write.");
 
-        //         let start_time = Instant::now();
+            // COPY -> MERGE
+            sink.write_fast_path(meta, batch)
+                .await
+                .map_err(|e| ConsumerError::WriteBatch {
+                    table: meta.name.clone(),
+                    source: Box::new(e),
+                })
+        } else {
+            info!("Using standard path for batch write.");
 
-        //         self.destination
-        //             .write_batch(table, records)
-        //             .await
-        //             .map_err(|e| ConsumerError::WriteBatch {
-        //                 table: table.name.clone(),
-        //                 source: Box::new(e),
-        //             })?;
+            // Fallback: multi-row UPSERT
+            self.destination
+                .write_batch(meta, &batch.rows)
+                .await
+                .map_err(|e| ConsumerError::WriteBatch {
+                    table: meta.name.clone(),
+                    source: Box::new(e),
+                })
+        };
 
-        //         let elapsed = start_time.elapsed().as_millis();
-        //         info!(
-        //             table = %table.name,
-        //             duration_ms = elapsed,
-        //             "Batch written successfully."
-        //         );
-        //     }
-        // }
+        if let Err(ref e) = write_result {
+            error!("Error writing batch to sink: {:?}", e);
+        }
+
+        write_result
+    }
+
+    async fn drain_pending_batches(
+        &mut self,
+        sink: &dyn Sink,
+        metrics: &Metrics,
+    ) -> Result<(), ConsumerError> {
+        loop {
+            match self.batch_rx.try_recv() {
+                Ok(batch) => {
+                    self.process_batch(batch, sink, metrics).await?;
+                }
+                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+            }
+        }
+
         Ok(())
+    }
+
+    /// Helper to build a `BatchBeginWrite` WAL entry.
+    fn wal_batch_begin(&self, batch_id: String) -> WalEntry {
+        WalEntry::BatchBeginWrite {
+            run_id: self.ids.run_id(),
+            item_id: self.ids.item_id(),
+            part_id: self.ids.part_id(),
+            batch_id,
+        }
+    }
+
+    /// Helper to build a `BatchCommit` WAL entry.
+    fn wal_batch_commit(&self, batch_id: String) -> WalEntry {
+        WalEntry::BatchCommit {
+            run_id: self.ids.run_id(),
+            item_id: self.ids.item_id(),
+            part_id: self.ids.part_id(),
+            batch_id,
+        }
+    }
+
+    /// Helper to build an `ItemDone` WAL entry.
+    fn wal_item_done(&self) -> WalEntry {
+        WalEntry::ItemDone {
+            run_id: self.ids.run_id(),
+            item_id: self.ids.item_id(),
+        }
+    }
+
+    /// Helper to build a new Checkpoint struct.
+    fn build_checkpoint(
+        &self,
+        stage: String,
+        batch_id: String,
+        src_offset: Cursor,
+        rows_done: u64,
+    ) -> Checkpoint {
+        Checkpoint {
+            run_id: self.ids.run_id(),
+            item_id: self.ids.item_id(),
+            part_id: self.ids.part_id(),
+            stage,
+            src_offset,
+            batch_id,
+            rows_done,
+            updated_at: chrono::Utc::now(),
+        }
     }
 
     async fn send_final_report(&self, metrics: &Metrics) {
