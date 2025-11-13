@@ -2,6 +2,7 @@ use crate::sql::{
     base::{
         adapter::{DatabaseKind, SqlAdapter},
         capabilities::DbCapabilities,
+        encoder::CopyValueEncoder,
         error::{ConnectorError, DbError},
         metadata::{
             column::{COL_REFERENCING_TABLE, ColumnMetadata},
@@ -15,6 +16,7 @@ use crate::sql::{
     },
     postgres::{
         data_type::PgDataType,
+        encoder::PgCopyValueEncoder,
         params::PgParamStore,
         probe::PgCapabilityProbe,
         utils::{connect_client, flatten_values},
@@ -171,6 +173,7 @@ impl SqlAdapter for PgAdapter {
 
         let generator = QueryGenerator::new(&self.dialect);
         let statement = generator.copy_from_stdin(table, columns);
+        let encoder = PgCopyValueEncoder::new();
 
         debug!("COPY statement: {}", statement);
 
@@ -183,7 +186,8 @@ impl SqlAdapter for PgAdapter {
                 if i > 0 {
                     line.push(',');
                 }
-                line.push_str(&row.encode_csv_value(&col.name));
+                let field_value = row.get(&col.name).and_then(|field| field.value.as_ref());
+                line.push_str(&encoder.encode_optional(field_value));
             }
             line.push('\n');
             sink.as_mut().send(Bytes::from(line)).await?;

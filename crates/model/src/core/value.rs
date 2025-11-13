@@ -1,8 +1,5 @@
-use crate::core::{
-    data_type::DataType,
-    utils::{encode_bytea, escape_copy_text, escape_csv_string},
-};
-use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
+use crate::core::data_type::DataType;
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt, hash::Hash};
 use uuid::Uuid;
@@ -179,40 +176,6 @@ impl Value {
             Value::Enum(_, _) => DataType::Enum,
             Value::StringArray(_) => DataType::Array,
             Value::Null => DataType::Null,
-        }
-    }
-
-    pub fn encode_csv(&self) -> String {
-        match self {
-            Value::Null => "\\N".to_string(),
-            Value::String(s) => escape_csv_string(s),
-            Value::Json(v) => escape_csv_string(&v.to_string()),
-            Value::Enum(_, v) => escape_csv_string(v),
-            Value::StringArray(values) => {
-                // Serialize array as JSON: ["a","b","c"]
-                let json = serde_json::to_string(values).unwrap_or("[]".to_string());
-                escape_csv_string(&json)
-            }
-            Value::Bytes(bytes) => {
-                // Convert to PostgreSQL bytea hex format: \xDEADBEEF
-                // CSV rules still apply, so wrap & escape
-                let hex = encode_bytea(bytes);
-                escape_csv_string(&hex)
-            }
-            Value::Boolean(v) => v.to_string(),
-            Value::Int(v) => v.to_string(),
-            Value::Uint(v) => v.to_string(),
-            Value::Usize(v) => v.to_string(),
-            Value::Float(v) => {
-                // Locale-independent float formatting: 1.23e-10
-                ryu::Buffer::new().format(*v).to_string()
-            }
-            Value::Uuid(v) => v.to_string(),
-            Value::Date(d) => d.to_string(),
-            Value::Timestamp(ts) => {
-                // RFC3339 with microseconds
-                ts.to_rfc3339_opts(SecondsFormat::Micros, true)
-            }
         }
     }
 

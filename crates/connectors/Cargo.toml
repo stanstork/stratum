@@ -14,6 +14,7 @@ bigdecimal = "0.4.7"
 chrono = { version = "0.4.39", features = ["serde"] }
 uuid = { version = "1.13.1", features = ["serde"] }
 serde_json = "1.0.138"
+ryu = "1.0.20"
 lazy_static = "1.5.0"
 serde = "1.0.217"
 thiserror = "2.0.12"

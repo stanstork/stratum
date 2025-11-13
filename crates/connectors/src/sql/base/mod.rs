@@ -1,6 +1,7 @@
 pub mod adapter;
 pub mod capabilities;
 pub mod destination;
+pub mod encoder;
 pub mod error;
 pub mod filter;
 pub mod join;

@@ -34,20 +34,6 @@ impl RowData {
         self.entity.clone()
     }
 
-    pub fn encode_csv_value(&self, field: &str) -> String {
-        let value = self
-            .field_values
-            .iter()
-            .find(|f| f.name.eq_ignore_ascii_case(field))
-            .and_then(|f| f.value.as_ref());
-
-        if let Some(v) = value {
-            v.encode_csv()
-        } else {
-            "\\N".to_string()
-        }
-    }
-
     pub fn size_bytes(&self) -> usize {
         let mut size = self.entity.len();
         for field_value in &self.field_values {
