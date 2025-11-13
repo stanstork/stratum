@@ -10,6 +10,7 @@ model = { path = "../model" }
 smql-syntax = { path = "../smql-syntax" }
 
 tokio = { version = "1.43.0", features = ["full"] }
+tokio-postgres = "0.7.15"
 futures = "0.3.31"
 thiserror = "2.0.12"
 serde = "1.0.217"

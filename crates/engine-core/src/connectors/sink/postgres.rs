@@ -7,6 +7,7 @@ use connectors::sql::{
         error::DbError,
         metadata::{column::ColumnMetadata, table::TableMetadata},
         query::generator::QueryGenerator,
+        transaction::Transaction,
     },
     postgres::adapter::PgAdapter,
 };
@@ -39,6 +40,7 @@ impl PostgresSink {
 
     async fn create_staging_table(
         &self,
+        tx: &Transaction<'_>,
         meta: &TableMetadata,
         name: &str,
     ) -> Result<(), SinkError> {
@@ -47,19 +49,20 @@ impl PostgresSink {
         let (sql, params) = generator.create_table(name, &column_defs, true, true);
 
         debug!("Creating staging table with SQL: {}", sql);
-        self.exec(&sql, params).await
+        self.exec(tx, &sql, params).await
     }
 
-    async fn drop_staging_table(&self, name: &str) -> Result<(), SinkError> {
+    async fn drop_staging_table(&self, tx: &Transaction<'_>, name: &str) -> Result<(), SinkError> {
         let generator = QueryGenerator::new(&self.dialect);
         let (sql, params) = generator.drop_table(name, true);
 
         debug!("Dropping staging table with SQL: {}", sql);
-        self.exec(&sql, params).await
+        self.exec(tx, &sql, params).await
     }
 
     async fn merge_staging(
         &self,
+        tx: &Transaction<'_>,
         meta: &TableMetadata,
         staging_table: &str,
         columns: &Vec<ColumnMetadata>,
@@ -81,14 +84,19 @@ impl PostgresSink {
 
         debug!("Merging staging table with SQL: {}", sql);
 
-        self.exec(&sql, params).await
+        self.exec(tx, &sql, params).await
     }
 
-    async fn exec(&self, sql: &str, params: Vec<Value>) -> Result<(), SinkError> {
+    async fn exec(
+        &self,
+        tx: &Transaction<'_>,
+        sql: &str,
+        params: Vec<Value>,
+    ) -> Result<(), SinkError> {
         if params.is_empty() {
-            self.adapter.exec(sql).await?;
+            self.adapter.exec_tx(tx, sql).await?;
         } else {
-            self.adapter.exec_params(sql, params).await?;
+            self.adapter.exec_params_tx(tx, sql, params).await?;
         }
 
         Ok(())
@@ -130,25 +138,31 @@ impl Sink for PostgresSink {
 
         debug!("Staging table: {}", staging_table);
 
-        self.create_staging_table(table, &staging_table).await?;
+        let mut client = self.adapter.lock_client().await;
+        let tx = Transaction::PgTransaction(client.transaction().await?);
+
+        self.create_staging_table(&tx, table, &staging_table)
+            .await?;
 
         let copy_result = self
             .adapter
-            .copy_rows(&staging_table, &ordered_cols, &batch.rows)
+            .copy_rows(&tx, &staging_table, &ordered_cols, &batch.rows)
             .await;
 
         if let Err(err) = copy_result {
-            let _ = self.drop_staging_table(&staging_table).await;
+            let _ = self.drop_staging_table(&tx, &staging_table).await;
             return Err(err.into());
         }
 
         let merge_result = self
-            .merge_staging(table, &staging_table, &ordered_cols)
+            .merge_staging(&tx, table, &staging_table, &ordered_cols)
             .await;
-        let drop_result = self.drop_staging_table(&staging_table).await;
+        let drop_result = self.drop_staging_table(&tx, &staging_table).await;
 
         merge_result?;
         drop_result?;
+
+        tx.commit().await?;
 
         Ok(())
     }

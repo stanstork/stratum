@@ -12,4 +12,5 @@ pub mod query;
 pub mod requests;
 pub mod row;
 pub mod source;
+pub mod transaction;
 pub mod utils;

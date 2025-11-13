@@ -3,6 +3,7 @@ use crate::sql::base::{
     error::{ConnectorError, DbError},
     metadata::{column::ColumnMetadata, table::TableMetadata},
     requests::FetchRowsRequest,
+    transaction::Transaction,
 };
 use async_trait::async_trait;
 use model::{core::value::Value, records::row::RowData};
@@ -20,9 +21,27 @@ pub trait SqlAdapter {
     where
         Self: Sized;
 
-    // Exec / Params
+    // Exec
     async fn exec(&self, query: &str) -> Result<(), DbError>;
     async fn exec_params(&self, query: &str, params: Vec<Value>) -> Result<(), DbError>;
+
+    // Exec transaction
+    async fn exec_tx(&self, _tx: &Transaction<'_>, _query: &str) -> Result<(), DbError> {
+        Err(DbError::Unknown(
+            "Exec within transaction not implemented for this adapter".to_string(),
+        ))
+    }
+
+    async fn exec_params_tx(
+        &self,
+        _tx: &Transaction<'_>,
+        _query: &str,
+        _params: Vec<Value>,
+    ) -> Result<(), DbError> {
+        Err(DbError::Unknown(
+            "Exec within transaction not implemented for this adapter".to_string(),
+        ))
+    }
 
     async fn query_rows(&self, sql: &str) -> Result<Vec<RowData>, DbError>;
 
@@ -48,6 +67,7 @@ pub trait SqlAdapter {
 
     async fn copy_rows(
         &self,
+        _tx: &Transaction<'_>,
         _table: &str,
         _columns: &Vec<ColumnMetadata>,
         _rows: &Vec<RowData>,

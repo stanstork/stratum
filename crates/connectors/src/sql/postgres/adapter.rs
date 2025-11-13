@@ -13,6 +13,7 @@ use crate::sql::{
         query::generator::QueryGenerator,
         requests::FetchRowsRequest,
         row::DbRow,
+        transaction::Transaction,
     },
     postgres::{
         data_type::PgDataType,
@@ -31,12 +32,13 @@ use model::{
 };
 use planner::query::dialect::{self};
 use std::{collections::HashMap, sync::Arc};
+use tokio::sync::{RwLock, RwLockWriteGuard};
 use tokio_postgres::Client;
 use tracing::debug;
 
 #[derive(Clone)]
 pub struct PgAdapter {
-    client: Arc<Client>,
+    client: Arc<RwLock<Client>>,
     dialect: dialect::Postgres,
 }
 
@@ -45,10 +47,28 @@ const QUERY_TRUNCATE_TABLE_SQL: &str = include_str!("sql/table_truncate.sql");
 const QUERY_TABLE_METADATA_SQL: &str = include_str!("sql/table_metadata.sql");
 const QUERY_TABLE_REFERENCING_SQL: &str = include_str!("sql/table_referencing.sql");
 
+impl PgAdapter {
+    pub async fn lock_client(&self) -> RwLockWriteGuard<'_, Client> {
+        self.client.write().await
+    }
+
+    fn transaction<'a>(
+        &self,
+        tx: &'a Transaction<'a>,
+    ) -> Result<&'a tokio_postgres::Transaction<'a>, DbError> {
+        match tx {
+            Transaction::PgTransaction(pg_tx) => Ok(pg_tx),
+            _ => Err(DbError::Unknown(
+                "Provided transaction is not a Postgres transaction".to_string(),
+            )),
+        }
+    }
+}
+
 #[async_trait]
 impl SqlAdapter for PgAdapter {
     async fn connect(url: &str) -> Result<Self, ConnectorError> {
-        let client = Arc::new(connect_client(url).await?);
+        let client = Arc::new(RwLock::new(connect_client(url).await?));
         Ok(PgAdapter {
             client,
             dialect: dialect::Postgres,
@@ -56,18 +76,39 @@ impl SqlAdapter for PgAdapter {
     }
 
     async fn exec(&self, query: &str) -> Result<(), DbError> {
-        self.client.batch_execute(query).await?;
+        let client = self.client.read().await;
+        client.batch_execute(query).await?;
         Ok(())
     }
 
     async fn exec_params(&self, query: &str, params: Vec<Value>) -> Result<(), DbError> {
         let bindings = PgParamStore::from_values(params);
-        self.client.execute(query, &bindings.as_refs()).await?;
+        let client = self.client.write().await;
+        client.execute(query, &bindings.as_refs()).await?;
+        Ok(())
+    }
+
+    async fn exec_tx(&self, tx: &Transaction<'_>, query: &str) -> Result<(), DbError> {
+        let tx = self.transaction(tx)?;
+        tx.batch_execute(query).await?;
+        Ok(())
+    }
+
+    async fn exec_params_tx(
+        &self,
+        tx: &Transaction<'_>,
+        query: &str,
+        params: Vec<Value>,
+    ) -> Result<(), DbError> {
+        let tx = self.transaction(tx)?;
+        let bindings = PgParamStore::from_values(params);
+        tx.execute(query, &bindings.as_refs()).await?;
         Ok(())
     }
 
     async fn query_rows(&self, sql: &str) -> Result<Vec<RowData>, DbError> {
-        let rows = self.client.query(sql, &[]).await?;
+        let client = self.client.read().await;
+        let rows = client.query(sql, &[]).await?;
         let result = rows
             .iter()
             .map(|row| DbRow::PostgresRow(row).to_row_data(""))
@@ -92,7 +133,8 @@ impl SqlAdapter for PgAdapter {
         let bindings = PgParamStore::from_values(flat_values);
         let refs = bindings.as_refs();
 
-        let rows = self.client.query(&sql, &refs).await?;
+        let client = self.client.read().await;
+        let rows = client.query(&sql, &refs).await?;
         let result = rows
             .iter()
             .map(|row| DbRow::PostgresRow(row).to_row_data(table))
@@ -102,10 +144,8 @@ impl SqlAdapter for PgAdapter {
     }
 
     async fn table_exists(&self, table: &str) -> Result<bool, DbError> {
-        let row = self
-            .client
-            .query_one(QUERY_TABLE_EXISTS_SQL, &[&table])
-            .await?;
+        let client = self.client.read().await;
+        let row = client.query_one(QUERY_TABLE_EXISTS_SQL, &[&table]).await?;
         Ok(row.get(0))
     }
 
@@ -115,7 +155,8 @@ impl SqlAdapter for PgAdapter {
 
     async fn table_metadata(&self, table: &str) -> Result<TableMetadata, DbError> {
         let query = QUERY_TABLE_METADATA_SQL.replace("{table}", table);
-        let rows = self.client.query(&query, &[]).await?;
+        let client = self.client.read().await;
+        let rows = client.query(&query, &[]).await?;
         let columns = rows
             .iter()
             .map(|row| {
@@ -129,10 +170,8 @@ impl SqlAdapter for PgAdapter {
     }
 
     async fn referencing_tables(&self, table: &str) -> Result<Vec<String>, DbError> {
-        let rows = self
-            .client
-            .query(QUERY_TABLE_REFERENCING_SQL, &[&table])
-            .await?;
+        let client = self.client.read().await;
+        let rows = client.query(QUERY_TABLE_REFERENCING_SQL, &[&table]).await?;
 
         let tables = rows
             .iter()
@@ -147,9 +186,8 @@ impl SqlAdapter for PgAdapter {
     }
 
     async fn truncate_table(&self, table: &str) -> Result<(), DbError> {
-        self.client
-            .execute(QUERY_TRUNCATE_TABLE_SQL, &[&table])
-            .await?;
+        let client = self.client.read().await;
+        client.execute(QUERY_TRUNCATE_TABLE_SQL, &[&table]).await?;
         Ok(())
     }
 
@@ -163,6 +201,7 @@ impl SqlAdapter for PgAdapter {
 
     async fn copy_rows(
         &self,
+        tx: &Transaction<'_>,
         table: &str,
         columns: &Vec<ColumnMetadata>,
         rows: &Vec<RowData>,
@@ -177,7 +216,8 @@ impl SqlAdapter for PgAdapter {
 
         debug!("COPY statement: {}", statement);
 
-        let sink = self.client.copy_in(&statement).await?;
+        let tx = self.transaction(tx)?;
+        let sink = tx.copy_in(&statement).await?;
         pin_mut!(sink);
 
         for row in rows {

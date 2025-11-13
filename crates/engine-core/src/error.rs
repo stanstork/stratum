@@ -47,4 +47,7 @@ pub enum SinkError {
 
     #[error("DB Error: {0}")]
     Db(#[from] DbError),
+
+    #[error("Tokio Postgres Error: {0}")]
+    TokioPostgres(#[from] tokio_postgres::Error),
 }
