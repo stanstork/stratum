@@ -1,4 +1,4 @@
-use crate::error::ConsumerError;
+use crate::{consumer::DataConsumer, error::ConsumerError};
 use async_trait::async_trait;
 use tracing::info;
 
@@ -17,7 +17,7 @@ impl ValidationConsumer {
 }
 
 #[async_trait]
-impl crate::consumer::DataConsumer for ValidationConsumer {
+impl DataConsumer for ValidationConsumer {
     async fn run(&mut self) -> Result<(), ConsumerError> {
         info!("Running in validation mode. No data will be written.");
 

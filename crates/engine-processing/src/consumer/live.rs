@@ -19,7 +19,7 @@ use model::{pagination::cursor::Cursor, records::batch::Batch};
 use std::{sync::Arc, time::Instant};
 use tokio::sync::{mpsc, mpsc::error::TryRecvError, watch::Receiver};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub struct LiveConsumer {
     ids: ItemId,
@@ -305,10 +305,10 @@ impl LiveConsumer {
         let (records_processed, bytes_transferred) = metrics.get_metrics().await;
         let report = MetricsReport::new(records_processed, bytes_transferred, "succeeded".into());
         if let Err(e) = send_report(report.clone()).await {
-            error!("Failed to send final report: {}", e);
+            warn!("Failed to send final report: {}", e);
             let report_json = serde_json::to_string(&report)
                 .unwrap_or_else(|_| "Failed to serialize report".to_string());
-            error!(
+            warn!(
                 "All attempts to send report failed. Final Report: {}",
                 report_json
             );

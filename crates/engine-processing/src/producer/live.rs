@@ -316,10 +316,10 @@ impl DataProducer for LiveProducer {
 
         // Start heartbeat loop
         let heartbeat_self = Arc::new(self.clone());
-        let hb_handle = tokio::spawn({
+        let hb_handle = {
             let cloned = heartbeat_self.clone();
-            async move { cloned.heartbeat().await }
-        });
+            tokio::spawn(async move { cloned.heartbeat().await });
+        };
 
         loop {
             if self.cancel_token.is_cancelled() {
@@ -363,10 +363,7 @@ impl DataProducer for LiveProducer {
         }
 
         self.signal_shutdown();
-
-        if let Err(e) = hb_handle.await {
-            warn!("Heartbeat task ended abnormally: {e}");
-        }
+        let _ = hb_handle; // Wait for heartbeat loop to finish
 
         Ok(batches) // Return the number of batches processed
     }

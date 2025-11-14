@@ -1,6 +1,6 @@
 use crate::error::ReportGenerationError;
 use serde::Serialize;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MetricsReport {
@@ -24,7 +24,7 @@ pub async fn send_report(report: MetricsReport) -> Result<(), ReportGenerationEr
     let callback_url = match std::env::var("REPORT_CALLBACK_URL") {
         Ok(url) => url,
         Err(_) => {
-            error!("CALLBACK_URL environment variable not set. Cannot send report.");
+            warn!("CALLBACK_URL environment variable not set. Cannot send report.");
             return Err(ReportGenerationError::MissingCallbackUrl);
         }
     };
@@ -32,7 +32,7 @@ pub async fn send_report(report: MetricsReport) -> Result<(), ReportGenerationEr
     let auth_token = match std::env::var("AUTH_TOKEN") {
         Ok(token) => token,
         Err(_) => {
-            error!("AUTH_TOKEN environment variable not set. Cannot send authenticated report.");
+            warn!("AUTH_TOKEN environment variable not set. Cannot send authenticated report.");
             return Err(ReportGenerationError::MissingAuthToken);
         }
     };
