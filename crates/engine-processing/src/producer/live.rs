@@ -121,8 +121,7 @@ impl LiveProducer {
     async fn next_page(&self, cursor: &Cursor) -> Result<FetchOutcome, ProducerError> {
         let res = self
             .source
-            // .fetch_data(self.batch_size, cursor.clone())
-            .fetch_data(20000, cursor.clone())
+            .fetch_data(self.batch_size, cursor.clone())
             .await?;
 
         if res.reached_end && res.row_count == 0 {
@@ -276,14 +275,14 @@ impl DataProducer for LiveProducer {
                         "Fetched batch."
                     );
 
-                    self.log_batch_start(&batch_id, &cur, res.row_count).await?;
+                    let next = res.next_cursor.clone().unwrap_or(Cursor::None);
+                    self.log_batch_start(&batch_id, &next, res.row_count)
+                        .await?;
 
                     let transformed = self.transform(res.rows).await;
-                    self.send_batch(batch_id, transformed, cur.clone()).await?;
+                    self.send_batch(batch_id, transformed, next.clone()).await?;
 
-                    if let Some(next) = res.next_cursor
-                        && next != Cursor::None
-                    {
+                    if next != Cursor::None {
                         cur = next;
                         batches += 1;
                     } else {
