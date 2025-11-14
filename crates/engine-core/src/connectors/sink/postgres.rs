@@ -65,7 +65,7 @@ impl PostgresSink {
         tx: &Transaction<'_>,
         meta: &TableMetadata,
         staging_table: &str,
-        columns: &Vec<ColumnMetadata>,
+        columns: &[ColumnMetadata],
     ) -> Result<(), SinkError> {
         if meta.primary_keys.is_empty() {
             return Err(SinkError::FastPathNotSupported(
@@ -119,7 +119,10 @@ impl Sink for PostgresSink {
             .cached_capabilities()
             .await
             .map_err(|_| SinkError::Capabilities)?;
-        Ok(capabilities.copy_streaming && capabilities.merge_statements)
+
+        // Fast path is allowed as long as we can stream COPY.
+        // merge_statements decides between MERGE or ON CONFLICT.
+        Ok(capabilities.copy_streaming)
     }
 
     async fn write_fast_path(&self, table: &TableMetadata, batch: &Batch) -> Result<(), SinkError> {

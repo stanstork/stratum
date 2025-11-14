@@ -10,7 +10,7 @@ use engine_core::{
     context::item::ItemContext,
     state::{
         StateStore,
-        models::{Checkpoint, WalEntry},
+        models::{Checkpoint, CheckpointSummary, WalEntry},
     },
 };
 use futures::{StreamExt, lock::Mutex, stream};
@@ -109,13 +109,76 @@ impl LiveProducer {
     }
 
     async fn start_cursor(&self) -> Cursor {
-        self.state_store
-            .load_checkpoint(&self.ids.run_id(), &self.ids.item_id(), &self.ids.part_id())
+        match self
+            .state_store
+            .last_checkpoint(&self.ids.run_id(), &self.ids.item_id(), &self.ids.part_id())
             .await
-            .ok()
-            .flatten()
-            .map(|cp| cp.src_offset)
-            .unwrap_or(self.cursor.clone())
+        {
+            Ok(Some(summary)) => self.cursor_from_checkpoint(&summary).await,
+            Ok(None) => self.cursor.clone(),
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    "Failed to load checkpoint; falling back to initial cursor"
+                );
+                self.cursor.clone()
+            }
+        }
+    }
+
+    /// Reconstruct the correct resume cursor based on the last checkpoint.
+    ///
+    /// Rules:
+    /// - If stage="committed": resume from `src_offset` (fully committed)
+    /// - If stage="read"/"write":
+    ///     - If WAL contains BatchCommit for this batch -> resume from `pending_offset`
+    ///     - Otherwise -> resume from `src_offset`
+    /// - Otherwise: fallback to `src_offset`
+    async fn cursor_from_checkpoint(&self, summary: &CheckpointSummary) -> Cursor {
+        match summary.stage.as_str() {
+            "committed" => summary.src_offset.clone(),
+            "read" | "write" => {
+                let wal_entries = match self.state_store.iter_wal(&self.ids.run_id()).await {
+                    Ok(entries) => entries,
+                    Err(err) => {
+                        warn!(
+                            error = %err,
+                            "Failed to read WAL entries; defaulting to prior cursor"
+                        );
+                        return summary.src_offset.clone();
+                    }
+                };
+
+                if Self::wal_has_commit(&wal_entries, &self.ids, &summary.batch_id) {
+                    summary
+                        .pending_offset
+                        .as_ref()
+                        .cloned()
+                        .unwrap_or_else(|| summary.src_offset.clone())
+                } else {
+                    summary.src_offset.clone()
+                }
+            }
+            _ => summary.src_offset.clone(),
+        }
+    }
+
+    /// Return true if a BatchCommit entry exists for this item/part/batch.
+    ///
+    /// Used to distinguish between “read but not written” and
+    /// “written but crash before checkpoint”.
+    fn wal_has_commit(entries: &[WalEntry], ids: &ItemId, batch_id: &str) -> bool {
+        let target_item = ids.item_id();
+        let target_part = ids.part_id();
+        entries.iter().rev().any(|entry| match entry {
+            WalEntry::BatchCommit {
+                item_id,
+                part_id,
+                batch_id: wal_batch_id,
+                ..
+            } => item_id == &target_item && part_id == &target_part && wal_batch_id == batch_id,
+            _ => false,
+        })
     }
 
     async fn next_page(&self, cursor: &Cursor) -> Result<FetchOutcome, ProducerError> {
@@ -144,6 +207,7 @@ impl LiveProducer {
     async fn log_batch_start(
         &self,
         batch_id: &str,
+        current: &Cursor,
         next: &Cursor,
         row_count: usize,
     ) -> Result<(), ProducerError> {
@@ -163,7 +227,8 @@ impl LiveProducer {
                 item_id: self.ids.item_id(),
                 part_id: self.ids.part_id(),
                 stage: "read".to_string(),
-                src_offset: next.clone(),
+                src_offset: current.clone(),
+                pending_offset: Some(next.clone()),
                 batch_id: batch_id.to_string(),
                 rows_done: row_count as u64,
                 updated_at: chrono::Utc::now(),
@@ -188,6 +253,7 @@ impl LiveProducer {
     async fn send_batch(
         &self,
         batch_id: String,
+        cursor: Cursor,
         records: Vec<Record>,
         next: Cursor,
     ) -> Result<(), ProducerError> {
@@ -203,6 +269,7 @@ impl LiveProducer {
         let batch = Batch {
             id: batch_id,
             rows,
+            cursor,
             next,
             manifest,
             ts: chrono::Utc::now(),
@@ -249,10 +316,10 @@ impl DataProducer for LiveProducer {
 
         // Start heartbeat loop
         let heartbeat_self = Arc::new(self.clone());
-        let hb_handle = {
+        let hb_handle = tokio::spawn({
             let cloned = heartbeat_self.clone();
-            tokio::spawn(async move { cloned.heartbeat().await });
-        };
+            async move { cloned.heartbeat().await }
+        });
 
         loop {
             if self.cancel_token.is_cancelled() {
@@ -276,11 +343,13 @@ impl DataProducer for LiveProducer {
                     );
 
                     let next = res.next_cursor.clone().unwrap_or(Cursor::None);
-                    self.log_batch_start(&batch_id, &next, res.row_count)
+                    let current_cursor = cur.clone();
+                    self.log_batch_start(&batch_id, &current_cursor, &next, res.row_count)
                         .await?;
 
                     let transformed = self.transform(res.rows).await;
-                    self.send_batch(batch_id, transformed, next.clone()).await?;
+                    self.send_batch(batch_id, current_cursor.clone(), transformed, next.clone())
+                        .await?;
 
                     if next != Cursor::None {
                         cur = next;
@@ -294,7 +363,10 @@ impl DataProducer for LiveProducer {
         }
 
         self.signal_shutdown();
-        let _ = hb_handle; // Wait for heartbeat loop to finish
+
+        if let Err(e) = hb_handle.await {
+            warn!("Heartbeat task ended abnormally: {e}");
+        }
 
         Ok(batches) // Return the number of batches processed
     }

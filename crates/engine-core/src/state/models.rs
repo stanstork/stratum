@@ -2,6 +2,17 @@ use chrono::{DateTime, Utc};
 use model::pagination::cursor::Cursor;
 use serde::{Deserialize, Serialize};
 
+/// A durable checkpoint describing producer or consumer progress.
+///
+/// Semantics:
+/// - stage="read":
+///     - `src_offset` = cursor used to start this batch
+///     - `pending_offset` = cursor after this batch (the “next” cursor)
+/// - stage="write":
+///     - `src_offset` = cursor after this batch (same as pending_offset)
+///     - `pending_offset` = always None
+/// - stage="committed":
+///     - `src_offset` = fully committed cursor; safe resume point
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Checkpoint {
     pub run_id: String,
@@ -9,9 +20,30 @@ pub struct Checkpoint {
     pub part_id: String,
     pub stage: String, // "read", "committed", "validated"
     pub src_offset: Cursor,
+    #[serde(default)]
+    pub pending_offset: Option<Cursor>,
     pub batch_id: String,
     pub rows_done: u64,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CheckpointSummary {
+    pub stage: String,
+    pub src_offset: Cursor,
+    pub pending_offset: Option<Cursor>,
+    pub batch_id: String,
+}
+
+impl From<Checkpoint> for CheckpointSummary {
+    fn from(value: Checkpoint) -> Self {
+        Self {
+            stage: value.stage,
+            src_offset: value.src_offset,
+            pending_offset: value.pending_offset,
+            batch_id: value.batch_id,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

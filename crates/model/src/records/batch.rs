@@ -7,6 +7,7 @@ use crate::{
 pub struct Batch {
     pub id: String,
     pub rows: Vec<RowData>, // already transformed
+    pub cursor: Cursor,     // cursor used to start this batch (last committed offset)
     pub next: Cursor,       // resume-from cursor (end of this batch)
     pub manifest: Manifest,
     pub ts: chrono::DateTime<chrono::Utc>,

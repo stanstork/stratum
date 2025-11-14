@@ -149,6 +149,7 @@ impl LiveConsumer {
         let batch_id = batch.id.clone();
         let batch_rows = batch.rows.len();
         let next_cursor = batch.next.clone();
+        let start_cursor = batch.cursor.clone();
 
         info!(batch_id = %batch_id, rows = batch_rows, "Processing received batch");
 
@@ -161,9 +162,10 @@ impl LiveConsumer {
             .await?;
 
         let write_checkpoint = self.build_checkpoint(
-            "write".to_string(),
+            "write",
             batch_id.clone(),
-            next_cursor.clone(),
+            start_cursor,
+            Some(next_cursor.clone()),
             batch_rows as u64,
         );
         self.state_store.save_checkpoint(&write_checkpoint).await?;
@@ -176,12 +178,8 @@ impl LiveConsumer {
             .append_wal(&self.wal_batch_commit(batch_id.clone()))
             .await?;
 
-        let committed_checkpoint = self.build_checkpoint(
-            "committed".to_string(),
-            batch_id,
-            next_cursor,
-            batch_rows as u64,
-        );
+        let committed_checkpoint =
+            self.build_checkpoint("committed", batch_id, next_cursor, None, batch_rows as u64);
         self.state_store
             .save_checkpoint(&committed_checkpoint)
             .await?;
@@ -284,17 +282,19 @@ impl LiveConsumer {
     /// Helper to build a new Checkpoint struct.
     fn build_checkpoint(
         &self,
-        stage: String,
+        stage: &str,
         batch_id: String,
         src_offset: Cursor,
+        pending_offset: Option<Cursor>,
         rows_done: u64,
     ) -> Checkpoint {
         Checkpoint {
             run_id: self.ids.run_id(),
             item_id: self.ids.item_id(),
             part_id: self.ids.part_id(),
-            stage,
+            stage: stage.to_string(),
             src_offset,
+            pending_offset,
             batch_id,
             rows_done,
             updated_at: chrono::Utc::now(),
