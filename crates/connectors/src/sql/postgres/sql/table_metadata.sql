@@ -29,7 +29,7 @@ foreign_keys AS (
 SELECT
   c.ordinal_position,
   c.column_name,
-  c.data_type,
+  format_type(t.oid, NULL) AS data_type,
   c.is_nullable,
   c.column_default IS NOT NULL AS has_default,
   c.column_default,
@@ -45,5 +45,6 @@ SELECT
   fk.on_update
 FROM information_schema.columns AS c
 LEFT JOIN foreign_keys AS fk ON c.column_name = fk.column_name
+LEFT JOIN pg_type t ON t.typname = c.udt_name
 WHERE c.table_schema = 'public' AND c.table_name = '{table}'
 ORDER BY c.ordinal_position::int;
