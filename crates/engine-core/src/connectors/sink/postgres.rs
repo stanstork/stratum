@@ -9,9 +9,12 @@ use connectors::sql::{
         query::generator::QueryGenerator,
         transaction::Transaction,
     },
-    postgres::adapter::PgAdapter,
+    postgres::{adapter::PgAdapter, data_type::PgDataType},
 };
-use model::{core::value::Value, records::batch::Batch};
+use model::{
+    core::{data_type::DataType, value::Value},
+    records::batch::Batch,
+};
 use planner::query::dialect;
 use tokio::sync::OnceCell;
 use tracing::debug;
@@ -45,7 +48,7 @@ impl PostgresSink {
         name: &str,
     ) -> Result<(), SinkError> {
         let generator = QueryGenerator::new(&self.dialect);
-        let column_defs = meta.column_defs(&|col| (col.data_type.clone(), col.char_max_length));
+        let column_defs = meta.column_defs(&|col| DataType::as_pg_type_info(col));
         let (sql, params) = generator.create_table(name, &column_defs, true, true);
 
         debug!("Creating staging table with SQL: {}", sql);

@@ -24,7 +24,9 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<(), CliError> {
     // Initialize logger
-    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
+    tracing_subscriber::fmt()
+        .with_max_level(Level::DEBUG)
+        .init();
 
     let cli = Cli::parse();
 

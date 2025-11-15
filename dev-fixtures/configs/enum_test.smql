@@ -3,12 +3,5 @@ CONNECTIONS(
     DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/testdb")
 );
 MIGRATE(
-    SOURCE(TABLE, rental) -> DEST(TABLE, rental) [
-        SETTINGS(CREATE_MISSING_TABLES=TRUE,IGNORE_CONSTRAINTS=TRUE),
-        OFFSET(
-            STRATEGY -> timestamp, 
-            CURSOR -> rental[rental_date],
-            TIEBREAKER -> rental[rental_id]
-        )
-    ]
-);
+                SOURCE(TABLE, film) -> DEST(TABLE, film) [SETTINGS(INFER_SCHEMA=TRUE)]
+            );

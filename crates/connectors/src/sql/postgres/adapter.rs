@@ -161,6 +161,11 @@ impl SqlAdapter for PgAdapter {
             .iter()
             .map(|row| {
                 let data_type = DataType::parse_from_row(row);
+                println!(
+                    "Column '{}' has data type: {:?}",
+                    row.try_get::<_, String>("column_name")?,
+                    data_type
+                );
                 let column_metadata = ColumnMetadata::from_row(&DbRow::PostgresRow(row), data_type);
                 Ok((column_metadata.name.clone(), column_metadata))
             })

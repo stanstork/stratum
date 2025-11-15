@@ -1,4 +1,8 @@
-use crate::{consumer::DataConsumer, error::ConsumerError, item::ItemId};
+use crate::{
+    consumer::{DataConsumer, trigger::TriggerGuard},
+    error::ConsumerError,
+    item::ItemId,
+};
 use async_trait::async_trait;
 use connectors::sql::base::metadata::table::TableMetadata;
 use engine_config::report::metrics::{MetricsReport, send_report};
@@ -45,6 +49,10 @@ impl DataConsumer for LiveConsumer {
         let start_time = Instant::now();
         let sink = self.destination.sink();
         let metrics = Metrics::new();
+
+        // Guard to ensure triggers are restored on exit
+        // TODO: Handle constraints more gracefully
+        let _trigger_guard = TriggerGuard::new(&self.destination, &self.meta, false).await?;
 
         info!("Consumer starting. Listening for batches...");
 
@@ -152,6 +160,12 @@ impl LiveConsumer {
         let start_cursor = batch.cursor.clone();
 
         info!(batch_id = %batch_id, rows = batch_rows, "Processing received batch");
+
+        // If no metadata is available, skip processing this batch
+        if self.meta.is_empty() {
+            warn!("No table metadata available for destination. Skipping batch.");
+            return Ok(());
+        }
 
         // For now we support only single destination table
         let meta = self.meta[0].clone();

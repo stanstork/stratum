@@ -17,7 +17,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc01() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         let tmpl = r#"
@@ -42,7 +41,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc02() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         let tmpl = r#"
@@ -74,7 +72,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc03() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         // Create the actor table in Postgres without the full_name column
@@ -110,7 +107,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc04() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         let tmpl = r#"

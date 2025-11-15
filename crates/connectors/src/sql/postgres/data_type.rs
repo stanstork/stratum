@@ -19,7 +19,7 @@ impl PgDataType for DataType {
             DataType::Enum => (DataType::Custom(col.name.clone()), None),
 
             // A common way to represent a SET is as a TEXT array in PostgreSQL.
-            DataType::Set => (DataType::Custom("TEXT[]".to_string()), None),
+            DataType::Set | DataType::Array => (DataType::Custom("TEXT[]".to_string()), None),
 
             // These types don't have a character length limit in this context.
             DataType::String
