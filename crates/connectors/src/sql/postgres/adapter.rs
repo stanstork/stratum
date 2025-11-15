@@ -16,6 +16,7 @@ use crate::sql::{
         transaction::Transaction,
     },
     postgres::{
+        coercion,
         data_type::PgDataType,
         encoder::PgCopyValueEncoder,
         params::PgParamStore,
@@ -161,11 +162,6 @@ impl SqlAdapter for PgAdapter {
             .iter()
             .map(|row| {
                 let data_type = DataType::parse_from_row(row);
-                println!(
-                    "Column '{}' has data type: {:?}",
-                    row.try_get::<_, String>("column_name")?,
-                    data_type
-                );
                 let column_metadata = ColumnMetadata::from_row(&DbRow::PostgresRow(row), data_type);
                 Ok((column_metadata.name.clone(), column_metadata))
             })
@@ -231,8 +227,13 @@ impl SqlAdapter for PgAdapter {
                 if i > 0 {
                     line.push(',');
                 }
-                let field_value = row.get(&col.name).and_then(|field| field.value.as_ref());
-                line.push_str(&encoder.encode_optional(field_value));
+                let field = row.get(&col.name);
+                let prepared = coercion::prepare_value(col, field);
+                let encoded = match prepared {
+                    Some(ref value) => encoder.encode_value(value),
+                    None => encoder.encode_null(),
+                };
+                line.push_str(&encoded);
             }
             line.push('\n');
             sink.as_mut().send(Bytes::from(line)).await?;

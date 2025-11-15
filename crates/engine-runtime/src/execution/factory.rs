@@ -12,7 +12,7 @@ use engine_core::{
 use engine_processing::filter::{
     compiler::FilterCompiler, csv::CsvFilterCompiler, sql::SqlFilterCompiler,
 };
-use model::{pagination::cursor::Cursor, transform::mapping::EntityMapping};
+use model::transform::mapping::EntityMapping;
 use planner::query::offsets::OffsetStrategy;
 use smql_syntax::ast::{
     connection::{Connection, ConnectionPair, DataFormat},
@@ -26,7 +26,6 @@ pub async fn create_source(
     mapping: &EntityMapping,
     migrate_item: &MigrateItem,
     offset_strategy: Arc<dyn OffsetStrategy>,
-    cursor: Cursor,
 ) -> Result<Source, MigrationError> {
     let name = migrate_item.source.name();
     let format = get_data_format(migrate_item, conn).0;
@@ -39,8 +38,7 @@ pub async fn create_source(
 
     let adapter = get_adapter(ctx, &format, &name).await?;
     let filter = create_filter(migrate_item, format)?;
-    let primary =
-        DataSource::from_adapter(format, &adapter, &linked, &filter, offset_strategy, cursor)?;
+    let primary = DataSource::from_adapter(format, &adapter, &linked, &filter, offset_strategy)?;
 
     Ok(Source::new(name, format, primary, linked, filter))
 }

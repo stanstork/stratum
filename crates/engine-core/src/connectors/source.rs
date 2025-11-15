@@ -46,7 +46,6 @@ impl DataSource {
         linked: &Option<LinkedSource>,
         filter: &Option<Filter>,
         offset_strategy: Arc<dyn OffsetStrategy>,
-        cursor: Cursor,
     ) -> Result<Self, AdapterError> {
         match (format, adapter) {
             // MySQL + MySqlAdapter -> build a MySqlDataSource
@@ -63,13 +62,8 @@ impl DataSource {
                     }
                 });
 
-                let ds = MySqlDataSource::new(
-                    mysql_adapter.clone(),
-                    join,
-                    sql_filter,
-                    offset_strategy,
-                    cursor,
-                );
+                let ds =
+                    MySqlDataSource::new(mysql_adapter.clone(), join, sql_filter, offset_strategy);
                 Ok(DataSource::Database(Arc::new(Mutex::new(ds))))
             }
 

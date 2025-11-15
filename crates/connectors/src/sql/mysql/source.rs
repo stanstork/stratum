@@ -48,8 +48,8 @@ pub struct MySqlDataSource {
     /// (if any) when cascading
     cascade_joins: HashMap<String, Vec<JoinClause>>,
 
+    /// The offset strategy to use for pagination.
     offset_strategy: Arc<dyn OffsetStrategy>,
-    cursor: Cursor,
 }
 
 impl MySqlDataSource {
@@ -58,7 +58,6 @@ impl MySqlDataSource {
         join: Option<JoinSource>,
         filter: Option<SqlFilter>,
         offset_strategy: Arc<dyn OffsetStrategy>,
-        cursor: Cursor,
     ) -> Self {
         Self {
             adapter,
@@ -68,7 +67,6 @@ impl MySqlDataSource {
             related_meta: HashMap::new(),
             cascade_joins: HashMap::new(),
             offset_strategy,
-            cursor,
         }
     }
 

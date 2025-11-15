@@ -174,7 +174,7 @@ impl Value {
             Value::Date(_) => DataType::Date,
             Value::Timestamp(_) => DataType::Timestamp,
             Value::Enum(_, _) => DataType::Enum,
-            Value::StringArray(_) => DataType::Array,
+            Value::StringArray(_) => DataType::Array(None),
             Value::Null => DataType::Null,
         }
     }

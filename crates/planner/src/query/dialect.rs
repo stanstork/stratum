@@ -1,6 +1,6 @@
 //! Defines the `Dialect` trait for database-specific SQL syntax.
 
-use model::core::data_type::DataType;
+use model::core::data_type::{DataType, SqlDialect};
 
 pub trait Dialect: Send + Sync {
     /// Wraps an identifier (like a table or column name) in the correct
@@ -46,47 +46,13 @@ impl Dialect for Postgres {
     }
 
     fn render_data_type(&self, data_type: &DataType, max_length: Option<usize>) -> String {
-        let type_name = match data_type {
-            DataType::Decimal => "DECIMAL".into(),
-            DataType::Short => "SMALLINT".into(),
-            DataType::Long => "INTEGER".into(),
-            DataType::Float => "REAL".into(),
-            DataType::Double => "DOUBLE PRECISION".into(),
-            DataType::Null => "NULL".into(),
-            DataType::Timestamp => "TIMESTAMP".into(),
-            DataType::LongLong => "BIGINT".into(),
-            DataType::Int => "INTEGER".into(),
-            DataType::Int4 => "INT4".into(),
-            DataType::Time => "TIME".into(),
-            DataType::Year => "INTEGER".into(),
-            DataType::VarChar => "VARCHAR".into(),
-            DataType::Bit => "BIT".into(),
-            DataType::Json => "JSON".into(),
-            DataType::NewDecimal => "DECIMAL".into(),
-            DataType::Enum => "ENUM".into(),
-            DataType::Set => "TEXT[]".into(),
-            DataType::TinyBlob => "BYTEA".into(),
-            DataType::MediumBlob => "BYTEA".into(),
-            DataType::LongBlob => "BYTEA".into(),
-            DataType::Blob => "BYTEA".into(),
-            DataType::VarString => "VARCHAR".into(),
-            DataType::String => "TEXT".into(),
-            DataType::Geometry => "BYTEA".into(),
-            DataType::Boolean => "BOOLEAN".into(),
-            DataType::ShortUnsigned => "SMALLINT".into(),
-            DataType::IntUnsigned => "INTEGER".into(),
-            DataType::Bytea => "BYTEA".into(),
-            DataType::Array => "ARRAY".into(),
-            DataType::Char => "CHAR".into(),
-            DataType::Date => "DATE".into(),
-            DataType::Custom(name) => name.clone(),
-        };
-
-        if let Some(max_len) = max_length {
-            format!("{type_name}({max_len})")
-        } else {
-            type_name
+        let mut type_name = data_type.postgres_name().into_owned();
+        if data_type.supports_length(SqlDialect::Postgres) {
+            if let Some(max_len) = max_length {
+                type_name = format!("{type_name}({max_len})");
+            }
         }
+        type_name
     }
 
     fn name(&self) -> String {
@@ -163,47 +129,13 @@ impl Dialect for MySql {
     }
 
     fn render_data_type(&self, data_type: &DataType, max_length: Option<usize>) -> String {
-        let type_name = match data_type {
-            DataType::Decimal => "DECIMAL".into(),
-            DataType::Short => "SMALLINT".into(),
-            DataType::Long => "INT".into(),
-            DataType::Float => "FLOAT".into(),
-            DataType::Double => "DOUBLE".into(),
-            DataType::Null => "NULL".into(),
-            DataType::Timestamp => "TIMESTAMP".into(),
-            DataType::LongLong => "BIGINT".into(),
-            DataType::Int => "INT".into(),
-            DataType::Int4 => "INT4".into(),
-            DataType::Time => "TIME".into(),
-            DataType::Year => "YEAR".into(),
-            DataType::VarChar => "VARCHAR".into(),
-            DataType::Bit => "BIT".into(),
-            DataType::Json => "JSON".into(),
-            DataType::NewDecimal => "NEWDECIMAL".into(),
-            DataType::Enum => "ENUM".into(),
-            DataType::Set => "SET".into(),
-            DataType::TinyBlob => "TINYBLOB".into(),
-            DataType::MediumBlob => "MEDIUMBLOB".into(),
-            DataType::LongBlob => "LONGBLOB".into(),
-            DataType::Blob => "BLOB".into(),
-            DataType::VarString => "VARSTRING".into(),
-            DataType::String => "VARCHAR".into(),
-            DataType::Geometry => "GEOMETRY".into(),
-            DataType::Boolean => "BOOLEAN".into(),
-            DataType::ShortUnsigned => "SMALLINT UNSIGNED".into(),
-            DataType::IntUnsigned => "INT UNSIGNED".into(),
-            DataType::Bytea => "BYTEA".into(),
-            DataType::Array => "ARRAY".into(),
-            DataType::Char => "CHAR".into(),
-            DataType::Date => "DATE".into(),
-            DataType::Custom(name) => name.clone(),
-        };
-
-        if let Some(max_len) = max_length {
-            format!("{type_name}({max_len})")
-        } else {
-            type_name
+        let mut type_name = data_type.mysql_name().into_owned();
+        if data_type.supports_length(SqlDialect::MySql) {
+            if let Some(max_len) = max_length {
+                type_name = format!("{type_name}({max_len})");
+            }
         }
+        type_name
     }
 
     fn name(&self) -> String {

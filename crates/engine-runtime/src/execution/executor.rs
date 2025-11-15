@@ -95,7 +95,6 @@ impl MigrationExecutor {
             &mapping,
             mi,
             offset_strategy.clone(),
-            cursor.clone(),
         )
         .await?;
         let destination =

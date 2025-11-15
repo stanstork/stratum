@@ -11,6 +11,31 @@ impl PgCopyValueEncoder {
     pub fn new() -> Self {
         Self
     }
+
+    fn encode_array_literal(&self, values: &[String]) -> String {
+        let mut literal = String::from('{');
+        for (idx, value) in values.iter().enumerate() {
+            if idx > 0 {
+                literal.push(',');
+            }
+            literal.push_str(&Self::quote_array_item(value));
+        }
+        literal.push('}');
+        literal
+    }
+
+    fn quote_array_item(value: &str) -> String {
+        let mut quoted = String::from('"');
+        for ch in value.chars() {
+            match ch {
+                '"' => quoted.push_str("\\\""),
+                '\\' => quoted.push_str("\\\\"),
+                _ => quoted.push(ch),
+            }
+        }
+        quoted.push('"');
+        quoted
+    }
 }
 
 impl CopyValueEncoder for PgCopyValueEncoder {
@@ -21,8 +46,8 @@ impl CopyValueEncoder for PgCopyValueEncoder {
             Value::Json(v) => escape_csv_string(&v.to_string()),
             Value::Enum(_, v) => escape_csv_string(v),
             Value::StringArray(values) => {
-                let json = serde_json::to_string(values).unwrap_or_else(|_| "[]".to_string());
-                escape_csv_string(&json)
+                let literal = self.encode_array_literal(values);
+                escape_csv_string(&literal)
             }
             Value::Bytes(bytes) => {
                 let hex = encode_bytea(bytes);

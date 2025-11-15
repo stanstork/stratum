@@ -25,8 +25,13 @@ impl DbRow<'_> {
             .columns()
             .iter()
             .map(|column| {
-                let data_type = DataType::try_from(self.column_type(column)).unwrap_or_else(|_| {
-                    warn!("Unknown column type: {}", self.column_type(column));
+                let column_type = self.column_type(column);
+                let data_type = match self {
+                    DbRow::MySqlRow(_) => DataType::from_mysql_type(column_type),
+                    DbRow::PostgresRow(_) => DataType::from_postgres_type(column_type),
+                }
+                .unwrap_or_else(|_| {
+                    warn!("Unknown column type: {column_type}");
                     DataType::String
                 });
 
@@ -43,7 +48,7 @@ impl DbRow<'_> {
 
     pub fn get_value(&self, data_type: &DataType, name: &str) -> Option<Value> {
         match data_type {
-            DataType::Int | DataType::Long | DataType::Short => {
+            DataType::Int | DataType::Long | DataType::LongLong | DataType::Short => {
                 self.try_get_i64(name).map(Value::Int)
             }
             DataType::Int4 => self.try_get_i32(name).map(|v| Value::Int(v as i64)),
@@ -65,7 +70,9 @@ impl DbRow<'_> {
                 let enum_value = self.try_get_string(name)?;
                 Some(Value::Enum(name.to_string(), enum_value))
             }
-            DataType::Bytea | DataType::Geometry => self.try_get_bytes(name).map(Value::Bytes),
+            DataType::Bytea | DataType::Geometry | DataType::Binary | DataType::VarBinary => {
+                self.try_get_bytes(name).map(Value::Bytes)
+            }
             DataType::Blob | DataType::TinyBlob | DataType::MediumBlob | DataType::LongBlob => {
                 self.try_get_bytes(name).map(Value::Bytes)
             }

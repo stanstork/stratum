@@ -374,7 +374,7 @@ fn map_value_to_expr(value: Value, col_meta: &ColumnMetadata) -> Expr {
     match col_meta.data_type {
         // For array types, check if the value is already an array or if it's a
         // string that needs to be parsed.
-        DataType::Array => {
+        DataType::Array(_) => {
             let string_array = match value {
                 Value::String(s) => s.split(',').map(|item| item.trim().to_string()).collect(),
                 Value::StringArray(arr) => arr,
