@@ -306,6 +306,25 @@ impl OffsetStrategy for TimestampOffset {
                     Cursor::None
                 }
             }
+            Value::TimestampNaive(dt_local) => {
+                if let Some(dt_utc) = self.tz.from_local_datetime(&dt_local).single() {
+                    let utc_ts = dt_utc.timestamp_micros();
+                    let id = match pk_v {
+                        Value::Uint(id) => id,
+                        Value::Int(i) if i >= 0 => i as u64,
+                        Value::String(ref s) => s.parse::<u64>().unwrap_or(0),
+                        _ => 0,
+                    };
+                    Cursor::CompositeTsPk {
+                        ts_col: self.ts_col.clone(),
+                        pk_col: self.pk.clone(),
+                        ts: utc_ts,
+                        id,
+                    }
+                } else {
+                    Cursor::None
+                }
+            }
             _ => Cursor::None,
         }
     }

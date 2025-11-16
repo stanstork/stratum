@@ -149,7 +149,6 @@ mod tests {
     #[tokio::test]
     #[ignore = "This test is ignored because it infers a large schema and copies a lot of data, so it takes a long time to run. It should be run manually when needed."]
     async fn tc05() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         let tmpl = r#"
@@ -186,7 +185,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc06() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         let tmpl = r#"
@@ -226,7 +224,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc07() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         let tmpl = r#"
@@ -268,7 +265,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc08() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         let tmpl = r#"
@@ -300,7 +296,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc09() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         // Create the actor table in Postgres
@@ -333,7 +328,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc10() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         let tmpl = r#"
@@ -381,7 +375,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc11() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         let tmpl = r#"
@@ -423,7 +416,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc12() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         let tmpl = r#"
@@ -474,7 +466,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc13() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         let tmpl = r#"

@@ -111,7 +111,7 @@ impl MigrationExecutor {
             state.clone(),
             offset_strategy.clone(),
             cursor,
-            settings.clone(),
+            settings,
         );
 
         item_ctx

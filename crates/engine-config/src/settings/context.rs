@@ -28,7 +28,7 @@ pub struct SchemaSettingContext {
     pub source: Source,
     pub destination: Destination,
     pub mapping: EntityMapping,
-    pub settings: MigrationSettings,
+    pub settings: Arc<Mutex<MigrationSettings>>,
     pub dry_run_report: Arc<Mutex<Option<DryRunReport>>>,
     pub schema_manager: Box<dyn SchemaManager>,
 }
@@ -38,10 +38,10 @@ impl SchemaSettingContext {
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
-        settings: MigrationSettings,
+        settings: &Arc<Mutex<MigrationSettings>>,
         dry_run_report: &Arc<Mutex<Option<DryRunReport>>>,
     ) -> Self {
-        let is_dry_run = settings.is_dry_run();
+        let is_dry_run = settings.lock().await.is_dry_run();
         let schema_manager: Box<dyn SchemaManager + Send> = if is_dry_run {
             // Create validation manager for dry-run mode
             let report = dry_run_report
@@ -118,8 +118,9 @@ impl SchemaSettingContext {
     }
 
     pub async fn build_schema_plan(&self) -> Result<SchemaPlan, SettingsError> {
-        let ignore_constraints = self.settings.ignore_constraints();
-        let mapped_columns_only = self.settings.copy_columns() == CopyColumns::MapOnly;
+        let settings = self.settings.lock().await;
+        let ignore_constraints = settings.ignore_constraints();
+        let mapped_columns_only = settings.copy_columns() == CopyColumns::MapOnly;
         let source = self.source.primary.clone();
 
         let type_engine = TypeEngine::new(

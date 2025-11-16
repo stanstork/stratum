@@ -59,7 +59,7 @@ impl MigrationSetting for CreateMissingColumnsSetting {
             .await?;
 
         {
-            let mut settings = self.context.settings.clone();
+            let mut settings = self.context.settings.lock().await;
             settings.set_create_missing_columns(true);
         }
 
@@ -134,7 +134,7 @@ impl CreateMissingColumnsSetting {
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
-        settings: MigrationSettings,
+        settings: &Arc<Mutex<MigrationSettings>>,
         dry_run_report: &Arc<Mutex<Option<DryRunReport>>>,
     ) -> Self {
         Self {

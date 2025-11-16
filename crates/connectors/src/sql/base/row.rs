@@ -48,23 +48,27 @@ impl DbRow<'_> {
 
     pub fn get_value(&self, data_type: &DataType, name: &str) -> Option<Value> {
         match data_type {
-            DataType::Int | DataType::Long | DataType::LongLong | DataType::Short => {
-                self.try_get_i64(name).map(Value::Int)
+            DataType::Short => self.try_get_i64(name).map(|v| Value::SmallInt(v as i16)),
+            DataType::Int | DataType::Int4 => {
+                self.try_get_i64(name).map(|v| Value::Int32(v as i32))
             }
-            DataType::Int4 => self.try_get_i32(name).map(|v| Value::Int(v as i64)),
+            DataType::Long | DataType::LongLong => self.try_get_i64(name).map(Value::Int),
             DataType::IntUnsigned | DataType::ShortUnsigned | DataType::Year => {
                 self.try_get_u64(name).map(|v| Value::Int(v as i64))
             }
-            DataType::Float => self.try_get_f64(name).map(Value::Float),
-            DataType::Decimal => self
-                .try_get_bigdecimal(name)
-                .and_then(|v| v.to_f64().map(Value::Float)),
+            DataType::Float | DataType::Double => self.try_get_f64(name).map(Value::Float),
+            DataType::Decimal | DataType::NewDecimal => {
+                self.try_get_bigdecimal(name).map(Value::Decimal)
+            }
             DataType::String | DataType::VarChar | DataType::Char => {
                 self.try_get_string(name).map(Value::String)
             }
             DataType::Boolean => self.try_get_bool(name).map(Value::Boolean),
             DataType::Json => self.try_get_json(name).map(Value::Json),
-            DataType::Timestamp => self.try_get_timestamp(name).map(Value::Timestamp),
+            DataType::Timestamp => self
+                .try_get_naive_timestamp(name)
+                .map(Value::TimestampNaive),
+            DataType::TimestampTz => self.try_get_timestamp(name).map(Value::Timestamp),
             DataType::Date => self.try_get_date(name).map(Value::Date),
             DataType::Enum => {
                 let enum_value = self.try_get_string(name)?;
@@ -187,10 +191,19 @@ impl DbRow<'_> {
             DbRow::MySqlRow(row) => row
                 .get_opt::<bigdecimal::BigDecimal, _>(name)
                 .and_then(|res| res.ok()),
-            DbRow::PostgresRow(row) => row
-                .try_get::<_, f64>(name)
-                .ok()
-                .and_then(BigDecimal::from_f64),
+            DbRow::PostgresRow(row) => {
+                let val = row.try_get::<_, rust_decimal::Decimal>(name);
+                match val {
+                    Ok(decimal) => {
+                        if let Some(f) = decimal.to_f64() {
+                            BigDecimal::from_f64(f)
+                        } else {
+                            None
+                        }
+                    }
+                    Err(_) => None,
+                }
+            }
         }
     }
 
@@ -203,6 +216,15 @@ impl DbRow<'_> {
                     chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(naive, chrono::Utc)
                 }),
             DbRow::PostgresRow(row) => row.try_get::<_, chrono::DateTime<chrono::Utc>>(name).ok(),
+        }
+    }
+
+    pub fn try_get_naive_timestamp(&self, name: &str) -> Option<chrono::NaiveDateTime> {
+        match self {
+            DbRow::MySqlRow(row) => row
+                .get_opt::<chrono::NaiveDateTime, _>(name)
+                .and_then(|res| res.ok()),
+            DbRow::PostgresRow(row) => row.try_get::<_, chrono::NaiveDateTime>(name).ok(),
         }
     }
 

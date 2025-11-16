@@ -49,6 +49,9 @@ impl CopyValueEncoder for PgCopyValueEncoder {
                 let literal = self.encode_array_literal(values);
                 escape_csv_string(&literal)
             }
+            Value::Decimal(v) => v.to_string(),
+            Value::SmallInt(v) => v.to_string(),
+            Value::Int32(v) => v.to_string(),
             Value::Bytes(bytes) => {
                 let hex = encode_bytea(bytes);
                 escape_csv_string(&hex)
@@ -61,6 +64,7 @@ impl CopyValueEncoder for PgCopyValueEncoder {
             Value::Uuid(v) => v.to_string(),
             Value::Date(d) => d.to_string(),
             Value::Timestamp(ts) => ts.to_rfc3339_opts(SecondsFormat::Micros, true),
+            Value::TimestampNaive(ts) => ts.format("%Y-%m-%d %H:%M:%S%.6f").to_string(),
         }
     }
 

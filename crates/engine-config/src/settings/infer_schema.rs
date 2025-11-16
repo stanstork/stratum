@@ -42,7 +42,7 @@ impl MigrationSetting for InferSchemaSetting {
 
         // Set the infer schema flag to global settings
         {
-            let mut settings = self.context.settings.clone();
+            let mut settings = self.context.settings.lock().await;
             settings.set_infer_schema(true);
         }
 
@@ -56,7 +56,7 @@ impl InferSchemaSetting {
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
-        settings: MigrationSettings,
+        settings: &Arc<Mutex<MigrationSettings>>,
         dry_run_report: &Arc<Mutex<Option<DryRunReport>>>,
     ) -> Self {
         Self {

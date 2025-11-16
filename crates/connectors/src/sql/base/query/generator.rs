@@ -1,6 +1,6 @@
 use crate::sql::base::{
     metadata::{column::ColumnMetadata, table::TableMetadata},
-    query::{column::ColumnDef, fk::ForeignKeyDef},
+    query::{coercion::coerce_value, column::ColumnDef, fk::ForeignKeyDef},
     requests::FetchRowsRequest,
 };
 use crate::{add_joins, add_where, ident, join_on_expr, sql_filter_expr};
@@ -371,11 +371,13 @@ fn map_value_to_expr(value: Value, col_meta: &ColumnMetadata) -> Expr {
         };
     }
 
+    let coerced_value = coerce_value(value, col_meta);
+
     match col_meta.data_type {
         // For array types, check if the value is already an array or if it's a
         // string that needs to be parsed.
-        DataType::Array(_) => {
-            let string_array = match value {
+        DataType::Array(_) | DataType::Set => {
+            let string_array = match coerced_value {
                 Value::String(s) => s.split(',').map(|item| item.trim().to_string()).collect(),
                 Value::StringArray(arr) => arr,
                 _ => vec![], // Default to an empty array if the type is unexpected
@@ -384,16 +386,16 @@ fn map_value_to_expr(value: Value, col_meta: &ColumnMetadata) -> Expr {
         }
 
         // For custom types like enums, wrap the value in a CAST expression.
-        DataType::Custom(_) => match value {
+        DataType::Custom(_) => match coerced_value {
             Value::Enum(n, v) => Expr::Cast {
                 expr: Box::new(Expr::Value(Value::String(v))),
                 data_type: n, // Use the enum name as the SQL type
             },
-            _ => Expr::Value(value),
+            _ => Expr::Value(coerced_value),
         },
 
         // For all other standard data types, just use the value directly.
-        _ => Expr::Value(value),
+        _ => Expr::Value(coerced_value),
     }
 }
 

@@ -14,6 +14,7 @@ pub enum DataType {
     Null,
     Date,
     Timestamp,
+    TimestampTz,
     LongLong,
     Int,
     Int4,
@@ -87,6 +88,7 @@ impl DataType {
             DataType::Boolean => Cow::Borrowed("BOOLEAN"),
             DataType::Null => Cow::Borrowed("NULL"),
             DataType::Timestamp => Cow::Borrowed("TIMESTAMP"),
+            DataType::TimestampTz => Cow::Borrowed("TIMESTAMP"),
             DataType::Date => Cow::Borrowed("DATE"),
             DataType::Time => Cow::Borrowed("TIME"),
             DataType::Year => Cow::Borrowed("YEAR"),
@@ -124,6 +126,7 @@ impl DataType {
             DataType::Boolean => Cow::Borrowed("BOOLEAN"),
             DataType::Null => Cow::Borrowed("NULL"),
             DataType::Timestamp => Cow::Borrowed("TIMESTAMP"),
+            DataType::TimestampTz => Cow::Borrowed("TIMESTAMPTZ"),
             DataType::Date => Cow::Borrowed("DATE"),
             DataType::Time => Cow::Borrowed("TIME"),
             DataType::Year => Cow::Borrowed("INTEGER"),
@@ -177,6 +180,8 @@ impl DataType {
             (DataType::Set, DataType::Array(_)) | (DataType::Array(_), DataType::Set) => true,
             (DataType::Year, DataType::Int) | (DataType::Int, DataType::Year) => true,
             (DataType::Date, DataType::Timestamp) | (DataType::Timestamp, DataType::Date) => true,
+            (DataType::Timestamp, DataType::TimestampTz)
+            | (DataType::TimestampTz, DataType::Timestamp) => true,
             _ => self == other,
         }
     }
@@ -342,8 +347,8 @@ fn build_postgres_type_map() -> HashMap<&'static str, DataType> {
         ("TIMETZ", Time),
         ("TIMESTAMP", Timestamp),
         ("TIMESTAMP WITHOUT TIME ZONE", Timestamp),
-        ("TIMESTAMP WITH TIME ZONE", Timestamp),
-        ("TIMESTAMPTZ", Timestamp),
+        ("TIMESTAMP WITH TIME ZONE", TimestampTz),
+        ("TIMESTAMPTZ", TimestampTz),
         ("GEOMETRY", Geometry),
         ("ARRAY", Array(None)),
     ];

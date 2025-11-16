@@ -86,13 +86,14 @@ impl SchemaManager for LiveSchemaManager {
 
 pub struct ValidationSchemaManager {
     pub report: Arc<Mutex<DryRunReport>>,
-    pub settings: MigrationSettings,
+    pub settings: Arc<Mutex<MigrationSettings>>,
 }
 
 #[async_trait::async_trait]
 impl SchemaManager for ValidationSchemaManager {
     async fn add_column(&mut self, table: &str, column: &ColumnDef) -> Result<(), SettingsError> {
-        if self.settings.infer_schema() {
+        let settings = self.settings.lock().await;
+        if settings.infer_schema() {
             info!(
                 "Skipping add_column for '{}' on table '{}' due to infer_schema being enabled.",
                 column.name, table
@@ -151,7 +152,7 @@ impl SchemaManager for ValidationSchemaManager {
 
         // Mark that schema inference has been performed.
         {
-            let mut settings = self.settings.clone();
+            let mut settings = self.settings.lock().await;
             settings.set_infer_schema(true);
         }
 

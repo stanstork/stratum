@@ -49,7 +49,7 @@ impl PostgresSink {
     ) -> Result<(), SinkError> {
         let generator = QueryGenerator::new(&self.dialect);
         let column_defs = meta.column_defs(&|col| DataType::as_pg_type_info(col));
-        let (sql, params) = generator.create_table(name, &column_defs, true, true);
+        let (sql, params) = generator.create_table(name, &column_defs, false, true);
 
         debug!("Creating staging table with SQL: {}", sql);
         self.exec(tx, &sql, params).await

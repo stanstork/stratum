@@ -30,7 +30,7 @@ pub struct ItemContext {
     pub state: Arc<SledStateStore>,
     pub offset_strategy: Arc<dyn OffsetStrategy>,
     pub cursor: Cursor,
-    pub settings: MigrationSettings,
+    pub settings: Arc<Mutex<MigrationSettings>>,
 }
 
 impl ItemContext {
@@ -55,7 +55,7 @@ impl ItemContext {
             state,
             offset_strategy,
             cursor,
-            settings,
+            settings: Arc::new(Mutex::new(settings)),
         }
     }
 

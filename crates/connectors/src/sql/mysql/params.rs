@@ -9,10 +9,13 @@ pub struct MySqlParam(MySqlValue);
 impl MySqlParam {
     pub fn from_value(value: &Value) -> Self {
         match value {
+            Value::SmallInt(i) => MySqlParam(MySqlValue::Int(*i as i64)),
+            Value::Int32(i) => MySqlParam(MySqlValue::Int(*i as i64)),
             Value::Int(i) => MySqlParam(MySqlValue::Int(*i)),
             Value::Uint(u) => MySqlParam(MySqlValue::UInt(*u)),
             Value::Usize(u) => MySqlParam(MySqlValue::UInt(*u as u64)),
             Value::Float(f) => MySqlParam(MySqlValue::Double(*f)),
+            Value::Decimal(d) => MySqlParam(MySqlValue::Bytes(d.to_string().into_bytes())),
             Value::String(s) => MySqlParam(MySqlValue::Bytes(s.clone().into_bytes())),
             Value::Boolean(b) => MySqlParam(MySqlValue::Int(if *b { 1 } else { 0 })),
             Value::Json(j) => MySqlParam(MySqlValue::Bytes(j.to_string().into_bytes())),
@@ -40,6 +43,15 @@ impl MySqlParam {
                     utc.timestamp_subsec_micros(),
                 ))
             }
+            Value::TimestampNaive(ts) => MySqlParam(MySqlValue::Date(
+                ts.year() as u16,
+                ts.month() as u8,
+                ts.day() as u8,
+                ts.hour() as u8,
+                ts.minute() as u8,
+                ts.second() as u8,
+                ts.and_utc().timestamp_subsec_micros(),
+            )),
             Value::Null => MySqlParam(MySqlValue::NULL),
             Value::Enum(_, v) => MySqlParam(MySqlValue::Bytes(v.clone().into_bytes())),
             Value::StringArray(v) => MySqlParam(MySqlValue::Bytes(format!("{v:?}").into_bytes())),

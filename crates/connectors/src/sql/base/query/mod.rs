@@ -1,3 +1,4 @@
+pub mod coercion;
 pub mod column;
 pub mod fk;
 pub mod generator;

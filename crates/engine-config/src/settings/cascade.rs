@@ -50,7 +50,7 @@ impl MigrationSetting for CascadeSchemaSetting {
 
         // Set the cascade flag to global settings
         {
-            let mut settings = self.context.settings.clone();
+            let mut settings = self.context.settings.lock().await;
             settings.set_cascade(true);
         }
 
@@ -64,7 +64,7 @@ impl CascadeSchemaSetting {
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
-        settings: MigrationSettings,
+        settings: &Arc<Mutex<MigrationSettings>>,
         dry_run_report: &Arc<Mutex<Option<DryRunReport>>>,
     ) -> Self {
         Self {

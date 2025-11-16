@@ -127,14 +127,18 @@ fn eval_function(name: &str, args: &[Value]) -> Option<Value> {
                         .trim_start_matches('\"')
                         .trim_end_matches('\"')
                         .to_string(),
+                    Value::SmallInt(i) => i.to_string(),
+                    Value::Int32(i) => i.to_string(),
                     Value::Int(i) => i.to_string(),
                     Value::Uint(u) => u.to_string(),
                     Value::Usize(u) => u.to_string(),
                     Value::Float(f) => f.to_string(),
+                    Value::Decimal(d) => d.to_string(),
                     Value::Boolean(b) => b.to_string(),
                     Value::Uuid(u) => u.to_string(),
                     Value::Date(d) => d.to_string(),
                     Value::Timestamp(t) => t.to_rfc3339(),
+                    Value::TimestampNaive(t) => t.to_string(),
                     Value::Bytes(b) => String::from_utf8_lossy(b).to_string(),
                     Value::Json(v) => v.to_string(),
                     Value::Null => "NULL".to_string(),

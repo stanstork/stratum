@@ -217,6 +217,7 @@ impl LiveConsumer {
         batch: &Batch,
     ) -> Result<(), ConsumerError> {
         let fast = sink.support_fast_path().await?;
+        let fast = fast && meta.primary_keys.len() > 0;
 
         let write_result = if fast {
             info!("Using fast path for batch write.");

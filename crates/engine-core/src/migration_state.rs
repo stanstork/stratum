@@ -12,12 +12,6 @@ pub struct MigrationSettings {
     is_dry_run: bool,
 }
 
-impl Default for MigrationSettings {
-    fn default() -> Self {
-        Self::new(false)
-    }
-}
-
 impl MigrationSettings {
     pub fn new(dry_run: bool) -> Self {
         MigrationSettings {

@@ -74,7 +74,7 @@ impl MigrationSetting for CreateMissingTablesSetting {
 
         // Set the create missing tables flag to global settings
         {
-            let mut settings = self.context.settings.clone();
+            let mut settings = self.context.settings.lock().await;
             settings.set_create_missing_tables(true);
         }
 
@@ -88,7 +88,7 @@ impl CreateMissingTablesSetting {
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
-        settings: MigrationSettings,
+        settings: &Arc<Mutex<MigrationSettings>>,
         dry_run_report: &Arc<Mutex<Option<DryRunReport>>>,
     ) -> Self {
         Self {

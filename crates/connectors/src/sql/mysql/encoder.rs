@@ -30,6 +30,9 @@ impl CopyValueEncoder for MySqlCopyValueEncoder {
                 let json = serde_json::to_string(values).unwrap_or_else(|_| "[]".to_string());
                 escape_csv_string(&json)
             }
+            Value::Decimal(v) => v.to_string(),
+            Value::SmallInt(v) => v.to_string(),
+            Value::Int32(v) => v.to_string(),
             Value::Bytes(bytes) => {
                 let hex = self.encode_bytes(bytes);
                 escape_csv_string(&hex)
@@ -42,6 +45,7 @@ impl CopyValueEncoder for MySqlCopyValueEncoder {
             Value::Uuid(v) => escape_csv_string(&v.to_string()),
             Value::Date(d) => d.format("%Y-%m-%d").to_string(),
             Value::Timestamp(ts) => ts.naive_utc().format("%Y-%m-%d %H:%M:%S%.6f").to_string(),
+            Value::TimestampNaive(ts) => ts.format("%Y-%m-%d %H:%M:%S%.6f").to_string(),
         }
     }
 

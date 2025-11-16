@@ -1,4 +1,4 @@
-use crate::sql::base::metadata::column::ColumnMetadata;
+use crate::sql::base::{metadata::column::ColumnMetadata, query::coercion as base_coercion};
 use model::core::{
     data_type::DataType,
     value::{FieldValue, Value},
@@ -23,27 +23,6 @@ pub(crate) fn is_text_column(col: &ColumnMetadata) -> bool {
         col.data_type,
         DataType::Custom(ref name) if name.eq_ignore_ascii_case("text")
     )
-}
-
-/// Attempts to coerce a field value into a `Value::StringArray`.
-pub(crate) fn coerce_array_value(field: Option<&FieldValue>) -> Option<Value> {
-    let field = field?;
-    let value = field.value.as_ref()?;
-    match value {
-        Value::StringArray(_) => Some(value.clone()),
-        Value::String(s) => Some(Value::StringArray(parse_array_string(s))),
-        Value::Json(json) => {
-            if let Some(items) = json.as_array() {
-                let parsed = items.iter().map(json_value_to_string).collect::<Vec<_>>();
-                Some(Value::StringArray(parsed))
-            } else {
-                Some(Value::StringArray(vec![json.to_string()]))
-            }
-        }
-        Value::Enum(_, v) => Some(Value::StringArray(vec![v.clone()])),
-        Value::Null => None,
-        _ => Some(value.clone()),
-    }
 }
 
 /// Parses a raw string into a `Vec<String>`.
@@ -102,18 +81,10 @@ pub(crate) fn json_value_to_string(value: &serde_json::Value) -> String {
 }
 
 /// Prepares a `Value` for `COPY` based on its column metadata.
-/// This handles dispatching to array or text coercion logic.
+/// This handles dispatching to array, numeric, or text coercion logic.
 pub(crate) fn prepare_value(col: &ColumnMetadata, field: Option<&FieldValue>) -> Option<Value> {
-    if is_array_column(col) {
-        return coerce_array_value(field);
-    }
-
-    let mut value = field?.value.clone()?;
-    if is_text_column(col) {
-        value = coerce_text_value(value);
-    }
-
-    Some(value)
+    let value = field?.value.clone()?;
+    Some(normalize_value(col, value))
 }
 
 /// Coerces a `Value` to a text-compatible format (e.g., `Bytes` -> `String`).
@@ -126,6 +97,40 @@ pub(crate) fn coerce_text_value(value: Value) -> Value {
                 Value::String(String::from_utf8_lossy(&bytes).to_string())
             }
         },
+        other => other,
+    }
+}
+
+fn normalize_value(col: &ColumnMetadata, mut value: Value) -> Value {
+    if matches!(value, Value::Null) {
+        return value;
+    }
+
+    if is_array_column(col) {
+        return coerce_array_value(value);
+    }
+
+    value = base_coercion::coerce_value(value, col);
+    if is_text_column(col) {
+        value = coerce_text_value(value);
+    }
+
+    value
+}
+
+fn coerce_array_value(value: Value) -> Value {
+    match value {
+        Value::StringArray(_) => value,
+        Value::String(s) => Value::StringArray(parse_array_string(&s)),
+        Value::Json(json) => {
+            if let Some(items) = json.as_array() {
+                let parsed = items.iter().map(json_value_to_string).collect::<Vec<_>>();
+                Value::StringArray(parsed)
+            } else {
+                Value::StringArray(vec![json.to_string()])
+            }
+        }
+        Value::Enum(_, v) => Value::StringArray(vec![v.clone()]),
         other => other,
     }
 }

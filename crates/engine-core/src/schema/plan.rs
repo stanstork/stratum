@@ -21,7 +21,7 @@ pub struct SchemaPlan {
     type_engine: TypeEngine,
 
     /// Indicates whether to ignore constraints during the migration process.
-    /// Primary keys and foreign keys are not created in the target database.
+    /// Foreign keys are not created in the target database.
     ignore_constraints: bool,
 
     /// Indicates whether to create columns in the target table that are present in the mapping block only.

@@ -13,7 +13,8 @@ impl MigrationSetting for BatchSizeSetting {
     }
 
     async fn apply(&mut self, ctx: &mut ItemContext) -> Result<(), SettingsError> {
-        ctx.settings.set_batch_size(self.0 as usize);
+        let mut settings = ctx.settings.lock().await;
+        settings.set_batch_size(self.0 as usize);
         info!("Batch size setting applied");
         Ok(())
     }

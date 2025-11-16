@@ -164,7 +164,7 @@ pub async fn get_table_names(
             let pool = mysql_pool(source_db).await;
             // SHOW TABLES can return VARBINARY -> decode to Vec<u8> first
             let sql = r#"
-                SELECT table_name
+                SELECT table_name as table_name
                   FROM information_schema.tables
                  WHERE table_schema = DATABASE()
                    AND table_type   = 'BASE TABLE';
@@ -210,7 +210,7 @@ pub async fn get_column_names(
             let pool = mysql_pool(source_db).await;
             let mut conn = pool.get_conn().await.unwrap();
             let sql = r#"
-                SELECT column_name
+                SELECT column_name as column_name
                   FROM information_schema.columns
                  WHERE table_schema = DATABASE()
                    AND table_name   = ?
@@ -266,7 +266,7 @@ pub async fn fetch_rows(
             let rows = pg.query(query, &[]).await?;
             Ok(rows
                 .into_iter()
-                .map(|row| DbRow::PostgresRow(&row).to_row_data("source_table"))
+                .map(|row| DbRow::PostgresRow(&row).to_row_data("dest_table"))
                 .collect())
         }
     }

@@ -1,5 +1,4 @@
 use bigdecimal::BigDecimal;
-use bigdecimal::ToPrimitive;
 use chrono::Utc;
 use chrono::{DateTime, NaiveDate};
 use model::core::data_type::DataType;
@@ -71,18 +70,15 @@ impl CsvType for DataType {
         }
 
         match *self {
-            DataType::Short | DataType::Int | DataType::Long => {
-                value.parse::<i64>().ok().map(Value::Int)
-            }
+            DataType::Short => value.parse::<i16>().ok().map(Value::SmallInt),
+            DataType::Int => value.parse::<i32>().ok().map(Value::Int32),
+            DataType::Long => value.parse::<i64>().ok().map(Value::Int),
             DataType::ShortUnsigned | DataType::IntUnsigned | DataType::Year => {
                 value.parse::<u64>().ok().map(|v| Value::Int(v as i64))
             }
 
             DataType::Float | DataType::Double => value.parse::<f64>().ok().map(Value::Float),
-            DataType::Decimal => value
-                .parse::<BigDecimal>()
-                .ok()
-                .and_then(|d| d.to_f64().map(Value::Float)),
+            DataType::Decimal => value.parse::<BigDecimal>().ok().map(Value::Decimal),
             DataType::String | DataType::VarChar | DataType::Char | DataType::Enum => {
                 Some(Value::String(value.to_string()))
             }
