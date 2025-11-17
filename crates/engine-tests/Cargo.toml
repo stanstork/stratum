@@ -12,6 +12,8 @@ engine-core = { path = "../engine-core" }
 engine-processing = { path = "../engine-processing" }
 engine-config = { path = "../engine-config" }
 smql-syntax = { path = "../smql-syntax" }
+chrono = { version = "0.4.39", features = ["serde"] }
+blake3 = "1.8.2"
 
 tracing-test = "0.2.5"
 tracing = "0.1.41"
@@ -29,3 +31,4 @@ mysql_common = "0.35.5"
 futures = "0.3.31"
 tempfile = "3.10.1"
 tokio-util = "0.7.17"
+async-trait = "0.1.83"
