@@ -5,6 +5,7 @@ use mysql_async::Pool;
 use std::sync::Arc;
 use tokio_postgres::Client;
 
+pub mod engine;
 pub mod integration;
 pub mod utils;
 

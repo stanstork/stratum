@@ -8,6 +8,10 @@ planner = { path = "../planner" }
 model = { path = "../model" }
 connectors = { path = "../connectors" }
 engine-runtime = { path = "../engine-runtime" }
+engine-core = { path = "../engine-core" }
+engine-processing = { path = "../engine-processing" }
+engine-config = { path = "../engine-config" }
+smql-syntax = { path = "../smql-syntax" }
 
 tracing-test = "0.2.5"
 tracing = "0.1.41"
@@ -22,3 +26,6 @@ postgres-native-tls = "0.5.0"
 native-tls = "0.2"
 mysql_async = { version = "0.36.1", features = ["chrono", "bigdecimal"] }
 mysql_common = "0.35.5"
+futures = "0.3.31"
+tempfile = "3.10.1"
+tokio-util = "0.7.17"
