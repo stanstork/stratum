@@ -5,20 +5,26 @@ use crate::file::csv::{
     metadata::{CsvMetadata, MetadataHelper, normalize_col_name},
     types::CsvType,
 };
-use model::{core::value::FieldValue, records::row::RowData};
-use std::sync::Arc;
+use model::{
+    core::value::FieldValue,
+    pagination::{cursor::Cursor, page::FetchResult},
+    records::row::RowData,
+};
+use std::{sync::Arc, time::Instant};
 use tracing::warn;
 
 pub trait FileDataSource: MetadataHelper + Send + Sync {
     type Error;
 
-    fn fetch(&mut self, batch_size: usize) -> Result<Vec<RowData>, Self::Error>;
+    fn fetch(&mut self, batch_size: usize, cursor: Cursor) -> Result<FetchResult, Self::Error>;
 }
 
 pub struct CsvDataSource {
     pub adapter: CsvAdapter,
     pub primary_meta: Option<CsvMetadata>,
     pub filter: Option<CsvFilter>,
+    /// Tracks how many rows have been consumed from the file.
+    rows_read: usize,
 }
 
 impl CsvDataSource {
@@ -27,6 +33,7 @@ impl CsvDataSource {
             adapter,
             filter,
             primary_meta: None,
+            rows_read: 0,
         }
     }
 }
@@ -34,7 +41,8 @@ impl CsvDataSource {
 impl FileDataSource for CsvDataSource {
     type Error = FileError;
 
-    fn fetch(&mut self, batch_size: usize) -> Result<Vec<RowData>, Self::Error> {
+    fn fetch(&mut self, batch_size: usize, cursor: Cursor) -> Result<FetchResult, Self::Error> {
+        let start = Instant::now();
         let meta = self.primary_meta.clone().expect("Metadata not set");
         let entity_name = meta.name.clone();
 
@@ -56,10 +64,53 @@ impl FileDataSource for CsvDataSource {
             .lock()
             .map_err(|_| FileError::LockError("Failed to lock CSV reader".into()))?;
 
+        let target_offset = match cursor {
+            Cursor::None => 0,
+            Cursor::Default { offset } => offset,
+            other => {
+                return Err(FileError::InvalidCursor(format!(
+                    "Unsupported cursor: {other:?}"
+                )));
+            }
+        };
+
+        if target_offset < self.rows_read {
+            return Err(FileError::InvalidCursor(format!(
+                "Cursor offset {target_offset} is behind current offset {}",
+                self.rows_read
+            )));
+        }
+
+        while self.rows_read < target_offset {
+            match data_iter.next() {
+                Some(Ok(_)) => {
+                    self.rows_read += 1;
+                }
+                Some(Err(e)) => {
+                    return Err(FileError::ReadError(format!(
+                        "Error reading CSV record: {e}"
+                    )));
+                }
+                None => {
+                    let took_ms = start.elapsed().as_millis();
+                    return Ok(FetchResult {
+                        rows: Vec::new(),
+                        next_cursor: None,
+                        reached_end: true,
+                        row_count: 0,
+                        took_ms,
+                    });
+                }
+            }
+        }
+
         let mut result = Vec::new();
+        let mut reached_end = false;
         while result.len() < batch_size {
             match data_iter.next() {
                 Some(Ok(record)) => {
+                    self.rows_read += 1;
+
                     if let Some(ref filter) = self.filter
                         && !filter.eval(&record, &headers_meta)
                     {
@@ -100,11 +151,30 @@ impl FileDataSource for CsvDataSource {
                     )));
                 }
                 // End of file
-                None => break,
+                None => {
+                    reached_end = true;
+                    break;
+                }
             }
         }
 
-        Ok(result)
+        let row_count = result.len();
+        let next_cursor = if reached_end {
+            None
+        } else {
+            Some(Cursor::Default {
+                offset: self.rows_read,
+            })
+        };
+        let took_ms = start.elapsed().as_millis();
+
+        Ok(FetchResult {
+            rows: result,
+            next_cursor,
+            reached_end,
+            row_count,
+            took_ms,
+        })
     }
 }
 

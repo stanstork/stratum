@@ -55,18 +55,18 @@ pub const ORDERS_FLAT_FILTER_QUERY: &str = r#"
 /// This is used for testing CSV data loading and transformations.
 pub const CUSTOMERS_TABLE_DDL: &str = r#"
     CREATE TABLE public.customers (
-        "index" varchar NOT NULL,
-        customer_id varchar NOT NULL,
-        first_name varchar NOT NULL,
-        last_name varchar NOT NULL,
-        company varchar NOT NULL,
-        city varchar NOT NULL,
-        country varchar NOT NULL,
-        phone_1 varchar NOT NULL,
-        phone_2 varchar NOT NULL,
-        email varchar NOT NULL,
-        subscription_date varchar NOT NULL,
-        website varchar NOT NULL
+        "index" int2 NOT NULL,
+        customer_id text NOT NULL,
+        first_name text NOT NULL,
+        last_name text NOT NULL,
+        company text NOT NULL,
+        city text NOT NULL,
+        country text NOT NULL,
+        phone_1 text NOT NULL,
+        phone_2 text NOT NULL,
+        email text NOT NULL,
+        subscription_date date NOT NULL,
+        website text NOT NULL
     );
 "#;
 

@@ -378,7 +378,7 @@ mod tests {
                     column: "created_at".to_string(),
                 }),
                 op: BinaryOperator::Gt,
-                right: value(Value::String("'1970-01-01 00:02:13'".to_string())),
+                right: value(Value::String("1970-01-01 00:02:13".to_string())),
             }))
         );
 
@@ -397,7 +397,7 @@ mod tests {
                     column: "created_at".to_string(),
                 }),
                 op: BinaryOperator::Eq,
-                right: value(Value::String("'1970-01-01 00:02:13'".to_string())),
+                right: value(Value::String("1970-01-01 00:02:13".to_string())),
             }))
         );
         assert_eq!(

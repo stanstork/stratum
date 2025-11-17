@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        reset_migration_buffer, reset_postgres_schema,
+        reset_postgres_schema,
         utils::{
             ACTORS_TABLE_DDL, CUSTOMERS_TABLE_DDL, DbType, ORDERS_FLAT_FILTER_QUERY,
             ORDERS_FLAT_JOIN_QUERY, assert_column_exists, assert_row_count, assert_table_exists,
@@ -558,7 +558,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc15() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         let tmpl = r#"
@@ -600,7 +599,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc16() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         let csv_path = "src/data/customers.csv";
@@ -630,7 +628,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc17() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         let csv_path = "src/data/customers.csv";
@@ -672,7 +669,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc18() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         // Create the customers table in Postgres without the full_name column
@@ -728,7 +724,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc19() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         let csv_path = "src/data/customers.csv";
@@ -776,7 +771,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc20() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         let csv_path = "src/data/customers.csv";

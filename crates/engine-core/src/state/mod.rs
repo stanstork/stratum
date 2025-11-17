@@ -2,7 +2,6 @@ use crate::state::models::{Checkpoint, CheckpointSummary, WalEntry};
 use async_trait::async_trait;
 use std::error::Error;
 
-pub mod buffer;
 pub mod models;
 pub mod sled_store;
 

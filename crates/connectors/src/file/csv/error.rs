@@ -16,4 +16,6 @@ pub enum FileError {
     CsvError(#[from] csv::Error),
     #[error("Error reading CSV file: {0}")]
     ReadError(String),
+    #[error("Invalid cursor for file source: {0}")]
+    InvalidCursor(String),
 }

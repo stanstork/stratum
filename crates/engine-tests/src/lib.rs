@@ -2,7 +2,7 @@
 
 use connectors::sql::postgres::utils::connect_client;
 use mysql_async::Pool;
-use std::{env, fs, io, path::PathBuf, sync::Arc};
+use std::sync::Arc;
 use tokio_postgres::Client;
 
 pub mod integration;
@@ -39,29 +39,4 @@ async fn reset_postgres_schema() {
     )
     .await
     .expect("reset postgres schema");
-}
-
-/// Remove all on-disk Sled buffers named `migration_buffer_<…>`
-/// in the current directory.
-pub fn reset_migration_buffer() -> io::Result<()> {
-    // Get working dir
-    let base: PathBuf = env::current_dir()?;
-
-    // Read every entry in that dir
-    for entry in fs::read_dir(&base)? {
-        let entry = entry?;
-        let path = entry.path();
-
-        // Check if it's a directory whose name starts with "migration_buffer_"
-        if path.is_dir()
-            && let Some(name) = path.file_name().and_then(|n| n.to_str())
-            && name.starts_with("migration_buffer_")
-        {
-            // Recursively delete it
-            fs::remove_dir_all(&path)?;
-            println!("Removed buffer directory: {}", path.display());
-        }
-    }
-
-    Ok(())
 }
