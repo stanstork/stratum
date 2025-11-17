@@ -133,26 +133,21 @@ impl OffsetStrategy for PkOffset {
     }
 
     fn next_cursor(&self, row: &RowData) -> Cursor {
-        match row.get_value(&self.pk.column) {
-            Value::Uint(id) => Cursor::Pk {
+        let id_opt = match row.get_value(&self.pk.column) {
+            Value::Uint(id) => Some(id),
+            Value::Usize(u) => Some(u as u64),
+            Value::Int(i) if i >= 0 => Some(i as u64),
+            Value::Int32(i) if i >= 0 => Some(i as u64),
+            Value::String(s) => s.parse::<u64>().ok(),
+            _ => None,
+        };
+
+        match id_opt {
+            Some(id) => Cursor::Pk {
                 pk_col: self.pk.clone(),
                 id,
             },
-            Value::Int(i) if i >= 0 => Cursor::Pk {
-                pk_col: self.pk.clone(),
-                id: i as u64,
-            },
-            Value::String(s) => {
-                if let Ok(id) = s.parse::<u64>() {
-                    Cursor::Pk {
-                        pk_col: self.pk.clone(),
-                        id,
-                    }
-                } else {
-                    Cursor::None // couldn't advance; treat as end/error path
-                }
-            }
-            _ => Cursor::None, // unexpected type; upstream should normalize PKs to Uint
+            None => Cursor::None,
         }
     }
 
@@ -358,7 +353,7 @@ impl OffsetStrategy for DefaultOffset {
 
     fn next_cursor(&self, _row: &RowData) -> Cursor {
         Cursor::Default {
-            offset: self.offset + 1,
+            offset: self.offset,
         }
     }
 
@@ -534,6 +529,7 @@ impl OffsetStrategyFactory {
 fn extract_numeric_value(val: &Value) -> Option<i128> {
     match val {
         Value::Int(i) => Some(*i as i128),
+        Value::Int32(i) => Some(*i as i128),
         Value::Uint(u) => Some(*u as i128),
         Value::Usize(u) => Some(*u as i128),
         Value::Float(f) => {
