@@ -385,14 +385,29 @@ fn map_value_to_expr(value: Value, col_meta: &ColumnMetadata) -> Expr {
             Expr::Value(Value::StringArray(string_array))
         }
 
-        // For custom types like enums, wrap the value in a CAST expression.
-        DataType::Custom(_) => match coerced_value {
-            Value::Enum(n, v) => Expr::Cast {
-                expr: Box::new(Expr::Value(Value::String(v))),
-                data_type: n, // Use the enum name as the SQL type
-            },
-            _ => Expr::Value(coerced_value),
-        },
+        // For custom types or enums, wrap the value in a CAST expression to ensure the parameter
+        // is typed correctly (e.g., `$1::rating`).
+        DataType::Custom(_) | DataType::Enum => {
+            let type_name = match col_meta.data_type {
+                DataType::Custom(ref name) => name.clone(),
+                DataType::Enum => col_meta.name.clone(),
+                _ => unreachable!(),
+            };
+
+            let base_expr = match coerced_value {
+                Value::Enum(_, v) => Expr::Value(Value::String(v)),
+                Value::String(s) => Expr::Value(Value::String(s)),
+                other => Expr::Value(other),
+            };
+
+            Expr::Cast {
+                data_type: type_name,
+                expr: Box::new(Expr::Cast {
+                    expr: Box::new(base_expr),
+                    data_type: "TEXT".into(),
+                }),
+            }
+        }
 
         // For all other standard data types, just use the value directly.
         _ => Expr::Value(coerced_value),

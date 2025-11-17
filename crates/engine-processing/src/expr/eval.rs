@@ -1,3 +1,4 @@
+use bigdecimal::FromPrimitive;
 use model::{core::value::Value, records::row::RowData, transform::mapping::EntityMapping};
 use smql_syntax::ast::expr::{Expression, Literal, Operator};
 use tracing::warn;
@@ -79,10 +80,12 @@ impl Evaluator for Expression {
 
 fn eval_arithmetic(left: &Value, right: &Value, op: &Operator) -> Option<Value> {
     use Value::*;
+    use bigdecimal::ToPrimitive;
 
     let as_float = |v: &Value| match v {
         Int(i) => Some(*i as f64),
         Float(f) => Some(*f),
+        Decimal(d) => d.to_f64(),
         _ => None,
     };
 
@@ -102,6 +105,21 @@ fn eval_arithmetic(left: &Value, right: &Value, op: &Operator) -> Option<Value> 
                 Operator::Subtract => Float(l - r),
                 Operator::Multiply => Float(l * r),
                 Operator::Divide => Float(l / r),
+            })
+        }
+
+        (Decimal(_), Decimal(_))
+        | (Decimal(_), Int(_))
+        | (Int(_), Decimal(_))
+        | (Decimal(_), Float(_))
+        | (Float(_), Decimal(_)) => {
+            let l = as_float(left)?;
+            let r = as_float(right)?;
+            Some(match op {
+                Operator::Add => Decimal(bigdecimal::BigDecimal::from_f64(l + r)?),
+                Operator::Subtract => Decimal(bigdecimal::BigDecimal::from_f64(l - r)?),
+                Operator::Multiply => Decimal(bigdecimal::BigDecimal::from_f64(l * r)?),
+                Operator::Divide => Decimal(bigdecimal::BigDecimal::from_f64(l / r)?),
             })
         }
 

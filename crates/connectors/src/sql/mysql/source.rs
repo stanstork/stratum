@@ -142,7 +142,21 @@ impl DbDataSource for MySqlDataSource {
         let next_cursor = if !reached_end {
             primary_last_row
                 .or_else(|| rows.last().cloned())
-                .map(|row| self.offset_strategy.next_cursor(&row))
+                .map(|row| {
+                    let mut cursor = self.offset_strategy.next_cursor(&row);
+                    // update offset if using Default cursor
+                    // it's a hack to keep track of how many rows we've read so far
+                    // TODO: improve this by having the strategy manage its own state
+                    match &cursor {
+                        Cursor::Default { offset } => {
+                            cursor = Cursor::Default {
+                                offset: *offset + batch_size,
+                            };
+                        }
+                        _ => {}
+                    }
+                    cursor
+                })
         } else {
             None
         };

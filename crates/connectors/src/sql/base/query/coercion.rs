@@ -4,7 +4,9 @@ use model::core::{data_type::DataType, value::Value};
 
 pub(crate) fn coerce_value(value: Value, col_meta: &ColumnMetadata) -> Value {
     let value = coerce_numeric(value, &col_meta.data_type);
-    coerce_temporal(value, &col_meta.data_type)
+    let value = coerce_temporal(value, &col_meta.data_type);
+    let value = coerce_enum(value, col_meta);
+    coerce_text(value, &col_meta.data_type)
 }
 
 fn coerce_numeric(value: Value, data_type: &DataType) -> Value {
@@ -28,6 +30,38 @@ fn coerce_numeric(value: Value, data_type: &DataType) -> Value {
         DataType::Decimal | DataType::NewDecimal => match value.as_big_decimal() {
             Some(v) => Value::Decimal(v),
             None => value,
+        },
+        _ => value,
+    }
+}
+
+fn coerce_text(value: Value, data_type: &DataType) -> Value {
+    match data_type {
+        DataType::String | DataType::VarChar | DataType::Char => match value {
+            Value::Bytes(bytes) => match String::from_utf8(bytes) {
+                Ok(text) => Value::String(text),
+                Err(err) => {
+                    let bytes = err.into_bytes();
+                    Value::String(String::from_utf8_lossy(&bytes).to_string())
+                }
+            },
+            other => other,
+        },
+        _ => value,
+    }
+}
+
+fn coerce_enum(value: Value, col_meta: &ColumnMetadata) -> Value {
+    match &col_meta.data_type {
+        DataType::Custom(type_name) => match value {
+            Value::Enum(_, v) => Value::Enum(type_name.clone(), v),
+            Value::String(s) => Value::Enum(type_name.clone(), s),
+            other => other,
+        },
+        DataType::Enum => match value {
+            Value::Enum(_, v) => Value::Enum(col_meta.name.clone(), v),
+            Value::String(s) => Value::Enum(col_meta.name.clone(), s),
+            other => other,
         },
         _ => value,
     }

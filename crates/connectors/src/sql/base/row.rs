@@ -49,9 +49,8 @@ impl DbRow<'_> {
     pub fn get_value(&self, data_type: &DataType, name: &str) -> Option<Value> {
         match data_type {
             DataType::Short => self.try_get_i64(name).map(|v| Value::SmallInt(v as i16)),
-            DataType::Int | DataType::Int4 => {
-                self.try_get_i64(name).map(|v| Value::Int32(v as i32))
-            }
+            DataType::Int => self.try_get_i64(name).map(|v| Value::Int32(v as i32)),
+            DataType::Int4 => self.try_get_i32(name).map(Value::Int32),
             DataType::Long | DataType::LongLong => self.try_get_i64(name).map(Value::Int),
             DataType::IntUnsigned | DataType::ShortUnsigned | DataType::Year => {
                 self.try_get_u64(name).map(|v| Value::Int(v as i64))

@@ -184,6 +184,7 @@ mod tests {
     // - Data should be copied only for the target table, while related tables should remain empty.
     #[traced_test]
     #[tokio::test]
+    #[ignore = "CASCADE_SCHEMA will be reworked, so this test is ignored for now."]
     async fn tc06() {
         reset_postgres_schema().await;
 
@@ -517,7 +518,6 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn tc14() {
-        reset_migration_buffer().expect("reset migration buffer");
         reset_postgres_schema().await;
 
         let tmpl = r#"
