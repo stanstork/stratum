@@ -1,9 +1,15 @@
 use crate::{error::ProducerError, producer::DataProducer, transform::pipeline::TransformPipeline};
 use async_trait::async_trait;
-use connectors::sql::base::{error::DbError, query::generator::QueryGenerator};
+use connectors::{
+    metadata::entity::EntityMetadata,
+    sql::base::{error::DbError, query::generator::QueryGenerator},
+};
 use engine_config::{
     report::{
-        dry_run::{DryRunReport, DryRunStatus, FastPathSummary, OffsetValidationReport},
+        dry_run::{
+            DryRunReport, DryRunStatus, FastPathCapabilities, FastPathSummary,
+            OffsetValidationReport,
+        },
         finding::{Finding, Severity},
         mapping::EntityMappingReport,
         sql::{SqlKind, SqlStatement},
@@ -21,15 +27,17 @@ use model::{pagination::cursor::Cursor, records::row::RowData, transform::mappin
 use planner::query::offsets::OffsetStrategy;
 use smql_syntax::ast::setting::{CopyColumns, Settings};
 use std::{
-    any::type_name_of_val,
     collections::{HashMap, HashSet},
     sync::Arc,
 };
 
 /// A container for the results of the `sample_and_transform` operation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct SampleResult {
     records_sampled: usize,
+    reached_end: bool,
+    next_cursor: Option<Cursor>,
+    source_entity: Option<String>,
     transform_report: Option<TransformationReport>,
     fetch_error: Option<Finding>,
     prune_findings: Vec<Finding>,
@@ -110,7 +118,7 @@ impl ValidationProducer {
 
         report.generated_sql.statements.extend(results.statements);
         report.summary.records_sampled = results.sample_result.records_sampled;
-        if let Some(tr) = results.sample_result.transform_report {
+        if let Some(tr) = results.sample_result.clone().transform_report {
             report.transform = tr;
         }
 
@@ -125,14 +133,15 @@ impl ValidationProducer {
         report
             .summary
             .errors
-            .extend(results.sample_result.prune_findings);
-        if let Some(err) = results.sample_result.fetch_error {
+            .extend(results.sample_result.clone().prune_findings.clone());
+        if let Some(err) = results.sample_result.fetch_error.clone() {
             report.summary.errors.push(err);
         }
 
         for entity_report in &mut report.mapping.entities {
             if let Some(omitted) = results
                 .sample_result
+                .clone()
                 .omitted_columns
                 .get(&entity_report.source_entity)
             {
@@ -148,7 +157,7 @@ impl ValidationProducer {
             .schema_validation
             .findings
             .extend(results.schema_findings);
-        report.offset_validation = self.offset_validation_report();
+        report.offset_validation = self.offset_validation_report(&results.sample_result);
         report.fast_path_summary = self.fast_path_summary().await;
         report.summary.status = Self::calculate_status(&report);
     }
@@ -281,6 +290,9 @@ impl ValidationProducer {
         {
             Ok(data) => {
                 let total = data.row_count;
+                let next_cursor = data.next_cursor.clone();
+                let reached_end = data.reached_end;
+                let source_entity = data.rows.first().map(|r| r.entity.clone());
                 let sample: Vec<TransformationRecord> = data
                     .rows
                     .into_iter()
@@ -313,6 +325,9 @@ impl ValidationProducer {
 
                 SampleResult {
                     records_sampled: total,
+                    reached_end,
+                    next_cursor,
+                    source_entity,
                     transform_report: Some(report),
                     fetch_error: None,
                     prune_findings,
@@ -321,6 +336,9 @@ impl ValidationProducer {
             }
             Err(e) => SampleResult {
                 records_sampled: 0,
+                reached_end: false,
+                next_cursor: None,
+                source_entity: None,
                 transform_report: None,
                 fetch_error: Some(Finding::new_fetch_error(&e.to_string())),
                 prune_findings,
@@ -393,57 +411,152 @@ impl ValidationProducer {
         10 // TODO: make configurable
     }
 
-    fn offset_validation_report(&self) -> OffsetValidationReport {
-        let strategy = type_name_of_val(&*self.offset_strategy)
-            .rsplit("::")
-            .next()
-            .unwrap_or("Unknown")
-            .to_string();
+    fn offset_validation_report(&self, sample: &SampleResult) -> OffsetValidationReport {
+        let strategy = self.offset_strategy.name();
+
+        let key_columns = match &self.cursor {
+            Cursor::Pk { pk_col, .. } => vec![pk_col.column.clone()],
+            // Cursor::Numeric { col, pk, .. } => vec![col.column.clone(), pk.column.clone()],
+            // Cursor::Timestamp { col, pk, .. } => vec![col.column.clone(), pk.column.clone()],
+            Cursor::CompositeNumPk {
+                num_col, pk_col, ..
+            } => {
+                vec![num_col.column.clone(), pk_col.column.clone()]
+            }
+            Cursor::CompositeTsPk { ts_col, pk_col, .. } => {
+                vec![ts_col.column.clone(), pk_col.column.clone()]
+            }
+            Cursor::Default { .. } | Cursor::None => Vec::new(),
+            _ => vec!["<complex cursor>".to_string()],
+        };
 
         OffsetValidationReport {
             strategy,
             initial_cursor: Some(self.cursor.clone()),
+            last_cursor: sample.next_cursor.clone(),
+            key_columns,
+            source_entity: sample.source_entity.clone(),
+            rows_fetched: Some(sample.records_sampled),
+            reached_end: Some(sample.reached_end),
             findings: Vec::new(),
         }
     }
 
     async fn fast_path_summary(&self) -> FastPathSummary {
         let sink = self.destination.sink();
+        let adapter = self.destination.data_dest.adapter().await;
+
+        let (capabilities, capability_probe_error) = match adapter.capabilities().await {
+            Ok(caps) => (
+                Some(FastPathCapabilities {
+                    copy_streaming: caps.copy_streaming,
+                    merge_statements: caps.merge_statements,
+                }),
+                None,
+            ),
+            Err(e) => (
+                None,
+                Some(format!("Fast path capability probe failed: {e}")),
+            ),
+        };
+
         match sink.support_fast_path().await {
-            Ok(true) => match self
-                .destination
-                .data_dest
-                .fetch_meta(self.destination.name.clone())
-                .await
-            {
-                Ok(meta) => {
-                    if meta.primary_keys.is_empty() {
-                        FastPathSummary {
-                            supported: false,
-                            reason: Some(
-                                "Fast path disabled: destination table has no primary key"
-                                    .to_string(),
-                            ),
-                        }
-                    } else {
-                        FastPathSummary {
-                            supported: true,
-                            reason: None,
+            Ok(true) => match adapter.table_exists(&self.destination.name).await {
+                Ok(true) => match self
+                    .destination
+                    .data_dest
+                    .fetch_meta(self.destination.name.clone())
+                    .await
+                {
+                    Ok(meta) => {
+                        if meta.primary_keys.is_empty() {
+                            FastPathSummary {
+                                supported: false,
+                                reason: Some(
+                                    "Fast path disabled: destination table has no primary key"
+                                        .to_string(),
+                                ),
+                                capabilities,
+                            }
+                        } else {
+                            FastPathSummary {
+                                supported: true,
+                                reason: None,
+                                capabilities,
+                            }
                         }
                     }
+                    Err(e) => FastPathSummary {
+                        supported: false,
+                        reason: Some(format!("Failed to fetch destination metadata: {e}")),
+                        capabilities,
+                    },
+                },
+                Ok(false) if self.settings.create_missing_tables => {
+                    let source_table = self
+                        .mapping
+                        .entity_name_map
+                        .reverse_resolve(&self.destination.name);
+                    match self.source.primary.fetch_meta(source_table.clone()).await {
+                        Ok(EntityMetadata::Table(meta)) => {
+                            if meta.primary_keys.is_empty() {
+                                FastPathSummary {
+                                    supported: false,
+                                    reason: Some(format!(
+                                        "Fast path disabled: source table `{source_table}` has no primary key"
+                                    )),
+                                    capabilities,
+                                }
+                            } else {
+                                FastPathSummary {
+                                    supported: true,
+                                    reason: None,
+                                    capabilities,
+                                }
+                            }
+                        }
+                        Ok(_) => FastPathSummary {
+                            supported: false,
+                            reason: Some(format!(
+                                "Fast path disabled: cannot infer primary keys for `{source_table}`"
+                            )),
+                            capabilities,
+                        },
+                        Err(e) => FastPathSummary {
+                            supported: false,
+                            reason: Some(format!(
+                                "Failed to fetch source metadata for `{source_table}`: {e}"
+                            )),
+                            capabilities,
+                        },
+                    }
                 }
+                Ok(false) => FastPathSummary {
+                    supported: false,
+                    reason: Some(
+                        "Destination table does not exist and auto-creation is disabled"
+                            .to_string(),
+                    ),
+                    capabilities,
+                },
                 Err(e) => FastPathSummary {
                     supported: false,
-                    reason: Some(format!("Failed to fetch destination metadata: {e}")),
+                    reason: Some(format!("Fast path table existence check failed: {e}")),
+                    capabilities,
                 },
             },
             Ok(false) => FastPathSummary {
                 supported: false,
                 reason: Some("Destination sink does not support fast path".to_string()),
+                capabilities,
             },
             Err(e) => FastPathSummary {
                 supported: false,
-                reason: Some(format!("Fast path check failed: {e}")),
+                reason: Some(
+                    capability_probe_error
+                        .unwrap_or_else(|| format!("Fast path check failed: {e}")),
+                ),
+                capabilities,
             },
         }
     }

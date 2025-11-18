@@ -103,6 +103,16 @@ pub struct OffsetValidationReport {
     pub strategy: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub initial_cursor: Option<Cursor>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_cursor: Option<Cursor>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub key_columns: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_entity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rows_fetched: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reached_end: Option<bool>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub findings: Vec<Finding>,
 }
@@ -112,6 +122,14 @@ pub struct FastPathSummary {
     pub supported: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<FastPathCapabilities>,
+}
+
+#[derive(Serialize, Debug, Default, Clone)]
+pub struct FastPathCapabilities {
+    pub copy_streaming: bool,
+    pub merge_statements: bool,
 }
 
 pub fn source_endpoint(source: &Source) -> EndpointType {

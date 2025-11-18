@@ -34,6 +34,9 @@ pub trait OffsetStrategy: Send + Sync {
 
     /// Clones the boxed trait object.
     fn clone_box(&self) -> Box<dyn OffsetStrategy>;
+
+    /// Returns the name of the offset strategy.
+    fn name(&self) -> String;
 }
 
 pub struct PkOffset {
@@ -156,6 +159,10 @@ impl OffsetStrategy for PkOffset {
             pk: self.pk.clone(),
         })
     }
+
+    fn name(&self) -> String {
+        "pk".to_string()
+    }
 }
 
 impl OffsetStrategy for NumericOffset {
@@ -197,6 +204,10 @@ impl OffsetStrategy for NumericOffset {
             col: self.col.clone(),
             pk: self.pk.clone(),
         })
+    }
+
+    fn name(&self) -> String {
+        "numeric".to_string()
     }
 }
 
@@ -331,6 +342,10 @@ impl OffsetStrategy for TimestampOffset {
             tz: self.tz,
         })
     }
+
+    fn name(&self) -> String {
+        "timestamp".to_string()
+    }
 }
 
 impl OffsetStrategy for DefaultOffset {
@@ -361,6 +376,10 @@ impl OffsetStrategy for DefaultOffset {
         Box::new(DefaultOffset {
             offset: self.offset,
         })
+    }
+
+    fn name(&self) -> String {
+        "default".to_string()
     }
 }
 pub struct OffsetStrategyFactory;
