@@ -9,7 +9,7 @@ pub enum MigrationError {
     #[error("Initialization error: {0}")]
     InitializationError(String),
 
-    /// Adaper-related error.
+    /// Adapter-related error.
     #[error("Adapter error: {0}")]
     Adapter(#[from] AdapterError),
 
