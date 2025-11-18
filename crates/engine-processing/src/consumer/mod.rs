@@ -26,31 +26,16 @@ pub async fn create_consumer(
     shutdown_rx: Receiver<bool>,
     cancel: CancellationToken,
 ) -> Box<dyn DataConsumer + Send> {
-    Box::new(LiveConsumer::new(ctx, batch_rx, shutdown_rx, cancel).await)
+    let ctx_guard = ctx.lock().await;
+    let settings_guard = ctx_guard.settings.lock().await;
+    let is_dry_run = settings_guard.is_dry_run();
 
-    // Box::new(ValidationConsumer::new())
-    // let ctx_guard = ctx.lock().await;
-    // let state_guard = ctx_guard.state.lock().await;
+    drop(settings_guard);
+    drop(ctx_guard);
 
-    // if state_guard.is_dry_run() {
-    //     Box::new(ValidationConsumer::new())
-    // } else {
-    //     let buffer = Arc::clone(&ctx_guard.buffer);
-    //     let destination = ctx_guard.destination.clone();
-    //     let mappings = ctx_guard.mapping.clone();
-    //     let batch_size = state_guard.batch_size();
-
-    //     // Drop guards to release locks before creating the new object.
-    //     drop(state_guard);
-    //     drop(ctx_guard);
-
-    //     Box::new(LiveConsumer::new(
-    //         buffer,
-    //         destination,
-    //         mappings,
-    //         receiver,
-    //         batch_size,
-    //     ))
-    // }
-    // todo!("Implement consumer creation based on context and settings")
+    if is_dry_run {
+        Box::new(ValidationConsumer::new())
+    } else {
+        Box::new(LiveConsumer::new(ctx, batch_rx, shutdown_rx, cancel).await)
+    }
 }

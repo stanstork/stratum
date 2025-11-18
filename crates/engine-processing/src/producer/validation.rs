@@ -86,14 +86,16 @@ impl ValidationProducer {
         }
     }
 
+    /// Initializes the destination schema validator.
+    async fn init_schema_validator(&self) -> Result<DestinationSchemaValidator, ProducerError> {
+        DestinationSchemaValidator::new(&self.destination, self.mapping.clone(), &self.settings)
+            .await
+            .map_err(|e| ProducerError::Other(format!("Init schema validator: {e}")))
+    }
+
+    /// Performs the core validation steps: SQL generation, sampling/transform, and final schema check.
     async fn perform_validation(&mut self) -> Result<ValidationResults, ProducerError> {
-        let mut validator = DestinationSchemaValidator::new(
-            &self.destination,
-            self.mapping.clone(),
-            &self.settings,
-        )
-        .await
-        .map_err(|e| ProducerError::Other(format!("Init schema validator: {e}")))?;
+        let mut validator = self.init_schema_validator().await?;
 
         let (statements, prep_findings) = self.generate_sql_statements().await;
         let sample_result = self.sample_and_transform(&mut validator).await;
@@ -112,54 +114,83 @@ impl ValidationProducer {
         })
     }
 
+    /// Updates the `DryRunReport` with the results of the validation.
     async fn update_report(&mut self, results: ValidationResults) {
-        let mut report_guard = self.report.lock().await;
-        let report = &mut *report_guard;
+        let mut report = self.report.lock().await;
 
-        report.generated_sql.statements.extend(results.statements);
+        // Step 1: Update errors, sampled count, and SQL
+        self.update_summary(&mut report, &results);
+        // Step 2: Update transformation results
+        self.update_transform(&mut report, &results.sample_result);
+        // Step 3: Update mapping omissions and one-to-one columns
+        self.update_mapping(&mut report, &results.sample_result)
+            .await;
+        // Step 4: Final validation results, offset, fast path, and status
+        self.update_validation(&mut report, results).await;
+    }
+
+    /// Helper to update SQL statements, sampled counts, and all collected errors.
+    fn update_summary(&self, report: &mut DryRunReport, results: &ValidationResults) {
+        report
+            .generated_sql
+            .statements
+            .extend(results.statements.clone());
         report.summary.records_sampled = results.sample_result.records_sampled;
-        if let Some(tr) = results.sample_result.clone().transform_report {
-            report.transform = tr;
-        }
 
-        if let Some(e) = results.schema_validation_error {
+        // Handle schema validation error
+        if let Some(ref e) = results.schema_validation_error {
             let error_msg = format!("Schema validation error: {e}");
             report
                 .summary
                 .errors
                 .push(Finding::new_fetch_error(&error_msg));
         }
-        report.summary.errors.extend(results.prep_findings);
+
+        // Collect preparation, pruning, and sampling fetch errors
+        report.summary.errors.extend(results.prep_findings.clone());
         report
             .summary
             .errors
-            .extend(results.sample_result.clone().prune_findings.clone());
-        if let Some(err) = results.sample_result.fetch_error.clone() {
-            report.summary.errors.push(err);
+            .extend(results.sample_result.prune_findings.clone());
+        if let Some(ref err) = results.sample_result.fetch_error {
+            report.summary.errors.push(err.clone());
         }
+    }
 
+    /// Helper to update the transformation report section.
+    fn update_transform(&self, report: &mut DryRunReport, sample_result: &SampleResult) {
+        if let Some(ref tr) = sample_result.transform_report {
+            report.transform = tr.clone();
+        }
+    }
+
+    /// Helper to update entity mapping findings (omitted columns) and one-to-one mapping.
+    async fn update_mapping(&self, report: &mut DryRunReport, sample_result: &SampleResult) {
         for entity_report in &mut report.mapping.entities {
-            if let Some(omitted) = results
-                .sample_result
-                .clone()
+            // Update omitted columns from pruning step
+            if let Some(omitted) = sample_result
                 .omitted_columns
                 .get(&entity_report.source_entity)
             {
                 entity_report.omitted_source_columns.extend(omitted.clone());
             }
 
+            // Update one-to-one mapped columns if CopyColumns::All is set
             if self.settings.copy_columns == CopyColumns::All {
                 self.update_one_to_one_mapped(entity_report).await;
             }
         }
+    }
 
+    /// Helper to update final schema validation, offset, fast path summary, and final status.
+    async fn update_validation(&self, report: &mut DryRunReport, results: ValidationResults) {
         report
             .schema_validation
             .findings
             .extend(results.schema_findings);
         report.offset_validation = self.offset_validation_report(&results.sample_result);
         report.fast_path_summary = self.fast_path_summary().await;
-        report.summary.status = Self::calculate_status(&report);
+        report.summary.status = Self::calculate_status(report);
     }
 
     fn calculate_status(report: &DryRunReport) -> DryRunStatus {
@@ -416,8 +447,6 @@ impl ValidationProducer {
 
         let key_columns = match &self.cursor {
             Cursor::Pk { pk_col, .. } => vec![pk_col.column.clone()],
-            // Cursor::Numeric { col, pk, .. } => vec![col.column.clone(), pk.column.clone()],
-            // Cursor::Timestamp { col, pk, .. } => vec![col.column.clone(), pk.column.clone()],
             Cursor::CompositeNumPk {
                 num_col, pk_col, ..
             } => {
