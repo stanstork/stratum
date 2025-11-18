@@ -356,7 +356,7 @@ mod tests {
         mapping: &EntityMapping,
         offset_strategy: Arc<dyn OffsetStrategy>,
         cursor: Cursor,
-    ) -> (Arc<Mutex<ItemContext>>, Arc<Mutex<Option<DryRunReport>>>) {
+    ) -> (Arc<Mutex<ItemContext>>, Arc<Mutex<DryRunReport>>) {
         let source = factory::create_source(
             &*global_ctx,
             &plan.connections,
@@ -384,7 +384,7 @@ mod tests {
             MigrationSettings::new(false),
         );
 
-        let dry_run_report = Arc::new(Mutex::new(None));
+        let dry_run_report = Arc::new(Mutex::new(DryRunReport::default()));
         settings::apply_all(&mut item_ctx, &migrate_item.settings, &dry_run_report)
             .await
             .expect("apply settings");
@@ -396,7 +396,7 @@ mod tests {
     async fn run_engine_once(
         ctx: Arc<Mutex<ItemContext>>,
         settings: Settings,
-        report: Arc<Mutex<Option<DryRunReport>>>,
+        report: Arc<Mutex<DryRunReport>>,
     ) -> EngineRunResult {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let (batch_tx, batch_rx) = mpsc::channel(8);

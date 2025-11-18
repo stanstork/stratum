@@ -14,7 +14,7 @@ pub async fn spawn(
     ctx: Arc<Mutex<ItemContext>>,
     settings: &Settings,
     cancel: CancellationToken,
-    dry_run_report: &Arc<Mutex<Option<DryRunReport>>>,
+    dry_run_report: &Arc<Mutex<DryRunReport>>,
 ) -> Result<(), MigrationError> {
     info!("Launching workers");
 

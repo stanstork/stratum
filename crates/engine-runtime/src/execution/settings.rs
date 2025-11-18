@@ -11,7 +11,7 @@ use tracing::info;
 pub async fn apply_all(
     ctx: &mut ItemContext,
     settings: &Settings,
-    dry_run_report: &Arc<Mutex<Option<DryRunReport>>>,
+    dry_run_report: &Arc<Mutex<DryRunReport>>,
 ) -> Result<(), SettingsError> {
     info!("Applying migration settings");
 

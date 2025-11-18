@@ -89,7 +89,7 @@ impl CreateMissingTablesSetting {
         dest: &Destination,
         mapping: &EntityMapping,
         settings: &Arc<Mutex<MigrationSettings>>,
-        dry_run_report: &Arc<Mutex<Option<DryRunReport>>>,
+        dry_run_report: &Arc<Mutex<DryRunReport>>,
     ) -> Self {
         Self {
             context: SchemaSettingContext::new(src, dest, mapping, settings, dry_run_report).await,

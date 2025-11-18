@@ -82,6 +82,8 @@ impl DryRunReport {
     pub fn new(params: DryRunParams) -> Self {
         let summary = DryRunSummary {
             timestamp: Utc::now(),
+            source: params.source,
+            destination: params.destination,
             ..Default::default()
         };
 

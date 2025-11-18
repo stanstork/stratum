@@ -45,7 +45,7 @@ struct ValidationResults {
 }
 
 pub struct ValidationProducer {
-    report: Arc<Mutex<Option<DryRunReport>>>,
+    report: Arc<Mutex<DryRunReport>>,
     source: Source,
     destination: Destination,
     pipeline: TransformPipeline,
@@ -64,7 +64,7 @@ impl ValidationProducer {
         settings: Settings,
         offset_strategy: Arc<dyn OffsetStrategy>,
         cursor: Cursor,
-        report: Arc<Mutex<Option<DryRunReport>>>,
+        report: Arc<Mutex<DryRunReport>>,
     ) -> Self {
         ValidationProducer {
             report,
@@ -106,9 +106,7 @@ impl ValidationProducer {
 
     async fn update_report(&mut self, results: ValidationResults) {
         let mut report_guard = self.report.lock().await;
-        let Some(report) = report_guard.as_mut() else {
-            return;
-        };
+        let report = &mut *report_guard;
 
         report.generated_sql.statements.extend(results.statements);
         report.summary.records_sampled = results.sample_result.records_sampled;

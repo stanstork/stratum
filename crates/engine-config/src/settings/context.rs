@@ -29,7 +29,7 @@ pub struct SchemaSettingContext {
     pub destination: Destination,
     pub mapping: EntityMapping,
     pub settings: Arc<Mutex<MigrationSettings>>,
-    pub dry_run_report: Arc<Mutex<Option<DryRunReport>>>,
+    pub dry_run_report: Arc<Mutex<DryRunReport>>,
     pub schema_manager: Box<dyn SchemaManager>,
 }
 
@@ -39,20 +39,12 @@ impl SchemaSettingContext {
         dest: &Destination,
         mapping: &EntityMapping,
         settings: &Arc<Mutex<MigrationSettings>>,
-        dry_run_report: &Arc<Mutex<Option<DryRunReport>>>,
+        dry_run_report: &Arc<Mutex<DryRunReport>>,
     ) -> Self {
         let is_dry_run = settings.lock().await.is_dry_run();
         let schema_manager: Box<dyn SchemaManager + Send> = if is_dry_run {
-            // Create validation manager for dry-run mode
-            let report = dry_run_report
-                .lock()
-                .await
-                .as_ref()
-                .cloned()
-                .expect("Dry run report should be initialized in dry run mode");
-
             Box::new(ValidationSchemaManager {
-                report: Arc::new(Mutex::new(report)),
+                report: dry_run_report.clone(),
                 settings: settings.clone(),
             })
         } else {

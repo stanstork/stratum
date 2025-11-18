@@ -132,7 +132,7 @@ impl MigrationExecutor {
 
         let final_report = dry_run_report.lock().await.clone();
         Ok(SummaryReport {
-            dry_run_report: final_report,
+            dry_run_report: self.dry_run.then(|| final_report),
         })
     }
 
@@ -142,17 +142,14 @@ impl MigrationExecutor {
         destination: &Destination,
         mapping: &EntityMapping,
         mi: &MigrateItem,
-    ) -> Arc<Mutex<Option<DryRunReport>>> {
-        if self.dry_run {
-            return Arc::new(Mutex::new(Some(DryRunReport::new(DryRunParams {
-                source: source_endpoint(&source),
-                destination: dest_endpoint(&destination),
-                mapping: &mapping,
-                config_hash: &self.plan.hash(),
-                copy_columns: mi.settings.copy_columns,
-            }))));
-        }
-        Arc::new(Mutex::new(None))
+    ) -> Arc<Mutex<DryRunReport>> {
+        Arc::new(Mutex::new(DryRunReport::new(DryRunParams {
+            source: source_endpoint(&source),
+            destination: dest_endpoint(&destination),
+            mapping: &mapping,
+            config_hash: &self.plan.hash(),
+            copy_columns: mi.settings.copy_columns,
+        })))
     }
 
     fn make_item_id(plan_hash: &str, mi: &MigrateItem, idx: usize) -> String {

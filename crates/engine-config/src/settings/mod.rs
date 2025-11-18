@@ -41,7 +41,7 @@ pub trait MigrationSetting: Send + Sync {
 pub async fn collect_settings(
     cfg: &Settings,
     ctx: &ItemContext,
-    dry_run_report: &Arc<Mutex<Option<DryRunReport>>>,
+    dry_run_report: &Arc<Mutex<DryRunReport>>,
 ) -> Vec<Box<dyn MigrationSetting>> {
     let src = ctx.source.clone();
     let dest = ctx.destination.clone();
