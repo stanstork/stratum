@@ -3,10 +3,8 @@ CONNECTIONS(
     DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/testdb")
 );
 MIGRATE(
-    SOURCE(CSV, "dev-fixtures/csv/customers.csv") -> DEST(TABLE, customers) [
-        SETTINGS(CREATE_MISSING_COLUMNS=TRUE,CSV_HEADER=TRUE),
-        MAP(
-            CONCAT(customers[first_name], customers[last_name]) -> full_name
-        )
+    SOURCE(TABLE, actor) -> DEST(TABLE, actor) [
+        SETTINGS(CREATE_MISSING_TABLES=TRUE),
+        MAP(CONCAT(actor[first_name], actor[last_name]) -> full_name)
     ]
 );

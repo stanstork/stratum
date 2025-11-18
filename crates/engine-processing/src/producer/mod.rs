@@ -51,6 +51,37 @@ pub async fn create_producer(
     cancel: CancellationToken,
     report: &Arc<Mutex<Option<DryRunReport>>>,
 ) -> Box<dyn DataProducer + Send> {
+    let (is_dry_run, source, destination, mapping, offset_strategy, cursor) = {
+        let guard = ctx.lock().await;
+        let is_dry_run = guard.settings.lock().await.is_dry_run();
+        (
+            is_dry_run,
+            guard.source.clone(),
+            guard.destination.clone(),
+            guard.mapping.clone(),
+            guard.offset_strategy.clone(),
+            guard.cursor.clone(),
+        )
+    };
+
+    if is_dry_run {
+        let has_report = report.lock().await.is_some();
+        if has_report {
+            let pipeline = pipeline_for_mapping(&mapping);
+            let validation_prod = ValidationProducer::new(
+                source,
+                destination,
+                pipeline,
+                mapping,
+                settings.clone(),
+                offset_strategy,
+                cursor,
+                report.clone(),
+            );
+            return Box::new(validation_prod);
+        }
+    }
+
     let live_prod = LiveProducer::new(ctx, shutdown_tx, batch_tx, settings, cancel).await;
     Box::new(live_prod)
 }

@@ -10,7 +10,7 @@ use engine_core::connectors::{
     destination::{DataDestination, Destination},
     source::{DataSource, Source},
 };
-use model::transform::mapping::EntityMapping;
+use model::{pagination::cursor::Cursor, transform::mapping::EntityMapping};
 use serde::Serialize;
 use smql_syntax::ast::setting::CopyColumns;
 
@@ -64,6 +64,8 @@ pub struct DryRunReport {
     pub generated_sql: GeneratedSql,
     pub transform: TransformationReport,
     pub schema_validation: SchemaValidationReport,
+    pub offset_validation: OffsetValidationReport,
+    pub fast_path_summary: FastPathSummary,
 }
 
 /// Parameters required to generate a dry run report.
@@ -92,6 +94,22 @@ impl DryRunReport {
             ..Default::default()
         }
     }
+}
+
+#[derive(Serialize, Debug, Default, Clone)]
+pub struct OffsetValidationReport {
+    pub strategy: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_cursor: Option<Cursor>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub findings: Vec<Finding>,
+}
+
+#[derive(Serialize, Debug, Default, Clone)]
+pub struct FastPathSummary {
+    pub supported: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 pub fn source_endpoint(source: &Source) -> EndpointType {

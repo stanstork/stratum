@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use connectors::sql::base::{error::DbError, query::generator::QueryGenerator};
 use engine_config::{
     report::{
-        dry_run::{DryRunReport, DryRunStatus},
+        dry_run::{DryRunReport, DryRunStatus, FastPathSummary, OffsetValidationReport},
         finding::{Finding, Severity},
         mapping::EntityMappingReport,
         sql::{SqlKind, SqlStatement},
@@ -16,9 +16,12 @@ use engine_core::connectors::{
     source::{DataSource, Source},
 };
 use futures::lock::Mutex;
+use model::records::record::Record;
 use model::{pagination::cursor::Cursor, records::row::RowData, transform::mapping::EntityMapping};
+use planner::query::offsets::OffsetStrategy;
 use smql_syntax::ast::setting::{CopyColumns, Settings};
 use std::{
+    any::type_name_of_val,
     collections::{HashMap, HashSet},
     sync::Arc,
 };
@@ -42,12 +45,14 @@ struct ValidationResults {
 }
 
 pub struct ValidationProducer {
-    report: Arc<Mutex<DryRunReport>>,
+    report: Arc<Mutex<Option<DryRunReport>>>,
     source: Source,
     destination: Destination,
     pipeline: TransformPipeline,
     mapping: EntityMapping,
     settings: Settings,
+    offset_strategy: Arc<dyn OffsetStrategy>,
+    cursor: Cursor,
 }
 
 impl ValidationProducer {
@@ -57,7 +62,9 @@ impl ValidationProducer {
         pipeline: TransformPipeline,
         mapping: EntityMapping,
         settings: Settings,
-        report: Arc<Mutex<DryRunReport>>,
+        offset_strategy: Arc<dyn OffsetStrategy>,
+        cursor: Cursor,
+        report: Arc<Mutex<Option<DryRunReport>>>,
     ) -> Self {
         ValidationProducer {
             report,
@@ -66,6 +73,8 @@ impl ValidationProducer {
             pipeline,
             mapping,
             settings,
+            offset_strategy,
+            cursor,
         }
     }
 
@@ -96,7 +105,11 @@ impl ValidationProducer {
     }
 
     async fn update_report(&mut self, results: ValidationResults) {
-        let mut report = self.report.lock().await;
+        let mut report_guard = self.report.lock().await;
+        let Some(report) = report_guard.as_mut() else {
+            return;
+        };
+
         report.generated_sql.statements.extend(results.statements);
         report.summary.records_sampled = results.sample_result.records_sampled;
         if let Some(tr) = results.sample_result.transform_report {
@@ -137,6 +150,8 @@ impl ValidationProducer {
             .schema_validation
             .findings
             .extend(results.schema_findings);
+        report.offset_validation = self.offset_validation_report();
+        report.fast_path_summary = self.fast_path_summary().await;
         report.summary.status = Self::calculate_status(&report);
     }
 
@@ -258,57 +273,62 @@ impl ValidationProducer {
         &self,
         validator: &mut DestinationSchemaValidator,
     ) -> SampleResult {
-        // let mut prune_findings = Vec::new();
-        // let mut omitted_columns: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut prune_findings = Vec::new();
+        let mut omitted_columns: HashMap<String, HashSet<String>> = HashMap::new();
 
-        // match self.source.fetch_data(self.sample_size(), None).await {
-        //     Ok(data) => {
-        //         let total = data.len();
-        //         let sample: Vec<TransformationRecord> = data
-        //             .into_iter()
-        //             .filter_map(|record| {
-        //                 let input_row = record.to_row_data().cloned()?;
-        //                 let transformed = self.pipeline.apply(&record);
-        //                 let mut output_row_opt = transformed.to_row_data().cloned();
+        match self
+            .source
+            .fetch_data(self.sample_size(), self.cursor.clone())
+            .await
+        {
+            Ok(data) => {
+                let total = data.row_count;
+                let sample: Vec<TransformationRecord> = data
+                    .rows
+                    .into_iter()
+                    .map(|input_row| {
+                        let input_clone = input_row.clone();
+                        let record = Record::RowData(input_row);
+                        let transformed = self.pipeline.apply(&record);
+                        let mut output_row_opt = transformed.to_row_data().cloned();
 
-        //                 if let Some(ref mut output_row) = output_row_opt {
-        //                     if output_row.entity.is_empty() {
-        //                         output_row.entity = input_row.entity.clone();
-        //                     }
-        //                     self.prune_row(output_row, &mut prune_findings, &mut omitted_columns);
-        //                     validator.validate(output_row);
-        //                 }
+                        if let Some(ref mut output_row) = output_row_opt {
+                            if output_row.entity.is_empty() {
+                                output_row.entity = input_clone.entity.clone();
+                            }
+                            self.prune_row(output_row, &mut prune_findings, &mut omitted_columns);
+                            validator.validate(output_row);
+                        }
 
-        //                 Some(TransformationRecord {
-        //                     input: input_row,
-        //                     output: output_row_opt,
-        //                     error: None,
-        //                     warnings: None,
-        //                 })
-        //             })
-        //             .collect();
+                        TransformationRecord {
+                            input: input_clone,
+                            output: output_row_opt,
+                            error: None,
+                            warnings: None,
+                        }
+                    })
+                    .collect();
 
-        //         let ok = sample.iter().filter(|r| r.output.is_some()).count();
-        //         let failed = total.saturating_sub(ok);
-        //         let report = TransformationReport { ok, failed, sample };
+                let ok = sample.iter().filter(|r| r.output.is_some()).count();
+                let failed = total.saturating_sub(ok);
+                let report = TransformationReport { ok, failed, sample };
 
-        //         SampleResult {
-        //             records_sampled: total,
-        //             transform_report: Some(report),
-        //             fetch_error: None,
-        //             prune_findings,
-        //             omitted_columns,
-        //         }
-        //     }
-        //     Err(e) => SampleResult {
-        //         records_sampled: 0,
-        //         transform_report: None,
-        //         fetch_error: Some(Finding::new_fetch_error(&e.to_string())),
-        //         prune_findings,
-        //         omitted_columns,
-        //     },
-        // }
-        todo!("")
+                SampleResult {
+                    records_sampled: total,
+                    transform_report: Some(report),
+                    fetch_error: None,
+                    prune_findings,
+                    omitted_columns,
+                }
+            }
+            Err(e) => SampleResult {
+                records_sampled: 0,
+                transform_report: None,
+                fetch_error: Some(Finding::new_fetch_error(&e.to_string())),
+                prune_findings,
+                omitted_columns,
+            },
+        }
     }
 
     async fn generate_sql_statements(&self) -> (Vec<SqlStatement>, Vec<Finding>) {
@@ -373,6 +393,61 @@ impl ValidationProducer {
 
     fn sample_size(&self) -> usize {
         10 // TODO: make configurable
+    }
+
+    fn offset_validation_report(&self) -> OffsetValidationReport {
+        let strategy = type_name_of_val(&*self.offset_strategy)
+            .rsplit("::")
+            .next()
+            .unwrap_or("Unknown")
+            .to_string();
+
+        OffsetValidationReport {
+            strategy,
+            initial_cursor: Some(self.cursor.clone()),
+            findings: Vec::new(),
+        }
+    }
+
+    async fn fast_path_summary(&self) -> FastPathSummary {
+        let sink = self.destination.sink();
+        match sink.support_fast_path().await {
+            Ok(true) => match self
+                .destination
+                .data_dest
+                .fetch_meta(self.destination.name.clone())
+                .await
+            {
+                Ok(meta) => {
+                    if meta.primary_keys.is_empty() {
+                        FastPathSummary {
+                            supported: false,
+                            reason: Some(
+                                "Fast path disabled: destination table has no primary key"
+                                    .to_string(),
+                            ),
+                        }
+                    } else {
+                        FastPathSummary {
+                            supported: true,
+                            reason: None,
+                        }
+                    }
+                }
+                Err(e) => FastPathSummary {
+                    supported: false,
+                    reason: Some(format!("Failed to fetch destination metadata: {e}")),
+                },
+            },
+            Ok(false) => FastPathSummary {
+                supported: false,
+                reason: Some("Destination sink does not support fast path".to_string()),
+            },
+            Err(e) => FastPathSummary {
+                supported: false,
+                reason: Some(format!("Fast path check failed: {e}")),
+            },
+        }
     }
 }
 
