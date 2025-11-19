@@ -81,6 +81,14 @@ pub enum WalEntry {
         part_id: String,
         at: DateTime<Utc>,
     },
+    CircuitBreakerOpen {
+        run_id: String,
+        item_id: String,
+        part_id: String,
+        stage: String,
+        failures: u32,
+        last_error: String,
+    },
 }
 
 impl WalEntry {
@@ -93,6 +101,7 @@ impl WalEntry {
             WalEntry::RunDone { run_id } => run_id,
             WalEntry::ItemStart { run_id, .. } => run_id,
             WalEntry::Heartbeat { run_id, .. } => run_id,
+            WalEntry::CircuitBreakerOpen { run_id, .. } => run_id,
         }
     }
 }

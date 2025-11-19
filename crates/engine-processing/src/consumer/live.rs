@@ -1,7 +1,9 @@
 use crate::{
+    cb::{CircuitBreaker, CircuitBreakerState},
     consumer::{DataConsumer, trigger::TriggerGuard},
     error::ConsumerError,
     item::ItemId,
+    retry::{classify_db_error, classify_sink_error},
 };
 use async_trait::async_trait;
 use connectors::sql::base::metadata::table::TableMetadata;
@@ -13,6 +15,7 @@ use engine_core::{
     },
     context::item::ItemContext,
     metrics::Metrics,
+    retry::{RetryError, RetryPolicy},
     state::{
         StateStore,
         models::{Checkpoint, WalEntry},
@@ -20,7 +23,10 @@ use engine_core::{
 };
 use futures::lock::Mutex;
 use model::{pagination::cursor::Cursor, records::batch::Batch};
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::{mpsc, watch::Receiver};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
@@ -39,6 +45,10 @@ pub struct LiveConsumer {
     // Control
     pub shutdown_rx: Receiver<bool>,
     pub cancel: CancellationToken,
+
+    // Resilience
+    breaker: CircuitBreaker,
+    retry: RetryPolicy,
 }
 
 #[async_trait]
@@ -143,6 +153,8 @@ impl LiveConsumer {
             batch_rx,
             shutdown_rx,
             cancel,
+            breaker: CircuitBreaker::default_db(),
+            retry: RetryPolicy::for_database(),
         }
     }
 
@@ -179,8 +191,8 @@ impl LiveConsumer {
         );
         self.state_store.save_checkpoint(&write_checkpoint).await?;
 
-        // Write data to destination
-        self.write_batch(sink, &meta, &batch).await?;
+        // Write data to destination with retries + breaker protection
+        self.ensure_write(sink, &meta, &batch).await?;
 
         // Post-write state management
         self.state_store
@@ -203,6 +215,30 @@ impl LiveConsumer {
         Ok(())
     }
 
+    /// Wraps the batch write with retries + circuit breaker.
+    async fn ensure_write(
+        &mut self,
+        sink: &dyn Sink,
+        meta: &TableMetadata,
+        batch: &Batch,
+    ) -> Result<(), ConsumerError> {
+        loop {
+            match self.write_batch(sink, meta, batch).await {
+                Ok(()) => {
+                    self.breaker.record_success();
+                    return Ok(());
+                }
+                Err(err) => {
+                    let delay = match self.handle_write_failure(&err).await {
+                        Ok(delay) => delay,
+                        Err(cb_err) => return Err(cb_err),
+                    };
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+    }
+
     /// Handles the logic for writing a batch to the data sink,
     /// preferring the fast path if supported.
     async fn write_batch(
@@ -217,24 +253,44 @@ impl LiveConsumer {
         let write_result = if fast {
             info!("Using fast path for batch write.");
 
-            // COPY -> MERGE
-            sink.write_fast_path(meta, batch)
-                .await
-                .map_err(|e| ConsumerError::WriteBatch {
-                    table: meta.name.clone(),
-                    source: Box::new(e),
-                })
+            let result = self
+                .retry
+                .run(
+                    || async {
+                        // COPY -> MERGE
+                        sink.write_fast_path(meta, batch).await
+                    },
+                    classify_sink_error,
+                )
+                .await;
+            match result {
+                Ok(()) => Ok(()),
+                Err(RetryError::Fatal(err)) => Err(ConsumerError::Sink(err)),
+                Err(RetryError::AttemptsExceeded(err)) => Err(ConsumerError::RetriesExhausted(
+                    format!("fast-path sink retries exhausted: {err}"),
+                )),
+            }
         } else {
             info!("Using standard path for batch write.");
 
-            // Fallback: multi-row UPSERT
-            self.destination
-                .write_batch(meta, &batch.rows)
-                .await
-                .map_err(|e| ConsumerError::WriteBatch {
+            let result = self
+                .retry
+                .run(
+                    || async move { self.destination.write_batch(meta, &batch.rows).await },
+                    classify_db_error,
+                )
+                .await;
+
+            match result {
+                Ok(()) => Ok(()),
+                Err(RetryError::Fatal(err)) => Err(ConsumerError::WriteBatch {
                     table: meta.name.clone(),
-                    source: Box::new(e),
-                })
+                    source: Box::new(err),
+                }),
+                Err(RetryError::AttemptsExceeded(err)) => Err(ConsumerError::RetriesExhausted(
+                    format!("standard sink retries exhausted: {err}"),
+                )),
+            }
         };
 
         if let Err(ref e) = write_result {
@@ -261,6 +317,38 @@ impl LiveConsumer {
         Ok(())
     }
 
+    async fn handle_write_failure(
+        &mut self,
+        err: &ConsumerError,
+    ) -> Result<Duration, ConsumerError> {
+        let stage = "write";
+        match self.breaker.record_failure() {
+            CircuitBreakerState::RetryAfter(delay) => {
+                warn!(
+                    stage = stage,
+                    failures = self.breaker.consecutive_failures(),
+                    retry_in_ms = delay.as_millis(),
+                    error = %err,
+                    "Batch write failed; retrying after backoff"
+                );
+                Ok(delay)
+            }
+            CircuitBreakerState::Open => {
+                error!(
+                    stage = stage,
+                    failures = self.breaker.consecutive_failures(),
+                    error = %err,
+                    "Circuit breaker opened for consumer; aborting item"
+                );
+                self.emit_breaker_wal(stage, err.to_string()).await?;
+                Err(ConsumerError::CircuitBreakerOpen {
+                    stage: stage.to_string(),
+                    last_error: err.to_string(),
+                })
+            }
+        }
+    }
+
     /// Helper to build a `BatchCommit` WAL entry.
     fn wal_batch_commit(&self, batch_id: String) -> WalEntry {
         WalEntry::BatchCommit {
@@ -277,6 +365,20 @@ impl LiveConsumer {
             run_id: self.ids.run_id(),
             item_id: self.ids.item_id(),
         }
+    }
+
+    async fn emit_breaker_wal(&self, stage: &str, last_error: String) -> Result<(), ConsumerError> {
+        self.state_store
+            .append_wal(&WalEntry::CircuitBreakerOpen {
+                run_id: self.ids.run_id(),
+                item_id: self.ids.item_id(),
+                part_id: self.ids.part_id(),
+                stage: stage.to_string(),
+                failures: self.breaker.consecutive_failures(),
+                last_error,
+            })
+            .await
+            .map_err(ConsumerError::Unexpected)
     }
 
     /// Helper to build a new Checkpoint struct.

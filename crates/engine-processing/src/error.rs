@@ -26,6 +26,12 @@ pub enum ConsumerError {
 
     #[error("Sink error: {0}")]
     Sink(#[from] SinkError),
+
+    #[error("Retry attempts exhausted: {0}")]
+    RetriesExhausted(String),
+
+    #[error("Circuit breaker opened for stage '{stage}': {last_error}")]
+    CircuitBreakerOpen { stage: String, last_error: String },
 }
 
 #[derive(Error, Debug)]
@@ -53,4 +59,10 @@ pub enum ProducerError {
 
     #[error("Failed to send batch: {0}")]
     ChannelSend(String),
+
+    #[error("Retry attempts exhausted: {0}")]
+    RetriesExhausted(String),
+
+    #[error("Circuit breaker opened for stage '{stage}': {last_error}")]
+    CircuitBreakerOpen { stage: String, last_error: String },
 }

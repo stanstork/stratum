@@ -1,13 +1,16 @@
 use crate::{
+    cb::{CircuitBreaker, CircuitBreakerState},
     error::ProducerError,
     item::ItemId,
     producer::{DataProducer, pipeline_for_mapping},
+    retry::classify_adapter_error,
     transform::pipeline::TransformPipeline,
 };
 use async_trait::async_trait;
 use engine_core::{
     connectors::source::Source,
     context::item::ItemContext,
+    retry::{RetryError, RetryPolicy},
     state::{
         StateStore,
         models::{Checkpoint, CheckpointSummary, WalEntry},
@@ -27,7 +30,7 @@ use smql_syntax::ast::setting::Settings;
 use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 use tokio::sync::{mpsc, watch::Sender};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 enum FetchOutcome {
     Page(FetchResult),
@@ -57,6 +60,10 @@ pub struct LiveProducer {
     pub source: Source,
     pub batch_tx: mpsc::Sender<Batch>,
     pub batch_size: usize,
+
+    // Resilience
+    breaker: CircuitBreaker,
+    retry: RetryPolicy,
 }
 
 impl LiveProducer {
@@ -96,6 +103,8 @@ impl LiveProducer {
             shutdown_tx,
             batch_tx,
             batch_size: settings.batch_size,
+            breaker: CircuitBreaker::default_db(),
+            retry: RetryPolicy::for_database(),
         }
     }
 
@@ -182,10 +191,31 @@ impl LiveProducer {
     }
 
     async fn next_page(&self, cursor: &Cursor) -> Result<FetchOutcome, ProducerError> {
-        let res = self
-            .source
-            .fetch_data(self.batch_size, cursor.clone())
-            .await?;
+        let source = self.source.clone();
+        let cursor_template = cursor.clone();
+        let batch_size = self.batch_size;
+
+        let fetch_result = self
+            .retry
+            .run(
+                || {
+                    let source = source.clone();
+                    let cursor = cursor_template.clone();
+                    async move { source.fetch_data(batch_size, cursor).await }
+                },
+                classify_adapter_error,
+            )
+            .await;
+
+        let res = match fetch_result {
+            Ok(result) => result,
+            Err(RetryError::Fatal(err)) => return Err(ProducerError::Fetch(err)),
+            Err(RetryError::AttemptsExceeded(err)) => {
+                return Err(ProducerError::RetriesExhausted(format!(
+                    "source fetch retries exhausted: {err}"
+                )));
+            }
+        };
 
         if res.reached_end && res.row_count == 0 {
             info!("No more records to fetch. Terminating producer.");
@@ -202,6 +232,52 @@ impl LiveProducer {
         }
 
         Ok(FetchOutcome::Page(res))
+    }
+
+    async fn handle_fetch_failure(
+        &mut self,
+        err: &ProducerError,
+    ) -> Result<Duration, ProducerError> {
+        let stage = "read";
+        match self.breaker.record_failure() {
+            CircuitBreakerState::RetryAfter(delay) => {
+                warn!(
+                    stage = stage,
+                    failures = self.breaker.consecutive_failures(),
+                    retry_in_ms = delay.as_millis(),
+                    error = %err,
+                    "Source fetch failed; backing off before retry"
+                );
+                Ok(delay)
+            }
+            CircuitBreakerState::Open => {
+                error!(
+                    stage = stage,
+                    failures = self.breaker.consecutive_failures(),
+                    error = %err,
+                    "Circuit breaker opened for producer; aborting item"
+                );
+                self.emit_breaker_wal(stage, err.to_string()).await?;
+                Err(ProducerError::CircuitBreakerOpen {
+                    stage: stage.to_string(),
+                    last_error: err.to_string(),
+                })
+            }
+        }
+    }
+
+    async fn emit_breaker_wal(&self, stage: &str, last_error: String) -> Result<(), ProducerError> {
+        self.state_store
+            .append_wal(&WalEntry::CircuitBreakerOpen {
+                run_id: self.ids.run_id(),
+                item_id: self.ids.item_id(),
+                part_id: self.ids.part_id(),
+                stage: stage.to_string(),
+                failures: self.breaker.consecutive_failures(),
+                last_error,
+            })
+            .await
+            .map_err(|e| ProducerError::StateStore(e.to_string()))
     }
 
     async fn log_batch_start(
@@ -324,13 +400,18 @@ impl DataProducer for LiveProducer {
                 break;
             }
 
-            match self.next_page(&cur).await? {
-                FetchOutcome::End => break,
-                FetchOutcome::Advance(next) => {
+            match self.next_page(&cur).await {
+                Ok(FetchOutcome::End) => {
+                    self.breaker.record_success();
+                    break;
+                }
+                Ok(FetchOutcome::Advance(next)) => {
+                    self.breaker.record_success();
                     cur = next;
                     continue;
                 }
-                FetchOutcome::Page(res) => {
+                Ok(FetchOutcome::Page(res)) => {
+                    self.breaker.record_success();
                     let batch_id = self.batch_id(&cur);
                     info!(
                         batch_no = batches + 1,
@@ -355,6 +436,13 @@ impl DataProducer for LiveProducer {
                         warn!("No next cursor available; terminating producer.");
                         break;
                     }
+                }
+                Err(err) => {
+                    let delay = match self.handle_fetch_failure(&err).await {
+                        Ok(delay) => delay,
+                        Err(cb_err) => return Err(cb_err),
+                    };
+                    tokio::time::sleep(delay).await;
                 }
             }
         }
