@@ -170,11 +170,6 @@ impl LiveConsumer {
         // For now we support only single destination table
         let meta = self.meta[0].clone();
 
-        // Pre-write state management
-        self.state_store
-            .append_wal(&self.wal_batch_begin(batch_id.clone()))
-            .await?;
-
         let write_checkpoint = self.build_checkpoint(
             "write",
             batch_id.clone(),
@@ -264,16 +259,6 @@ impl LiveConsumer {
         }
 
         Ok(())
-    }
-
-    /// Helper to build a `BatchBeginWrite` WAL entry.
-    fn wal_batch_begin(&self, batch_id: String) -> WalEntry {
-        WalEntry::BatchBeginWrite {
-            run_id: self.ids.run_id(),
-            item_id: self.ids.item_id(),
-            part_id: self.ids.part_id(),
-            batch_id,
-        }
     }
 
     /// Helper to build a `BatchCommit` WAL entry.

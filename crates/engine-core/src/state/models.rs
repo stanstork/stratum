@@ -62,12 +62,6 @@ pub enum WalEntry {
         part_id: String,
         batch_id: String,
     },
-    BatchBeginWrite {
-        run_id: String,
-        item_id: String,
-        part_id: String,
-        batch_id: String,
-    },
     BatchCommit {
         run_id: String,
         item_id: String,
@@ -94,7 +88,6 @@ impl WalEntry {
         match self {
             WalEntry::RunStart { run_id, .. } => run_id,
             WalEntry::BatchBegin { run_id, .. } => run_id,
-            WalEntry::BatchBeginWrite { run_id, .. } => run_id,
             WalEntry::BatchCommit { run_id, .. } => run_id,
             WalEntry::ItemDone { run_id, .. } => run_id,
             WalEntry::RunDone { run_id } => run_id,
