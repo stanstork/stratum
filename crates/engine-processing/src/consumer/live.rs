@@ -21,7 +21,7 @@ use engine_core::{
 use futures::lock::Mutex;
 use model::{pagination::cursor::Cursor, records::batch::Batch};
 use std::{sync::Arc, time::Instant};
-use tokio::sync::{mpsc, mpsc::error::TryRecvError, watch::Receiver};
+use tokio::sync::{mpsc, watch::Receiver};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
@@ -217,7 +217,7 @@ impl LiveConsumer {
         batch: &Batch,
     ) -> Result<(), ConsumerError> {
         let fast = sink.support_fast_path().await?;
-        let fast = fast && meta.primary_keys.len() > 0;
+        let fast = fast && !meta.primary_keys.is_empty();
 
         let write_result = if fast {
             info!("Using fast path for batch write.");
@@ -254,13 +254,13 @@ impl LiveConsumer {
         sink: &dyn Sink,
         metrics: &Metrics,
     ) -> Result<(), ConsumerError> {
-        loop {
-            match self.batch_rx.try_recv() {
-                Ok(batch) => {
-                    self.process_batch(batch, sink, metrics).await?;
-                }
-                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
-            }
+        while let Ok(batch) = self.batch_rx.try_recv() {
+            info!(
+                batch_id = %batch.id,
+                rows = batch.rows.len(),
+                "Draining pending batch before shutdown"
+            );
+            self.process_batch(batch, sink, metrics).await?;
         }
 
         Ok(())

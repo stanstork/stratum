@@ -19,7 +19,7 @@ pub async fn spawn(
     info!("Launching workers");
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let (batch_tx, mut batch_rx) = mpsc::channel::<Batch>(64);
+    let (batch_tx, batch_rx) = mpsc::channel::<Batch>(64);
 
     let mut producer = create_producer(
         &ctx,

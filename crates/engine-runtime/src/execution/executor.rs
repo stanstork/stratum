@@ -13,7 +13,10 @@ use engine_config::report::{
 };
 use engine_core::{
     connectors::{destination::Destination, source::Source},
-    context::{global::GlobalContext, item::ItemContext},
+    context::{
+        global::GlobalContext,
+        item::{ItemContext, ItemContextParams},
+    },
     migration_state::MigrationSettings,
     state::{StateStore, models::WalEntry, sled_store::SledStateStore},
 };
@@ -102,17 +105,17 @@ impl MigrationExecutor {
 
         let state = self.global_ctx.state.clone();
         let settings = MigrationSettings::new(self.dry_run);
-        let mut item_ctx = ItemContext::new(
-            run_id.clone(),
-            item_id.clone(),
-            source.clone(),
-            destination.clone(),
-            mapping.clone(),
-            state.clone(),
-            offset_strategy.clone(),
+        let mut item_ctx = ItemContext::new(ItemContextParams {
+            run_id: run_id.clone(),
+            item_id: item_id.clone(),
+            source: source.clone(),
+            destination: destination.clone(),
+            mapping: mapping.clone(),
+            state: state.clone(),
+            offset_strategy: offset_strategy.clone(),
             cursor,
             settings,
-        );
+        });
 
         item_ctx
             .state
@@ -132,7 +135,7 @@ impl MigrationExecutor {
 
         let final_report = dry_run_report.lock().await.clone();
         Ok(SummaryReport {
-            dry_run_report: self.dry_run.then(|| final_report),
+            dry_run_report: self.dry_run.then_some(final_report),
         })
     }
 
@@ -144,9 +147,9 @@ impl MigrationExecutor {
         mi: &MigrateItem,
     ) -> Arc<Mutex<DryRunReport>> {
         Arc::new(Mutex::new(DryRunReport::new(DryRunParams {
-            source: source_endpoint(&source),
-            destination: dest_endpoint(&destination),
-            mapping: &mapping,
+            source: source_endpoint(source),
+            destination: dest_endpoint(destination),
+            mapping,
             config_hash: &self.plan.hash(),
             copy_columns: mi.settings.copy_columns,
         })))

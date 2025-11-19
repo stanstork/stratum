@@ -83,11 +83,7 @@ impl Destination {
         }
     }
 
-    pub async fn write_batch(
-        &self,
-        meta: &TableMetadata,
-        rows: &Vec<RowData>,
-    ) -> Result<(), DbError> {
+    pub async fn write_batch(&self, meta: &TableMetadata, rows: &[RowData]) -> Result<(), DbError> {
         match &self.data_dest {
             DataDestination::Database(db) => db.data.lock().await.write_batch(meta, rows).await,
         }

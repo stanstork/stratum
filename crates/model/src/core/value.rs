@@ -206,7 +206,7 @@ impl Value {
             Value::Int32(v) => Some(*v as i128),
             Value::Int(v) => Some(*v as i128),
             Value::Decimal(v) => v.to_i128(),
-            Value::Uint(v) => i128::try_from(*v).ok(),
+            Value::Uint(v) => Some(i128::from(*v)),
             Value::Usize(v) => i128::try_from(*v).ok(),
             _ => None,
         }

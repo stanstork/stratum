@@ -7,7 +7,10 @@ mod tests {
     use chrono::Utc;
     use engine_config::report::dry_run::DryRunReport;
     use engine_core::{
-        context::{global::GlobalContext, item::ItemContext},
+        context::{
+            global::GlobalContext,
+            item::{ItemContext, ItemContextParams},
+        },
         migration_state::MigrationSettings,
         state::{
             StateStore,
@@ -372,17 +375,17 @@ mod tests {
                 .await
                 .expect("create destination");
 
-        let mut item_ctx = ItemContext::new(
-            RUN_ID.to_string(),
-            ITEM_ID.to_string(),
+        let mut item_ctx = ItemContext::new(ItemContextParams {
+            run_id: RUN_ID.to_string(),
+            item_id: ITEM_ID.to_string(),
             source,
             destination,
-            mapping.clone(),
-            global_ctx.state.clone(),
+            mapping: mapping.clone(),
+            state: global_ctx.state.clone(),
             offset_strategy,
             cursor,
-            MigrationSettings::new(false),
-        );
+            settings: MigrationSettings::new(false),
+        });
 
         let dry_run_report = Arc::new(Mutex::new(DryRunReport::default()));
         settings::apply_all(&mut item_ctx, &migrate_item.settings, &dry_run_report)

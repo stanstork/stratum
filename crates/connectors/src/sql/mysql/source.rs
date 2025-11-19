@@ -212,9 +212,9 @@ impl DbDataSource for MySqlDataSource {
 
             let mut joins = Vec::new();
 
-            if let Some(primary_name) = primary_table_name.as_ref() {
-                if !table.eq_ignore_ascii_case(primary_name) {
-                    if let Some(path) =
+            if let Some(primary_name) = primary_table_name.as_ref()
+                && !table.eq_ignore_ascii_case(primary_name)
+                    && let Some(path) =
                         find_join_path(&self.related_meta, table.as_str(), primary_name.as_str())
                     {
                         let join_path: Vec<String> = path.into_iter().skip(1).collect();
@@ -227,8 +227,6 @@ impl DbDataSource for MySqlDataSource {
                             ));
                         }
                     }
-                }
-            }
 
             if let Some(extra_joins) = self.cascade_joins.get(table) {
                 for clause in extra_joins {

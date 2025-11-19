@@ -258,13 +258,10 @@ impl LiveProducer {
         next: Cursor,
     ) -> Result<(), ProducerError> {
         let manifest = manifest_for(&records);
-        let rows = records
-            .into_iter()
-            .filter_map(|r| match r {
-                Record::RowData(rd) => Some(rd),
-                _ => None,
-            })
-            .collect::<Vec<RowData>>();
+        let mut rows = Vec::with_capacity(records.len());
+        for record in records {
+            rows.push(Record::to_row_data(record));
+        }
 
         let batch = Batch {
             id: batch_id,

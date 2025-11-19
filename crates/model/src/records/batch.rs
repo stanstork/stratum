@@ -19,7 +19,7 @@ pub struct Manifest {
     pub checksum_xxh3: u64, // fast rolling checksum over canonicalized row
 }
 
-pub fn manifest_for(rows: &Vec<Record>) -> Manifest {
+pub fn manifest_for(rows: &[Record]) -> Manifest {
     use xxhash_rust::xxh3::xxh3_64_with_seed;
     let mut h: u64 = 0;
     for r in rows.iter() {

@@ -127,7 +127,7 @@ impl DbRow<'_> {
     pub fn try_get_u32(&self, name: &str) -> Option<u32> {
         match self {
             DbRow::MySqlRow(row) => row.get_opt::<u32, _>(name).and_then(|res| res.ok()),
-            DbRow::PostgresRow(row) => row.try_get::<_, u32>(name).map(|v| v as u32).ok(),
+            DbRow::PostgresRow(row) => row.try_get::<_, u32>(name).ok(),
         }
     }
 

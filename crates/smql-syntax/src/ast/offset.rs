@@ -17,18 +17,15 @@ pub struct OffsetPair {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub enum OffsetKey {
+    #[default]
     Strategy,
     Cursor,
     TieBreaker,
     TimeZone,
 }
 
-impl Default for OffsetKey {
-    fn default() -> Self {
-        OffsetKey::Strategy
-    }
-}
 
 impl Default for Offset {
     fn default() -> Self {
@@ -71,12 +68,9 @@ impl StatementParser for Offset {
         let mut pairs = vec![];
 
         for inner_pair in pair.into_inner() {
-            match inner_pair.as_rule() {
-                Rule::offset_pair => {
-                    let offset_pair = OffsetPair::parse(inner_pair);
-                    pairs.push(offset_pair);
-                }
-                _ => {}
+            if inner_pair.as_rule() == Rule::offset_pair {
+                let offset_pair = OffsetPair::parse(inner_pair);
+                pairs.push(offset_pair);
             }
         }
 

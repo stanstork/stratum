@@ -65,7 +65,7 @@ impl<'a> QueryGenerator<'a> {
         self.render_ast(select_ast)
     }
 
-    pub fn insert_batch(&self, meta: &TableMetadata, rows: &Vec<RowData>) -> (String, Vec<Value>) {
+    pub fn insert_batch(&self, meta: &TableMetadata, rows: &[RowData]) -> (String, Vec<Value>) {
         if rows.is_empty() {
             return (String::new(), Vec::new());
         }

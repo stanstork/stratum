@@ -7,6 +7,12 @@ use model::core::{
 
 pub struct PgCopyValueEncoder;
 
+impl Default for PgCopyValueEncoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PgCopyValueEncoder {
     pub fn new() -> Self {
         Self

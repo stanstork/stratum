@@ -1,6 +1,9 @@
 use crate::{
     error::ProducerError,
-    producer::{live::LiveProducer, validation::ValidationProducer},
+    producer::{
+        live::LiveProducer,
+        validation::{ValidationProducer, ValidationProducerParams},
+    },
     transform::{
         computed::ComputedTransform,
         mapping::{FieldMapper, TableMapper},
@@ -66,16 +69,16 @@ pub async fn create_producer(
 
     if is_dry_run {
         let pipeline = pipeline_for_mapping(&mapping);
-        let validation_prod = ValidationProducer::new(
+        let validation_prod = ValidationProducer::new(ValidationProducerParams {
             source,
             destination,
             pipeline,
             mapping,
-            settings.clone(),
+            settings: settings.clone(),
             offset_strategy,
             cursor,
-            report.clone(),
-        );
+            report: report.clone(),
+        });
         return Box::new(validation_prod);
     }
 

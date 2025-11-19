@@ -11,7 +11,7 @@ impl PgDataType for DataType {
     fn parse_from_row(row: &PgRow) -> DataType {
         let data_type_str: String = row.try_get("data_type").ok().unwrap_or_default();
         DataType::from_postgres_type(data_type_str.as_str())
-            .unwrap_or_else(|_| DataType::Custom(data_type_str))
+            .unwrap_or(DataType::Custom(data_type_str))
     }
 
     fn as_pg_type_info(col: &ColumnMetadata) -> (DataType, Option<usize>) {

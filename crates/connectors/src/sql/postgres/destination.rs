@@ -43,7 +43,7 @@ impl PgDestination {
 impl DbDataDestination for PgDestination {
     type Error = DbError;
 
-    async fn write_batch(&self, meta: &TableMetadata, rows: &Vec<RowData>) -> Result<(), DbError> {
+    async fn write_batch(&self, meta: &TableMetadata, rows: &[RowData]) -> Result<(), DbError> {
         if rows.is_empty() {
             return Ok(());
         }

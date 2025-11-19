@@ -63,17 +63,31 @@ pub struct ValidationProducer {
     cursor: Cursor,
 }
 
+/// Bundles construction arguments for `ValidationProducer`.
+pub struct ValidationProducerParams {
+    pub source: Source,
+    pub destination: Destination,
+    pub pipeline: TransformPipeline,
+    pub mapping: EntityMapping,
+    pub settings: Settings,
+    pub offset_strategy: Arc<dyn OffsetStrategy>,
+    pub cursor: Cursor,
+    pub report: Arc<Mutex<DryRunReport>>,
+}
+
 impl ValidationProducer {
-    pub fn new(
-        source: Source,
-        destination: Destination,
-        pipeline: TransformPipeline,
-        mapping: EntityMapping,
-        settings: Settings,
-        offset_strategy: Arc<dyn OffsetStrategy>,
-        cursor: Cursor,
-        report: Arc<Mutex<DryRunReport>>,
-    ) -> Self {
+    pub fn new(params: ValidationProducerParams) -> Self {
+        let ValidationProducerParams {
+            source,
+            destination,
+            pipeline,
+            mapping,
+            settings,
+            offset_strategy,
+            cursor,
+            report,
+        } = params;
+
         ValidationProducer {
             report,
             source,
@@ -331,19 +345,17 @@ impl ValidationProducer {
                         let input_clone = input_row.clone();
                         let record = Record::RowData(input_row);
                         let transformed = self.pipeline.apply(&record);
-                        let mut output_row_opt = transformed.to_row_data().cloned();
+                        let mut output_row = Record::to_row_data(transformed);
 
-                        if let Some(ref mut output_row) = output_row_opt {
-                            if output_row.entity.is_empty() {
-                                output_row.entity = input_clone.entity.clone();
-                            }
-                            self.prune_row(output_row, &mut prune_findings, &mut omitted_columns);
-                            validator.validate(output_row);
+                        if output_row.entity.is_empty() {
+                            output_row.entity = input_clone.entity.clone();
                         }
+                        self.prune_row(&mut output_row, &mut prune_findings, &mut omitted_columns);
+                        validator.validate(&output_row);
 
                         TransformationRecord {
                             input: input_clone,
-                            output: output_row_opt,
+                            output: Some(output_row),
                             error: None,
                             warnings: None,
                         }

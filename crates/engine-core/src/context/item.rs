@@ -33,19 +33,34 @@ pub struct ItemContext {
     pub settings: Arc<Mutex<MigrationSettings>>,
 }
 
+/// Bundles the arguments required to create an `ItemContext`.
+pub struct ItemContextParams {
+    pub run_id: String,
+    pub item_id: String,
+    pub source: Source,
+    pub destination: Destination,
+    pub mapping: EntityMapping,
+    pub state: Arc<SledStateStore>,
+    pub offset_strategy: Arc<dyn OffsetStrategy>,
+    pub cursor: Cursor,
+    pub settings: MigrationSettings,
+}
+
 impl ItemContext {
     /// Initializes a new `ItemContext` with the provided source, destination, and mapping.
-    pub fn new(
-        run_id: String,
-        item_id: String,
-        source: Source,
-        destination: Destination,
-        mapping: EntityMapping,
-        state: Arc<SledStateStore>,
-        offset_strategy: Arc<dyn OffsetStrategy>,
-        cursor: Cursor,
-        settings: MigrationSettings,
-    ) -> Self {
+    pub fn new(params: ItemContextParams) -> Self {
+        let ItemContextParams {
+            run_id,
+            item_id,
+            source,
+            destination,
+            mapping,
+            state,
+            offset_strategy,
+            cursor,
+            settings,
+        } = params;
+
         ItemContext {
             run_id,
             item_id,

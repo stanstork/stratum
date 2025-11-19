@@ -4,6 +4,12 @@ use std::fmt::Write;
 
 pub struct MySqlCopyValueEncoder;
 
+impl Default for MySqlCopyValueEncoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MySqlCopyValueEncoder {
     pub fn new() -> Self {
         Self

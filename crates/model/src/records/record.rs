@@ -24,9 +24,9 @@ impl Record {
         }
     }
 
-    pub fn to_row_data(&self) -> Option<&RowData> {
-        match self {
-            Record::RowData(data) => Some(data),
+    pub fn to_row_data(record: Record) -> RowData {
+        match record {
+            Record::RowData(data) => data,
         }
     }
 

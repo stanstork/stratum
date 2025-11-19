@@ -35,8 +35,10 @@ impl PgParam {
             Value::Null => PgParam(Box::new(Option::<std::string::String>::None)),
         }
     }
+}
 
-    pub fn as_ref(&self) -> &(dyn ToSql + Sync) {
+impl AsRef<dyn ToSql + Sync> for PgParam {
+    fn as_ref(&self) -> &(dyn ToSql + Sync + 'static) {
         &*self.0
     }
 }
