@@ -42,9 +42,13 @@ mod tests {
 
     const DEST_TABLE: &str = "actor_engine_replay";
     const DEST_TABLE_RESUME: &str = "actor_engine_resume";
+    const DEST_TABLE_TRANSIENT: &str = "actor_retry_transient";
+    const DEST_TABLE_BREAKER: &str = "actor_breaker_trip";
     const RUN_ID: &str = "engine-restart-run";
     const ITEM_ID: &str = "actor-item";
     const PART_ID: &str = "part-0";
+    const FN_TRANSIENT: &str = "fn_actor_retry_fail_once";
+    const FN_BREAKER: &str = "fn_actor_breaker_fail";
 
     struct EngineRunResult {
         producer: Result<usize, ProducerError>,
@@ -352,6 +356,177 @@ mod tests {
         assert_row_count("actor", "sakila", DEST_TABLE_RESUME).await;
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn transient_write_failure_retries_and_succeeds() {
+        reset_postgres_schema().await;
+
+        create_transient_failure_table(DEST_TABLE_TRANSIENT, FN_TRANSIENT).await;
+
+        let smql = format!(
+            r#"
+            CONNECTIONS(
+                SOURCE(MYSQL, "{mysql_url}"),
+                DESTINATION(POSTGRES, "{pg_url}")
+            );
+            MIGRATE(
+                SOURCE(TABLE, actor) -> DEST(TABLE, {dest_table}) [
+                    SETTINGS(BATCH_SIZE=16)
+                ]
+            );
+        "#,
+            mysql_url = TEST_MYSQL_URL_SAKILA,
+            pg_url = TEST_PG_URL,
+            dest_table = DEST_TABLE_TRANSIENT,
+        );
+
+        let plan = parse(&smql).expect("parse plan");
+        let migrate_item = plan
+            .migration
+            .migrate_items
+            .first()
+            .expect("expected migrate item");
+        let mapping = EntityMapping::new(migrate_item);
+        let offset_strategy = OffsetStrategyFactory::from_smql(&migrate_item.offset);
+        let cursor = Cursor::None;
+
+        let state_dir = tempdir().expect("state dir");
+        let state_store = Arc::new(SledStateStore::open(state_dir.path()).expect("open sled"));
+        let global_ctx = Arc::new(
+            GlobalContext::new(&plan, state_store.clone())
+                .await
+                .expect("global ctx"),
+        );
+
+        state_store
+            .append_wal(&WalEntry::RunStart {
+                run_id: RUN_ID.to_string(),
+                plan_hash: plan.hash(),
+            })
+            .await
+            .expect("run start wal");
+        state_store
+            .append_wal(&WalEntry::ItemStart {
+                run_id: RUN_ID.to_string(),
+                item_id: ITEM_ID.to_string(),
+            })
+            .await
+            .expect("item start wal");
+
+        let (ctx, report) = build_item_context(
+            &global_ctx,
+            &plan,
+            migrate_item,
+            &mapping,
+            offset_strategy,
+            cursor,
+        )
+        .await;
+
+        let result = run_engine_once(ctx, migrate_item.settings.clone(), report).await;
+        assert!(
+            result.consumer.is_ok(),
+            "transient failure should be retried and eventually succeed"
+        );
+
+        let wal_entries = state_store.iter_wal(RUN_ID).await.expect("wal entries");
+        assert!(
+            wal_entries
+                .iter()
+                .all(|entry| !matches!(entry, WalEntry::CircuitBreakerOpen { .. })),
+            "transient errors must not open the breaker"
+        );
+
+        assert_row_count("actor", "sakila", DEST_TABLE_TRANSIENT).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn permanent_write_failure_trips_circuit_breaker() {
+        reset_postgres_schema().await;
+
+        create_permanent_failure_table(DEST_TABLE_BREAKER, FN_BREAKER).await;
+
+        let smql = format!(
+            r#"
+            CONNECTIONS(
+                SOURCE(MYSQL, "{mysql_url}"),
+                DESTINATION(POSTGRES, "{pg_url}")
+            );
+            MIGRATE(
+                SOURCE(TABLE, actor) -> DEST(TABLE, {dest_table}) [
+                    SETTINGS(BATCH_SIZE=8)
+                ]
+            );
+        "#,
+            mysql_url = TEST_MYSQL_URL_SAKILA,
+            pg_url = TEST_PG_URL,
+            dest_table = DEST_TABLE_BREAKER,
+        );
+
+        let plan = parse(&smql).expect("parse plan");
+        let migrate_item = plan
+            .migration
+            .migrate_items
+            .first()
+            .expect("expected migrate item");
+        let mapping = EntityMapping::new(migrate_item);
+        let offset_strategy = OffsetStrategyFactory::from_smql(&migrate_item.offset);
+        let cursor = Cursor::None;
+
+        let state_dir = tempdir().expect("state dir");
+        let state_store = Arc::new(SledStateStore::open(state_dir.path()).expect("open sled"));
+        let global_ctx = Arc::new(
+            GlobalContext::new(&plan, state_store.clone())
+                .await
+                .expect("global ctx"),
+        );
+
+        state_store
+            .append_wal(&WalEntry::RunStart {
+                run_id: RUN_ID.to_string(),
+                plan_hash: plan.hash(),
+            })
+            .await
+            .expect("run start wal");
+        state_store
+            .append_wal(&WalEntry::ItemStart {
+                run_id: RUN_ID.to_string(),
+                item_id: ITEM_ID.to_string(),
+            })
+            .await
+            .expect("item start wal");
+
+        let (ctx, report) = build_item_context(
+            &global_ctx,
+            &plan,
+            migrate_item,
+            &mapping,
+            offset_strategy,
+            cursor,
+        )
+        .await;
+
+        let result = run_engine_once(ctx, migrate_item.settings.clone(), report).await;
+        assert!(
+            matches!(
+                result.consumer,
+                Err(ConsumerError::CircuitBreakerOpen { .. })
+            ),
+            "permanent failures should open the breaker"
+        );
+
+        let wal_entries = state_store.iter_wal(RUN_ID).await.expect("wal entries");
+        assert!(
+            wal_entries.iter().any(|entry| matches!(
+                entry,
+                WalEntry::CircuitBreakerOpen { stage, .. } if stage == "write"
+            )),
+            "WAL must record when the consumer breaker opens"
+        );
+
+        let rows = get_row_count(DEST_TABLE_BREAKER, "sakila", DbType::Postgres).await;
+        assert_eq!(rows, 0, "no rows should be written after breaker opens");
+    }
+
     async fn build_item_context(
         global_ctx: &Arc<GlobalContext>,
         plan: &MigrationPlan,
@@ -450,5 +625,73 @@ mod tests {
         h.update(part_id.as_bytes());
         h.update(format!("{cursor:?}").as_bytes());
         h.finalize().to_hex().to_string()
+    }
+
+    async fn create_transient_failure_table(table: &str, function_name: &str) {
+        let seq_name = format!("{table}_fail_seq");
+
+        execute(&format!(
+            r#"
+            CREATE SEQUENCE {seq_name} START 1;
+
+            CREATE OR REPLACE FUNCTION {function_name}() RETURNS boolean AS $$
+            DECLARE attempt BIGINT;
+            BEGIN
+                attempt := nextval('{seq_name}');
+                IF attempt = 1 THEN
+                    RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'simulated serialization failure';
+                END IF;
+                RETURN true;
+            END;
+            $$ LANGUAGE plpgsql;
+        "#,
+            function_name = function_name,
+            seq_name = seq_name,
+        ))
+        .await;
+
+        execute(&format!(
+            r#"
+            CREATE TABLE {table} (
+                actor_id SMALLINT,
+                first_name VARCHAR(45) NOT NULL,
+                last_name VARCHAR(45) NOT NULL,
+                last_update TIMESTAMP NOT NULL,
+                CONSTRAINT {table}_fail_guard CHECK ({function_name}())
+            );
+        "#,
+            table = table,
+            function_name = function_name,
+        ))
+        .await;
+    }
+
+    async fn create_permanent_failure_table(table: &str, function_name: &str) {
+        execute(&format!(
+            r#"
+            CREATE OR REPLACE FUNCTION {function_name}() RETURNS boolean AS $$
+            BEGIN
+                RAISE EXCEPTION USING ERRCODE = '23505', MESSAGE = 'simulated permanent failure';
+            END;
+            $$ LANGUAGE plpgsql;
+        "#,
+            function_name = function_name,
+        ))
+        .await;
+
+        execute(&format!(
+            r#"
+            CREATE TABLE {table} (
+                actor_id SMALLINT,
+                first_name VARCHAR(45) NOT NULL,
+                last_name VARCHAR(45) NOT NULL,
+                last_update TIMESTAMP NOT NULL,
+                CONSTRAINT {table}_fail_guard CHECK ({function_name}())
+            );
+        "#,
+            table = table,
+            function_name = function_name,
+        ))
+        .await;
     }
 }

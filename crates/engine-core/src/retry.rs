@@ -101,3 +101,73 @@ impl RetryPolicy {
         Duration::from_millis(capped as u64)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    #[derive(Debug, Clone)]
+    struct TestError(&'static str);
+
+    #[tokio::test]
+    async fn retries_transient_failure_and_succeeds() {
+        let policy = RetryPolicy::new(5, Duration::from_millis(0), Duration::from_millis(0));
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let op_attempts = attempts.clone();
+
+        let result = policy
+            .run(
+                move || {
+                    let op_attempts = op_attempts.clone();
+                    async move {
+                        let attempt = op_attempts.fetch_add(1, Ordering::SeqCst);
+                        if attempt < 2 {
+                            Err(TestError("transient"))
+                        } else {
+                            Ok::<&'static str, TestError>("done")
+                        }
+                    }
+                },
+                |err: &TestError| match err.0 {
+                    "transient" => RetryDisposition::Retry,
+                    _ => RetryDisposition::Stop,
+                },
+            )
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn permanent_failure_exhausts_retries() {
+        let policy = RetryPolicy::new(3, Duration::from_millis(0), Duration::from_millis(0));
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let op_attempts = attempts.clone();
+
+        let result = policy
+            .run(
+                move || {
+                    let op_attempts = op_attempts.clone();
+                    async move {
+                        op_attempts.fetch_add(1, Ordering::SeqCst);
+                        Err::<(), TestError>(TestError("permanent"))
+                    }
+                },
+                |_err: &TestError| RetryDisposition::Retry,
+            )
+            .await;
+
+        match result {
+            Err(RetryError::AttemptsExceeded(TestError(msg))) => {
+                assert_eq!(msg, "permanent");
+            }
+            other => panic!("unexpected result: {other:?}"),
+        }
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    }
+}

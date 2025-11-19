@@ -63,3 +63,42 @@ impl CircuitBreaker {
         Duration::from_millis(capped as u64)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transient_failure_then_success_resets_breaker() {
+        let mut breaker = CircuitBreaker::new(3, Duration::from_millis(1), Duration::from_secs(1));
+
+        match breaker.record_failure() {
+            CircuitBreakerState::RetryAfter(delay) => assert!(delay > Duration::from_millis(0)),
+            CircuitBreakerState::Open => panic!("breaker should not open on first failure"),
+        }
+
+        breaker.record_success();
+
+        match breaker.record_failure() {
+            CircuitBreakerState::RetryAfter(_) => {}
+            CircuitBreakerState::Open => panic!("breaker should reset after success"),
+        }
+    }
+
+    #[test]
+    fn permanent_failure_opens_breaker_and_stays_open() {
+        let mut breaker = CircuitBreaker::new(2, Duration::from_millis(1), Duration::from_secs(1));
+        assert!(matches!(
+            breaker.record_failure(),
+            CircuitBreakerState::RetryAfter(_)
+        ));
+
+        let state = breaker.record_failure();
+        assert!(matches!(state, CircuitBreakerState::Open));
+        assert_eq!(breaker.consecutive_failures(), 2);
+
+        let next_state = breaker.record_failure();
+        assert!(matches!(next_state, CircuitBreakerState::Open));
+        assert_eq!(breaker.consecutive_failures(), 3);
+    }
+}
