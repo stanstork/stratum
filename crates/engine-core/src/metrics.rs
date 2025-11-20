@@ -33,7 +33,7 @@ impl Metrics {
         }
     }
 
-    pub async fn increment_records(&self, count: u64) {
+    pub fn increment_records(&self, count: u64) {
         self.inner
             .records_processed
             .fetch_add(count, Ordering::Relaxed);

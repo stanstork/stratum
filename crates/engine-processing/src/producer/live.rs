@@ -294,8 +294,16 @@ impl LiveProducer {
         batch_id: &str,
         current: &Cursor,
         next: &Cursor,
-        row_count: usize,
+        _row_count: usize,
     ) -> Result<(), ProducerError> {
+        let rows_done = self
+            .state_store
+            .load_checkpoint(&self.ids.run_id(), &self.ids.item_id(), &self.ids.part_id())
+            .await
+            .map_err(|e| ProducerError::StateStore(e.to_string()))?
+            .map(|cp| cp.rows_done)
+            .unwrap_or(0);
+
         self.state_store
             .append_wal(&WalEntry::BatchBegin {
                 run_id: self.ids.run_id(),
@@ -315,7 +323,7 @@ impl LiveProducer {
                 src_offset: current.clone(),
                 pending_offset: Some(next.clone()),
                 batch_id: batch_id.to_string(),
-                rows_done: row_count as u64,
+                rows_done,
                 updated_at: chrono::Utc::now(),
             })
             .await

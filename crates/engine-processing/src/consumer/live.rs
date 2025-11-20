@@ -54,6 +54,7 @@ pub struct LiveConsumer {
     breaker: CircuitBreaker,
     retry: RetryPolicy,
     metrics: Metrics,
+    rows_done: u64,
 }
 
 #[async_trait]
@@ -155,6 +156,7 @@ impl LiveConsumer {
                 c.destination.clone(),
             )
         };
+        let state_store: Arc<dyn StateStore> = state_store;
 
         println!("Run ID: {}", run_id);
         println!("Item ID: {}", item_id);
@@ -165,6 +167,7 @@ impl LiveConsumer {
 
         // TODO: Part ID is hardcoded for now
         let part_id = "part-0".to_string();
+        let rows_done = Self::init_rows_done(&state_store, &run_id, &item_id, &part_id).await;
 
         Self {
             ids: ItemId::new(run_id, item_id, part_id),
@@ -178,6 +181,7 @@ impl LiveConsumer {
             breaker: CircuitBreaker::default_db(),
             retry: RetryPolicy::for_database(),
             metrics,
+            rows_done,
         }
     }
 
@@ -188,6 +192,7 @@ impl LiveConsumer {
         let batch_rows = batch.rows.len();
         let next_cursor = batch.next.clone();
         let start_cursor = batch.cursor.clone();
+        let cur_rows_done = self.rows_done;
 
         info!(batch_id = %batch_id, rows = batch_rows, "Processing received batch");
 
@@ -205,7 +210,7 @@ impl LiveConsumer {
             batch_id.clone(),
             start_cursor,
             Some(next_cursor.clone()),
-            batch_rows as u64,
+            cur_rows_done,
         );
         self.state_store.save_checkpoint(&write_checkpoint).await?;
 
@@ -217,11 +222,13 @@ impl LiveConsumer {
             .append_wal(&self.wal_batch_commit(batch_id.clone()))
             .await?;
 
+        let committed_total = cur_rows_done + batch_rows as u64;
         let committed_checkpoint =
-            self.build_checkpoint("committed", batch_id, next_cursor, None, batch_rows as u64);
+            self.build_checkpoint("committed", batch_id, next_cursor, None, committed_total);
         self.state_store
             .save_checkpoint(&committed_checkpoint)
             .await?;
+        self.rows_done = committed_total;
 
         // Metrics
         self.metrics.increment_batches(1);
@@ -415,6 +422,28 @@ impl LiveConsumer {
             batch_id,
             rows_done,
             updated_at: chrono::Utc::now(),
+        }
+    }
+
+    async fn init_rows_done(
+        state_store: &Arc<dyn StateStore>,
+        run_id: &str,
+        item_id: &str,
+        part_id: &str,
+    ) -> u64 {
+        match state_store.load_checkpoint(run_id, item_id, part_id).await {
+            Ok(Some(cp)) => cp.rows_done,
+            Ok(None) => 0,
+            Err(err) => {
+                warn!(
+                    run_id = run_id,
+                    item_id = item_id,
+                    part_id = part_id,
+                    error = %err,
+                    "Failed to load checkpoint for initial rows_done; defaulting to 0"
+                );
+                0
+            }
         }
     }
 
