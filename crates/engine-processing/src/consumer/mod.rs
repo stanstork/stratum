@@ -3,7 +3,7 @@ use crate::{
     error::ConsumerError,
 };
 use async_trait::async_trait;
-use engine_core::context::item::ItemContext;
+use engine_core::{context::item::ItemContext, metrics::Metrics};
 use futures::lock::Mutex;
 use model::records::batch::Batch;
 use std::sync::Arc;
@@ -25,6 +25,7 @@ pub async fn create_consumer(
     batch_rx: mpsc::Receiver<Batch>,
     shutdown_rx: Receiver<bool>,
     cancel: CancellationToken,
+    metrics: Metrics,
 ) -> Box<dyn DataConsumer + Send> {
     let ctx_guard = ctx.lock().await;
     let settings_guard = ctx_guard.settings.lock().await;
@@ -36,6 +37,6 @@ pub async fn create_consumer(
     if is_dry_run {
         Box::new(ValidationConsumer::new())
     } else {
-        Box::new(LiveConsumer::new(ctx, batch_rx, shutdown_rx, cancel).await)
+        Box::new(LiveConsumer::new(ctx, batch_rx, shutdown_rx, cancel, metrics).await)
     }
 }

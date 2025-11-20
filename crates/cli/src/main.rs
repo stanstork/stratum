@@ -4,9 +4,13 @@ use crate::{
 };
 use clap::Parser;
 use commands::Commands;
+use engine_core::{
+    progress::{ProgressService, ProgressStatus},
+    state::{StateStore, sled_store::SledStateStore},
+};
 use engine_runtime::execution::{executor, source::load_metadata};
 use planner::plan::MigrationPlan;
-use std::str::FromStr;
+use std::{str::FromStr, sync::Arc};
 use tracing::{Level, info};
 
 pub mod commands;
@@ -90,6 +94,9 @@ async fn main() -> Result<(), CliError> {
                 _ => return Err(CliError::UnsupportedConnectionKind),
             }
         }
+        Commands::Progress { run, item, json } => {
+            show_progress(&run, &item, json).await?;
+        }
     }
 
     Ok(())
@@ -106,4 +113,54 @@ async fn load_migration_plan(path: &str, from_ast: bool) -> Result<MigrationPlan
         let plan = planner::plan::parse(&source)?;
         Ok(plan)
     }
+}
+
+fn open_state_store() -> Result<Arc<dyn StateStore>, CliError> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| CliError::Unexpected("Could not determine home directory".into()))?;
+    let path = home.join(".stratum/state");
+    let store = SledStateStore::open(&path).map_err(|err| {
+        CliError::Unexpected(format!(
+            "Failed to open state store at {}: {err}",
+            path.display()
+        ))
+    })?;
+    Ok(Arc::new(store))
+}
+
+async fn show_progress(run: &str, item: &str, as_json: bool) -> Result<(), CliError> {
+    let store = open_state_store()?;
+    let service = ProgressService::new(store);
+
+    let status = service
+        .item_status(run, item)
+        .await
+        .map_err(|err| CliError::Unexpected(format!("Failed to load progress: {err}")))?;
+
+    if as_json {
+        let json =
+            serde_json::to_string_pretty(&status).map_err(|err| CliError::JsonSerialize(err))?;
+        println!("{json}");
+    } else {
+        print_progress_table(run, item, &status);
+    }
+
+    Ok(())
+}
+
+fn print_progress_table(run: &str, item: &str, status: &ProgressStatus) {
+    println!("Progress for run '{run}' / item '{item}':");
+    println!("-----------------------------");
+    println!("{:<16} {}", "Stage", status.stage);
+    println!("{:<16} {}", "Rows done", status.rows_done);
+    println!(
+        "{:<16} {}",
+        "Last cursor",
+        format!("{:?}", status.last_cursor)
+    );
+    let heartbeat = status
+        .last_heartbeat
+        .map(|ts| ts.to_rfc3339())
+        .unwrap_or_else(|| "n/a".to_string());
+    println!("{:<16} {}", "Last heartbeat", heartbeat);
 }

@@ -27,7 +27,10 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::{mpsc, watch::Receiver};
+use tokio::{
+    sync::{mpsc, watch::Receiver},
+    task::JoinHandle,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
@@ -45,10 +48,12 @@ pub struct LiveConsumer {
     // Control
     pub shutdown_rx: Receiver<bool>,
     pub cancel: CancellationToken,
+    pub heartbeat_interval: Duration,
 
     // Resilience
     breaker: CircuitBreaker,
     retry: RetryPolicy,
+    metrics: Metrics,
 }
 
 #[async_trait]
@@ -58,66 +63,78 @@ impl DataConsumer for LiveConsumer {
     async fn run(&mut self) -> Result<(), ConsumerError> {
         let start_time = Instant::now();
         let sink = self.destination.sink();
-        let metrics = Metrics::new();
+        let (heartbeat_shutdown, heartbeat_handle) = self.spawn_heartbeat();
 
-        // Guard to ensure triggers are restored on exit
-        // TODO: Handle constraints more gracefully
-        let _trigger_guard = TriggerGuard::new(&self.destination, &self.meta, false).await?;
+        let result = async {
+            // Guard to ensure triggers are restored on exit
+            // TODO: Handle constraints more gracefully
+            let _trigger_guard = TriggerGuard::new(&self.destination, &self.meta, false).await?;
 
-        info!("Consumer starting. Listening for batches...");
+            info!("Consumer starting. Listening for batches...");
 
-        loop {
-            tokio::select! {
-                biased;
+            loop {
+                tokio::select! {
+                    biased;
 
-                _ = self.cancel.cancelled() => {
-                    info!("Cancellation requested. Exiting consumer loop.");
-                    break;
-                }
+                    _ = self.cancel.cancelled() => {
+                        info!("Cancellation requested. Exiting consumer loop.");
+                        break;
+                    }
 
-                batch = self.batch_rx.recv() => {
-                    match batch {
-                        Some(batch) => {
-                            // Process the batch, propagating any errors to stop the consumer
-                            self.process_batch(batch, sink.as_ref(), &metrics).await?;
-                        }
-                        None => {
-                            info!("Batch channel closed. Exiting consumer loop.");
-                            break;
+                    batch = self.batch_rx.recv() => {
+                        match batch {
+                            Some(batch) => {
+                                // Process the batch, propagating any errors to stop the consumer
+                                self.process_batch(batch, sink.as_ref()).await?;
+                            }
+                            None => {
+                                info!("Batch channel closed. Exiting consumer loop.");
+                                break;
+                            }
                         }
                     }
-                }
 
-                changed = self.shutdown_rx.changed() => {
-                    match changed {
-                        Ok(_) if *self.shutdown_rx.borrow() => {
-                            info!("Shutdown signal received. Draining pending batches before exit.");
-                            self
-                                .drain_pending_batches(sink.as_ref(), &metrics)
-                                .await?;
-                            break;
-                        }
-                        Ok(_) => {}
-                        Err(_) => {
-                            info!("Shutdown channel closed. Exiting consumer loop.");
-                            break;
+                    changed = self.shutdown_rx.changed() => {
+                        match changed {
+                            Ok(_) if *self.shutdown_rx.borrow() => {
+                                info!("Shutdown signal received. Draining pending batches before exit.");
+                                self
+                                    .drain_pending_batches(sink.as_ref())
+                                    .await?;
+                                break;
+                            }
+                            Ok(_) => {}
+                            Err(_) => {
+                                info!("Shutdown channel closed. Exiting consumer loop.");
+                                break;
+                            }
                         }
                     }
                 }
             }
+
+            // Post-loop cleanup and final state update
+            info!("Batch channel closed. Writing final state.");
+
+            self.state_store.append_wal(&self.wal_item_done()).await?;
+
+            let duration = start_time.elapsed();
+            info!(duration = ?duration, "Consumer finished");
+
+            Ok(())
+        }
+        .await;
+
+        heartbeat_shutdown.cancel();
+        if let Err(err) = heartbeat_handle.await {
+            warn!(error = ?err, "Consumer heartbeat task did not shut down cleanly");
         }
 
-        // Post-loop cleanup and final state update
-        info!("Batch channel closed. Writing final state.");
+        if result.is_ok() {
+            self.send_final_report().await;
+        }
 
-        self.state_store.append_wal(&self.wal_item_done()).await?;
-
-        let duration = start_time.elapsed();
-        info!(duration = ?duration, "Consumer finished");
-
-        self.send_final_report(&metrics).await;
-
-        Ok(())
+        result
     }
 }
 
@@ -127,6 +144,7 @@ impl LiveConsumer {
         batch_rx: mpsc::Receiver<Batch>,
         shutdown_rx: Receiver<bool>,
         cancel: CancellationToken,
+        metrics: Metrics,
     ) -> Self {
         let (run_id, item_id, state_store, destination) = {
             let c = ctx.lock().await;
@@ -137,6 +155,9 @@ impl LiveConsumer {
                 c.destination.clone(),
             )
         };
+
+        println!("Run ID: {}", run_id);
+        println!("Item ID: {}", item_id);
 
         let tables = match &destination.data_dest {
             DataDestination::Database(db) => db.data.lock().await.tables(),
@@ -153,17 +174,14 @@ impl LiveConsumer {
             batch_rx,
             shutdown_rx,
             cancel,
+            heartbeat_interval: Duration::from_secs(30),
             breaker: CircuitBreaker::default_db(),
             retry: RetryPolicy::for_database(),
+            metrics,
         }
     }
 
-    async fn process_batch(
-        &mut self,
-        batch: Batch,
-        sink: &dyn Sink,
-        metrics: &Metrics,
-    ) -> Result<(), ConsumerError> {
+    async fn process_batch(&mut self, batch: Batch, sink: &dyn Sink) -> Result<(), ConsumerError> {
         let start_time = Instant::now();
 
         let batch_id = batch.id.clone();
@@ -206,8 +224,9 @@ impl LiveConsumer {
             .await?;
 
         // Metrics
-        metrics.increment_bytes(batch.size_bytes() as u64).await;
-        metrics.increment_records(batch_rows as u64).await;
+        self.metrics.increment_batches(1);
+        self.metrics.increment_bytes(batch.size_bytes() as u64);
+        self.metrics.increment_records(batch_rows as u64);
 
         let duration = start_time.elapsed();
         info!(duration = ?duration, "Batch processed successfully");
@@ -300,18 +319,14 @@ impl LiveConsumer {
         write_result
     }
 
-    async fn drain_pending_batches(
-        &mut self,
-        sink: &dyn Sink,
-        metrics: &Metrics,
-    ) -> Result<(), ConsumerError> {
+    async fn drain_pending_batches(&mut self, sink: &dyn Sink) -> Result<(), ConsumerError> {
         while let Ok(batch) = self.batch_rx.try_recv() {
             info!(
                 batch_id = %batch.id,
                 rows = batch.rows.len(),
                 "Draining pending batch before shutdown"
             );
-            self.process_batch(batch, sink, metrics).await?;
+            self.process_batch(batch, sink).await?;
         }
 
         Ok(())
@@ -403,9 +418,57 @@ impl LiveConsumer {
         }
     }
 
-    async fn send_final_report(&self, metrics: &Metrics) {
-        let (records_processed, bytes_transferred) = metrics.get_metrics().await;
-        let report = MetricsReport::new(records_processed, bytes_transferred, "succeeded".into());
+    fn spawn_heartbeat(&self) -> (CancellationToken, JoinHandle<()>) {
+        let shutdown = CancellationToken::new();
+        let shutdown_token = shutdown.clone();
+        let run_id = self.ids.run_id();
+        let item_id = self.ids.item_id();
+        let part_id = self.ids.part_id();
+        let state_store = self.state_store.clone();
+        let cancel = self.cancel.clone();
+        let interval = self.heartbeat_interval;
+
+        let handle = tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+
+            loop {
+                tokio::select! {
+                     _ = ticker.tick() => {
+                        if shutdown_token.is_cancelled() || cancel.is_cancelled() {
+                            break;
+                        }
+
+                        if let Err(err) = state_store
+                            .append_wal(&WalEntry::Heartbeat {
+                                run_id: run_id.clone(),
+                                item_id: item_id.clone(),
+                                part_id: part_id.clone(),
+                                at: chrono::Utc::now(),
+                            })
+                            .await
+                        {
+                            warn!(error = %err, "Failed to append consumer heartbeat");
+                        }
+                    }
+                    _ = shutdown_token.cancelled() => break,
+                    _ = cancel.cancelled() => break,
+                }
+            }
+        });
+
+        (shutdown, handle)
+    }
+
+    async fn send_final_report(&self) {
+        let snapshot = self.metrics.snapshot();
+        let report = MetricsReport::new(
+            snapshot.records_processed,
+            snapshot.bytes_transferred,
+            snapshot.batches_processed,
+            snapshot.failure_count,
+            snapshot.retry_count,
+            "succeeded".into(),
+        );
         if let Err(e) = send_report(report.clone()).await {
             warn!("Failed to send final report: {}", e);
             let report_json = serde_json::to_string(&report)

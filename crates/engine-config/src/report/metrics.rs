@@ -6,14 +6,27 @@ use tracing::{info, warn};
 pub struct MetricsReport {
     records_processed: u64,
     bytes_transferred: u64,
+    batches_processed: u64,
+    failure_count: u64,
+    retry_count: u64,
     status: String,
 }
 
 impl MetricsReport {
-    pub fn new(records_processed: u64, bytes_transferred: u64, status: String) -> Self {
+    pub fn new(
+        records_processed: u64,
+        bytes_transferred: u64,
+        batches_processed: u64,
+        failure_count: u64,
+        retry_count: u64,
+        status: String,
+    ) -> Self {
         MetricsReport {
             records_processed,
             bytes_transferred,
+            batches_processed,
+            failure_count,
+            retry_count,
             status,
         }
     }

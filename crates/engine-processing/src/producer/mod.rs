@@ -12,7 +12,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use engine_config::report::dry_run::DryRunReport;
-use engine_core::context::item::ItemContext;
+use engine_core::{context::item::ItemContext, metrics::Metrics};
 use futures::lock::Mutex;
 use model::{records::batch::Batch, transform::mapping::EntityMapping};
 use smql_syntax::ast::setting::Settings;
@@ -53,6 +53,7 @@ pub async fn create_producer(
     settings: &Settings,
     cancel: CancellationToken,
     report: &Arc<Mutex<DryRunReport>>,
+    metrics: Metrics,
 ) -> Box<dyn DataProducer + Send> {
     let (is_dry_run, source, destination, mapping, offset_strategy, cursor) = {
         let guard = ctx.lock().await;
@@ -82,6 +83,6 @@ pub async fn create_producer(
         return Box::new(validation_prod);
     }
 
-    let live_prod = LiveProducer::new(ctx, shutdown_tx, batch_tx, settings, cancel).await;
+    let live_prod = LiveProducer::new(ctx, shutdown_tx, batch_tx, settings, cancel, metrics).await;
     Box::new(live_prod)
 }

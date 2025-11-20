@@ -46,6 +46,19 @@ pub enum Commands {
         #[arg(long)]
         conn_str: String,
     },
+    Progress {
+        #[arg(long, help = "Run ID to inspect")]
+        run: String,
+
+        #[arg(long, help = "Item ID within the run")]
+        item: String,
+
+        #[arg(
+            long,
+            help = "If set, prints the progress information as JSON instead of a table"
+        )]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]

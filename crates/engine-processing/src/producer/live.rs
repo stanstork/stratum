@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use engine_core::{
     connectors::source::Source,
     context::item::ItemContext,
+    metrics::Metrics,
     retry::{RetryError, RetryPolicy},
     state::{
         StateStore,
@@ -28,7 +29,10 @@ use model::{
 use planner::query::offsets::OffsetStrategy;
 use smql_syntax::ast::setting::Settings;
 use std::{num::NonZeroUsize, sync::Arc, time::Duration};
-use tokio::sync::{mpsc, watch::Sender};
+use tokio::{
+    sync::{mpsc, watch::Sender},
+    task::JoinHandle,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
@@ -64,6 +68,7 @@ pub struct LiveProducer {
     // Resilience
     breaker: CircuitBreaker,
     retry: RetryPolicy,
+    metrics: Metrics,
 }
 
 impl LiveProducer {
@@ -73,6 +78,7 @@ impl LiveProducer {
         batch_tx: mpsc::Sender<Batch>,
         settings: &Settings,
         cancel_token: CancellationToken,
+        metrics: Metrics,
     ) -> Self {
         let (run_id, item_id, part_id, offset_strategy, cursor, state_store, source, mapping) = {
             let c = ctx.lock().await;
@@ -105,6 +111,7 @@ impl LiveProducer {
             batch_size: settings.batch_size,
             breaker: CircuitBreaker::default_db(),
             retry: RetryPolicy::for_database(),
+            metrics,
         }
     }
 
@@ -239,8 +246,10 @@ impl LiveProducer {
         err: &ProducerError,
     ) -> Result<Duration, ProducerError> {
         let stage = "read";
+        self.metrics.increment_failures(1);
         match self.breaker.record_failure() {
             CircuitBreakerState::RetryAfter(delay) => {
+                self.metrics.increment_retries(1);
                 warn!(
                     stage = stage,
                     failures = self.breaker.consecutive_failures(),
@@ -354,26 +363,44 @@ impl LiveProducer {
             .map_err(|e| ProducerError::ChannelSend(e.to_string()))
     }
 
-    async fn heartbeat(self: Arc<Self>) {
-        let mut interval = tokio::time::interval(self.heartbeat_interval);
-        loop {
-            tokio::select! {
-                _ = interval.tick() => {
-                    if self.cancel_token.is_cancelled() {
-                        break;
+    fn spawn_heartbeat(&self) -> (CancellationToken, JoinHandle<()>) {
+        let shutdown = CancellationToken::new();
+        let shutdown_token = shutdown.clone();
+        let run_id = self.ids.run_id();
+        let item_id = self.ids.item_id();
+        let part_id = self.ids.part_id();
+        let state_store = self.state_store.clone();
+        let cancel = self.cancel_token.clone();
+        let interval = self.heartbeat_interval;
+
+        let handle = tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            loop {
+                tokio::select! {
+                    _ = ticker.tick() => {
+                        if shutdown_token.is_cancelled() || cancel.is_cancelled() {
+                            break;
+                        }
+
+                        if let Err(err) = state_store
+                            .append_wal(&WalEntry::Heartbeat {
+                                run_id: run_id.clone(),
+                                item_id: item_id.clone(),
+                                part_id: part_id.clone(),
+                                at: chrono::Utc::now(),
+                            })
+                            .await
+                        {
+                            warn!(error = %err, "Failed to append producer heartbeat");
+                        }
                     }
-                    let _ = self.state_store
-                        .append_wal(&WalEntry::Heartbeat {
-                            run_id: self.ids.run_id(),
-                            item_id: self.ids.item_id(),
-                            part_id: self.ids.part_id(),
-                            at: chrono::Utc::now(),
-                        })
-                        .await;
+                    _ = shutdown_token.cancelled() => break,
+                    _ = cancel.cancelled() => break,
                 }
-                _ = self.cancel_token.cancelled() => break,
             }
-        }
+        });
+
+        (shutdown, handle)
     }
 
     fn signal_shutdown(&self) {
@@ -384,72 +411,81 @@ impl LiveProducer {
 #[async_trait]
 impl DataProducer for LiveProducer {
     async fn run(&mut self) -> Result<usize, ProducerError> {
-        let mut cur = self.start_cursor().await;
-        let mut batches = 0usize;
-
         // Start heartbeat loop
-        let heartbeat_self = Arc::new(self.clone());
-        let hb_handle = {
-            let cloned = heartbeat_self.clone();
-            tokio::spawn(async move { cloned.heartbeat().await });
-        };
+        let (heartbeat_shutdown, heartbeat_handle) = self.spawn_heartbeat();
 
-        loop {
-            if self.cancel_token.is_cancelled() {
-                info!("Cancellation requested. Terminating producer.");
-                break;
-            }
+        let result = async {
+            let mut cur = self.start_cursor().await;
+            let mut batches = 0usize;
 
-            match self.next_page(&cur).await {
-                Ok(FetchOutcome::End) => {
-                    self.breaker.record_success();
+            loop {
+                if self.cancel_token.is_cancelled() {
+                    info!("Cancellation requested. Terminating producer.");
                     break;
                 }
-                Ok(FetchOutcome::Advance(next)) => {
-                    self.breaker.record_success();
-                    cur = next;
-                    continue;
-                }
-                Ok(FetchOutcome::Page(res)) => {
-                    self.breaker.record_success();
-                    let batch_id = self.batch_id(&cur);
-                    info!(
-                        batch_no = batches + 1,
-                        batch_id = %batch_id,
-                        rows = res.row_count,
-                        "Fetched batch."
-                    );
 
-                    let next = res.next_cursor.clone().unwrap_or(Cursor::None);
-                    let current_cursor = cur.clone();
-                    self.log_batch_start(&batch_id, &current_cursor, &next, res.row_count)
-                        .await?;
-
-                    let transformed = self.transform(res.rows).await;
-                    self.send_batch(batch_id, current_cursor.clone(), transformed, next.clone())
-                        .await?;
-
-                    if next != Cursor::None {
-                        cur = next;
-                        batches += 1;
-                    } else {
-                        warn!("No next cursor available; terminating producer.");
+                match self.next_page(&cur).await {
+                    Ok(FetchOutcome::End) => {
+                        self.breaker.record_success();
                         break;
                     }
-                }
-                Err(err) => {
-                    let delay = match self.handle_fetch_failure(&err).await {
-                        Ok(delay) => delay,
-                        Err(cb_err) => return Err(cb_err),
-                    };
-                    tokio::time::sleep(delay).await;
+                    Ok(FetchOutcome::Advance(next)) => {
+                        self.breaker.record_success();
+                        cur = next;
+                        continue;
+                    }
+                    Ok(FetchOutcome::Page(res)) => {
+                        self.breaker.record_success();
+                        let batch_id = self.batch_id(&cur);
+                        info!(
+                            batch_no = batches + 1,
+                            batch_id = %batch_id,
+                            rows = res.row_count,
+                            "Fetched batch."
+                        );
+
+                        let next = res.next_cursor.clone().unwrap_or(Cursor::None);
+                        let current_cursor = cur.clone();
+                        self.log_batch_start(&batch_id, &current_cursor, &next, res.row_count)
+                            .await?;
+
+                        let transformed = self.transform(res.rows).await;
+                        self.send_batch(
+                            batch_id,
+                            current_cursor.clone(),
+                            transformed,
+                            next.clone(),
+                        )
+                        .await?;
+
+                        if next != Cursor::None {
+                            cur = next;
+                            batches += 1;
+                        } else {
+                            warn!("No next cursor available; terminating producer.");
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        let delay = match self.handle_fetch_failure(&err).await {
+                            Ok(delay) => delay,
+                            Err(cb_err) => return Err(cb_err),
+                        };
+                        tokio::time::sleep(delay).await;
+                    }
                 }
             }
+
+            self.signal_shutdown();
+            Ok(batches)
+        }
+        .await;
+
+        heartbeat_shutdown.cancel();
+        if let Err(err) = heartbeat_handle.await {
+            warn!(error = ?err, "Producer heartbeat task did not shut down cleanly");
         }
 
-        self.signal_shutdown();
-        let _ = hb_handle; // Wait for heartbeat loop to finish
-
-        Ok(batches) // Return the number of batches processed
+        result
     }
 }

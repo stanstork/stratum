@@ -1,6 +1,6 @@
 use crate::error::MigrationError;
 use engine_config::report::dry_run::DryRunReport;
-use engine_core::context::item::ItemContext;
+use engine_core::{context::item::ItemContext, metrics::Metrics};
 use engine_processing::{consumer::create_consumer, producer::create_producer};
 use futures::lock::Mutex;
 use model::records::batch::Batch;
@@ -20,6 +20,7 @@ pub async fn spawn(
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let (batch_tx, batch_rx) = mpsc::channel::<Batch>(64);
+    let metrics = Metrics::new();
 
     let mut producer = create_producer(
         &ctx,
@@ -28,11 +29,12 @@ pub async fn spawn(
         settings,
         cancel.clone(),
         dry_run_report,
+        metrics.clone(),
     )
     .await;
     let producer_handle = tokio::spawn(async move { producer.run().await });
 
-    let mut consumer = create_consumer(&ctx, batch_rx, shutdown_rx, cancel).await;
+    let mut consumer = create_consumer(&ctx, batch_rx, shutdown_rx, cancel, metrics.clone()).await;
     let consumer_handle = tokio::spawn(async move { consumer.run().await });
 
     let (producer_result, consumer_result) = tokio::try_join!(producer_handle, consumer_handle)?;

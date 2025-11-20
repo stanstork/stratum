@@ -51,3 +51,11 @@ pub enum SinkError {
     #[error("Tokio Postgres Error: {0}")]
     TokioPostgres(#[from] tokio_postgres::Error),
 }
+
+#[derive(Debug, Error)]
+pub enum ProgressError {
+    #[error("failed to load checkpoint: {0}")]
+    LoadCheckpoint(String),
+    #[error("failed to read wal entries: {0}")]
+    Wal(String),
+}

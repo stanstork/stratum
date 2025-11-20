@@ -11,6 +11,7 @@ mod tests {
             global::GlobalContext,
             item::{ItemContext, ItemContextParams},
         },
+        metrics::Metrics,
         migration_state::MigrationSettings,
         state::{
             StateStore,
@@ -579,6 +580,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let (batch_tx, batch_rx) = mpsc::channel(8);
         let cancel = CancellationToken::new();
+        let metrics = Metrics::new();
 
         let mut producer = create_producer(
             &ctx,
@@ -587,9 +589,11 @@ mod tests {
             &settings,
             cancel.clone(),
             &report,
+            metrics.clone(),
         )
         .await;
-        let mut consumer = create_consumer(&ctx, batch_rx, shutdown_rx, cancel.clone()).await;
+        let mut consumer =
+            create_consumer(&ctx, batch_rx, shutdown_rx, cancel.clone(), metrics.clone()).await;
 
         let producer_handle = spawn(async move { producer.run().await });
         let consumer_handle = spawn(async move { consumer.run().await });
