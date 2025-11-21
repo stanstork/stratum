@@ -5,6 +5,7 @@ WITH primary_keys AS (
         ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
         AND tc.TABLE_NAME = kcu.TABLE_NAME
     WHERE tc.TABLE_NAME = ? 
+    AND tc.TABLE_SCHEMA = DATABASE()
     AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
 ),
 unique_constraints AS (
@@ -14,6 +15,7 @@ unique_constraints AS (
         ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
         AND tc.TABLE_NAME = kcu.TABLE_NAME
     WHERE tc.TABLE_NAME = ?
+    AND tc.TABLE_SCHEMA = DATABASE()
     AND tc.CONSTRAINT_TYPE = 'UNIQUE'
 ),
 foreign_keys AS (
@@ -28,6 +30,7 @@ foreign_keys AS (
         ON kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
         AND kcu.TABLE_NAME = rc.TABLE_NAME
     WHERE kcu.TABLE_NAME = ?
+    AND kcu.TABLE_SCHEMA = DATABASE()
 )
 SELECT 
     c.ORDINAL_POSITION AS ordinal_position,
@@ -50,4 +53,5 @@ FROM information_schema.COLUMNS c
 LEFT JOIN foreign_keys fk 
     ON c.COLUMN_NAME = fk.COLUMN_NAME
 WHERE c.TABLE_NAME = ?
+AND c.TABLE_SCHEMA = DATABASE()
 ORDER BY c.ORDINAL_POSITION;
