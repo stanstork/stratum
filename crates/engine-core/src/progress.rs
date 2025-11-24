@@ -101,7 +101,7 @@ impl ProgressService {
                     ..
                 } if wal_item == item_id => {
                     part_hint = Some(part_id.clone());
-                    last_heartbeat = Some(at.clone());
+                    last_heartbeat = Some(*at);
                 }
                 WalEntry::CircuitBreakerOpen {
                     item_id: wal_item, ..
@@ -157,26 +157,24 @@ impl ProgressService {
         item_id: &str,
         part_hint: Option<&str>,
     ) -> Result<Option<Checkpoint>, ProgressError> {
-        if let Some(part_id) = part_hint {
-            if let Some(cp) = self
+        if let Some(part_id) = part_hint
+            && let Some(cp) = self
                 .store
                 .load_checkpoint(run_id, item_id, part_id)
                 .await
                 .map_err(|err| ProgressError::LoadCheckpoint(err.to_string()))?
-            {
-                return Ok(Some(cp));
-            }
+        {
+            return Ok(Some(cp));
         }
 
-        if part_hint != Some("part-0") {
-            if let Some(cp) = self
+        if part_hint != Some("part-0")
+            && let Some(cp) = self
                 .store
                 .load_checkpoint(run_id, item_id, "part-0")
                 .await
                 .map_err(|err| ProgressError::LoadCheckpoint(err.to_string()))?
-            {
-                return Ok(Some(cp));
-            }
+        {
+            return Ok(Some(cp));
         }
 
         Ok(None)

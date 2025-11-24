@@ -36,6 +36,7 @@ pub enum DbError {
     #[error("Query build error: {0}")]
     QueryBuildError(String),
 
+    /// An unknown error occurred.
     #[error("Unknown error: {0}")]
     Unknown(String),
 }

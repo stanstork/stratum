@@ -57,10 +57,10 @@ fn classify_pg_error(err: &PgError) -> RetryDisposition {
         return RetryDisposition::Retry;
     }
 
-    if let Some(code) = err.code() {
-        if is_retryable_pg_code(code) {
-            return RetryDisposition::Retry;
-        }
+    if let Some(code) = err.code()
+        && is_retryable_pg_code(code)
+    {
+        return RetryDisposition::Retry;
     }
 
     RetryDisposition::Stop
@@ -92,7 +92,7 @@ fn classify_mysql_error(err: &MySqlError) -> RetryDisposition {
         MySqlError::Io(_) | MySqlError::Other(_) => RetryDisposition::Retry,
         MySqlError::Driver(_) => RetryDisposition::Retry,
         MySqlError::Server(server_err) => {
-            if is_retryable_mysql_server_error(server_err.code, &server_err.state.as_str()) {
+            if is_retryable_mysql_server_error(server_err.code, server_err.state.as_str()) {
                 RetryDisposition::Retry
             } else {
                 RetryDisposition::Stop

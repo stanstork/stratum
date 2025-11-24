@@ -1,6 +1,6 @@
 use super::pipeline::Transform;
 use model::{
-    records::record::Record,
+    records::row::RowData,
     transform::mapping::{FieldMappings, NameMap},
 };
 
@@ -25,28 +25,20 @@ impl TableMapper {
 }
 
 impl Transform for FieldMapper {
-    fn apply(&self, record: &Record) -> Record {
-        match record {
-            Record::RowData(row) => {
-                let mut new_row = row.clone();
-                let table = new_row.entity.clone();
-                for column in &mut new_row.field_values {
-                    column.name = self.ns_map.resolve(&table, &column.name);
-                }
-                Record::RowData(new_row)
-            }
+    fn apply(&self, row: &RowData) -> RowData {
+        let mut new_row = row.clone();
+        let table = new_row.entity.clone();
+        for column in &mut new_row.field_values {
+            column.name = self.ns_map.resolve(&table, &column.name);
         }
+        new_row
     }
 }
 
 impl Transform for TableMapper {
-    fn apply(&self, record: &Record) -> Record {
-        match record {
-            Record::RowData(row) => {
-                let mut new_row = row.clone();
-                new_row.entity = self.name_map.resolve(&row.entity);
-                Record::RowData(new_row)
-            }
-        }
+    fn apply(&self, record: &RowData) -> RowData {
+        let mut new_row = record.clone();
+        new_row.entity = self.name_map.resolve(&record.entity);
+        new_row
     }
 }

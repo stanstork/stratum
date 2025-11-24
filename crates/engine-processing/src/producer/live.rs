@@ -22,7 +22,6 @@ use model::{
     pagination::{cursor::Cursor, page::FetchResult},
     records::{
         batch::{Batch, manifest_for},
-        record::Record,
         row::RowData,
     },
 };
@@ -330,13 +329,10 @@ impl LiveProducer {
             .map_err(|e| ProducerError::StateStore(e.to_string()))
     }
 
-    async fn transform(&self, rows: Vec<RowData>) -> Vec<Record> {
+    async fn transform(&self, rows: Vec<RowData>) -> Vec<RowData> {
         stream::iter(rows.into_iter().map(|row| {
             let transform_pipeline = &self.pipeline;
-            async move {
-                let record = Record::RowData(row);
-                transform_pipeline.apply(&record)
-            }
+            async move { transform_pipeline.apply(&row) }
         }))
         .buffer_unordered(self.transform_concurrency.get())
         .collect()
@@ -347,15 +343,10 @@ impl LiveProducer {
         &self,
         batch_id: String,
         cursor: Cursor,
-        records: Vec<Record>,
+        rows: Vec<RowData>,
         next: Cursor,
     ) -> Result<(), ProducerError> {
-        let manifest = manifest_for(&records);
-        let mut rows = Vec::with_capacity(records.len());
-        for record in records {
-            rows.push(Record::to_row_data(record));
-        }
-
+        let manifest = manifest_for(&rows);
         let batch = Batch {
             id: batch_id,
             rows,

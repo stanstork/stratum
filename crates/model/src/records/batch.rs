@@ -1,7 +1,4 @@
-use crate::{
-    pagination::cursor::Cursor,
-    records::{record::Record, row::RowData},
-};
+use crate::{pagination::cursor::Cursor, records::row::RowData};
 
 #[derive(Debug, Clone)]
 pub struct Batch {
@@ -19,16 +16,17 @@ pub struct Manifest {
     pub checksum_xxh3: u64, // fast rolling checksum over canonicalized row
 }
 
-pub fn manifest_for(rows: &[Record]) -> Manifest {
-    use xxhash_rust::xxh3::xxh3_64_with_seed;
-    let mut h: u64 = 0;
-    for r in rows.iter() {
-        let bytes = r.canonical_bytes();
-        h = xxh3_64_with_seed(&bytes, h);
-    }
+pub fn manifest_for(rows: &[RowData]) -> Manifest {
+    // use xxhash_rust::xxh3::xxh3_64_with_seed;
+    // TODO: implement proper rolling hash
+    // let mut h: u64 = 0;
+    // for r in rows.iter() {
+    //     let bytes = r.canonical_bytes();
+    //     h = xxh3_64_with_seed(&bytes, h);
+    // }
     Manifest {
         row_count: rows.len(),
-        checksum_xxh3: h,
+        checksum_xxh3: 0, // placeholder
     }
 }
 

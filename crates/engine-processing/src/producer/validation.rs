@@ -22,7 +22,6 @@ use engine_core::connectors::{
     source::{DataSource, Source},
 };
 use futures::lock::Mutex;
-use model::records::record::Record;
 use model::{pagination::cursor::Cursor, records::row::RowData, transform::mapping::EntityMapping};
 use planner::query::offsets::OffsetStrategy;
 use smql_syntax::ast::setting::{CopyColumns, Settings};
@@ -343,9 +342,7 @@ impl ValidationProducer {
                     .into_iter()
                     .map(|input_row| {
                         let input_clone = input_row.clone();
-                        let record = Record::RowData(input_row);
-                        let transformed = self.pipeline.apply(&record);
-                        let mut output_row = Record::to_row_data(transformed);
+                        let mut output_row = self.pipeline.apply(&input_row);
 
                         if output_row.entity.is_empty() {
                             output_row.entity = input_clone.entity.clone();

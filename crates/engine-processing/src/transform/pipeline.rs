@@ -1,9 +1,8 @@
+use model::records::row::RowData;
 use std::sync::Arc;
 
-use model::records::record::Record;
-
 pub trait Transform: Send + Sync {
-    fn apply(&self, record: &Record) -> Record;
+    fn apply(&self, row: &RowData) -> RowData;
 }
 
 pub trait TransformPipelineExt {
@@ -25,10 +24,10 @@ impl TransformPipeline {
         }
     }
 
-    pub fn apply(&self, record: &Record) -> Record {
+    pub fn apply(&self, row: &RowData) -> RowData {
         self.transforms
             .iter()
-            .fold(record.clone(), |acc, transform| transform.apply(&acc))
+            .fold(row.clone(), |acc, transform| transform.apply(&acc))
     }
 
     pub fn add_transform<T: Transform + 'static>(mut self, transform: T) -> Self {

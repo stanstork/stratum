@@ -138,8 +138,7 @@ async fn show_progress(run: &str, item: &str, as_json: bool) -> Result<(), CliEr
         .map_err(|err| CliError::Unexpected(format!("Failed to load progress: {err}")))?;
 
     if as_json {
-        let json =
-            serde_json::to_string_pretty(&status).map_err(|err| CliError::JsonSerialize(err))?;
+        let json = serde_json::to_string_pretty(&status).map_err(CliError::JsonSerialize)?;
         println!("{json}");
     } else {
         print_progress_table(run, item, &status);
@@ -153,11 +152,7 @@ fn print_progress_table(run: &str, item: &str, status: &ProgressStatus) {
     println!("-----------------------------");
     println!("{:<16} {}", "Stage", status.stage);
     println!("{:<16} {}", "Rows done", status.rows_done);
-    println!(
-        "{:<16} {}",
-        "Last cursor",
-        format!("{:?}", status.last_cursor)
-    );
+    println!("{:<16} {:?}", "Last cursor", status.last_cursor);
     let heartbeat = status
         .last_heartbeat
         .map(|ts| ts.to_rfc3339())

@@ -30,6 +30,7 @@ pub enum AdapterError {
     #[error("Database error: {0}")]
     Database(#[from] DbError),
 
+    /// Invalid metadata error.
     #[error("Invalid Metadata: {0}")]
     InvalidMetadata(String),
 }

@@ -2,7 +2,7 @@ use super::pipeline::Transform;
 use crate::expr::eval::Evaluator;
 use model::{
     core::value::{FieldValue, Value},
-    records::{record::Record, row::RowData},
+    records::row::RowData,
     transform::mapping::EntityMapping,
 };
 use smql_syntax::ast::expr::Expression;
@@ -19,33 +19,27 @@ impl ComputedTransform {
 }
 
 impl Transform for ComputedTransform {
-    fn apply(&self, record: &Record) -> Record {
-        match record {
-            Record::RowData(row) => {
-                let mut row = row.clone();
-                let table = row.entity.clone();
+    fn apply(&self, row: &RowData) -> RowData {
+        let mut row = row.clone();
+        let table = row.entity.clone();
 
-                if let Some(computed_fields) =
-                    self.mapping.field_mappings.computed_fields.get(&table)
-                {
-                    for computed in computed_fields {
-                        if let Some(value) = computed.expression.evaluate(&row, &self.mapping) {
-                            if let Expression::Lookup { .. } = computed.expression {
-                                // Skip lookup expressions as they are handled during data loading
-                                continue;
-                            }
-                            update_row(&mut row, &computed.name, &value);
-                        } else {
-                            warn!(
-                                "Failed to evaluate computed column `{}` in `{}`",
-                                computed.name, table
-                            );
-                        }
+        if let Some(computed_fields) = self.mapping.field_mappings.computed_fields.get(&table) {
+            for computed in computed_fields {
+                if let Some(value) = computed.expression.evaluate(&row, &self.mapping) {
+                    if let Expression::Lookup { .. } = computed.expression {
+                        // Skip lookup expressions as they are handled during data loading
+                        continue;
                     }
+                    update_row(&mut row, &computed.name, &value);
+                } else {
+                    warn!(
+                        "Failed to evaluate computed column `{}` in `{}`",
+                        computed.name, table
+                    );
                 }
-                Record::RowData(row.clone())
             }
         }
+        row
     }
 }
 
