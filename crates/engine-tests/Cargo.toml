@@ -1,0 +1,34 @@
+[package]
+name = "engine-tests"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+planner = { path = "../planner" }
+model = { path = "../model" }
+connectors = { path = "../connectors" }
+engine-runtime = { path = "../engine-runtime" }
+engine-core = { path = "../engine-core" }
+engine-processing = { path = "../engine-processing" }
+engine-config = { path = "../engine-config" }
+smql-syntax = { path = "../smql-syntax" }
+chrono = { version = "0.4.39", features = ["serde"] }
+blake3 = "1.8.2"
+
+tracing-test = "0.2.5"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tokio = { version = "1.43.0", features = ["full"] }
+tokio-postgres = { version = "0.7.15", features = [
+    "with-chrono-0_4",
+    "with-serde_json-1",
+    "with-uuid-1",
+] }
+postgres-native-tls = "0.5.0"
+native-tls = "0.2"
+mysql_async = { version = "0.36.1", features = ["chrono", "bigdecimal"] }
+mysql_common = "0.35.5"
+futures = "0.3.31"
+tempfile = "3.10.1"
+tokio-util = "0.7.17"
+async-trait = "0.1.83"

@@ -1,0 +1,28 @@
+[package]
+name = "cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+smql-syntax = { path = "../smql-syntax" }
+planner = { path = "../planner" }
+engine-runtime = { path = "../engine-runtime" }
+engine-config = { path = "../engine-config" }
+engine-core = { path = "../engine-core" }
+
+tokio = { version = "1.43.0", features = ["full"] }
+sqlx = { version = "0.8.3", features = [
+    "mysql",
+    "postgres",
+    "runtime-tokio",
+    "tls-native-tls",
+] }
+clap = { version = "4.5.28", features = ["derive"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+serde_json = "1.0.138"
+serde = "1.0.217"
+thiserror = "2.0.12"
+futures-util = "0.3.31"
+async-trait = "0.1.86"
+dirs = "6.0.0"

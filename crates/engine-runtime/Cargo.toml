@@ -1,0 +1,24 @@
+[package]
+name = "engine-runtime"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+model = { path = "../model" }
+connectors = { path = "../connectors" }
+smql-syntax = { path = "../smql-syntax" }
+planner = { path = "../planner" }
+engine-core = { path = "../engine-core" }
+engine-processing = { path = "../engine-processing" }
+engine-config = { path = "../engine-config" }
+
+tokio = { version = "1.43.0", features = ["full"] }
+futures = "0.3.31"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+thiserror = "2.0.12"
+sled = "0.34.7"
+dirs = "6.0.0"
+uuid = { version = "1.13.1", features = ["serde", "v4"] }
+blake3 = "1.8.2"
+tokio-util = "0.7.17"
