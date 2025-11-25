@@ -48,9 +48,10 @@ impl Dialect for Postgres {
     fn render_data_type(&self, data_type: &DataType, max_length: Option<usize>) -> String {
         let mut type_name = data_type.postgres_name().into_owned();
         if data_type.supports_length(SqlDialect::Postgres)
-            && let Some(max_len) = max_length {
-                type_name = format!("{type_name}({max_len})");
-            }
+            && let Some(max_len) = max_length
+        {
+            type_name = format!("{type_name}({max_len})");
+        }
         type_name
     }
 
@@ -130,9 +131,10 @@ impl Dialect for MySql {
     fn render_data_type(&self, data_type: &DataType, max_length: Option<usize>) -> String {
         let mut type_name = data_type.mysql_name().into_owned();
         if data_type.supports_length(SqlDialect::MySql)
-            && let Some(max_len) = max_length {
-                type_name = format!("{type_name}({max_len})");
-            }
+            && let Some(max_len) = max_length
+        {
+            type_name = format!("{type_name}({max_len})");
+        }
         type_name
     }
 

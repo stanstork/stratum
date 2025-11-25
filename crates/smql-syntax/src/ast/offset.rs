@@ -16,8 +16,7 @@ pub struct OffsetPair {
     pub value: Expression,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub enum OffsetKey {
     #[default]
     Strategy,
@@ -25,7 +24,6 @@ pub enum OffsetKey {
     TieBreaker,
     TimeZone,
 }
-
 
 impl Default for Offset {
     fn default() -> Self {

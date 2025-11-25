@@ -40,3 +40,13 @@ pub enum MigrationError {
     #[error("Unknown error: {0}")]
     Unknown(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
+
+/// Common error type for all actors in the engine.
+#[derive(Debug, Error)]
+pub enum ActorError {
+    #[error("Mailbox closed")]
+    MailboxClosed,
+
+    #[error("Actor internal error: {0}")]
+    Internal(String),
+}

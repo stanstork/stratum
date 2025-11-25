@@ -11,7 +11,6 @@ impl MySqlColumnDataType for DataType {
             .get_opt::<String, _>("data_type")
             .and_then(|res| res.ok())
             .unwrap_or_default();
-        DataType::from_mysql_type(data_type_str.as_str())
-            .unwrap_or(DataType::Custom(data_type_str))
+        DataType::from_mysql_type(data_type_str.as_str()).unwrap_or(DataType::Custom(data_type_str))
     }
 }
