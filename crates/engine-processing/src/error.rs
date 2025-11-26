@@ -18,6 +18,19 @@ pub enum ConsumerError {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
+    #[error("Failed to load consumer state: {source}")]
+    StateLoad {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    #[error("Failed to save checkpoint for batch '{batch_id}': {source}")]
+    Checkpoint {
+        batch_id: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     #[error("Failed to toggle triggers for table '{table}': {source}")]
     ToggleTrigger {
         table: String,

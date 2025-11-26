@@ -16,10 +16,29 @@ pub mod live;
 pub mod trigger;
 pub mod validation;
 
+#[derive(Clone, Debug, PartialEq)]
+enum ConsumerStatus {
+    /// Work is ongoing; the actor should schedule another tick immediately.
+    Working,
+    /// The consumer is idle (waiting for batches).
+    Idle,
+    /// The consumer has finished (channel closed, all work done).
+    Finished,
+}
+
 #[async_trait]
 pub trait DataConsumer {
-    /// Executes the consumer's main loop.
-    async fn run(&mut self) -> Result<(), ConsumerError>;
+    async fn start(&mut self) -> Result<(), ConsumerError>;
+
+    async fn resume(
+        &mut self,
+        run_id: &str,
+        item_id: &str,
+        part_id: &str,
+    ) -> Result<(), ConsumerError>;
+
+    async fn tick(&mut self) -> Result<ConsumerStatus, ConsumerError>;
+    async fn stop(&mut self) -> Result<(), ConsumerError>;
 }
 
 pub async fn create_consumer(

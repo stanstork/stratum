@@ -1,142 +1,54 @@
 use crate::{
-    cb::{CircuitBreaker, CircuitBreakerState},
-    consumer::{DataConsumer, trigger::TriggerGuard},
+    consumer::{
+        ConsumerStatus, DataConsumer,
+        components::{coordinator::BatchCoordinator, writer::BatchWriter},
+        config::ConsumerConfig,
+    },
     error::ConsumerError,
     item::ItemId,
-    retry::{classify_db_error, classify_sink_error},
+    state_manager::StateManager,
 };
 use async_trait::async_trait;
-use connectors::sql::base::metadata::table::TableMetadata;
-use engine_config::report::metrics::{MetricsReport, send_report};
 use engine_core::{
-    connectors::{
-        destination::{DataDestination, Destination},
-        sink::Sink,
-    },
-    context::item::ItemContext,
-    metrics::Metrics,
-    retry::{RetryError, RetryPolicy},
-    state::{
-        StateStore,
-        models::{Checkpoint, WalEntry},
-    },
+    connectors::destination::DataDestination, context::item::ItemContext, metrics::Metrics,
+    retry::RetryPolicy,
 };
 use futures::lock::Mutex;
-use model::{pagination::cursor::Cursor, records::batch::Batch};
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
-use tokio::{
-    sync::{mpsc, watch::Receiver},
-    task::JoinHandle,
-};
+use model::records::batch::Batch;
+use std::sync::Arc;
+use tokio::sync::{mpsc, watch::Receiver};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-pub struct LiveConsumer {
-    ids: ItemId,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConsumerMode {
+    /// Consumer is idle, waiting to start.
+    Idle,
 
-    // Shared context
-    pub state_store: Arc<dyn StateStore>,
-    pub destination: Destination,
-    pub meta: Vec<TableMetadata>,
+    /// Consumer is actively processing batches.
+    Running,
 
-    // IO
-    pub batch_rx: mpsc::Receiver<Batch>,
+    /// Consumer is flushing pending writes before shutdown.
+    Flushing,
 
-    // Control
-    pub shutdown_rx: Receiver<bool>,
-    pub cancel: CancellationToken,
-    pub heartbeat_interval: Duration,
-
-    // Resilience
-    breaker: CircuitBreaker,
-    retry: RetryPolicy,
-    metrics: Metrics,
-    rows_done: u64,
+    /// Consumer has finished all work.
+    Finished,
 }
 
-#[async_trait]
-impl DataConsumer for LiveConsumer {
-    /// Main entry point for the consumer.
-    /// Runs a loop to receive and process batches until the channel closes or cancellation is requested.
-    async fn run(&mut self) -> Result<(), ConsumerError> {
-        let start_time = Instant::now();
-        let sink = self.destination.sink();
-        let (heartbeat_shutdown, heartbeat_handle) = self.spawn_heartbeat();
+pub struct LiveConsumer {
+    // Components
+    coordinator: BatchCoordinator,
 
-        let result = async {
-            // Guard to ensure triggers are restored on exit
-            // TODO: Handle constraints more gracefully
-            let _trigger_guard = TriggerGuard::new(&self.destination, &self.meta, false).await?;
+    // Communication
+    shutdown_rx: Receiver<bool>,
+    cancel: CancellationToken,
 
-            info!("Consumer starting. Listening for batches...");
+    // State
+    mode: ConsumerMode,
+    ids: ItemId,
 
-            loop {
-                tokio::select! {
-                    biased;
-
-                    _ = self.cancel.cancelled() => {
-                        info!("Cancellation requested. Exiting consumer loop.");
-                        break;
-                    }
-
-                    batch = self.batch_rx.recv() => {
-                        match batch {
-                            Some(batch) => {
-                                // Process the batch, propagating any errors to stop the consumer
-                                self.process_batch(batch, sink.as_ref()).await?;
-                            }
-                            None => {
-                                info!("Batch channel closed. Exiting consumer loop.");
-                                break;
-                            }
-                        }
-                    }
-
-                    changed = self.shutdown_rx.changed() => {
-                        match changed {
-                            Ok(_) if *self.shutdown_rx.borrow() => {
-                                info!("Shutdown signal received. Draining pending batches before exit.");
-                                self
-                                    .drain_pending_batches(sink.as_ref())
-                                    .await?;
-                                break;
-                            }
-                            Ok(_) => {}
-                            Err(_) => {
-                                info!("Shutdown channel closed. Exiting consumer loop.");
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Post-loop cleanup and final state update
-            info!("Batch channel closed. Writing final state.");
-
-            self.state_store.append_wal(&self.wal_item_done()).await?;
-
-            let duration = start_time.elapsed();
-            info!(duration = ?duration, "Consumer finished");
-
-            Ok(())
-        }
-        .await;
-
-        heartbeat_shutdown.cancel();
-        if let Err(err) = heartbeat_handle.await {
-            warn!(error = ?err, "Consumer heartbeat task did not shut down cleanly");
-        }
-
-        if result.is_ok() {
-            self.send_final_report().await;
-        }
-
-        result
-    }
+    // Config
+    config: ConsumerConfig,
 }
 
 impl LiveConsumer {
@@ -147,366 +59,198 @@ impl LiveConsumer {
         cancel: CancellationToken,
         metrics: Metrics,
     ) -> Self {
-        let (run_id, item_id, state_store, destination) = {
+        let (run_id, item_id, destination, state_store) = {
             let c = ctx.lock().await;
             (
                 c.run_id.clone(),
                 c.item_id.clone(),
-                c.state.clone(),
                 c.destination.clone(),
+                c.state.clone(),
             )
         };
-        let state_store: Arc<dyn StateStore> = state_store;
 
-        println!("Run ID: {}", run_id);
-        println!("Item ID: {}", item_id);
+        let config = ConsumerConfig::default();
+        let part_id = "part-0".to_string();
+        let ids = ItemId::new(run_id, item_id, part_id);
 
-        let tables = match &destination.data_dest {
-            DataDestination::Database(db) => db.data.lock().await.tables(),
+        let meta = match &destination.data_dest {
+            DataDestination::Database(db) => {
+                let tables = db.data.lock().await.tables();
+                tables
+                    .first()
+                    .cloned()
+                    .expect("Expected at least one table metadata")
+            }
         };
 
-        // TODO: Part ID is hardcoded for now
-        let part_id = "part-0".to_string();
-        let rows_done = Self::init_rows_done(&state_store, &run_id, &item_id, &part_id).await;
+        let writer = BatchWriter::new(destination.clone(), RetryPolicy::for_database(), &meta)
+            .auto_detect_strategy() // Detects fast path (COPY/MERGE) availability
+            .await;
+        let state_manager = StateManager::new(ids.clone(), state_store);
+        let coordinator = BatchCoordinator::new(
+            writer,
+            state_manager,
+            metrics.clone(),
+            config.clone(),
+            batch_rx,
+        );
 
         Self {
-            ids: ItemId::new(run_id, item_id, part_id),
-            state_store,
-            destination,
-            meta: tables,
-            batch_rx,
+            coordinator,
             shutdown_rx,
             cancel,
-            heartbeat_interval: Duration::from_secs(30),
-            breaker: CircuitBreaker::default_db(),
-            retry: RetryPolicy::for_database(),
-            metrics,
-            rows_done,
+            mode: ConsumerMode::Idle,
+            ids,
+            config,
         }
     }
 
-    async fn process_batch(&mut self, batch: Batch, sink: &dyn Sink) -> Result<(), ConsumerError> {
-        let start_time = Instant::now();
+    /// Check if we should stop processing.
+    fn should_stop(&self) -> bool {
+        self.cancel.is_cancelled() || *self.shutdown_rx.borrow()
+    }
+}
 
-        let batch_id = batch.id.clone();
-        let batch_rows = batch.rows.len();
-        let next_cursor = batch.next.clone();
-        let start_cursor = batch.cursor.clone();
-        let cur_rows_done = self.rows_done;
-
-        info!(batch_id = %batch_id, rows = batch_rows, "Processing received batch");
-
-        // If no metadata is available, skip processing this batch
-        if self.meta.is_empty() {
-            warn!("No table metadata available for destination. Skipping batch.");
-            return Ok(());
-        }
-
-        // For now we support only single destination table
-        let meta = self.meta[0].clone();
-
-        let write_checkpoint = self.build_checkpoint(
-            "write",
-            batch_id.clone(),
-            start_cursor,
-            Some(next_cursor.clone()),
-            cur_rows_done,
+#[async_trait]
+impl DataConsumer for LiveConsumer {
+    async fn start(&mut self) -> Result<(), ConsumerError> {
+        info!(
+            run_id = %self.ids.run_id(),
+            item_id = %self.ids.item_id(),
+            "Starting LiveConsumer"
         );
-        self.state_store.save_checkpoint(&write_checkpoint).await?;
 
-        // Write data to destination with retries + breaker protection
-        self.ensure_write(sink, &meta, &batch).await?;
+        if self.config.disable_triggers {
+            info!("Consumer configured to disable triggers on start");
+            // TODO: Disable triggers if applicable
+        }
 
-        // Post-write state management
-        self.state_store
-            .append_wal(&self.wal_batch_commit(batch_id.clone()))
-            .await?;
-
-        let committed_total = cur_rows_done + batch_rows as u64;
-        let committed_checkpoint =
-            self.build_checkpoint("committed", batch_id, next_cursor, None, committed_total);
-        self.state_store
-            .save_checkpoint(&committed_checkpoint)
-            .await?;
-        self.rows_done = committed_total;
-
-        // Metrics
-        self.metrics.increment_batches(1);
-        self.metrics.increment_bytes(batch.size_bytes() as u64);
-        self.metrics.increment_records(batch_rows as u64);
-
-        let duration = start_time.elapsed();
-        info!(duration = ?duration, "Batch processed successfully");
-
+        self.mode = ConsumerMode::Running;
+        info!("LiveConsumer started successfully");
         Ok(())
     }
 
-    /// Wraps the batch write with retries + circuit breaker.
-    async fn ensure_write(
+    async fn resume(
         &mut self,
-        sink: &dyn Sink,
-        meta: &TableMetadata,
-        batch: &Batch,
-    ) -> Result<(), ConsumerError> {
-        loop {
-            match self.write_batch(sink, meta, batch).await {
-                Ok(()) => {
-                    self.breaker.record_success();
-                    return Ok(());
-                }
-                Err(err) => {
-                    let delay = match self.handle_write_failure(&err).await {
-                        Ok(delay) => delay,
-                        Err(cb_err) => return Err(cb_err),
-                    };
-                    tokio::time::sleep(delay).await;
-                }
-            }
-        }
-    }
-
-    /// Handles the logic for writing a batch to the data sink,
-    /// preferring the fast path if supported.
-    async fn write_batch(
-        &self,
-        sink: &dyn Sink,
-        meta: &TableMetadata,
-        batch: &Batch,
-    ) -> Result<(), ConsumerError> {
-        let fast = sink.support_fast_path().await?;
-        let fast = fast && !meta.primary_keys.is_empty();
-
-        let write_result = if fast {
-            info!("Using fast path for batch write.");
-
-            let result = self
-                .retry
-                .run(
-                    || async {
-                        // COPY -> MERGE
-                        sink.write_fast_path(meta, batch).await
-                    },
-                    classify_sink_error,
-                )
-                .await;
-            match result {
-                Ok(()) => Ok(()),
-                Err(RetryError::Fatal(err)) => Err(ConsumerError::Sink(err)),
-                Err(RetryError::AttemptsExceeded(err)) => Err(ConsumerError::RetriesExhausted(
-                    format!("fast-path sink retries exhausted: {err}"),
-                )),
-            }
-        } else {
-            info!("Using standard path for batch write.");
-
-            let result = self
-                .retry
-                .run(
-                    || async move { self.destination.write_batch(meta, &batch.rows).await },
-                    classify_db_error,
-                )
-                .await;
-
-            match result {
-                Ok(()) => Ok(()),
-                Err(RetryError::Fatal(err)) => Err(ConsumerError::WriteBatch {
-                    table: meta.name.clone(),
-                    source: Box::new(err),
-                }),
-                Err(RetryError::AttemptsExceeded(err)) => Err(ConsumerError::RetriesExhausted(
-                    format!("standard sink retries exhausted: {err}"),
-                )),
-            }
-        };
-
-        if let Err(ref e) = write_result {
-            error!("Error writing batch to sink: {:?}", e);
-        }
-
-        write_result
-    }
-
-    async fn drain_pending_batches(&mut self, sink: &dyn Sink) -> Result<(), ConsumerError> {
-        while let Ok(batch) = self.batch_rx.try_recv() {
-            info!(
-                batch_id = %batch.id,
-                rows = batch.rows.len(),
-                "Draining pending batch before shutdown"
-            );
-            self.process_batch(batch, sink).await?;
-        }
-
-        Ok(())
-    }
-
-    async fn handle_write_failure(
-        &mut self,
-        err: &ConsumerError,
-    ) -> Result<Duration, ConsumerError> {
-        let stage = "write";
-        match self.breaker.record_failure() {
-            CircuitBreakerState::RetryAfter(delay) => {
-                warn!(
-                    stage = stage,
-                    failures = self.breaker.consecutive_failures(),
-                    retry_in_ms = delay.as_millis(),
-                    error = %err,
-                    "Batch write failed; retrying after backoff"
-                );
-                Ok(delay)
-            }
-            CircuitBreakerState::Open => {
-                error!(
-                    stage = stage,
-                    failures = self.breaker.consecutive_failures(),
-                    error = %err,
-                    "Circuit breaker opened for consumer; aborting item"
-                );
-                self.emit_breaker_wal(stage, err.to_string()).await?;
-                Err(ConsumerError::CircuitBreakerOpen {
-                    stage: stage.to_string(),
-                    last_error: err.to_string(),
-                })
-            }
-        }
-    }
-
-    /// Helper to build a `BatchCommit` WAL entry.
-    fn wal_batch_commit(&self, batch_id: String) -> WalEntry {
-        WalEntry::BatchCommit {
-            run_id: self.ids.run_id(),
-            item_id: self.ids.item_id(),
-            part_id: self.ids.part_id(),
-            batch_id,
-            ts: chrono::Utc::now(),
-        }
-    }
-
-    /// Helper to build an `ItemDone` WAL entry.
-    fn wal_item_done(&self) -> WalEntry {
-        WalEntry::ItemDone {
-            run_id: self.ids.run_id(),
-            item_id: self.ids.item_id(),
-        }
-    }
-
-    async fn emit_breaker_wal(&self, stage: &str, last_error: String) -> Result<(), ConsumerError> {
-        self.state_store
-            .append_wal(&WalEntry::CircuitBreakerOpen {
-                run_id: self.ids.run_id(),
-                item_id: self.ids.item_id(),
-                part_id: self.ids.part_id(),
-                stage: stage.to_string(),
-                failures: self.breaker.consecutive_failures(),
-                last_error,
-            })
-            .await
-            .map_err(ConsumerError::Unexpected)
-    }
-
-    /// Helper to build a new Checkpoint struct.
-    fn build_checkpoint(
-        &self,
-        stage: &str,
-        batch_id: String,
-        src_offset: Cursor,
-        pending_offset: Option<Cursor>,
-        rows_done: u64,
-    ) -> Checkpoint {
-        Checkpoint {
-            run_id: self.ids.run_id(),
-            item_id: self.ids.item_id(),
-            part_id: self.ids.part_id(),
-            stage: stage.to_string(),
-            src_offset,
-            pending_offset,
-            batch_id,
-            rows_done,
-            updated_at: chrono::Utc::now(),
-        }
-    }
-
-    async fn init_rows_done(
-        state_store: &Arc<dyn StateStore>,
         run_id: &str,
         item_id: &str,
         part_id: &str,
-    ) -> u64 {
-        match state_store.load_checkpoint(run_id, item_id, part_id).await {
-            Ok(Some(cp)) => cp.rows_done,
-            Ok(None) => 0,
-            Err(err) => {
-                warn!(
-                    run_id = run_id,
-                    item_id = item_id,
-                    part_id = part_id,
-                    error = %err,
-                    "Failed to load checkpoint for initial rows_done; defaulting to 0"
+    ) -> Result<(), ConsumerError> {
+        info!(
+            run_id = run_id,
+            item_id = item_id,
+            part_id = part_id,
+            "Resuming consumer from checkpoint"
+        );
+
+        // Load last checkpoint to verify state
+        match self.coordinator.load_last_checkpoint().await? {
+            Some(checkpoint) => {
+                info!(
+                    stage = %checkpoint.stage,
+                    rows_done = checkpoint.rows_done,
+                    cursor = ?checkpoint.src_offset,
+                    "Loaded checkpoint, consumer will continue from last position"
                 );
-                0
-            }
-        }
-    }
 
-    fn spawn_heartbeat(&self) -> (CancellationToken, JoinHandle<()>) {
-        let shutdown = CancellationToken::new();
-        let shutdown_token = shutdown.clone();
-        let run_id = self.ids.run_id();
-        let item_id = self.ids.item_id();
-        let part_id = self.ids.part_id();
-        let state_store = self.state_store.clone();
-        let cancel = self.cancel.clone();
-        let interval = self.heartbeat_interval;
-
-        let handle = tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(interval);
-
-            loop {
-                tokio::select! {
-                     _ = ticker.tick() => {
-                        if shutdown_token.is_cancelled() || cancel.is_cancelled() {
-                            break;
-                        }
-
-                        if let Err(err) = state_store
-                            .append_wal(&WalEntry::Heartbeat {
-                                run_id: run_id.clone(),
-                                item_id: item_id.clone(),
-                                part_id: part_id.clone(),
-                                at: chrono::Utc::now(),
-                            })
-                            .await
-                        {
-                            warn!(error = %err, "Failed to append consumer heartbeat");
-                        }
-                    }
-                    _ = shutdown_token.cancelled() => break,
-                    _ = cancel.cancelled() => break,
+                // If we crashed during "write" stage, the producer will re-send
+                // that batch based on its checkpoint recovery logic
+                if checkpoint.stage == "write" {
+                    warn!(
+                        batch_id = %checkpoint.batch_id,
+                        "Last batch was being written when crash occurred, \
+                         it may be re-sent by producer"
+                    );
                 }
             }
-        });
+            None => {
+                info!("No checkpoint found, consumer starting fresh");
+            }
+        }
 
-        (shutdown, handle)
+        self.mode = ConsumerMode::Running;
+        Ok(())
     }
 
-    async fn send_final_report(&self) {
-        let snapshot = self.metrics.snapshot();
-        let report = MetricsReport::new(
-            snapshot.records_processed,
-            snapshot.bytes_transferred,
-            snapshot.batches_processed,
-            snapshot.failure_count,
-            snapshot.retry_count,
-            "succeeded".into(),
-        );
-        if let Err(e) = send_report(report.clone()).await {
-            warn!("Failed to send final report: {}", e);
-            let report_json = serde_json::to_string(&report)
-                .unwrap_or_else(|_| "Failed to serialize report".to_string());
-            warn!(
-                "All attempts to send report failed. Final Report: {}",
-                report_json
-            );
+    async fn tick(&mut self) -> Result<ConsumerStatus, ConsumerError> {
+        match self.mode {
+            ConsumerMode::Idle => {
+                // Not yet started
+                Ok(ConsumerStatus::Idle)
+            }
+
+            ConsumerMode::Finished => {
+                // Already finished, nothing to do
+                Ok(ConsumerStatus::Finished)
+            }
+
+            ConsumerMode::Running => {
+                if self.should_stop() {
+                    info!("Consumer received stop signal, entering flush mode");
+                    self.mode = ConsumerMode::Flushing;
+                    return Ok(ConsumerStatus::Working); // Continue to flush
+                }
+
+                if self.coordinator.is_channel_closed() {
+                    info!("Batch channel closed, producer has finished");
+                    self.mode = ConsumerMode::Finished;
+                    return Ok(ConsumerStatus::Finished);
+                }
+
+                match self.coordinator.try_process_one().await {
+                    Ok(true) => {
+                        // Successfully processed a batch
+                        // More batches may be available, return Working
+                        Ok(ConsumerStatus::Working)
+                    }
+                    Ok(false) => {
+                        // No batch available right now
+                        // Return Idle so actor can schedule delayed tick
+                        Ok(ConsumerStatus::Idle)
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to process batch");
+                        // On error, enter flushing mode to clean up
+                        self.mode = ConsumerMode::Flushing;
+                        Err(e)
+                    }
+                }
+            }
+
+            ConsumerMode::Flushing => {
+                // Flush any pending writes before finishing
+                info!("Flushing consumer writes");
+
+                if let Err(e) = self.coordinator.try_process_one().await {
+                    error!(error = %e, "Failed to flush on shutdown");
+                }
+
+                self.mode = ConsumerMode::Finished;
+                Ok(ConsumerStatus::Finished)
+            }
         }
+    }
+
+    async fn stop(&mut self) -> Result<(), ConsumerError> {
+        info!(
+            run_id = %self.ids.run_id(),
+            item_id = %self.ids.item_id(),
+            "Stopping LiveConsumer"
+        );
+
+        // Flush any pending writes
+        if let Err(e) = self.coordinator.try_process_one().await {
+            error!(error = %e, "Failed to flush on stop");
+            // Continue to restore triggers even if flush fails
+        }
+
+        if self.config.disable_triggers {
+            info!("Consumer configured to re-enable triggers on stop");
+            // TODO: Re-enable triggers if applicable
+        }
+
+        self.mode = ConsumerMode::Finished;
+        info!("LiveConsumer stopped successfully");
+        Ok(())
     }
 }
