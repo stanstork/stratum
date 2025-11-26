@@ -600,11 +600,11 @@ impl ValidationProducer {
     }
 }
 
-#[async_trait]
-impl DataProducer for ValidationProducer {
-    async fn run(&mut self) -> Result<usize, ProducerError> {
-        let results = self.perform_validation().await?;
-        self.update_report(results).await;
-        Ok(1) // One validation run completed
-    }
-}
+// #[async_trait]
+// impl DataProducer for ValidationProducer {
+//     async fn run(&mut self) -> Result<usize, ProducerError> {
+//         let results = self.perform_validation().await?;
+//         self.update_report(results).await;
+//         Ok(1) // One validation run completed
+//     }
+// }

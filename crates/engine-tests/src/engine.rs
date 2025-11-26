@@ -595,25 +595,27 @@ mod tests {
         let mut consumer =
             create_consumer(&ctx, batch_rx, shutdown_rx, cancel.clone(), metrics.clone()).await;
 
-        let producer_handle = spawn(async move { producer.run().await });
-        let consumer_handle = spawn(async move { consumer.run().await });
+        // let producer_handle = spawn(async move { producer.run().await });
+        // let consumer_handle = spawn(async move { consumer.run().await });
 
-        // Give the tasks a moment to start to avoid race conditions when the write fails instantly.
-        sleep(Duration::from_millis(50)).await;
+        // // Give the tasks a moment to start to avoid race conditions when the write fails instantly.
+        // sleep(Duration::from_millis(50)).await;
 
-        let consumer_result = consumer_handle.await.expect("consumer panicked");
-        if consumer_result.is_err() {
-            cancel.cancel();
-        }
+        // let consumer_result = consumer_handle.await.expect("consumer panicked");
+        // if consumer_result.is_err() {
+        //     cancel.cancel();
+        // }
 
-        drop(shutdown_tx);
+        // drop(shutdown_tx);
 
-        let producer_result = producer_handle.await.expect("producer panicked");
+        // let producer_result = producer_handle.await.expect("producer panicked");
 
-        EngineRunResult {
-            producer: producer_result,
-            consumer: consumer_result,
-        }
+        // EngineRunResult {
+        //     producer: producer_result,
+        //     consumer: consumer_result,
+        // }
+
+        todo!()
     }
 
     fn wal_has_commit(entries: &[WalEntry]) -> bool {

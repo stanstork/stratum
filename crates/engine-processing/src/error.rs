@@ -65,4 +65,7 @@ pub enum ProducerError {
 
     #[error("Circuit breaker opened for stage '{stage}': {last_error}")]
     CircuitBreakerOpen { stage: String, last_error: String },
+
+    #[error("Producer finished work.")]
+    Finished,
 }

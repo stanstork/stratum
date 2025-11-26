@@ -40,10 +40,30 @@ fn pipeline_for_mapping(mapping: &EntityMapping) -> TransformPipeline {
     pipeline
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ProducerStatus {
+    /// Work is ongoing; the actor should schedule another tick.
+    Working,
+    /// The producer is idle (e.g. waiting for CDC events or backpressure).
+    Idle,
+    /// The producer has finished its task (e.g. Snapshot complete).
+    Finished,
+}
+
 #[async_trait]
 pub trait DataProducer {
-    /// Executes the producer's main loop.
-    async fn run(&mut self) -> Result<usize, ProducerError>;
+    async fn start_snapshot(&mut self) -> Result<(), ProducerError>;
+    async fn start_cdc(&mut self) -> Result<(), ProducerError>;
+
+    async fn resume(
+        &mut self,
+        run_id: &str,
+        item_id: &str,
+        part_id: &str,
+    ) -> Result<(), ProducerError>;
+
+    async fn tick(&mut self) -> Result<ProducerStatus, ProducerError>;
+    async fn stop(&mut self) -> Result<(), ProducerError>;
 }
 
 pub async fn create_producer(
@@ -80,9 +100,10 @@ pub async fn create_producer(
             cursor,
             report: report.clone(),
         });
-        return Box::new(validation_prod);
+        // return Box::new(validation_prod);
+        todo!()
     }
 
-    let live_prod = LiveProducer::new(ctx, shutdown_tx, batch_tx, settings, cancel, metrics).await;
+    let live_prod = LiveProducer::new(ctx, batch_tx, settings).await;
     Box::new(live_prod)
 }

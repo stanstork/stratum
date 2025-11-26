@@ -18,34 +18,36 @@ pub async fn spawn(
 ) -> Result<(), MigrationError> {
     info!("Launching workers");
 
-    let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let (batch_tx, batch_rx) = mpsc::channel::<Batch>(64);
-    let metrics = Metrics::new();
+    // let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    // let (batch_tx, batch_rx) = mpsc::channel::<Batch>(64);
+    // let metrics = Metrics::new();
 
-    let mut producer = create_producer(
-        &ctx,
-        shutdown_tx,
-        batch_tx,
-        settings,
-        cancel.clone(),
-        dry_run_report,
-        metrics.clone(),
-    )
-    .await;
-    let producer_handle = tokio::spawn(async move { producer.run().await });
+    // let mut producer = create_producer(
+    //     &ctx,
+    //     shutdown_tx,
+    //     batch_tx,
+    //     settings,
+    //     cancel.clone(),
+    //     dry_run_report,
+    //     metrics.clone(),
+    // )
+    // .await;
+    // let producer_handle = tokio::spawn(async move { producer.run().await });
 
-    let mut consumer = create_consumer(&ctx, batch_rx, shutdown_rx, cancel, metrics.clone()).await;
-    let consumer_handle = tokio::spawn(async move { consumer.run().await });
+    // let mut consumer = create_consumer(&ctx, batch_rx, shutdown_rx, cancel, metrics.clone()).await;
+    // let consumer_handle = tokio::spawn(async move { consumer.run().await });
 
-    let (producer_result, consumer_result) = tokio::try_join!(producer_handle, consumer_handle)?;
+    // let (producer_result, consumer_result) = tokio::try_join!(producer_handle, consumer_handle)?;
 
-    if let Err(err) = producer_result {
-        error!("Producer error: {}", err);
-        return Err(MigrationError::Unexpected(err.to_string()));
-    }
+    // if let Err(err) = producer_result {
+    //     error!("Producer error: {}", err);
+    //     return Err(MigrationError::Unexpected(err.to_string()));
+    // }
 
-    consumer_result.map_err(|err| {
-        error!("Consumer error: {}", err);
-        MigrationError::Unexpected(err.to_string())
-    })
+    // consumer_result.map_err(|err| {
+    //     error!("Consumer error: {}", err);
+    //     MigrationError::Unexpected(err.to_string())
+    // })
+
+    todo!()
 }
