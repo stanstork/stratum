@@ -11,8 +11,21 @@ use engine_processing::{
     cb::{CircuitBreaker, CircuitBreakerState},
     producer::{DataProducer, ProducerStatus},
 };
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TickResponse {
+    /// Schedule another tick immediately
+    ScheduleImmediate,
+
+    /// Schedule another tick after a delay
+    ScheduleDelayed(Duration),
+
+    /// No more ticks needed (finished or stopped)
+    NoMoreTicks,
+}
 
 pub struct ProducerActor<P>
 where
@@ -27,6 +40,9 @@ where
     // Resilience
     breaker: CircuitBreaker,
     metrics: Metrics,
+
+    // Configuration
+    idle_delay: Duration,
 
     // Self-reference for scheduling ticks
     actor_ref: Option<ActorRef<ProducerMsg>>,
@@ -43,6 +59,7 @@ where
             cancel_token,
             breaker: CircuitBreaker::default_db(),
             metrics,
+            idle_delay: Duration::from_millis(500), // Default idle delay
             actor_ref: None,
         }
     }
@@ -50,6 +67,42 @@ where
     /// This must be called after the actor is spawned.
     pub fn set_actor_ref(&mut self, actor_ref: ActorRef<ProducerMsg>) {
         self.actor_ref = Some(actor_ref);
+    }
+
+    fn next_action(&self, status: ProducerStatus) -> TickResponse {
+        match status {
+            ProducerStatus::Working => TickResponse::ScheduleImmediate,
+            ProducerStatus::Idle => TickResponse::ScheduleDelayed(self.idle_delay),
+            ProducerStatus::Finished => TickResponse::NoMoreTicks,
+        }
+    }
+
+    async fn handle_tick_error(
+        &mut self,
+        error: impl std::fmt::Display,
+    ) -> Result<TickResponse, ActorError> {
+        self.metrics.increment_failures(1);
+        error!(error = %error, "Producer tick failed");
+
+        match self.breaker.record_failure() {
+            CircuitBreakerState::RetryAfter(delay) => {
+                warn!(
+                    delay_ms = delay.as_millis(),
+                    failures = self.breaker.consecutive_failures(),
+                    "Circuit breaker: backing off"
+                );
+                tokio::time::sleep(delay).await;
+                Ok(TickResponse::ScheduleImmediate)
+            }
+            CircuitBreakerState::Open => {
+                error!(
+                    failures = self.breaker.consecutive_failures(),
+                    "Circuit breaker open, stopping producer"
+                );
+                self.running = false;
+                Ok(TickResponse::NoMoreTicks)
+            }
+        }
     }
 }
 
@@ -117,15 +170,22 @@ where
             }
 
             ProducerMsg::Tick => {
+                // Stop if not running or cancelled
                 if !self.running || self.cancel_token.is_cancelled() {
                     info!(actor = ctx.name(), "Producer stopping");
                     return Ok(());
                 }
 
-                match self.producer.tick().await {
-                    Ok(ProducerStatus::Working) => {
+                let response = match self.producer.tick().await {
+                    Ok(status) => {
                         self.breaker.record_success();
-                        // Schedule next tick immediately
+                        self.next_action(status)
+                    }
+                    Err(e) => self.handle_tick_error(e).await?,
+                };
+
+                match response {
+                    TickResponse::ScheduleImmediate => {
                         if let Some(ref actor_ref) = self.actor_ref {
                             let actor_ref = actor_ref.clone();
                             tokio::spawn(async move {
@@ -135,58 +195,22 @@ where
                             });
                         }
                     }
-                    Ok(ProducerStatus::Idle) => {
-                        self.breaker.record_success();
-                        info!(actor = ctx.name(), "Producer idle");
-                        // Schedule next tick after delay
+                    TickResponse::ScheduleDelayed(delay) => {
+                        info!(delay_ms = delay.as_millis(), "Producer idle");
                         if let Some(ref actor_ref) = self.actor_ref {
                             let actor_ref = actor_ref.clone();
                             tokio::spawn(async move {
-                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                tokio::time::sleep(delay).await;
                                 if let Err(e) = actor_ref.send(ProducerMsg::Tick).await {
                                     error!(error = ?e, "Failed to schedule delayed tick");
                                 }
                             });
                         }
                     }
-                    Ok(ProducerStatus::Finished) => {
-                        info!(actor = ctx.name(), "Producer finished");
+                    TickResponse::NoMoreTicks => {
+                        info!("Producer finished");
                         self.running = false;
                         let _ = self.producer.stop().await;
-                        // Do not schedule next tick
-                    }
-                    Err(e) => {
-                        self.metrics.increment_failures(1);
-                        error!(actor = ctx.name(), error = %e, "Producer tick failed");
-
-                        match self.breaker.record_failure() {
-                            CircuitBreakerState::RetryAfter(delay) => {
-                                warn!(
-                                    actor = ctx.name(),
-                                    delay_ms = delay.as_millis(),
-                                    failures = self.breaker.consecutive_failures(),
-                                    "Circuit breaker: backing off"
-                                );
-                                // Schedule next tick after backoff delay
-                                if let Some(ref actor_ref) = self.actor_ref {
-                                    let actor_ref = actor_ref.clone();
-                                    tokio::spawn(async move {
-                                        tokio::time::sleep(delay).await;
-                                        if let Err(e) = actor_ref.send(ProducerMsg::Tick).await {
-                                            error!(error = ?e, "Failed to schedule tick after backoff");
-                                        }
-                                    });
-                                }
-                            }
-                            CircuitBreakerState::Open => {
-                                error!(
-                                    actor = ctx.name(),
-                                    failures = self.breaker.consecutive_failures(),
-                                    "Circuit breaker open, stopping producer"
-                                );
-                                self.running = false;
-                            }
-                        }
                     }
                 }
 
