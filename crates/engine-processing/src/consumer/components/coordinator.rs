@@ -1,20 +1,16 @@
+use crate::{
+    consumer::components::writer::BatchWriter, error::ConsumerError, state_manager::StateManager,
+};
 use engine_core::{metrics::Metrics, state::models::Checkpoint};
 use model::records::batch::Batch;
 use tokio::sync::mpsc;
-use tracing::{error, info};
-
-use crate::{
-    consumer::{components::writer::BatchWriter, config::ConsumerConfig},
-    error::ConsumerError,
-    state_manager::StateManager,
-};
+use tracing::info;
 
 /// Coordinates batch receiving, writing, and checkpointing.
 pub struct BatchCoordinator {
     writer: BatchWriter,
     state_manager: StateManager,
     metrics: Metrics,
-    config: ConsumerConfig,
     batch_rx: mpsc::Receiver<Batch>,
 }
 
@@ -23,14 +19,12 @@ impl BatchCoordinator {
         writer: BatchWriter,
         state_manager: StateManager,
         metrics: Metrics,
-        config: ConsumerConfig,
         batch_rx: mpsc::Receiver<Batch>,
     ) -> Self {
         Self {
             writer,
             state_manager,
             metrics,
-            config,
             batch_rx,
         }
     }

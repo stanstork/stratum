@@ -17,7 +17,7 @@ pub mod trigger;
 pub mod validation;
 
 #[derive(Clone, Debug, PartialEq)]
-enum ConsumerStatus {
+pub enum ConsumerStatus {
     /// Work is ongoing; the actor should schedule another tick immediately.
     Working,
     /// The consumer is idle (waiting for batches).
@@ -56,7 +56,8 @@ pub async fn create_consumer(
     drop(ctx_guard);
 
     if is_dry_run {
-        Box::new(ValidationConsumer::new())
+        // Box::new(ValidationConsumer::new())
+        todo!("Implement ValidationConsumer constructor")
     } else {
         Box::new(LiveConsumer::new(ctx, batch_rx, shutdown_rx, cancel, metrics).await)
     }

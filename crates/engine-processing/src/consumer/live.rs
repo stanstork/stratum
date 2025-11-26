@@ -87,13 +87,7 @@ impl LiveConsumer {
             .auto_detect_strategy() // Detects fast path (COPY/MERGE) availability
             .await;
         let state_manager = StateManager::new(ids.clone(), state_store);
-        let coordinator = BatchCoordinator::new(
-            writer,
-            state_manager,
-            metrics.clone(),
-            config.clone(),
-            batch_rx,
-        );
+        let coordinator = BatchCoordinator::new(writer, state_manager, metrics.clone(), batch_rx);
 
         Self {
             coordinator,

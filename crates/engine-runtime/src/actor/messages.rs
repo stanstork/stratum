@@ -1,9 +1,8 @@
+use crate::{actor::actor::ActorRef, error::ActorError};
 use model::{
     pagination::cursor::Cursor,
     records::{batch::Manifest, row::RowData},
 };
-
-use crate::error::ActorError;
 
 #[derive(Debug, Clone)]
 pub struct RecordBatch {
@@ -33,6 +32,9 @@ pub struct MetricSample {
 /// Responsible for snapshot + CDC reading.
 #[derive(Debug)]
 pub enum ProducerMsg {
+    /// Initialize the actor with its own reference for tick scheduling.
+    SetActorRef(ActorRef<ProducerMsg>),
+
     /// Start (or resume) snapshot for a given migration item.
     StartSnapshot { run_id: String, item_id: String },
 
@@ -51,14 +53,20 @@ pub enum ProducerMsg {
 /// Responsible for applying batches to the destination.
 #[derive(Debug)]
 pub enum ConsumerMsg {
-    /// Apply a batch of records to the destination.
-    ApplyBatch {
+    /// Initialize the actor with its own reference for tick scheduling.
+    SetActorRef(ActorRef<ConsumerMsg>),
+
+    /// Start the consumer for a specific item.
+    Start {
         run_id: String,
         item_id: String,
-        batch: RecordBatch,
+        part_id: String,
     },
 
-    /// Flush any buffered work (e.g., before cutover).
+    /// Periodic tick to process one batch.
+    Tick,
+
+    /// Flush any buffered work.
     Flush { run_id: String, item_id: String },
 
     /// Graceful shutdown.

@@ -48,6 +48,7 @@ where
 }
 
 /// Handle used by other components to send messages to an actor.
+#[derive(Debug)]
 pub struct ActorRef<M>
 where
     M: Send + Debug + 'static,

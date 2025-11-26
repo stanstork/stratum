@@ -16,14 +16,14 @@ impl ValidationConsumer {
     }
 }
 
-#[async_trait]
-impl DataConsumer for ValidationConsumer {
-    async fn run(&mut self) -> Result<(), ConsumerError> {
-        info!("Running in validation mode. No data will be written.");
+// #[async_trait]
+// impl DataConsumer for ValidationConsumer {
+//     async fn run(&mut self) -> Result<(), ConsumerError> {
+//         info!("Running in validation mode. No data will be written.");
 
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            info!("ValidationConsumer is alive...");
-        }
-    }
-}
+//         loop {
+//             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+//             info!("ValidationConsumer is alive...");
+//         }
+//     }
+// }
