@@ -2,7 +2,7 @@ use crate::{
     error::ProducerError,
     producer::{
         live::LiveProducer,
-        validation::{ValidationProducer, ValidationProducerParams},
+        // validation2::{ValidationProducer, ValidationProducerParams},
     },
     transform::{
         computed::ComputedTransform,
@@ -20,6 +20,8 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, watch::Sender};
 use tokio_util::sync::CancellationToken;
 
+pub mod components;
+pub mod config;
 pub mod live;
 pub mod validation;
 
@@ -88,21 +90,21 @@ pub async fn create_producer(
         )
     };
 
-    if is_dry_run {
-        let pipeline = pipeline_for_mapping(&mapping);
-        let validation_prod = ValidationProducer::new(ValidationProducerParams {
-            source,
-            destination,
-            pipeline,
-            mapping,
-            settings: settings.clone(),
-            offset_strategy,
-            cursor,
-            report: report.clone(),
-        });
-        // return Box::new(validation_prod);
-        todo!()
-    }
+    // if is_dry_run {
+    //     let pipeline = pipeline_for_mapping(&mapping);
+    //     let validation_prod = ValidationProducer::new(ValidationProducerParams {
+    //         source,
+    //         destination,
+    //         pipeline,
+    //         mapping,
+    //         settings: settings.clone(),
+    //         offset_strategy,
+    //         cursor,
+    //         report: report.clone(),
+    //     });
+    //     // return Box::new(validation_prod);
+    //     todo!()
+    // }
 
     let live_prod = LiveProducer::new(ctx, batch_tx, settings).await;
     Box::new(live_prod)

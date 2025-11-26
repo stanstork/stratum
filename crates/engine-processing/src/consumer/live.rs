@@ -378,6 +378,7 @@ impl LiveConsumer {
             item_id: self.ids.item_id(),
             part_id: self.ids.part_id(),
             batch_id,
+            ts: chrono::Utc::now(),
         }
     }
 

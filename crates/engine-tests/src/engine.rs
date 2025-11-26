@@ -277,6 +277,7 @@ mod tests {
                 item_id: ITEM_ID.to_string(),
                 part_id: PART_ID.to_string(),
                 batch_id: initial_batch_id.clone(),
+                ts: Utc::now(),
             })
             .await
             .expect("seed wal commit");

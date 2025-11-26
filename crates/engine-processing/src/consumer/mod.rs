@@ -10,6 +10,8 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, watch::Receiver};
 use tokio_util::sync::CancellationToken;
 
+pub mod components;
+pub mod config;
 pub mod live;
 pub mod trigger;
 pub mod validation;
