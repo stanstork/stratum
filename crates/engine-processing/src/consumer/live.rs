@@ -16,7 +16,7 @@ use engine_core::{
 use futures::lock::Mutex;
 use model::records::batch::Batch;
 use std::sync::Arc;
-use tokio::sync::{mpsc, watch::Receiver};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
@@ -40,7 +40,6 @@ pub struct LiveConsumer {
     coordinator: BatchCoordinator,
 
     // Communication
-    shutdown_rx: Receiver<bool>,
     cancel: CancellationToken,
 
     // State
@@ -55,7 +54,6 @@ impl LiveConsumer {
     pub async fn new(
         ctx: &Arc<Mutex<ItemContext>>,
         batch_rx: mpsc::Receiver<Batch>,
-        shutdown_rx: Receiver<bool>,
         cancel: CancellationToken,
         metrics: Metrics,
     ) -> Self {
@@ -91,7 +89,6 @@ impl LiveConsumer {
 
         Self {
             coordinator,
-            shutdown_rx,
             cancel,
             mode: ConsumerMode::Idle,
             ids,
@@ -101,7 +98,7 @@ impl LiveConsumer {
 
     /// Check if we should stop processing.
     fn should_stop(&self) -> bool {
-        self.cancel.is_cancelled() || *self.shutdown_rx.borrow()
+        self.cancel.is_cancelled()
     }
 }
 

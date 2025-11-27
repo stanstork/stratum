@@ -578,14 +578,12 @@ mod tests {
         settings: Settings,
         report: Arc<Mutex<DryRunReport>>,
     ) -> EngineRunResult {
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let (batch_tx, batch_rx) = mpsc::channel(8);
         let cancel = CancellationToken::new();
         let metrics = Metrics::new();
 
         let mut producer = create_producer(&ctx, batch_tx, &settings, &report).await;
-        let mut consumer =
-            create_consumer(&ctx, batch_rx, shutdown_rx, cancel.clone(), metrics.clone()).await;
+        let mut consumer = create_consumer(&ctx, batch_rx, cancel.clone(), metrics.clone()).await;
 
         // let producer_handle = spawn(async move { producer.run().await });
         // let consumer_handle = spawn(async move { consumer.run().await });

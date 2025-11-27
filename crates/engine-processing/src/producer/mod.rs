@@ -72,7 +72,7 @@ pub async fn create_producer(
     batch_tx: mpsc::Sender<Batch>,
     settings: &Settings,
     report: &Arc<Mutex<DryRunReport>>,
-) -> Box<dyn DataProducer + Send> {
+) -> Box<dyn DataProducer + Send + 'static> {
     let (is_dry_run, source, destination, mapping, offset_strategy, cursor) = {
         let guard = ctx.lock().await;
         let is_dry_run = guard.settings.lock().await.is_dry_run();

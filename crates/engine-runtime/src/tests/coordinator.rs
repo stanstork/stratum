@@ -108,8 +108,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_pipeline_coordinator_initialization() {
-        let producer = MockProducer::new();
-        let consumer = MockConsumer::new();
+        let producer = Box::new(MockProducer::new());
+        let consumer = Box::new(MockConsumer::new());
         let metrics = Metrics::new();
         let cancel_token = CancellationToken::new();
 
@@ -121,8 +121,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_pipeline_coordinator_snapshot_pipeline() {
-        let producer = MockProducer::new();
-        let consumer = MockConsumer::new();
+        let producer = Box::new(MockProducer::new());
+        let consumer = Box::new(MockConsumer::new());
         let metrics = Metrics::new();
         let cancel_token = CancellationToken::new();
 
@@ -145,8 +145,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_pipeline_coordinator_stop() {
-        let producer = MockProducer::new();
-        let consumer = MockConsumer::new();
+        let producer = Box::new(MockProducer::new());
+        let consumer = Box::new(MockConsumer::new());
         let metrics = Metrics::new();
         let cancel_token = CancellationToken::new();
 
@@ -165,8 +165,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_pipeline_coordinator_accessors() {
-        let producer = MockProducer::new();
-        let consumer = MockConsumer::new();
+        let producer = Box::new(MockProducer::new());
+        let consumer = Box::new(MockConsumer::new());
         let metrics = Metrics::new();
         let cancel_token = CancellationToken::new();
 

@@ -27,11 +27,8 @@ pub enum TickResponse {
     NoMoreTicks,
 }
 
-pub struct ProducerActor<P>
-where
-    P: DataProducer + Send + 'static,
-{
-    producer: P,
+pub struct ProducerActor {
+    producer: Box<dyn DataProducer + Send + 'static>,
 
     // Control state
     running: bool,
@@ -48,11 +45,12 @@ where
     actor_ref: Option<ActorRef<ProducerMsg>>,
 }
 
-impl<P> ProducerActor<P>
-where
-    P: DataProducer + Send + 'static,
-{
-    pub fn new(producer: P, cancel_token: CancellationToken, metrics: Metrics) -> Self {
+impl ProducerActor {
+    pub fn new(
+        producer: Box<dyn DataProducer + Send + 'static>,
+        cancel_token: CancellationToken,
+        metrics: Metrics,
+    ) -> Self {
         Self {
             producer,
             running: false,
@@ -107,22 +105,14 @@ where
 }
 
 #[async_trait]
-impl<P> Actor<ProducerMsg> for ProducerActor<P>
-where
-    P: DataProducer + Send + 'static,
-{
-    async fn on_start(&mut self, ctx: &ActorContext) -> Result<(), ActorError> {
-        info!(actor = ctx.name(), "Producer actor started");
+impl Actor<ProducerMsg> for ProducerActor {
+    async fn on_start(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
         Ok(())
     }
 
     async fn handle(&mut self, msg: ProducerMsg, ctx: &ActorContext) -> Result<(), ActorError> {
         match msg {
             ProducerMsg::SetActorRef(actor_ref) => {
-                info!(
-                    actor = ctx.name(),
-                    "Setting actor reference for tick scheduling"
-                );
                 self.set_actor_ref(actor_ref);
                 Ok(())
             }

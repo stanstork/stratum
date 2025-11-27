@@ -27,11 +27,8 @@ pub enum TickResponse {
     NoMoreTicks,
 }
 
-pub struct ConsumerActor<C>
-where
-    C: DataConsumer + Send + 'static,
-{
-    consumer: C,
+pub struct ConsumerActor {
+    consumer: Box<dyn DataConsumer + Send + 'static>,
 
     // Control state
     running: bool,
@@ -48,11 +45,12 @@ where
     actor_ref: Option<ActorRef<ConsumerMsg>>,
 }
 
-impl<C> ConsumerActor<C>
-where
-    C: DataConsumer + Send + 'static,
-{
-    pub fn new(consumer: C, cancel_token: CancellationToken, metrics: Metrics) -> Self {
+impl ConsumerActor {
+    pub fn new(
+        consumer: Box<dyn DataConsumer + Send + 'static>,
+        cancel_token: CancellationToken,
+        metrics: Metrics,
+    ) -> Self {
         Self {
             consumer,
             running: false,
@@ -109,22 +107,14 @@ where
 }
 
 #[async_trait]
-impl<C> Actor<ConsumerMsg> for ConsumerActor<C>
-where
-    C: DataConsumer + Send + 'static,
-{
-    async fn on_start(&mut self, ctx: &ActorContext) -> Result<(), ActorError> {
-        info!(actor = ctx.name(), "Consumer actor started");
+impl Actor<ConsumerMsg> for ConsumerActor {
+    async fn on_start(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
         Ok(())
     }
 
     async fn handle(&mut self, msg: ConsumerMsg, ctx: &ActorContext) -> Result<(), ActorError> {
         match msg {
             ConsumerMsg::SetActorRef(actor_ref) => {
-                info!(
-                    actor = ctx.name(),
-                    "Setting actor reference for tick scheduling"
-                );
                 self.set_actor_ref(actor_ref);
                 Ok(())
             }
@@ -153,8 +143,6 @@ where
                 }
 
                 self.running = true;
-
-                info!("Consumer started, sending initial tick");
 
                 // Send the first tick to start the processing loop
                 if let Some(ref actor_ref) = self.actor_ref {

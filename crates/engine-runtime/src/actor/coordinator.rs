@@ -23,18 +23,12 @@ pub struct PipelineCoordinator {
 }
 
 impl PipelineCoordinator {
-    pub fn new<P, C>(
-        producer: P,
-        consumer: C,
+    pub fn new(
+        producer: Box<dyn DataProducer + Send + 'static>,
+        consumer: Box<dyn DataConsumer + Send + 'static>,
         metrics: Metrics,
         cancel_token: CancellationToken,
-    ) -> Self
-    where
-        P: DataProducer + Send + 'static,
-        C: DataConsumer + Send + 'static,
-    {
-        info!("Initializing pipeline coordinator");
-
+    ) -> Self {
         // Create and spawn producer actor
         let producer_actor = ProducerActor::new(producer, cancel_token.clone(), metrics.clone());
         let (producer_ref, producer_handle) = spawn_actor("producer", 100, producer_actor);
@@ -54,7 +48,6 @@ impl PipelineCoordinator {
 
     /// Initializes the actors by setting their self-references.
     pub async fn initialize(&self) -> Result<(), ActorError> {
-        info!("Initializing actor references");
 
         // Set producer actor reference
         self.producer_ref
@@ -66,7 +59,6 @@ impl PipelineCoordinator {
             .send(ConsumerMsg::SetActorRef(self.consumer_ref.clone()))
             .await?;
 
-        info!("Pipeline coordinator initialized");
         Ok(())
     }
 
@@ -91,13 +83,6 @@ impl PipelineCoordinator {
         item_id: String,
         part_id: String,
     ) -> Result<(), ActorError> {
-        info!(
-            run_id = %run_id,
-            item_id = %item_id,
-            part_id = %part_id,
-            "Starting consumer"
-        );
-
         self.consumer_ref
             .send(ConsumerMsg::Start {
                 run_id,
@@ -154,12 +139,9 @@ impl PipelineCoordinator {
 
     /// Waits for both actors to complete.
     pub async fn wait(self) -> Result<(), ActorError> {
-        info!("Waiting for pipeline to complete");
-
         // Wait for both actors to finish
         let _ = tokio::join!(self.producer_handle, self.consumer_handle);
 
-        info!("Pipeline completed");
         Ok(())
     }
 
@@ -178,13 +160,6 @@ impl PipelineCoordinator {
         item_id: String,
         part_id: String,
     ) -> Result<(), ActorError> {
-        info!(
-            run_id = %run_id,
-            item_id = %item_id,
-            part_id = %part_id,
-            "Starting snapshot pipeline"
-        );
-
         // Start consumer first so it's ready to receive data
         self.start_consumer(run_id.clone(), item_id.clone(), part_id)
             .await?;
@@ -192,7 +167,6 @@ impl PipelineCoordinator {
         // Then start the producer
         self.start_snapshot(run_id, item_id).await?;
 
-        info!("Snapshot pipeline started");
         Ok(())
     }
 
