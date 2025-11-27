@@ -583,16 +583,7 @@ mod tests {
         let cancel = CancellationToken::new();
         let metrics = Metrics::new();
 
-        let mut producer = create_producer(
-            &ctx,
-            shutdown_tx.clone(),
-            batch_tx,
-            &settings,
-            cancel.clone(),
-            &report,
-            metrics.clone(),
-        )
-        .await;
+        let mut producer = create_producer(&ctx, batch_tx, &settings, &report).await;
         let mut consumer =
             create_consumer(&ctx, batch_rx, shutdown_rx, cancel.clone(), metrics.clone()).await;
 

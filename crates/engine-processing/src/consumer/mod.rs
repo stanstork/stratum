@@ -56,8 +56,7 @@ pub async fn create_consumer(
     drop(ctx_guard);
 
     if is_dry_run {
-        // Box::new(ValidationConsumer::new())
-        todo!("Implement ValidationConsumer constructor")
+        Box::new(ValidationConsumer::new(batch_rx))
     } else {
         Box::new(LiveConsumer::new(ctx, batch_rx, shutdown_rx, cancel, metrics).await)
     }

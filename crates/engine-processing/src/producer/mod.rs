@@ -2,7 +2,7 @@ use crate::{
     error::ProducerError,
     producer::{
         live::LiveProducer,
-        // validation2::{ValidationProducer, ValidationProducerParams},
+        validation::{ValidationProducer, ValidationProducerParams},
     },
     transform::{
         computed::ComputedTransform,
@@ -12,13 +12,12 @@ use crate::{
 };
 use async_trait::async_trait;
 use engine_config::report::dry_run::DryRunReport;
-use engine_core::{context::item::ItemContext, metrics::Metrics};
+use engine_core::context::item::ItemContext;
 use futures::lock::Mutex;
 use model::{records::batch::Batch, transform::mapping::EntityMapping};
 use smql_syntax::ast::setting::Settings;
 use std::sync::Arc;
-use tokio::sync::{mpsc, watch::Sender};
-use tokio_util::sync::CancellationToken;
+use tokio::sync::mpsc;
 
 pub mod components;
 pub mod config;
@@ -70,12 +69,9 @@ pub trait DataProducer {
 
 pub async fn create_producer(
     ctx: &Arc<Mutex<ItemContext>>,
-    shutdown_tx: Sender<bool>,
     batch_tx: mpsc::Sender<Batch>,
     settings: &Settings,
-    cancel: CancellationToken,
     report: &Arc<Mutex<DryRunReport>>,
-    metrics: Metrics,
 ) -> Box<dyn DataProducer + Send> {
     let (is_dry_run, source, destination, mapping, offset_strategy, cursor) = {
         let guard = ctx.lock().await;
@@ -90,21 +86,20 @@ pub async fn create_producer(
         )
     };
 
-    // if is_dry_run {
-    //     let pipeline = pipeline_for_mapping(&mapping);
-    //     let validation_prod = ValidationProducer::new(ValidationProducerParams {
-    //         source,
-    //         destination,
-    //         pipeline,
-    //         mapping,
-    //         settings: settings.clone(),
-    //         offset_strategy,
-    //         cursor,
-    //         report: report.clone(),
-    //     });
-    //     // return Box::new(validation_prod);
-    //     todo!()
-    // }
+    if is_dry_run {
+        let pipeline = pipeline_for_mapping(&mapping);
+        let validation_prod = ValidationProducer::new(ValidationProducerParams {
+            source,
+            destination,
+            pipeline,
+            mapping,
+            settings: settings.clone(),
+            offset_strategy,
+            cursor,
+            report: report.clone(),
+        });
+        return Box::new(validation_prod);
+    }
 
     let live_prod = LiveProducer::new(ctx, batch_tx, settings).await;
     Box::new(live_prod)
