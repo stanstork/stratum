@@ -12,14 +12,15 @@ use crate::{
 };
 use async_trait::async_trait;
 use engine_config::report::dry_run::DryRunReport;
-use engine_core::{context::item::ItemContext, metrics::Metrics};
+use engine_core::context::item::ItemContext;
 use futures::lock::Mutex;
 use model::{records::batch::Batch, transform::mapping::EntityMapping};
 use smql_syntax::ast::setting::Settings;
 use std::sync::Arc;
-use tokio::sync::{mpsc, watch::Sender};
-use tokio_util::sync::CancellationToken;
+use tokio::sync::mpsc;
 
+pub mod components;
+pub mod config;
 pub mod live;
 pub mod validation;
 
@@ -40,21 +41,38 @@ fn pipeline_for_mapping(mapping: &EntityMapping) -> TransformPipeline {
     pipeline
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ProducerStatus {
+    /// Work is ongoing; the actor should schedule another tick.
+    Working,
+    /// The producer is idle (e.g. waiting for CDC events or backpressure).
+    Idle,
+    /// The producer has finished its task (e.g. Snapshot complete).
+    Finished,
+}
+
 #[async_trait]
 pub trait DataProducer {
-    /// Executes the producer's main loop.
-    async fn run(&mut self) -> Result<usize, ProducerError>;
+    async fn start_snapshot(&mut self) -> Result<(), ProducerError>;
+    async fn start_cdc(&mut self) -> Result<(), ProducerError>;
+
+    async fn resume(
+        &mut self,
+        run_id: &str,
+        item_id: &str,
+        part_id: &str,
+    ) -> Result<(), ProducerError>;
+
+    async fn tick(&mut self) -> Result<ProducerStatus, ProducerError>;
+    async fn stop(&mut self) -> Result<(), ProducerError>;
 }
 
 pub async fn create_producer(
     ctx: &Arc<Mutex<ItemContext>>,
-    shutdown_tx: Sender<bool>,
     batch_tx: mpsc::Sender<Batch>,
     settings: &Settings,
-    cancel: CancellationToken,
     report: &Arc<Mutex<DryRunReport>>,
-    metrics: Metrics,
-) -> Box<dyn DataProducer + Send> {
+) -> Box<dyn DataProducer + Send + 'static> {
     let (is_dry_run, source, destination, mapping, offset_strategy, cursor) = {
         let guard = ctx.lock().await;
         let is_dry_run = guard.settings.lock().await.is_dry_run();
@@ -83,6 +101,6 @@ pub async fn create_producer(
         return Box::new(validation_prod);
     }
 
-    let live_prod = LiveProducer::new(ctx, shutdown_tx, batch_tx, settings, cancel, metrics).await;
+    let live_prod = LiveProducer::new(ctx, batch_tx, settings).await;
     Box::new(live_prod)
 }

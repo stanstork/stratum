@@ -67,6 +67,7 @@ pub enum WalEntry {
         item_id: String,
         part_id: String,
         batch_id: String,
+        ts: DateTime<Utc>,
     },
     ItemDone {
         run_id: String,

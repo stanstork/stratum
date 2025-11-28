@@ -3,6 +3,8 @@ use connectors::sql::base::metadata::table::TableMetadata;
 use engine_core::connectors::destination::Destination;
 use tracing::{error, info};
 
+#[allow(dead_code)]
+/// TODO: Constraints will be reworked in the future to handle more complex scenarios.
 /// # RAII Guard for Database Triggers
 /// This struct ensures that triggers are re-enabled when it goes out of scope.
 pub(crate) struct TriggerGuard {
@@ -11,6 +13,7 @@ pub(crate) struct TriggerGuard {
     target_state: bool,
 }
 
+#[allow(dead_code)]
 impl TriggerGuard {
     pub async fn new(
         destination: &Destination,

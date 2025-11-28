@@ -7,26 +7,46 @@ use engine_core::{context::item::ItemContext, metrics::Metrics};
 use futures::lock::Mutex;
 use model::records::batch::Batch;
 use std::sync::Arc;
-use tokio::sync::{mpsc, watch::Receiver};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+pub mod components;
+pub mod config;
 pub mod live;
 pub mod trigger;
 pub mod validation;
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConsumerStatus {
+    /// Work is ongoing; the actor should schedule another tick immediately.
+    Working,
+    /// The consumer is idle (waiting for batches).
+    Idle,
+    /// The consumer has finished (channel closed, all work done).
+    Finished,
+}
+
 #[async_trait]
 pub trait DataConsumer {
-    /// Executes the consumer's main loop.
-    async fn run(&mut self) -> Result<(), ConsumerError>;
+    async fn start(&mut self) -> Result<(), ConsumerError>;
+
+    async fn resume(
+        &mut self,
+        run_id: &str,
+        item_id: &str,
+        part_id: &str,
+    ) -> Result<(), ConsumerError>;
+
+    async fn tick(&mut self) -> Result<ConsumerStatus, ConsumerError>;
+    async fn stop(&mut self) -> Result<(), ConsumerError>;
 }
 
 pub async fn create_consumer(
     ctx: &Arc<Mutex<ItemContext>>,
     batch_rx: mpsc::Receiver<Batch>,
-    shutdown_rx: Receiver<bool>,
     cancel: CancellationToken,
     metrics: Metrics,
-) -> Box<dyn DataConsumer + Send> {
+) -> Box<dyn DataConsumer + Send + 'static> {
     let ctx_guard = ctx.lock().await;
     let settings_guard = ctx_guard.settings.lock().await;
     let is_dry_run = settings_guard.is_dry_run();
@@ -35,8 +55,8 @@ pub async fn create_consumer(
     drop(ctx_guard);
 
     if is_dry_run {
-        Box::new(ValidationConsumer::new())
+        Box::new(ValidationConsumer::new(batch_rx))
     } else {
-        Box::new(LiveConsumer::new(ctx, batch_rx, shutdown_rx, cancel, metrics).await)
+        Box::new(LiveConsumer::new(ctx, batch_rx, cancel, metrics).await)
     }
 }

@@ -24,7 +24,6 @@ async fn mysql_pool(source_db: &str) -> Pool {
 }
 
 async fn pg_pool() -> Arc<Client> {
-    
     Arc::new(connect_client(TEST_PG_URL).await.expect("connect postgres"))
 }
 

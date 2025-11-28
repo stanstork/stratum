@@ -6,4 +6,5 @@ pub mod filter;
 pub mod item;
 pub mod producer;
 pub mod retry;
+pub mod state_manager;
 pub mod transform;
