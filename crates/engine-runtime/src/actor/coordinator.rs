@@ -1,7 +1,7 @@
 use super::{consumer::ConsumerActor, producer::ProducerActor};
 use crate::{
     actor::{
-        actor::ActorRef,
+        ActorRef,
         messages::{ConsumerMsg, ProducerMsg},
         spawn::spawn_actor,
     },
@@ -48,7 +48,6 @@ impl PipelineCoordinator {
 
     /// Initializes the actors by setting their self-references.
     pub async fn initialize(&self) -> Result<(), ActorError> {
-
         // Set producer actor reference
         self.producer_ref
             .send(ProducerMsg::SetActorRef(self.producer_ref.clone()))

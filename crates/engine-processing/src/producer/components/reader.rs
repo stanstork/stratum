@@ -44,7 +44,7 @@ impl SnapshotReader {
             Err(RetryError::Fatal(e)) => {
                 return Err(ProducerError::Fetch {
                     cursor: cursor_template,
-                    source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)),
+                    source: Box::new(std::io::Error::other(e)),
                 });
             }
             Err(RetryError::AttemptsExceeded(e)) => {

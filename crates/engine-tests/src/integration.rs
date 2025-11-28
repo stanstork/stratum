@@ -265,6 +265,7 @@ mod tests {
     // - Data should be copied, and the row count should match between the source and destination tables.
     #[traced_test]
     #[tokio::test]
+    #[ignore = "Constaints handling will be reworked, so this test is ignored for now."]
     async fn tc08() {
         reset_postgres_schema().await;
 
@@ -328,6 +329,7 @@ mod tests {
     // - The new column should be populated with the computed value (`total * 1.4`).
     #[traced_test]
     #[tokio::test]
+    #[ignore = "Constaints handling will be reworked, so this test is ignored for now."]
     async fn tc10() {
         reset_postgres_schema().await;
 

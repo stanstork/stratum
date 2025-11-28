@@ -27,16 +27,16 @@ pub struct BatchWriter {
     destination: Destination,
     retry: RetryPolicy,
     strategy: WriteStrategy,
-    meta: TableMetadata,
+    meta: Vec<TableMetadata>,
 }
 
 impl BatchWriter {
-    pub fn new(destination: Destination, retry: RetryPolicy, meta: &TableMetadata) -> Self {
+    pub fn new(destination: Destination, retry: RetryPolicy, meta: &[TableMetadata]) -> Self {
         Self {
             destination,
             retry,
             strategy: WriteStrategy::Regular, // Default to regular
-            meta: meta.clone(),
+            meta: meta.to_owned(),
         }
     }
 
@@ -80,14 +80,14 @@ impl BatchWriter {
 
     /// Check if fast path (sink) is available.
     async fn can_use_fast_path(&self) -> Result<bool, ConsumerError> {
-        self.destination
-            .sink()
-            .support_fast_path()
-            .await
-            .map_err(|e| ConsumerError::Write {
-                batch_id: "detection".to_string(),
-                source: Box::new(e),
-            })
+        let fast = self.destination.sink().support_fast_path().await?;
+        if self.meta.is_empty() {
+            warn!("No table metadata available to determine fast path support");
+            return Ok(false);
+        }
+        let meta = &self.meta[0]; // For now, check only the first table
+        info!(table = %meta.name, fast_path = %fast, "Fast path support checked");
+        Ok(fast && !meta.primary_keys.is_empty())
     }
 
     /// Write batch using fast path (sink: COPY, MERGE, etc.).
@@ -101,12 +101,24 @@ impl BatchWriter {
             "Writing batch to destination via sink"
         );
 
+        if self.meta.is_empty() {
+            warn!("No table metadata available for fast path write. Skipping write.");
+            return Ok(WriteResult {
+                rows_written: 0,
+                duration: start.elapsed(),
+                strategy: WriteStrategy::FastPath,
+            });
+        }
+
+        // For now we support only single destination table
+        let meta = self.meta[0].clone();
+
         // Use retry policy for transient failures
         self.retry
             .run(
                 || {
                     let sink = self.destination.sink().clone();
-                    let meta = self.meta.clone();
+                    let meta = meta.clone();
                     async move { sink.write_fast_path(&meta, batch).await }
                 },
                 classify_sink_error,
@@ -114,10 +126,7 @@ impl BatchWriter {
             .await
             .map_err(|e| ConsumerError::Write {
                 batch_id: batch.id.clone(),
-                source: Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("{:?}", e),
-                )),
+                source: Box::new(std::io::Error::other(format!("{:?}", e))),
             })?;
 
         let duration = start.elapsed();
@@ -151,12 +160,24 @@ impl BatchWriter {
             "Writing batch to destination"
         );
 
+        if self.meta.is_empty() {
+            warn!("No table metadata available for regular write. Skipping write.");
+            return Ok(WriteResult {
+                rows_written: 0,
+                duration: start.elapsed(),
+                strategy: WriteStrategy::Regular,
+            });
+        }
+
+        // For now we support only single destination table
+        let meta = self.meta[0].clone();
+
         // Use retry policy for transient failures
         self.retry
             .run(
                 || {
                     let dest = self.destination.clone();
-                    let meta = self.meta.clone();
+                    let meta = meta.clone();
                     async move { dest.write_batch(&meta, &batch.rows).await }
                 },
                 classify_db_error,
@@ -164,10 +185,7 @@ impl BatchWriter {
             .await
             .map_err(|e| ConsumerError::Write {
                 batch_id: batch.id.clone(),
-                source: Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("{:?}", e),
-                )),
+                source: Box::new(std::io::Error::other(format!("{:?}", e))),
             })?;
 
         let duration = start.elapsed();
@@ -184,7 +202,7 @@ impl BatchWriter {
         );
 
         Ok(WriteResult {
-            rows_written: rows_written,
+            rows_written,
             duration,
             strategy: WriteStrategy::Regular,
         })

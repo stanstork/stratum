@@ -1,4 +1,4 @@
-use crate::{actor::actor::ActorRef, error::ActorError};
+use crate::{actor::ActorRef, error::ActorError};
 use model::{
     pagination::cursor::Cursor,
     records::{batch::Manifest, row::RowData},

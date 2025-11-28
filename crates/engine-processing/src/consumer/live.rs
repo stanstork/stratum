@@ -72,13 +72,7 @@ impl LiveConsumer {
         let ids = ItemId::new(run_id, item_id, part_id);
 
         let meta = match &destination.data_dest {
-            DataDestination::Database(db) => {
-                let tables = db.data.lock().await.tables();
-                tables
-                    .first()
-                    .cloned()
-                    .expect("Expected at least one table metadata")
-            }
+            DataDestination::Database(db) => db.data.lock().await.tables(),
         };
 
         let writer = BatchWriter::new(destination.clone(), RetryPolicy::for_database(), &meta)

@@ -1,4 +1,4 @@
-use crate::actor::actor::{Actor, ActorContext, ActorRef};
+use crate::actor::{Actor, ActorContext, ActorRef};
 use std::fmt::Debug;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::error;

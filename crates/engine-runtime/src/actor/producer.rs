@@ -1,8 +1,5 @@
 use crate::{
-    actor::{
-        actor::{Actor, ActorContext, ActorRef},
-        messages::ProducerMsg,
-    },
+    actor::{Actor, ActorContext, ActorRef, messages::ProducerMsg},
     error::ActorError,
 };
 use async_trait::async_trait;
