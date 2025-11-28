@@ -139,6 +139,12 @@ impl PipelineCoordinator {
 
     /// Waits for both actors to complete.
     pub async fn wait(self) -> Result<(), ActorError> {
+        // Drop actor references to allow mailboxes to close when actors finish
+        // This is necessary because actors hold self-references that they drop when done,
+        // but the coordinator also holds references that must be dropped for termination
+        drop(self.producer_ref);
+        drop(self.consumer_ref);
+
         // Wait for both actors to finish
         let _ = tokio::join!(self.producer_handle, self.consumer_handle);
 

@@ -5,6 +5,6 @@ CONNECTIONS(
 MIGRATE(
     SOURCE(TABLE, users) -> DEST(TABLE, users) [
         SETTINGS(CREATE_MISSING_TABLES=TRUE,BATCH_SIZE=50000),
-        OFFSET(STRATEGY -> pk, CURSOR -> id)
+        OFFSET(STRATEGY -> pk, CURSOR -> users[id])
     ]
 );

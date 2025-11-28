@@ -195,9 +195,14 @@ impl Actor<ConsumerMsg> for ConsumerActor {
                         }
                     }
                     TickResponse::NoMoreTicks => {
-                        // No more ticks needed
-                        info!("Consumer finished");
+                        // No more ticks needed - consumer has finished processing
+                        info!(
+                            "Consumer finished - dropping self-reference to allow actor termination"
+                        );
                         self.running = false;
+
+                        // Drop self-reference so the mailbox can close and actor can terminates
+                        self.actor_ref = None;
                     }
                 }
 

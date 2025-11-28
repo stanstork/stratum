@@ -182,12 +182,6 @@ impl DataConsumer for LiveConsumer {
                     return Ok(ConsumerStatus::Working); // Continue to flush
                 }
 
-                if self.coordinator.is_channel_closed() {
-                    info!("Batch channel closed, producer has finished");
-                    self.mode = ConsumerMode::Finished;
-                    return Ok(ConsumerStatus::Finished);
-                }
-
                 match self.coordinator.try_process_one().await {
                     Ok(true) => {
                         // Successfully processed a batch
@@ -196,7 +190,15 @@ impl DataConsumer for LiveConsumer {
                     }
                     Ok(false) => {
                         // No batch available right now
-                        // Return Idle so actor can schedule delayed tick
+                        // Check if channel is closed (producer finished)
+                        if self.coordinator.is_channel_closed() {
+                            info!(
+                                "Batch channel closed and all batches processed, consumer finished"
+                            );
+                            self.mode = ConsumerMode::Finished;
+                            return Ok(ConsumerStatus::Finished);
+                        }
+                        // Channel still open, just idle
                         Ok(ConsumerStatus::Idle)
                     }
                     Err(e) => {
@@ -228,12 +230,6 @@ impl DataConsumer for LiveConsumer {
             item_id = %self.ids.item_id(),
             "Stopping LiveConsumer"
         );
-
-        // Flush any pending writes
-        if let Err(e) = self.coordinator.try_process_one().await {
-            error!(error = %e, "Failed to flush on stop");
-            // Continue to restore triggers even if flush fails
-        }
 
         if self.config.disable_triggers {
             info!("Consumer configured to re-enable triggers on stop");

@@ -198,9 +198,14 @@ impl Actor<ProducerMsg> for ProducerActor {
                         }
                     }
                     TickResponse::NoMoreTicks => {
-                        info!("Producer finished");
+                        info!(
+                            "Producer finished - dropping self-reference to allow actor termination"
+                        );
                         self.running = false;
                         let _ = self.producer.stop().await;
+
+                        // Drop self-reference so the mailbox can close and actor can terminate
+                        self.actor_ref = None;
                     }
                 }
 

@@ -134,6 +134,8 @@ impl LiveProducer {
 
         if self.cursor == Cursor::None {
             self.mode = ProducerMode::Finished;
+            // Close the batch channel to signal consumers we're done
+            self.coordinator.close_channel();
             return Ok(ProducerStatus::Finished);
         }
 

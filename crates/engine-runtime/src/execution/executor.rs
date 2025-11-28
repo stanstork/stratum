@@ -83,6 +83,7 @@ impl MigrationExecutor {
         idx: usize,
         mi: &MigrateItem,
     ) -> Result<SummaryReport, MigrationError> {
+        let start_time = std::time::Instant::now();
         info!("Starting migration item {}", mi.destination.name());
 
         let run_id = self.global_ctx.run_id();
@@ -131,7 +132,12 @@ impl MigrationExecutor {
         let cancel = CancellationToken::new();
         workers::spawn(ctx, &mi.settings, cancel, &dry_run_report).await?;
 
-        info!("Migration item {} completed", mi.destination.name());
+        let duration = start_time.elapsed();
+        info!(
+            "Migration item {} completed in {:.2}s",
+            mi.destination.name(),
+            duration.as_secs_f64()
+        );
 
         let final_report = dry_run_report.lock().await.clone();
         Ok(SummaryReport {

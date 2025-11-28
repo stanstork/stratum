@@ -10,14 +10,14 @@ use tokio::sync::mpsc;
 
 /// Coordinates batch creation and delivery to consumers.
 pub struct BatchCoordinator {
-    batch_tx: mpsc::Sender<Batch>,
+    batch_tx: Option<mpsc::Sender<Batch>>,
     state_manager: StateManager,
 }
 
 impl BatchCoordinator {
     pub fn new(batch_tx: mpsc::Sender<Batch>, state_manager: StateManager) -> Self {
         Self {
-            batch_tx,
+            batch_tx: Some(batch_tx),
             state_manager,
         }
     }
@@ -41,9 +41,17 @@ impl BatchCoordinator {
         };
 
         self.batch_tx
+            .as_ref()
+            .ok_or_else(|| ProducerError::ChannelSend("Channel already closed".to_string()))?
             .send(batch)
             .await
             .map_err(|e| ProducerError::ChannelSend(e.to_string()))
+    }
+
+    /// Close the batch channel to signal consumers that no more batches will be sent.
+    /// This should be called when the producer has finished sending all data.
+    pub fn close_channel(&mut self) {
+        self.batch_tx = None;
     }
 
     /// Complete batch lifecycle: log start, send, and optionally commit.
