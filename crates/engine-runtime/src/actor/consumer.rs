@@ -3,11 +3,12 @@ use crate::{
     error::ActorError,
 };
 use async_trait::async_trait;
-use engine_core::metrics::Metrics;
+use engine_core::{event_bus::bus::EventBus, metrics::Metrics};
 use engine_processing::{
     cb::{CircuitBreaker, CircuitBreakerState},
     consumer::{ConsumerStatus, DataConsumer},
 };
+use model::events::*;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
@@ -40,6 +41,9 @@ pub struct ConsumerActor {
 
     // Self-reference for scheduling ticks
     actor_ref: Option<ActorRef<ConsumerMsg>>,
+
+    // EventBus for publishing migration events
+    event_bus: Option<EventBus>,
 }
 
 impl ConsumerActor {
@@ -56,12 +60,16 @@ impl ConsumerActor {
             metrics,
             idle_delay: Duration::from_millis(100), // Default idle delay
             actor_ref: None,
+            event_bus: None,
         }
     }
 
-    /// This must be called after the actor is spawned.
     pub fn set_actor_ref(&mut self, actor_ref: ActorRef<ConsumerMsg>) {
         self.actor_ref = Some(actor_ref);
+    }
+
+    pub fn set_event_bus(&mut self, event_bus: EventBus) {
+        self.event_bus = Some(event_bus);
     }
 
     fn next_action(&self, status: ConsumerStatus) -> TickResponse {
@@ -116,19 +124,16 @@ impl Actor<ConsumerMsg> for ConsumerActor {
                 Ok(())
             }
 
+            ConsumerMsg::SetEventBus(event_bus) => {
+                self.set_event_bus(event_bus);
+                Ok(())
+            }
+
             ConsumerMsg::Start {
                 run_id,
                 item_id,
                 part_id,
             } => {
-                info!(
-                    actor = ctx.name(),
-                    run_id = %run_id,
-                    item_id = %item_id,
-                    part_id = %part_id,
-                    "Starting consumer"
-                );
-
                 if let Err(e) = self.consumer.start().await {
                     error!(error = %e, "Failed to start consumer");
                     return Err(ActorError::Internal(e.to_string()));
@@ -140,6 +145,16 @@ impl Actor<ConsumerMsg> for ConsumerActor {
                 }
 
                 self.running = true;
+
+                if let Some(ref event_bus) = self.event_bus {
+                    event_bus
+                        .publish(ConsumerStarted {
+                            run_id: run_id.clone(),
+                            item_id: item_id.clone(),
+                            timestamp: chrono::Utc::now(),
+                        })
+                        .await;
+                }
 
                 // Send the first tick to start the processing loop
                 if let Some(ref actor_ref) = self.actor_ref {
@@ -156,7 +171,6 @@ impl Actor<ConsumerMsg> for ConsumerActor {
                     return Ok(());
                 }
 
-                // Process one tick
                 let response = match self.consumer.tick().await {
                     Ok(status) => {
                         self.breaker.record_success();
@@ -165,10 +179,8 @@ impl Actor<ConsumerMsg> for ConsumerActor {
                     Err(e) => self.handle_tick_error(e).await?,
                 };
 
-                // Schedule the next tick based on the response
                 match response {
                     TickResponse::ScheduleImmediate => {
-                        // Schedule another tick immediately
                         if let Some(ref actor_ref) = self.actor_ref {
                             let actor_ref = actor_ref.clone();
                             tokio::spawn(async move {
@@ -179,7 +191,6 @@ impl Actor<ConsumerMsg> for ConsumerActor {
                         }
                     }
                     TickResponse::ScheduleDelayed(delay) => {
-                        // Schedule tick after delay
                         info!(delay_ms = delay.as_millis(), "Consumer idle");
                         if let Some(ref actor_ref) = self.actor_ref {
                             let actor_ref = actor_ref.clone();
@@ -192,7 +203,6 @@ impl Actor<ConsumerMsg> for ConsumerActor {
                         }
                     }
                     TickResponse::NoMoreTicks => {
-                        // No more ticks needed - consumer has finished processing
                         info!(
                             "Consumer finished - dropping self-reference to allow actor termination"
                         );
@@ -225,13 +235,22 @@ impl Actor<ConsumerMsg> for ConsumerActor {
                 Ok(())
             }
 
-            ConsumerMsg::Stop => {
-                info!(actor = ctx.name(), "Stopping consumer");
+            ConsumerMsg::Stop { run_id, item_id } => {
                 self.running = false;
 
                 if let Err(e) = self.consumer.stop().await {
                     error!(error = %e, "Consumer stop failed");
                     return Err(ActorError::Internal(e.to_string()));
+                }
+
+                if let Some(ref event_bus) = self.event_bus {
+                    event_bus
+                        .publish(ConsumerStopped {
+                            run_id: run_id.clone(),
+                            item_id: item_id.clone(),
+                            timestamp: chrono::Utc::now(),
+                        })
+                        .await;
                 }
 
                 Ok(())

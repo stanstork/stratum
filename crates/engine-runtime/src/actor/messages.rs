@@ -1,18 +1,5 @@
 use crate::{actor::ActorRef, error::ActorError};
-use model::{
-    pagination::cursor::Cursor,
-    records::{batch::Manifest, row::RowData},
-};
-
-#[derive(Debug, Clone)]
-pub struct RecordBatch {
-    pub id: String,
-    pub rows: Vec<RowData>, // already transformed
-    pub cursor: Cursor,     // cursor used to start this batch (last committed offset)
-    pub next: Cursor,       // resume-from cursor (end of this batch)
-    pub manifest: Manifest,
-    pub ts: chrono::DateTime<chrono::Utc>,
-}
+use engine_core::event_bus::bus::EventBus;
 
 #[derive(Debug, Clone)]
 pub struct ChangeEvent {
@@ -35,6 +22,9 @@ pub enum ProducerMsg {
     /// Initialize the actor with its own reference for tick scheduling.
     SetActorRef(ActorRef<ProducerMsg>),
 
+    /// Set the EventBus for publishing migration events.
+    SetEventBus(EventBus),
+
     /// Start (or resume) snapshot for a given migration item.
     StartSnapshot { run_id: String, item_id: String },
 
@@ -45,7 +35,7 @@ pub enum ProducerMsg {
     Tick,
 
     /// Graceful shutdown.
-    Stop,
+    Stop { run_id: String, item_id: String },
 }
 
 /// Messages for the Consumer actor.
@@ -55,6 +45,9 @@ pub enum ProducerMsg {
 pub enum ConsumerMsg {
     /// Initialize the actor with its own reference for tick scheduling.
     SetActorRef(ActorRef<ConsumerMsg>),
+
+    /// Set the EventBus for publishing migration events.
+    SetEventBus(EventBus),
 
     /// Start the consumer for a specific item.
     Start {
@@ -70,7 +63,7 @@ pub enum ConsumerMsg {
     Flush { run_id: String, item_id: String },
 
     /// Graceful shutdown.
-    Stop,
+    Stop { run_id: String, item_id: String },
 }
 
 /// Messages for the CDC actor.

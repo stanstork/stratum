@@ -8,6 +8,9 @@ use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
+// Map of Event TypeID -> (Map of SubscriberID -> Sender)
+type Subscribers = Arc<RwLock<HashMap<TypeId, HashMap<u64, Box<dyn Any + Send + Sync>>>>>;
+
 /// A subscription handle that can be used to unsubscribe from events.
 #[derive(Debug, Clone)]
 pub struct Subscription {
@@ -17,9 +20,22 @@ pub struct Subscription {
 
 #[derive(Clone)]
 pub struct EventBus {
-    // Map of Event TypeID -> (Map of SubscriberID -> Sender)
-    subscribers: Arc<RwLock<HashMap<TypeId, HashMap<u64, Box<dyn Any + Send + Sync>>>>>,
+    subscribers: Subscribers,
     next_id: Arc<RwLock<u64>>,
+}
+
+impl std::fmt::Debug for EventBus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventBus")
+            .field("subscribers", &"<RwLock<HashMap>>")
+            .finish()
+    }
+}
+
+impl Default for EventBus {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl EventBus {
@@ -78,13 +94,11 @@ impl EventBus {
                 "Publishing event"
             );
 
-            // Send to all subscribers
             for (subscriber_id, boxed_sender) in type_subscribers.iter() {
                 // Downcast back to the specific Sender type
                 if let Some(sender) = boxed_sender.downcast_ref::<mpsc::Sender<Arc<E>>>() {
                     let event_clone = event_arc.clone();
 
-                    // try_send is non-blocking. If channel is full, it returns error.
                     if let Err(e) = sender.try_send(event_clone) {
                         warn!(
                             event_type = std::any::type_name::<E>(),

@@ -3,11 +3,12 @@ use crate::{
     error::ActorError,
 };
 use async_trait::async_trait;
-use engine_core::metrics::Metrics;
+use engine_core::{event_bus::bus::EventBus, metrics::Metrics};
 use engine_processing::{
     cb::{CircuitBreaker, CircuitBreakerState},
     producer::{DataProducer, ProducerStatus},
 };
+use model::events::*;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
@@ -30,6 +31,7 @@ pub struct ProducerActor {
     // Control state
     running: bool,
     cancel_token: CancellationToken,
+    mode: Option<ProducerMode>,
 
     // Resilience
     breaker: CircuitBreaker,
@@ -40,6 +42,9 @@ pub struct ProducerActor {
 
     // Self-reference for scheduling ticks
     actor_ref: Option<ActorRef<ProducerMsg>>,
+
+    // EventBus for publishing migration events
+    event_bus: Option<EventBus>,
 }
 
 impl ProducerActor {
@@ -52,16 +57,21 @@ impl ProducerActor {
             producer,
             running: false,
             cancel_token,
+            mode: None,
             breaker: CircuitBreaker::default_db(),
             metrics,
             idle_delay: Duration::from_millis(500), // Default idle delay
             actor_ref: None,
+            event_bus: None,
         }
     }
 
-    /// This must be called after the actor is spawned.
     pub fn set_actor_ref(&mut self, actor_ref: ActorRef<ProducerMsg>) {
         self.actor_ref = Some(actor_ref);
+    }
+
+    pub fn set_event_bus(&mut self, event_bus: EventBus) {
+        self.event_bus = Some(event_bus);
     }
 
     fn next_action(&self, status: ProducerStatus) -> TickResponse {
@@ -114,9 +124,12 @@ impl Actor<ProducerMsg> for ProducerActor {
                 Ok(())
             }
 
-            ProducerMsg::StartSnapshot { run_id, item_id } => {
-                info!(actor = ctx.name(), run_id = %run_id, item_id = %item_id, "Starting snapshot");
+            ProducerMsg::SetEventBus(event_bus) => {
+                self.set_event_bus(event_bus);
+                Ok(())
+            }
 
+            ProducerMsg::StartSnapshot { run_id, item_id } => {
                 if let Err(e) = self.producer.resume(&run_id, &item_id, "part-0").await {
                     error!("Failed to resume producer state: {}", e);
                     return Err(ActorError::Internal(e.to_string()));
@@ -128,6 +141,25 @@ impl Actor<ProducerMsg> for ProducerActor {
                 }
 
                 self.running = true;
+                self.mode = Some(ProducerMode::Snapshot);
+
+                if let Some(ref event_bus) = self.event_bus {
+                    event_bus
+                        .publish(SnapshotStarted {
+                            run_id: run_id.clone(),
+                            item_id: item_id.clone(),
+                            timestamp: chrono::Utc::now(),
+                        })
+                        .await;
+                    event_bus
+                        .publish(ProducerStarted {
+                            run_id: run_id.clone(),
+                            item_id: item_id.clone(),
+                            mode: ProducerMode::Snapshot,
+                            timestamp: chrono::Utc::now(),
+                        })
+                        .await;
+                }
 
                 // Send the first tick to start the processing loop
                 if let Some(ref actor_ref) = self.actor_ref {
@@ -137,16 +169,31 @@ impl Actor<ProducerMsg> for ProducerActor {
                 Ok(())
             }
 
-            ProducerMsg::StartCdc {
-                run_id: _,
-                item_id: _,
-            } => {
-                info!(actor = ctx.name(), "Starting CDC");
+            ProducerMsg::StartCdc { run_id, item_id } => {
                 if let Err(e) = self.producer.start_cdc().await {
                     error!("Failed to start CDC: {}", e);
                     return Err(ActorError::Internal(e.to_string()));
                 }
                 self.running = true;
+                self.mode = Some(ProducerMode::Cdc);
+
+                if let Some(ref event_bus) = self.event_bus {
+                    event_bus
+                        .publish(CdcStarted {
+                            run_id: run_id.clone(),
+                            item_id: item_id.clone(),
+                            timestamp: chrono::Utc::now(),
+                        })
+                        .await;
+                    event_bus
+                        .publish(ProducerStarted {
+                            run_id: run_id.clone(),
+                            item_id: item_id.clone(),
+                            mode: ProducerMode::Cdc,
+                            timestamp: chrono::Utc::now(),
+                        })
+                        .await;
+                }
 
                 // Send the first tick to start the processing loop
                 if let Some(ref actor_ref) = self.actor_ref {
@@ -209,13 +256,24 @@ impl Actor<ProducerMsg> for ProducerActor {
                 Ok(())
             }
 
-            ProducerMsg::Stop => {
-                info!(actor = ctx.name(), "Stopping producer");
+            ProducerMsg::Stop { run_id, item_id } => {
                 self.running = false;
                 if let Err(e) = self.producer.stop().await {
                     error!(error = %e, "Producer stop failed");
                     return Err(ActorError::Internal(e.to_string()));
                 }
+
+                if let Some(ref event_bus) = self.event_bus {
+                    event_bus
+                        .publish(ProducerStopped {
+                            run_id,
+                            item_id,
+                            mode: self.mode.unwrap_or(ProducerMode::Snapshot),
+                            timestamp: chrono::Utc::now(),
+                        })
+                        .await;
+                }
+
                 Ok(())
             }
         }
