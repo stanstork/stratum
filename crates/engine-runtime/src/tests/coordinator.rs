@@ -157,7 +157,12 @@ mod tests {
         coordinator.initialize().await.unwrap();
 
         // Stop should succeed
-        assert!(coordinator.stop().await.is_ok());
+        assert!(
+            coordinator
+                .stop("test-run".to_string(), "test-item".to_string())
+                .await
+                .is_ok()
+        );
 
         // Cancel token should be triggered
         assert!(cancel_token.is_cancelled());

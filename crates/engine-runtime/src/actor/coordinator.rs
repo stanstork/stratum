@@ -7,7 +7,7 @@ use crate::{
     },
     error::ActorError,
 };
-use engine_core::metrics::Metrics;
+use engine_core::{event_bus::bus::EventBus, metrics::Metrics};
 use engine_processing::{consumer::DataConsumer, producer::DataProducer};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -48,14 +48,24 @@ impl PipelineCoordinator {
 
     /// Initializes the actors by setting their self-references.
     pub async fn initialize(&self) -> Result<(), ActorError> {
-        // Set producer actor reference
         self.producer_ref
             .send(ProducerMsg::SetActorRef(self.producer_ref.clone()))
             .await?;
-
-        // Set consumer actor reference
         self.consumer_ref
             .send(ConsumerMsg::SetActorRef(self.consumer_ref.clone()))
+            .await?;
+
+        Ok(())
+    }
+
+    /// Sets the EventBus for both producer and consumer actors.
+    pub async fn set_event_bus(&self, event_bus: EventBus) -> Result<(), ActorError> {
+        self.producer_ref
+            .send(ProducerMsg::SetEventBus(event_bus.clone()))
+            .await?;
+
+        self.consumer_ref
+            .send(ConsumerMsg::SetEventBus(event_bus))
             .await?;
 
         Ok(())
@@ -116,19 +126,27 @@ impl PipelineCoordinator {
     }
 
     /// Gracefully stops the pipeline.
-    pub async fn stop(&self) -> Result<(), ActorError> {
+    pub async fn stop(&self, run_id: String, item_id: String) -> Result<(), ActorError> {
         info!("Stopping pipeline");
 
-        // Signal cancellation
         self.cancel_token.cancel();
 
-        // Stop producer
-        if let Err(e) = self.producer_ref.send(ProducerMsg::Stop).await {
+        if let Err(e) = self
+            .producer_ref
+            .send(ProducerMsg::Stop {
+                run_id: run_id.clone(),
+                item_id: item_id.clone(),
+            })
+            .await
+        {
             error!(error = ?e, "Failed to send stop to producer");
         }
 
-        // Stop consumer
-        if let Err(e) = self.consumer_ref.send(ConsumerMsg::Stop).await {
+        if let Err(e) = self
+            .consumer_ref
+            .send(ConsumerMsg::Stop { run_id, item_id })
+            .await
+        {
             error!(error = ?e, "Failed to send stop to consumer");
         }
 
