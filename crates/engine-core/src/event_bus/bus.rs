@@ -146,3 +146,128 @@ impl EventBus {
         debug!("Cleared all subscriptions from EventBus");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Clone)]
+    struct TestEvent {
+        message: String,
+    }
+
+    impl Event for TestEvent {
+        fn event_type(&self) -> &'static str {
+            "test.event"
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct AnotherEvent {
+        value: i32,
+    }
+
+    impl Event for AnotherEvent {
+        fn event_type(&self) -> &'static str {
+            "another.event"
+        }
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_and_publish() {
+        let bus = EventBus::new();
+        let (tx, mut rx) = mpsc::channel(10);
+
+        let _sub = bus.subscribe::<TestEvent>(tx).await;
+
+        bus.publish(TestEvent {
+            message: "Hello".to_string(),
+        })
+        .await;
+
+        let received = rx.recv().await.unwrap();
+        assert_eq!(received.message, "Hello");
+    }
+
+    #[tokio::test]
+    async fn test_multiple_subscribers() {
+        let bus = EventBus::new();
+        let (tx1, mut rx1) = mpsc::channel(10);
+        let (tx2, mut rx2) = mpsc::channel(10);
+
+        let _sub1 = bus.subscribe::<TestEvent>(tx1).await;
+        let _sub2 = bus.subscribe::<TestEvent>(tx2).await;
+
+        bus.publish(TestEvent {
+            message: "Broadcast".to_string(),
+        })
+        .await;
+
+        let received1 = rx1.recv().await.unwrap();
+        let received2 = rx2.recv().await.unwrap();
+
+        assert_eq!(received1.message, "Broadcast");
+        assert_eq!(received2.message, "Broadcast");
+    }
+
+    #[tokio::test]
+    async fn test_unsubscribe() {
+        let bus = EventBus::new();
+        let (tx, mut rx) = mpsc::channel(10);
+
+        let sub = bus.subscribe::<TestEvent>(tx).await;
+        assert_eq!(bus.subscriber_count::<TestEvent>().await, 1);
+
+        // First verify we can receive events
+        bus.publish(TestEvent {
+            message: "Before unsubscribe".to_string(),
+        })
+        .await;
+
+        let received = rx.recv().await.unwrap();
+        assert_eq!(received.message, "Before unsubscribe");
+
+        // Now unsubscribe
+        bus.unsubscribe(sub).await;
+        assert_eq!(bus.subscriber_count::<TestEvent>().await, 0);
+
+        // Publish after unsubscribe
+        bus.publish(TestEvent {
+            message: "After unsubscribe".to_string(),
+        })
+        .await;
+
+        // Should not receive anything
+        tokio::select! {
+            result = rx.recv() => {
+                if result.is_some() {
+                    panic!("Should not receive event after unsubscribe");
+                }
+            },
+            _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {}
+        }
+    }
+
+    #[tokio::test]
+    async fn test_different_event_types() {
+        let bus = EventBus::new();
+        let (tx1, mut rx1) = mpsc::channel(10);
+        let (tx2, mut rx2) = mpsc::channel(10);
+
+        let _sub1 = bus.subscribe::<TestEvent>(tx1).await;
+        let _sub2 = bus.subscribe::<AnotherEvent>(tx2).await;
+
+        bus.publish(TestEvent {
+            message: "Test".to_string(),
+        })
+        .await;
+
+        bus.publish(AnotherEvent { value: 42 }).await;
+
+        let received1 = rx1.recv().await.unwrap();
+        let received2 = rx2.recv().await.unwrap();
+
+        assert_eq!(received1.message, "Test");
+        assert_eq!(received2.value, 42);
+    }
+}
