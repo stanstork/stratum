@@ -3,7 +3,7 @@ use engine_config::report::dry_run::DryRunReport;
 use engine_core::{context::item::ItemContext, event_bus::bus::EventBus, metrics::Metrics};
 use engine_processing::{consumer::create_consumer, producer::create_producer};
 use futures::lock::Mutex;
-use model::{events::*, records::batch::Batch};
+use model::{events::migration::MigrationEvent, records::batch::Batch};
 use smql_syntax::ast::setting::Settings;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -73,91 +73,218 @@ pub async fn spawn(
 
 /// Subscribes to migration events for logging and monitoring.
 async fn subscribe_to_events(event_bus: EventBus) {
-    // Create channels for different event types
-    let (producer_tx, mut producer_rx) = mpsc::channel::<Arc<ProducerStarted>>(32);
-    let (consumer_tx, mut consumer_rx) = mpsc::channel::<Arc<ConsumerStarted>>(32);
-    let (snapshot_tx, mut snapshot_rx) = mpsc::channel::<Arc<SnapshotStarted>>(32);
-    let (cdc_tx, mut cdc_rx) = mpsc::channel::<Arc<CdcStarted>>(32);
-    let (batch_tx, mut batch_rx) = mpsc::channel::<Arc<BatchProcessed>>(32);
-    let (progress_tx, mut progress_rx) = mpsc::channel::<Arc<MigrationProgress>>(32);
+    // Create a single channel for all migration events
+    let (event_tx, mut event_rx) = mpsc::channel::<Arc<MigrationEvent>>(100);
 
-    event_bus.subscribe::<ProducerStarted>(producer_tx).await;
-    event_bus.subscribe::<ConsumerStarted>(consumer_tx).await;
-    event_bus.subscribe::<SnapshotStarted>(snapshot_tx).await;
-    event_bus.subscribe::<CdcStarted>(cdc_tx).await;
-    event_bus.subscribe::<BatchProcessed>(batch_tx).await;
-    event_bus.subscribe::<MigrationProgress>(progress_tx).await;
+    // Subscribe to MigrationEvent
+    event_bus.subscribe::<MigrationEvent>(event_tx).await;
 
-    // Spawn background task to handle producer events
+    // Spawn background task to handle all migration events
     tokio::spawn(async move {
-        while let Some(event) = producer_rx.recv().await {
-            info!(
-                run_id = %event.run_id,
-                item_id = %event.item_id,
-                mode = ?event.mode,
-                "Producer started"
-            );
+        while let Some(event) = event_rx.recv().await {
+            match event.as_ref() {
+                MigrationEvent::ProducerStarted {
+                    run_id,
+                    item_id,
+                    mode,
+                    ..
+                } => {
+                    info!(
+                        run_id = %run_id,
+                        item_id = %item_id,
+                        mode = ?mode,
+                        "Producer started"
+                    );
+                }
+
+                MigrationEvent::ProducerStopped {
+                    run_id,
+                    item_id,
+                    rows_produced,
+                    ..
+                } => {
+                    info!(
+                        run_id = %run_id,
+                        item_id = %item_id,
+                        rows_produced = rows_produced,
+                        "Producer stopped"
+                    );
+                }
+
+                MigrationEvent::ConsumerStarted {
+                    run_id,
+                    item_id,
+                    part_id,
+                    ..
+                } => {
+                    info!(
+                        run_id = %run_id,
+                        item_id = %item_id,
+                        part_id = %part_id,
+                        "Consumer started"
+                    );
+                }
+
+                MigrationEvent::ConsumerStopped {
+                    run_id,
+                    item_id,
+                    part_id,
+                    rows_written,
+                    ..
+                } => {
+                    info!(
+                        run_id = %run_id,
+                        item_id = %item_id,
+                        part_id = %part_id,
+                        rows_written = rows_written,
+                        "Consumer stopped"
+                    );
+                }
+
+                MigrationEvent::SnapshotStarted {
+                    run_id,
+                    item_id,
+                    estimated_rows,
+                    ..
+                } => {
+                    info!(
+                        run_id = %run_id,
+                        item_id = %item_id,
+                        estimated_rows = ?estimated_rows,
+                        "Snapshot phase started"
+                    );
+                }
+
+                MigrationEvent::SnapshotCompleted {
+                    run_id,
+                    item_id,
+                    rows_processed,
+                    duration_ms,
+                    ..
+                } => {
+                    info!(
+                        run_id = %run_id,
+                        item_id = %item_id,
+                        rows_processed = rows_processed,
+                        duration_ms = duration_ms,
+                        "Snapshot phase completed"
+                    );
+                }
+
+                MigrationEvent::CdcStarted {
+                    run_id,
+                    item_id,
+                    starting_position,
+                    ..
+                } => {
+                    info!(
+                        run_id = %run_id,
+                        item_id = %item_id,
+                        starting_position = ?starting_position,
+                        "CDC phase started"
+                    );
+                }
+
+                MigrationEvent::CdcStopped {
+                    run_id,
+                    item_id,
+                    final_position,
+                    ..
+                } => {
+                    info!(
+                        run_id = %run_id,
+                        item_id = %item_id,
+                        final_position = ?final_position,
+                        "CDC phase stopped"
+                    );
+                }
+
+                MigrationEvent::BatchProcessed {
+                    run_id,
+                    item_id,
+                    batch_id,
+                    row_count,
+                    ..
+                } => {
+                    debug!(
+                        run_id = %run_id,
+                        item_id = %item_id,
+                        batch_id = %batch_id,
+                        row_count = row_count,
+                        "Batch processed"
+                    );
+                }
+
+                MigrationEvent::Progress {
+                    run_id,
+                    item_id,
+                    rows_processed,
+                    rows_per_second,
+                    percentage,
+                    eta_seconds,
+                    ..
+                } => {
+                    info!(
+                        run_id = %run_id,
+                        item_id = %item_id,
+                        rows_processed = rows_processed,
+                        rows_per_second = rows_per_second,
+                        percentage = ?percentage,
+                        eta_seconds = ?eta_seconds,
+                        "Migration progress"
+                    );
+                }
+
+                MigrationEvent::Failed {
+                    run_id,
+                    item_id,
+                    error,
+                    rows_processed,
+                    ..
+                } => {
+                    error!(
+                        run_id = %run_id,
+                        item_id = %item_id,
+                        error = %error,
+                        rows_processed = rows_processed,
+                        "Migration failed"
+                    );
+                }
+
+                MigrationEvent::ActorError {
+                    actor_name,
+                    run_id,
+                    item_id,
+                    error,
+                    recoverable,
+                    ..
+                } => {
+                    if *recoverable {
+                        info!(
+                            actor = %actor_name,
+                            run_id = ?run_id,
+                            item_id = ?item_id,
+                            error = %error,
+                            "Recoverable actor error"
+                        );
+                    } else {
+                        error!(
+                            actor = %actor_name,
+                            run_id = ?run_id,
+                            item_id = ?item_id,
+                            error = %error,
+                            "Fatal actor error"
+                        );
+                    }
+                }
+
+                _ => {
+                    // Log other events at debug level
+                    debug!(event_type = event.event_type(), "{}", event);
+                }
+            }
         }
     });
 
-    // Spawn background task to handle consumer events
-    tokio::spawn(async move {
-        while let Some(event) = consumer_rx.recv().await {
-            info!(
-                run_id = %event.run_id,
-                item_id = %event.item_id,
-                "Consumer started"
-            );
-        }
-    });
-
-    // Spawn background task to handle snapshot events
-    tokio::spawn(async move {
-        while let Some(event) = snapshot_rx.recv().await {
-            info!(
-                run_id = %event.run_id,
-                item_id = %event.item_id,
-                "Snapshot phase started"
-            );
-        }
-    });
-
-    // Spawn background task to handle CDC events
-    tokio::spawn(async move {
-        while let Some(event) = cdc_rx.recv().await {
-            info!(
-                run_id = %event.run_id,
-                item_id = %event.item_id,
-                "CDC phase started"
-            );
-        }
-    });
-
-    // Spawn background task to handle batch processing events
-    tokio::spawn(async move {
-        while let Some(event) = batch_rx.recv().await {
-            debug!(
-                run_id = %event.run_id,
-                item_id = %event.item_id,
-                batch_id = %event.batch_id,
-                row_count = event.row_count,
-                "Batch processed"
-            );
-        }
-    });
-
-    // Spawn background task to handle progress events
-    tokio::spawn(async move {
-        while let Some(event) = progress_rx.recv().await {
-            info!(
-                run_id = %event.run_id,
-                item_id = %event.item_id,
-                rows_processed = event.rows_processed,
-                percentage = ?event.percentage,
-                "Migration progress"
-            );
-        }
-    });
-
-    info!("Event subscribers configured for migration monitoring");
+    info!("Event subscriber configured for migration monitoring");
 }

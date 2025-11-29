@@ -294,4 +294,8 @@ impl DataProducer for ValidationProducer {
     async fn stop(&mut self) -> Result<(), ProducerError> {
         Ok(())
     }
+
+    fn rows_produced(&self) -> u64 {
+        0
+    }
 }

@@ -189,4 +189,8 @@ impl DataProducer for LiveProducer {
         self.mode = ProducerMode::Finished;
         Ok(())
     }
+
+    fn rows_produced(&self) -> u64 {
+        self.coordinator.rows_produced()
+    }
 }

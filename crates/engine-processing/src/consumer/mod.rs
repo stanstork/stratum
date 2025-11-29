@@ -39,6 +39,8 @@ pub trait DataConsumer {
 
     async fn tick(&mut self) -> Result<ConsumerStatus, ConsumerError>;
     async fn stop(&mut self) -> Result<(), ConsumerError>;
+
+    fn rows_processed(&self) -> u64;
 }
 
 pub async fn create_consumer(

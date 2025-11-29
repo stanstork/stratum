@@ -234,4 +234,8 @@ impl DataConsumer for LiveConsumer {
         info!("LiveConsumer stopped successfully");
         Ok(())
     }
+
+    fn rows_processed(&self) -> u64 {
+        self.coordinator.rows_processed()
+    }
 }

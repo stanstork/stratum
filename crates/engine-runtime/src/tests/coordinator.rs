@@ -58,6 +58,10 @@ mod tests {
         async fn stop(&mut self) -> Result<(), ProducerError> {
             Ok(())
         }
+
+        fn rows_produced(&self) -> u64 {
+            0
+        }
     }
 
     // Mock Consumer for testing
@@ -103,6 +107,10 @@ mod tests {
 
         async fn stop(&mut self) -> Result<(), ConsumerError> {
             Ok(())
+        }
+
+        fn rows_processed(&self) -> u64 {
+            42
         }
     }
 
@@ -159,7 +167,11 @@ mod tests {
         // Stop should succeed
         assert!(
             coordinator
-                .stop("test-run".to_string(), "test-item".to_string())
+                .stop(
+                    "test-run".to_string(),
+                    "test-item".to_string(),
+                    "part-0".to_string()
+                )
                 .await
                 .is_ok()
         );

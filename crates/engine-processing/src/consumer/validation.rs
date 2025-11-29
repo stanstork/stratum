@@ -74,4 +74,8 @@ impl DataConsumer for ValidationConsumer {
         );
         Ok(())
     }
+
+    fn rows_processed(&self) -> u64 {
+        self.records_processed as u64
+    }
 }
