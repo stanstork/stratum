@@ -235,7 +235,7 @@ impl DataConsumer for LiveConsumer {
         Ok(())
     }
 
-    fn rows_processed(&self) -> u64 {
+    fn rows_written(&self) -> u64 {
         self.coordinator.rows_processed()
     }
 }

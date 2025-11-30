@@ -40,7 +40,8 @@ pub trait DataConsumer {
     async fn tick(&mut self) -> Result<ConsumerStatus, ConsumerError>;
     async fn stop(&mut self) -> Result<(), ConsumerError>;
 
-    fn rows_processed(&self) -> u64;
+    /// Returns the total number of rows written to the destination.
+    fn rows_written(&self) -> u64;
 }
 
 pub async fn create_consumer(

@@ -249,7 +249,7 @@ impl Actor<ConsumerMsg> for ConsumerActor {
                 }
 
                 if let Some(ref event_bus) = self.event_bus {
-                    let rows_written = self.consumer.rows_processed();
+                    let rows_written = self.consumer.rows_written();
                     event_bus
                         .publish(MigrationEvent::ConsumerStopped {
                             run_id,

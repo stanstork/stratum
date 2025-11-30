@@ -109,7 +109,7 @@ mod tests {
             Ok(())
         }
 
-        fn rows_processed(&self) -> u64 {
+        fn rows_written(&self) -> u64 {
             42
         }
     }
