@@ -11,11 +11,10 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use engine_config::report::dry_run::DryRunReport;
+use engine_config::{report::dry_run::DryRunReport, settings::validated::ValidatedSettings};
 use engine_core::context::item::ItemContext;
 use futures::lock::Mutex;
 use model::{records::batch::Batch, transform::mapping::EntityMapping};
-use smql_syntax::ast::setting::Settings;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -72,14 +71,12 @@ pub trait DataProducer {
 pub async fn create_producer(
     ctx: &Arc<Mutex<ItemContext>>,
     batch_tx: mpsc::Sender<Batch>,
-    settings: &Settings,
+    settings: &ValidatedSettings,
     report: &Arc<Mutex<DryRunReport>>,
 ) -> Box<dyn DataProducer + Send + 'static> {
-    let (is_dry_run, source, destination, mapping, offset_strategy, cursor) = {
+    let (source, destination, mapping, offset_strategy, cursor) = {
         let guard = ctx.lock().await;
-        let is_dry_run = guard.settings.lock().await.is_dry_run();
         (
-            is_dry_run,
             guard.source.clone(),
             guard.destination.clone(),
             guard.mapping.clone(),
@@ -88,7 +85,7 @@ pub async fn create_producer(
         )
     };
 
-    if is_dry_run {
+    if settings.is_dry_run() {
         let pipeline = pipeline_for_mapping(&mapping);
         let validation_prod = ValidationProducer::new(ValidationProducerParams {
             source,

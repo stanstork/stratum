@@ -1,11 +1,13 @@
 use super::{MigrationSetting, context::SchemaSettingContext, phase::MigrationSettingsPhase};
-use crate::{report::dry_run::DryRunReport, settings::error::SettingsError};
+use crate::{
+    report::dry_run::DryRunReport,
+    settings::{error::SettingsError, validated::ValidatedSettings},
+};
 use async_trait::async_trait;
 use connectors::metadata::entity::EntityMetadata;
 use engine_core::{
     connectors::{destination::Destination, source::Source},
     context::item::ItemContext,
-    migration_state::MigrationSettings,
 };
 use futures::lock::Mutex;
 use model::transform::mapping::EntityMapping;
@@ -72,12 +74,6 @@ impl MigrationSetting for CreateMissingTablesSetting {
         plan.add_metadata(&src_name, meta.clone());
         self.context.apply_to_destination(plan).await?;
 
-        // Set the create missing tables flag to global settings
-        {
-            let mut settings = self.context.settings.lock().await;
-            settings.set_create_missing_tables(true);
-        }
-
         info!("Create missing tables setting applied");
         Ok(())
     }
@@ -88,7 +84,7 @@ impl CreateMissingTablesSetting {
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
-        settings: &Arc<Mutex<MigrationSettings>>,
+        settings: &ValidatedSettings,
         dry_run_report: &Arc<Mutex<DryRunReport>>,
     ) -> Self {
         Self {

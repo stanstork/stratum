@@ -1,5 +1,8 @@
 use super::{MigrationSetting, context::SchemaSettingContext, phase::MigrationSettingsPhase};
-use crate::{report::dry_run::DryRunReport, settings::error::SettingsError};
+use crate::{
+    report::dry_run::DryRunReport,
+    settings::{error::SettingsError, validated::ValidatedSettings},
+};
 use async_trait::async_trait;
 use connectors::sql::base::{
     filter::SqlFilter,
@@ -16,7 +19,6 @@ use engine_core::{
         source::{DataSource, Source},
     },
     context::item::ItemContext,
-    migration_state::MigrationSettings,
 };
 use futures::lock::Mutex;
 use model::transform::mapping::EntityMapping;
@@ -48,12 +50,6 @@ impl MigrationSetting for CascadeSchemaSetting {
         // Handle destination metadata
         self.apply_destination().await?;
 
-        // Set the cascade flag to global settings
-        {
-            let mut settings = self.context.settings.lock().await;
-            settings.set_cascade(true);
-        }
-
         info!("Cascade schema setting applied");
         Ok(())
     }
@@ -64,7 +60,7 @@ impl CascadeSchemaSetting {
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
-        settings: &Arc<Mutex<MigrationSettings>>,
+        settings: &ValidatedSettings,
         dry_run_report: &Arc<Mutex<DryRunReport>>,
     ) -> Self {
         Self {

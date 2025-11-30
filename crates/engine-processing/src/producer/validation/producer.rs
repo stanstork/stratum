@@ -9,17 +9,20 @@ use crate::{
 };
 use async_trait::async_trait;
 use connectors::sql::base::error::DbError;
-use engine_config::report::{
-    dry_run::{DryRunReport, DryRunStatus, FastPathSummary, OffsetValidationReport},
-    finding::{Finding, Severity},
-    sql::SqlStatement,
-    transform::TransformationReport,
+use engine_config::{
+    report::{
+        dry_run::{DryRunReport, DryRunStatus, FastPathSummary, OffsetValidationReport},
+        finding::{Finding, Severity},
+        sql::SqlStatement,
+        transform::TransformationReport,
+    },
+    settings::validated::ValidatedSettings,
 };
 use engine_core::connectors::{destination::Destination, source::Source};
 use futures::lock::Mutex;
 use model::{pagination::cursor::Cursor, transform::mapping::EntityMapping};
 use planner::query::offsets::OffsetStrategy;
-use smql_syntax::ast::setting::{CopyColumns, Settings};
+use smql_syntax::ast::setting::CopyColumns;
 use std::sync::Arc;
 
 pub struct ValidationProducer {
@@ -28,7 +31,7 @@ pub struct ValidationProducer {
     destination: Destination,
     pipeline: TransformPipeline,
     mapping: EntityMapping,
-    settings: Settings,
+    settings: ValidatedSettings,
     offset_strategy: Arc<dyn OffsetStrategy>,
     cursor: Cursor,
     sample_size: usize,
@@ -39,7 +42,7 @@ pub struct ValidationProducerParams {
     pub destination: Destination,
     pub pipeline: TransformPipeline,
     pub mapping: EntityMapping,
-    pub settings: Settings,
+    pub settings: ValidatedSettings,
     pub offset_strategy: Arc<dyn OffsetStrategy>,
     pub cursor: Cursor,
     pub report: Arc<Mutex<DryRunReport>>,

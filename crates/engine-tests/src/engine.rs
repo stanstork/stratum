@@ -5,13 +5,15 @@ mod tests {
         utils::{DbType, assert_row_count, execute, get_row_count},
     };
     use chrono::Utc;
-    use engine_config::report::dry_run::DryRunReport;
+    use engine_config::{
+        report::dry_run::DryRunReport,
+        settings::{self, validated::ValidatedSettings},
+    };
     use engine_core::{
         context::{
             global::GlobalContext,
             item::{ItemContext, ItemContextParams},
         },
-        migration_state::MigrationSettings,
         state::{
             StateStore,
             models::{Checkpoint, WalEntry},
@@ -19,14 +21,14 @@ mod tests {
         },
     };
     use engine_processing::error::{ConsumerError, ProducerError};
-    use engine_runtime::execution::{factory, metadata, settings};
+    use engine_runtime::execution::{factory, metadata};
     use futures::lock::Mutex;
     use model::{pagination::cursor::Cursor, transform::mapping::EntityMapping};
     use planner::{
         plan::{MigrationPlan, parse},
         query::offsets::{OffsetStrategy, OffsetStrategyFactory},
     };
-    use smql_syntax::ast::{migrate::MigrateItem, setting::Settings};
+    use smql_syntax::ast::migrate::MigrateItem;
     use std::sync::Arc;
     use tempfile::tempdir;
     use tokio_util::sync::CancellationToken;
@@ -116,7 +118,7 @@ mod tests {
             .await
             .expect("item start wal");
 
-        let (ctx_first, report_first) = build_item_context(
+        let (ctx_first, report_first, settings) = build_item_context(
             &global_ctx,
             &plan,
             migrate_item,
@@ -126,8 +128,7 @@ mod tests {
         )
         .await;
 
-        let result_first =
-            run_engine_once(ctx_first, migrate_item.settings.clone(), report_first).await;
+        let result_first = run_engine_once(ctx_first, settings, report_first).await;
         let _ = &result_first.producer;
         assert!(
             result_first.consumer.is_err(),
@@ -154,7 +155,7 @@ mod tests {
         ))
         .await;
 
-        let (ctx_second, report_second) = build_item_context(
+        let (ctx_second, report_second, settings) = build_item_context(
             &global_ctx,
             &plan,
             migrate_item,
@@ -164,8 +165,7 @@ mod tests {
         )
         .await;
 
-        let result_second =
-            run_engine_once(ctx_second, migrate_item.settings.clone(), report_second).await;
+        let result_second = run_engine_once(ctx_second, settings, report_second).await;
         let _ = &result_second.producer;
         assert!(
             result_second.consumer.is_ok(),
@@ -288,7 +288,7 @@ mod tests {
             .await
             .expect("seed checkpoint");
 
-        let (ctx_first, report_first) = build_item_context(
+        let (ctx_first, report_first, settings) = build_item_context(
             &global_ctx,
             &plan,
             migrate_item,
@@ -298,8 +298,7 @@ mod tests {
         )
         .await;
 
-        let result_first =
-            run_engine_once(ctx_first, migrate_item.settings.clone(), report_first).await;
+        let result_first = run_engine_once(ctx_first, settings, report_first).await;
         assert!(
             result_first.consumer.is_err(),
             "first run should fail because destination schema rejects the batch"
@@ -329,7 +328,7 @@ mod tests {
         ))
         .await;
 
-        let (ctx_second, report_second) = build_item_context(
+        let (ctx_second, report_second, settings) = build_item_context(
             &global_ctx,
             &plan,
             migrate_item,
@@ -339,8 +338,7 @@ mod tests {
         )
         .await;
 
-        let result_second =
-            run_engine_once(ctx_second, migrate_item.settings.clone(), report_second).await;
+        let result_second = run_engine_once(ctx_second, settings, report_second).await;
         let _ = &result_second.producer;
         assert!(
             result_second.consumer.is_ok(),
@@ -407,7 +405,7 @@ mod tests {
             .await
             .expect("item start wal");
 
-        let (ctx, report) = build_item_context(
+        let (ctx, report, settings) = build_item_context(
             &global_ctx,
             &plan,
             migrate_item,
@@ -417,7 +415,7 @@ mod tests {
         )
         .await;
 
-        let result = run_engine_once(ctx, migrate_item.settings.clone(), report).await;
+        let result = run_engine_once(ctx, settings, report).await;
         assert!(
             result.consumer.is_ok(),
             "transient failure should be retried and eventually succeed"
@@ -491,7 +489,7 @@ mod tests {
             .await
             .expect("item start wal");
 
-        let (ctx, report) = build_item_context(
+        let (ctx, report, settings) = build_item_context(
             &global_ctx,
             &plan,
             migrate_item,
@@ -501,7 +499,7 @@ mod tests {
         )
         .await;
 
-        let result = run_engine_once(ctx, migrate_item.settings.clone(), report).await;
+        let result = run_engine_once(ctx, settings, report).await;
         assert!(
             matches!(
                 result.consumer,
@@ -530,7 +528,11 @@ mod tests {
         mapping: &EntityMapping,
         offset_strategy: Arc<dyn OffsetStrategy>,
         cursor: Cursor,
-    ) -> (Arc<Mutex<ItemContext>>, Arc<Mutex<DryRunReport>>) {
+    ) -> (
+        Arc<Mutex<ItemContext>>,
+        Arc<Mutex<DryRunReport>>,
+        ValidatedSettings,
+    ) {
         let source = factory::create_source(
             &*global_ctx,
             &plan.connections,
@@ -555,21 +557,25 @@ mod tests {
             state: global_ctx.state.clone(),
             offset_strategy,
             cursor,
-            settings: MigrationSettings::new(false),
         });
 
         let dry_run_report = Arc::new(Mutex::new(DryRunReport::default()));
-        settings::apply_all(&mut item_ctx, &migrate_item.settings, &dry_run_report)
-            .await
-            .expect("apply settings");
+        let settings = settings::validate_and_apply(
+            &mut item_ctx,
+            &migrate_item.settings,
+            false,
+            &dry_run_report,
+        )
+        .await
+        .expect("validate settings");
         metadata::load(&mut item_ctx).await.expect("load metadata");
 
-        (Arc::new(Mutex::new(item_ctx)), dry_run_report)
+        (Arc::new(Mutex::new(item_ctx)), dry_run_report, settings)
     }
 
     async fn run_engine_once(
         ctx: Arc<Mutex<ItemContext>>,
-        settings: Settings,
+        settings: ValidatedSettings,
         report: Arc<Mutex<DryRunReport>>,
     ) -> EngineRunResult {
         use engine_runtime::execution::workers;

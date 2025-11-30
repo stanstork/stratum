@@ -1,9 +1,8 @@
-use crate::report::dry_run::DryRunReport;
-
 use super::{
     MigrationSetting, context::SchemaSettingContext, error::SettingsError,
     phase::MigrationSettingsPhase,
 };
+use crate::{report::dry_run::DryRunReport, settings::validated::ValidatedSettings};
 use async_trait::async_trait;
 use connectors::{
     metadata::{entity::EntityMetadata, field::FieldMetadata},
@@ -12,7 +11,6 @@ use connectors::{
 use engine_core::{
     connectors::{destination::Destination, source::Source},
     context::item::ItemContext,
-    migration_state::MigrationSettings,
     schema::{
         types::{ExpressionWrapper, TypeInferencer},
         utils::create_column_def,
@@ -57,11 +55,6 @@ impl MigrationSetting for CreateMissingColumnsSetting {
         self.add_columns(&dest_name, &src_meta, &dest_meta).await?;
         self.add_computed_columns(&dest_name, &src_meta, &dest_meta)
             .await?;
-
-        {
-            let mut settings = self.context.settings.lock().await;
-            settings.set_create_missing_columns(true);
-        }
 
         Ok(())
     }
@@ -134,7 +127,7 @@ impl CreateMissingColumnsSetting {
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
-        settings: &Arc<Mutex<MigrationSettings>>,
+        settings: &ValidatedSettings,
         dry_run_report: &Arc<Mutex<DryRunReport>>,
     ) -> Self {
         Self {

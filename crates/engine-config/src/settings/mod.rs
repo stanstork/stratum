@@ -1,7 +1,9 @@
-use crate::{report::dry_run::DryRunReport, settings::error::SettingsError};
+use crate::{
+    report::dry_run::DryRunReport,
+    settings::{error::SettingsError, validated::ValidatedSettings, validator::SettingsValidator},
+};
 use async_trait::async_trait;
 use batch_size::BatchSizeSetting;
-use cascade::CascadeSchemaSetting;
 use constraints::IgnoreConstraintsSettings;
 use copy_cols::CopyColumnsSetting;
 use create_cols::CreateMissingColumnsSetting;
@@ -12,6 +14,7 @@ use infer_schema::InferSchemaSetting;
 use phase::MigrationSettingsPhase;
 use smql_syntax::ast::setting::Settings;
 use std::sync::Arc;
+use tracing::info;
 
 pub mod batch_size;
 pub mod cascade;
@@ -24,6 +27,8 @@ pub mod error;
 pub mod infer_schema;
 pub mod phase;
 pub mod schema_manager;
+pub mod validated;
+pub mod validator;
 
 #[async_trait]
 pub trait MigrationSetting: Send + Sync {
@@ -35,62 +40,74 @@ pub trait MigrationSetting: Send + Sync {
         true
     }
 
-    async fn apply(&mut self, ctx: &mut ItemContext) -> Result<(), SettingsError>;
+    async fn apply(&mut self, _ctx: &mut ItemContext) -> Result<(), SettingsError> {
+        Ok(())
+    }
+}
+
+/// Validate and apply all migration settings.
+pub async fn validate_and_apply(
+    ctx: &mut ItemContext,
+    settings: &Settings,
+    is_dry_run: bool,
+    dry_run_report: &Arc<Mutex<DryRunReport>>,
+) -> Result<ValidatedSettings, SettingsError> {
+    let validator = SettingsValidator::new(&ctx.source, &ctx.destination, is_dry_run);
+    let validated_settings = validator.validate(settings).await?;
+
+    let mut all_settings = collect_settings(ctx, dry_run_report, &validated_settings).await;
+    for setting in all_settings.iter_mut() {
+        if setting.can_apply(ctx) {
+            let phase = setting.phase();
+            info!("Applying setting: {:?}", phase);
+            setting.apply(ctx).await?;
+        }
+    }
+
+    Ok(validated_settings)
 }
 
 pub async fn collect_settings(
-    cfg: &Settings,
     ctx: &ItemContext,
     dry_run_report: &Arc<Mutex<DryRunReport>>,
+    validated: &ValidatedSettings,
 ) -> Vec<Box<dyn MigrationSetting>> {
     let src = ctx.source.clone();
     let dest = ctx.destination.clone();
-    let settings = ctx.settings.clone();
     let mapping = ctx.mapping.clone();
 
     let mut all_settings: Vec<Box<dyn MigrationSetting>> = Vec::new();
 
-    println!("Settings: {cfg:#?}");
-
-    if cfg.batch_size > 0 {
-        let batch_size_setting = BatchSizeSetting(cfg.batch_size as i64);
-        all_settings.push(Box::new(batch_size_setting) as _);
+    if validated.batch_size() > 0 {
+        all_settings.push(Box::new(BatchSizeSetting(validated.batch_size() as i64)));
     }
 
-    if cfg.create_missing_columns {
-        let missing_cols_setting =
-            CreateMissingColumnsSetting::new(&src, &dest, &mapping, &settings, dry_run_report)
-                .await;
-        all_settings.push(Box::new(missing_cols_setting) as _);
+    all_settings.push(Box::new(CopyColumnsSetting(*validated.copy_columns())));
+
+    if validated.ignore_constraints() {
+        all_settings.push(Box::new(IgnoreConstraintsSettings(true)));
     }
 
-    if cfg.ignore_constraints {
-        let ignore_constraints_setting = IgnoreConstraintsSettings(true);
-        all_settings.push(Box::new(ignore_constraints_setting) as _);
-    }
-
-    if cfg.create_missing_tables {
-        let missing_tables_setting =
-            CreateMissingTablesSetting::new(&src, &dest, &mapping, &settings, dry_run_report).await;
-        all_settings.push(Box::new(missing_tables_setting) as _);
-    }
-
-    if cfg.infer_schema {
+    if validated.infer_schema() {
         let infer_schema_setting =
-            InferSchemaSetting::new(&src, &dest, &mapping, &settings, dry_run_report).await;
-        all_settings.push(Box::new(infer_schema_setting) as _);
+            InferSchemaSetting::new(&src, &dest, &mapping, validated, dry_run_report).await;
+        all_settings.push(Box::new(infer_schema_setting));
     }
 
-    if cfg.cascade_schema {
-        let cascade_schema_setting =
-            CascadeSchemaSetting::new(&src, &dest, &mapping, &settings, dry_run_report).await;
-        all_settings.push(Box::new(cascade_schema_setting) as _);
+    if validated.create_missing_tables() {
+        let missing_tables_setting =
+            CreateMissingTablesSetting::new(&src, &dest, &mapping, validated, dry_run_report).await;
+        all_settings.push(Box::new(missing_tables_setting));
     }
 
-    let copy_columns_setting = CopyColumnsSetting(cfg.copy_columns);
-    all_settings.push(Box::new(copy_columns_setting) as _);
+    if validated.create_missing_columns() {
+        let missing_cols_setting =
+            CreateMissingColumnsSetting::new(&src, &dest, &mapping, validated, dry_run_report)
+                .await;
+        all_settings.push(Box::new(missing_cols_setting));
+    }
 
-    // Sort settings by phase to ensure they are applied in the correct order
+    // Settings are already created in phase order due to enum ordering
     all_settings.sort_by_key(|s| s.phase());
 
     all_settings

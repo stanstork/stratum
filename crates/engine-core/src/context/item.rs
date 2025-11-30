@@ -3,7 +3,6 @@ use crate::{
         destination::{DataDestination, Destination},
         source::{DataSource, Source},
     },
-    migration_state::MigrationSettings,
     state::sled_store::SledStateStore,
 };
 use connectors::{
@@ -30,7 +29,6 @@ pub struct ItemContext {
     pub state: Arc<SledStateStore>,
     pub offset_strategy: Arc<dyn OffsetStrategy>,
     pub cursor: Cursor,
-    pub settings: Arc<Mutex<MigrationSettings>>,
 }
 
 /// Bundles the arguments required to create an `ItemContext`.
@@ -43,7 +41,6 @@ pub struct ItemContextParams {
     pub state: Arc<SledStateStore>,
     pub offset_strategy: Arc<dyn OffsetStrategy>,
     pub cursor: Cursor,
-    pub settings: MigrationSettings,
 }
 
 impl ItemContext {
@@ -58,7 +55,6 @@ impl ItemContext {
             state,
             offset_strategy,
             cursor,
-            settings,
         } = params;
 
         ItemContext {
@@ -70,7 +66,6 @@ impl ItemContext {
             state,
             offset_strategy,
             cursor,
-            settings: Arc::new(Mutex::new(settings)),
         }
     }
 

@@ -3,13 +3,15 @@ use crate::{
     execution::{
         factory,
         metadata::{self},
-        settings::{self},
         workers,
     },
 };
-use engine_config::report::{
-    dry_run::{DryRunParams, DryRunReport, dest_endpoint, source_endpoint},
-    summary::SummaryReport,
+use engine_config::{
+    report::{
+        dry_run::{DryRunParams, DryRunReport, dest_endpoint, source_endpoint},
+        summary::SummaryReport,
+    },
+    settings,
 };
 use engine_core::{
     connectors::{destination::Destination, source::Source},
@@ -17,7 +19,6 @@ use engine_core::{
         global::GlobalContext,
         item::{ItemContext, ItemContextParams},
     },
-    migration_state::MigrationSettings,
     state::{StateStore, models::WalEntry, sled_store::SledStateStore},
 };
 use futures::lock::Mutex;
@@ -105,7 +106,6 @@ impl MigrationExecutor {
             factory::create_destination(&self.global_ctx, &self.plan.connections, mi).await?;
 
         let state = self.global_ctx.state.clone();
-        let settings = MigrationSettings::new(self.dry_run);
         let mut item_ctx = ItemContext::new(ItemContextParams {
             run_id: run_id.clone(),
             item_id: item_id.clone(),
@@ -115,7 +115,6 @@ impl MigrationExecutor {
             state: state.clone(),
             offset_strategy: offset_strategy.clone(),
             cursor,
-            settings,
         });
 
         item_ctx
@@ -125,12 +124,18 @@ impl MigrationExecutor {
 
         let dry_run_report = self.dry_run_report(&source, &destination, &mapping, mi);
 
-        settings::apply_all(&mut item_ctx, &mi.settings, &dry_run_report).await?;
+        let settings = settings::validate_and_apply(
+            &mut item_ctx,
+            &mi.settings,
+            self.dry_run,
+            &dry_run_report,
+        )
+        .await?;
         metadata::load(&mut item_ctx).await?;
 
         let ctx = Arc::new(Mutex::new(item_ctx));
         let cancel = CancellationToken::new();
-        workers::spawn(ctx, &mi.settings, cancel, &dry_run_report).await?;
+        workers::spawn(ctx, &settings, cancel, &dry_run_report).await?;
 
         let duration = start_time.elapsed();
         info!(

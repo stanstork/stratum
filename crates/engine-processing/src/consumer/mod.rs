@@ -3,6 +3,7 @@ use crate::{
     error::ConsumerError,
 };
 use async_trait::async_trait;
+use engine_config::settings::validated::ValidatedSettings;
 use engine_core::{context::item::ItemContext, metrics::Metrics};
 use futures::lock::Mutex;
 use model::records::batch::Batch;
@@ -47,17 +48,11 @@ pub trait DataConsumer {
 pub async fn create_consumer(
     ctx: &Arc<Mutex<ItemContext>>,
     batch_rx: mpsc::Receiver<Batch>,
+    settings: &ValidatedSettings,
     cancel: CancellationToken,
     metrics: Metrics,
 ) -> Box<dyn DataConsumer + Send + 'static> {
-    let ctx_guard = ctx.lock().await;
-    let settings_guard = ctx_guard.settings.lock().await;
-    let is_dry_run = settings_guard.is_dry_run();
-
-    drop(settings_guard);
-    drop(ctx_guard);
-
-    if is_dry_run {
+    if settings.is_dry_run() {
         Box::new(ValidationConsumer::new(batch_rx))
     } else {
         Box::new(LiveConsumer::new(ctx, batch_rx, cancel, metrics).await)
