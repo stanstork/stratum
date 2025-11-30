@@ -1,5 +1,6 @@
 use crate::{
     report::finding::{Finding, FindingKind},
+    settings::validated::ValidatedSettings,
     validation::key::{KeyCheckPolicy, KeyChecker},
 };
 use connectors::sql::base::{
@@ -12,7 +13,7 @@ use model::{
     records::row::RowData,
     transform::mapping::EntityMapping,
 };
-use smql_syntax::ast::setting::{CopyColumns, Settings};
+use smql_syntax::ast::setting::CopyColumns;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug)]
@@ -55,7 +56,7 @@ impl DestinationSchemaValidator {
     pub async fn new(
         destination: &Destination,
         mapping: EntityMapping,
-        settings: &Settings,
+        settings: &ValidatedSettings,
     ) -> Result<Self, DbError> {
         let adapter = destination.data_dest.adapter().await;
         let tables = [destination.name()];

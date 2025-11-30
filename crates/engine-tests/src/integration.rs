@@ -735,7 +735,7 @@ mod tests {
             );
             MIGRATE(
                 SOURCE(CSV, "{csv_path}") -> DEST(TABLE, customers) [
-                    SETTINGS(CREATE_MISSING_TABLES=TRUE,CREATE_MISSING_COLUMNS=TRUE,CSV_HEADER=TRUE),
+                    SETTINGS(CREATE_MISSING_TABLES=TRUE,CSV_HEADER=TRUE),
                     MAP(
                         index -> id,
                         CONCAT(customers[first_name], customers[last_name]) -> full_name
@@ -782,7 +782,7 @@ mod tests {
             );
             MIGRATE(
                 SOURCE(CSV, "{csv_path}") -> DEST(TABLE, customers) [
-                    SETTINGS(CREATE_MISSING_TABLES=TRUE,CREATE_MISSING_COLUMNS=TRUE,CSV_HEADER=TRUE),
+                    SETTINGS(CREATE_MISSING_TABLES=TRUE,CSV_HEADER=TRUE),
                     FILTER(customers[country] = "Poland")
                 ]
             );

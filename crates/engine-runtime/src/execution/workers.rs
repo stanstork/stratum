@@ -1,10 +1,9 @@
 use crate::{actor::coordinator::PipelineCoordinator, error::MigrationError};
-use engine_config::report::dry_run::DryRunReport;
+use engine_config::{report::dry_run::DryRunReport, settings::validated::ValidatedSettings};
 use engine_core::{context::item::ItemContext, event_bus::bus::EventBus, metrics::Metrics};
 use engine_processing::{consumer::create_consumer, producer::create_producer};
 use futures::lock::Mutex;
 use model::{events::migration::MigrationEvent, records::batch::Batch};
-use smql_syntax::ast::setting::Settings;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -12,7 +11,7 @@ use tracing::{error, info};
 
 pub async fn spawn(
     ctx: Arc<Mutex<ItemContext>>,
-    settings: &Settings,
+    settings: &ValidatedSettings,
     cancel: CancellationToken,
     report: &Arc<Mutex<DryRunReport>>,
 ) -> Result<(), MigrationError> {
@@ -22,7 +21,7 @@ pub async fn spawn(
     let metrics = Metrics::new();
 
     let producer = create_producer(&ctx, batch_tx, settings, report).await;
-    let consumer = create_consumer(&ctx, batch_rx, cancel.clone(), metrics.clone()).await;
+    let consumer = create_consumer(&ctx, batch_rx, settings, cancel.clone(), metrics.clone()).await;
 
     let coordinator = PipelineCoordinator::new(producer, consumer, metrics.clone(), cancel.clone());
 

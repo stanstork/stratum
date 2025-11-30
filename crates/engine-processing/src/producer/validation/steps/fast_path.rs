@@ -1,16 +1,16 @@
 use connectors::metadata::entity::EntityMetadata;
 use engine_config::report::dry_run::{FastPathCapabilities, FastPathSummary};
+use engine_config::settings::validated::ValidatedSettings;
 use engine_core::connectors::destination::Destination;
 use engine_core::connectors::source::Source;
 use model::transform::mapping::EntityMapping;
-use smql_syntax::ast::setting::Settings;
 
 /// Step responsible for validating fast path capabilities
 pub struct FastPathValidationStep {
     source: Source,
     destination: Destination,
     mapping: EntityMapping,
-    settings: Settings,
+    settings: ValidatedSettings,
 }
 
 impl FastPathValidationStep {
@@ -18,7 +18,7 @@ impl FastPathValidationStep {
         source: Source,
         destination: Destination,
         mapping: EntityMapping,
-        settings: Settings,
+        settings: ValidatedSettings,
     ) -> Self {
         Self {
             source,

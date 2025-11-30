@@ -31,4 +31,12 @@ pub enum SettingsError {
     /// Adapter-related error.
     #[error("Adapter error: {0}")]
     AdapterError(#[from] AdapterError),
+
+    /// Settings validation failed with one or more errors.
+    #[error("Settings validation failed:\n{}", .0.join("\n"))]
+    ValidationFailed(Vec<String>),
+
+    /// Multiple settings conflict with each other.
+    #[error("Conflicting settings detected:\n{}", .0.join("\n"))]
+    ConflictingSettings(Vec<String>),
 }

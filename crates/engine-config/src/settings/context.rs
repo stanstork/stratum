@@ -1,7 +1,10 @@
 use super::error::SettingsError;
 use crate::{
     report::dry_run::DryRunReport,
-    settings::schema_manager::{LiveSchemaManager, SchemaManager, ValidationSchemaManager},
+    settings::{
+        schema_manager::{LiveSchemaManager, SchemaManager, ValidationSchemaManager},
+        validated::ValidatedSettings,
+    },
 };
 use connectors::{
     metadata::field::FieldMetadata,
@@ -16,7 +19,6 @@ use engine_core::{
         source::{DataSource, Source},
     },
     context::item::ItemContext,
-    migration_state::MigrationSettings,
     schema::{plan::SchemaPlan, types::TypeEngine},
 };
 use futures::lock::Mutex;
@@ -28,7 +30,7 @@ pub struct SchemaSettingContext {
     pub source: Source,
     pub destination: Destination,
     pub mapping: EntityMapping,
-    pub settings: Arc<Mutex<MigrationSettings>>,
+    pub settings: ValidatedSettings,
     pub dry_run_report: Arc<Mutex<DryRunReport>>,
     pub schema_manager: Box<dyn SchemaManager>,
 }
@@ -38,10 +40,10 @@ impl SchemaSettingContext {
         src: &Source,
         dest: &Destination,
         mapping: &EntityMapping,
-        settings: &Arc<Mutex<MigrationSettings>>,
+        settings: &ValidatedSettings,
         dry_run_report: &Arc<Mutex<DryRunReport>>,
     ) -> Self {
-        let is_dry_run = settings.lock().await.is_dry_run();
+        let is_dry_run = settings.is_dry_run();
         let schema_manager: Box<dyn SchemaManager + Send> = if is_dry_run {
             Box::new(ValidationSchemaManager {
                 report: dry_run_report.clone(),
@@ -110,9 +112,8 @@ impl SchemaSettingContext {
     }
 
     pub async fn build_schema_plan(&self) -> Result<SchemaPlan, SettingsError> {
-        let settings = self.settings.lock().await;
-        let ignore_constraints = settings.ignore_constraints();
-        let mapped_columns_only = settings.copy_columns() == CopyColumns::MapOnly;
+        let ignore_constraints = self.settings.ignore_constraints();
+        let mapped_columns_only = *self.settings.copy_columns() == CopyColumns::MapOnly;
         let source = self.source.primary.clone();
 
         let type_engine = TypeEngine::new(

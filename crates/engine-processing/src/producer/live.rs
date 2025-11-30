@@ -12,10 +12,10 @@ use crate::{
     state_manager::StateManager,
 };
 use async_trait::async_trait;
+use engine_config::settings::validated::ValidatedSettings;
 use engine_core::{context::item::ItemContext, retry::RetryPolicy};
 use futures::lock::Mutex;
 use model::{pagination::cursor::Cursor, records::batch::Batch};
-use smql_syntax::ast::setting::Settings;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::info;
@@ -47,7 +47,7 @@ impl LiveProducer {
     pub async fn new(
         ctx: &Arc<Mutex<ItemContext>>,
         batch_tx: mpsc::Sender<Batch>,
-        settings: &Settings,
+        settings: &ValidatedSettings,
     ) -> Self {
         let (run_id, item_id, part_id, source, mapping, state_store, cursor) = {
             let c = ctx.lock().await;

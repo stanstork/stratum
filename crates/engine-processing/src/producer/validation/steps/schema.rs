@@ -1,11 +1,11 @@
 use crate::error::ProducerError;
 use engine_config::{
-    report::mapping::EntityMappingReport,
+    report::mapping::EntityMappingReport, settings::validated::ValidatedSettings,
     validation::schema_validator::DestinationSchemaValidator,
 };
 use engine_core::connectors::{destination::Destination, source::Source};
 use model::transform::mapping::EntityMapping;
-use smql_syntax::ast::setting::{CopyColumns, Settings};
+use smql_syntax::ast::setting::CopyColumns;
 use std::collections::HashSet;
 
 /// Step responsible for schema validation
@@ -13,7 +13,7 @@ pub struct SchemaValidationStep {
     source: Source,
     destination: Destination,
     mapping: EntityMapping,
-    settings: Settings,
+    settings: ValidatedSettings,
 }
 
 impl SchemaValidationStep {
@@ -21,7 +21,7 @@ impl SchemaValidationStep {
         source: Source,
         destination: Destination,
         mapping: EntityMapping,
-        settings: Settings,
+        settings: ValidatedSettings,
     ) -> Self {
         Self {
             source,

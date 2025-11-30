@@ -1,11 +1,12 @@
 use crate::{error::ProducerError, transform::pipeline::TransformPipeline};
 use engine_config::{
     report::{finding::Finding, transform::TransformationRecord},
+    settings::validated::ValidatedSettings,
     validation::schema_validator::DestinationSchemaValidator,
 };
 use engine_core::connectors::source::Source;
 use model::{pagination::cursor::Cursor, records::row::RowData, transform::mapping::EntityMapping};
-use smql_syntax::ast::setting::{CopyColumns, Settings};
+use smql_syntax::ast::setting::CopyColumns;
 use std::collections::{HashMap, HashSet};
 
 /// Result of sampling and transformation
@@ -24,7 +25,7 @@ pub struct SamplingStep {
     source: Source,
     pipeline: TransformPipeline,
     mapping: EntityMapping,
-    settings: Settings,
+    settings: ValidatedSettings,
     cursor: Cursor,
     sample_size: usize,
 }
@@ -34,7 +35,7 @@ impl SamplingStep {
         source: Source,
         pipeline: TransformPipeline,
         mapping: EntityMapping,
-        settings: Settings,
+        settings: ValidatedSettings,
         cursor: Cursor,
         sample_size: usize,
     ) -> Self {
@@ -137,7 +138,11 @@ impl SamplingStep {
         let mut prune_findings = Vec::new();
         let mut omitted_columns: HashMap<String, HashSet<String>> = HashMap::new();
 
-        match self.source.fetch_data(self.sample_size, self.cursor.clone()).await {
+        match self
+            .source
+            .fetch_data(self.sample_size, self.cursor.clone())
+            .await
+        {
             Ok(data) => {
                 let total = data.row_count;
                 let next_cursor = data.next_cursor.clone();
