@@ -63,7 +63,11 @@ pub enum ConsumerMsg {
     Flush { run_id: String, item_id: String },
 
     /// Graceful shutdown.
-    Stop { run_id: String, item_id: String },
+    Stop {
+        run_id: String,
+        item_id: String,
+        part_id: String,
+    },
 }
 
 /// Messages for the CDC actor.

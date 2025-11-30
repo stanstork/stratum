@@ -124,6 +124,10 @@ impl BatchCoordinator {
             })
     }
 
+    pub fn rows_processed(&self) -> u64 {
+        self.metrics.snapshot().records_processed
+    }
+
     async fn get_progress(&self) -> Result<u64, ConsumerError> {
         Ok(self
             .state_manager

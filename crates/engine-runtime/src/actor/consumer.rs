@@ -8,7 +8,7 @@ use engine_processing::{
     cb::{CircuitBreaker, CircuitBreakerState},
     consumer::{ConsumerStatus, DataConsumer},
 };
-use model::events::*;
+use model::events::migration::MigrationEvent;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
@@ -148,9 +148,10 @@ impl Actor<ConsumerMsg> for ConsumerActor {
 
                 if let Some(ref event_bus) = self.event_bus {
                     event_bus
-                        .publish(ConsumerStarted {
+                        .publish(MigrationEvent::ConsumerStarted {
                             run_id: run_id.clone(),
                             item_id: item_id.clone(),
+                            part_id: part_id.clone(),
                             timestamp: chrono::Utc::now(),
                         })
                         .await;
@@ -235,7 +236,11 @@ impl Actor<ConsumerMsg> for ConsumerActor {
                 Ok(())
             }
 
-            ConsumerMsg::Stop { run_id, item_id } => {
+            ConsumerMsg::Stop {
+                run_id,
+                item_id,
+                part_id,
+            } => {
                 self.running = false;
 
                 if let Err(e) = self.consumer.stop().await {
@@ -244,11 +249,14 @@ impl Actor<ConsumerMsg> for ConsumerActor {
                 }
 
                 if let Some(ref event_bus) = self.event_bus {
+                    let rows_written = self.consumer.rows_written();
                     event_bus
-                        .publish(ConsumerStopped {
-                            run_id: run_id.clone(),
-                            item_id: item_id.clone(),
+                        .publish(MigrationEvent::ConsumerStopped {
+                            run_id,
+                            item_id,
                             timestamp: chrono::Utc::now(),
+                            part_id,
+                            rows_written,
                         })
                         .await;
                 }

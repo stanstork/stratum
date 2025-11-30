@@ -65,6 +65,8 @@ pub trait DataProducer {
 
     async fn tick(&mut self) -> Result<ProducerStatus, ProducerError>;
     async fn stop(&mut self) -> Result<(), ProducerError>;
+
+    fn rows_produced(&self) -> u64;
 }
 
 pub async fn create_producer(

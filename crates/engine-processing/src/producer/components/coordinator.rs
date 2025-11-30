@@ -12,6 +12,7 @@ use tokio::sync::mpsc;
 pub struct BatchCoordinator {
     batch_tx: Option<mpsc::Sender<Batch>>,
     state_manager: StateManager,
+    rows_produced: u64,
 }
 
 impl BatchCoordinator {
@@ -19,6 +20,7 @@ impl BatchCoordinator {
         Self {
             batch_tx: Some(batch_tx),
             state_manager,
+            rows_produced: 0,
         }
     }
 
@@ -56,12 +58,14 @@ impl BatchCoordinator {
 
     /// Complete batch lifecycle: log start, send, and optionally commit.
     pub async fn process_batch(
-        &self,
+        &mut self,
         batch_id: String,
         current_cursor: Cursor,
         rows: Vec<RowData>,
         next_cursor: Cursor,
     ) -> Result<(), ProducerError> {
+        let rows_count = rows.len();
+
         // Log batch start for crash recovery
         self.state_manager
             .begin_batch(&batch_id, &current_cursor, &next_cursor)
@@ -71,13 +75,17 @@ impl BatchCoordinator {
         self.send_batch(batch_id.clone(), current_cursor, rows, next_cursor)
             .await?;
 
-        // Mark as committed in WAL
         self.state_manager.commit_batch(&batch_id).await?;
+        self.rows_produced += rows_count as u64;
 
         Ok(())
     }
 
     pub fn state_manager(&self) -> &StateManager {
         &self.state_manager
+    }
+
+    pub fn rows_produced(&self) -> u64 {
+        self.rows_produced
     }
 }

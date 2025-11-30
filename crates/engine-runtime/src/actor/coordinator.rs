@@ -126,7 +126,12 @@ impl PipelineCoordinator {
     }
 
     /// Gracefully stops the pipeline.
-    pub async fn stop(&self, run_id: String, item_id: String) -> Result<(), ActorError> {
+    pub async fn stop(
+        &self,
+        run_id: String,
+        item_id: String,
+        part_id: String,
+    ) -> Result<(), ActorError> {
         info!("Stopping pipeline");
 
         self.cancel_token.cancel();
@@ -144,7 +149,11 @@ impl PipelineCoordinator {
 
         if let Err(e) = self
             .consumer_ref
-            .send(ConsumerMsg::Stop { run_id, item_id })
+            .send(ConsumerMsg::Stop {
+                run_id,
+                item_id,
+                part_id,
+            })
             .await
         {
             error!(error = ?e, "Failed to send stop to consumer");

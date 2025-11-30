@@ -8,7 +8,7 @@ use engine_processing::{
     cb::{CircuitBreaker, CircuitBreakerState},
     producer::{DataProducer, ProducerStatus},
 };
-use model::events::*;
+use model::events::migration::{MigrationEvent, ProducerMode};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
@@ -145,14 +145,15 @@ impl Actor<ProducerMsg> for ProducerActor {
 
                 if let Some(ref event_bus) = self.event_bus {
                     event_bus
-                        .publish(SnapshotStarted {
+                        .publish(MigrationEvent::SnapshotStarted {
                             run_id: run_id.clone(),
                             item_id: item_id.clone(),
                             timestamp: chrono::Utc::now(),
+                            estimated_rows: None,
                         })
                         .await;
                     event_bus
-                        .publish(ProducerStarted {
+                        .publish(MigrationEvent::ProducerStarted {
                             run_id: run_id.clone(),
                             item_id: item_id.clone(),
                             mode: ProducerMode::Snapshot,
@@ -179,14 +180,15 @@ impl Actor<ProducerMsg> for ProducerActor {
 
                 if let Some(ref event_bus) = self.event_bus {
                     event_bus
-                        .publish(CdcStarted {
+                        .publish(MigrationEvent::CdcStarted {
                             run_id: run_id.clone(),
                             item_id: item_id.clone(),
                             timestamp: chrono::Utc::now(),
+                            starting_position: None,
                         })
                         .await;
                     event_bus
-                        .publish(ProducerStarted {
+                        .publish(MigrationEvent::ProducerStarted {
                             run_id: run_id.clone(),
                             item_id: item_id.clone(),
                             mode: ProducerMode::Cdc,
@@ -264,12 +266,13 @@ impl Actor<ProducerMsg> for ProducerActor {
                 }
 
                 if let Some(ref event_bus) = self.event_bus {
+                    let rows_produced = self.producer.rows_produced();
                     event_bus
-                        .publish(ProducerStopped {
+                        .publish(MigrationEvent::ProducerStopped {
                             run_id,
                             item_id,
-                            mode: self.mode.unwrap_or(ProducerMode::Snapshot),
                             timestamp: chrono::Utc::now(),
+                            rows_produced,
                         })
                         .await;
                 }

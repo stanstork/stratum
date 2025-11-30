@@ -3,12 +3,12 @@ use engine_config::report::dry_run::DryRunReport;
 use engine_core::{context::item::ItemContext, event_bus::bus::EventBus, metrics::Metrics};
 use engine_processing::{consumer::create_consumer, producer::create_producer};
 use futures::lock::Mutex;
-use model::{events::*, records::batch::Batch};
+use model::{events::migration::MigrationEvent, records::batch::Batch};
 use smql_syntax::ast::setting::Settings;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 pub async fn spawn(
     ctx: Arc<Mutex<ItemContext>>,
@@ -71,93 +71,20 @@ pub async fn spawn(
     Ok(())
 }
 
-/// Subscribes to migration events for logging and monitoring.
+/// Subscribes to migration events.
+/// Will be used by TUI to monitor migration progress.
 async fn subscribe_to_events(event_bus: EventBus) {
-    // Create channels for different event types
-    let (producer_tx, mut producer_rx) = mpsc::channel::<Arc<ProducerStarted>>(32);
-    let (consumer_tx, mut consumer_rx) = mpsc::channel::<Arc<ConsumerStarted>>(32);
-    let (snapshot_tx, mut snapshot_rx) = mpsc::channel::<Arc<SnapshotStarted>>(32);
-    let (cdc_tx, mut cdc_rx) = mpsc::channel::<Arc<CdcStarted>>(32);
-    let (batch_tx, mut batch_rx) = mpsc::channel::<Arc<BatchProcessed>>(32);
-    let (progress_tx, mut progress_rx) = mpsc::channel::<Arc<MigrationProgress>>(32);
+    // Create a single channel for all migration events
+    let (event_tx, mut event_rx) = mpsc::channel::<Arc<MigrationEvent>>(100);
 
-    event_bus.subscribe::<ProducerStarted>(producer_tx).await;
-    event_bus.subscribe::<ConsumerStarted>(consumer_tx).await;
-    event_bus.subscribe::<SnapshotStarted>(snapshot_tx).await;
-    event_bus.subscribe::<CdcStarted>(cdc_tx).await;
-    event_bus.subscribe::<BatchProcessed>(batch_tx).await;
-    event_bus.subscribe::<MigrationProgress>(progress_tx).await;
+    event_bus.subscribe::<MigrationEvent>(event_tx).await;
 
-    // Spawn background task to handle producer events
+    // Spawn background task to handle all migration events
     tokio::spawn(async move {
-        while let Some(event) = producer_rx.recv().await {
-            info!(
-                run_id = %event.run_id,
-                item_id = %event.item_id,
-                mode = ?event.mode,
-                "Producer started"
-            );
+        while let Some(event) = event_rx.recv().await {
+            info!("Migration Event: {}", event);
         }
     });
 
-    // Spawn background task to handle consumer events
-    tokio::spawn(async move {
-        while let Some(event) = consumer_rx.recv().await {
-            info!(
-                run_id = %event.run_id,
-                item_id = %event.item_id,
-                "Consumer started"
-            );
-        }
-    });
-
-    // Spawn background task to handle snapshot events
-    tokio::spawn(async move {
-        while let Some(event) = snapshot_rx.recv().await {
-            info!(
-                run_id = %event.run_id,
-                item_id = %event.item_id,
-                "Snapshot phase started"
-            );
-        }
-    });
-
-    // Spawn background task to handle CDC events
-    tokio::spawn(async move {
-        while let Some(event) = cdc_rx.recv().await {
-            info!(
-                run_id = %event.run_id,
-                item_id = %event.item_id,
-                "CDC phase started"
-            );
-        }
-    });
-
-    // Spawn background task to handle batch processing events
-    tokio::spawn(async move {
-        while let Some(event) = batch_rx.recv().await {
-            debug!(
-                run_id = %event.run_id,
-                item_id = %event.item_id,
-                batch_id = %event.batch_id,
-                row_count = event.row_count,
-                "Batch processed"
-            );
-        }
-    });
-
-    // Spawn background task to handle progress events
-    tokio::spawn(async move {
-        while let Some(event) = progress_rx.recv().await {
-            info!(
-                run_id = %event.run_id,
-                item_id = %event.item_id,
-                rows_processed = event.rows_processed,
-                percentage = ?event.percentage,
-                "Migration progress"
-            );
-        }
-    });
-
-    info!("Event subscribers configured for migration monitoring");
+    info!("Event subscriber configured for migration monitoring");
 }
