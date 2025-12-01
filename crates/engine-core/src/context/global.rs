@@ -30,7 +30,10 @@ impl GlobalContext {
         let src_conn = Self::create_sql_adapter(&plan.connections.source).await?;
         let dst_conn = Self::create_sql_adapter(&plan.connections.dest).await?;
         let batch_size = plan.migration.settings.batch_size;
-        let run_id = uuid::Uuid::new_v4().to_string();
+
+        // Generate a deterministic run_id based on the plan hash
+        // This allows resuming the same migration after restart
+        let run_id = format!("run-{}", &plan.hash()[..16]);
 
         // Pre-build file adapters for all CSV sources
         let initial_adapters = Self::build_file_adapters(plan)?;
