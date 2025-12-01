@@ -27,23 +27,32 @@ use planner::{plan::MigrationPlan, query::offsets::OffsetStrategyFactory};
 use smql_syntax::ast::migrate::MigrateItem;
 use std::{collections::HashMap, sync::Arc};
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 
 pub async fn run(
     plan: MigrationPlan,
     dry_run: bool,
+    cancel: CancellationToken,
 ) -> Result<HashMap<String, SummaryReport>, MigrationError> {
-    MigrationExecutor::new(plan, dry_run).await?.execute().await
+    MigrationExecutor::new(plan, dry_run, cancel)
+        .await?
+        .execute()
+        .await
 }
 
 struct MigrationExecutor {
     plan: MigrationPlan,
     dry_run: bool,
+    cancel: CancellationToken,
     global_ctx: GlobalContext,
 }
 
 impl MigrationExecutor {
-    async fn new(plan: MigrationPlan, dry_run: bool) -> Result<Self, MigrationError> {
+    async fn new(
+        plan: MigrationPlan,
+        dry_run: bool,
+        cancel: CancellationToken,
+    ) -> Result<Self, MigrationError> {
         let home_dir = dirs::home_dir().ok_or_else(|| {
             MigrationError::InitializationError("Could not determine home directory".to_string())
         })?;
@@ -53,6 +62,7 @@ impl MigrationExecutor {
         Ok(Self {
             plan,
             dry_run,
+            cancel,
             global_ctx,
         })
     }
@@ -70,7 +80,28 @@ impl MigrationExecutor {
             .await?;
 
         let mut report = HashMap::new();
+        let total_items = self.plan.migration.migrate_items.len();
+
         for (idx, mi) in self.plan.migration.migrate_items.iter().enumerate() {
+            // Check if shutdown was requested before starting next item
+            if self.cancel.is_cancelled() {
+                warn!(
+                    "Shutdown requested before starting item {}/{}: {}",
+                    idx + 1,
+                    total_items,
+                    mi.destination.name()
+                );
+                info!("Stopping migration gracefully - partial progress saved");
+                return Err(MigrationError::ShutdownRequested);
+            }
+
+            info!(
+                "Processing item {}/{}: {}",
+                idx + 1,
+                total_items,
+                mi.destination.name()
+            );
+
             let summary = self.run_item(idx, mi).await?;
             report.insert(mi.destination.name().clone(), summary);
         }
@@ -134,8 +165,7 @@ impl MigrationExecutor {
         metadata::load(&mut item_ctx).await?;
 
         let ctx = Arc::new(Mutex::new(item_ctx));
-        let cancel = CancellationToken::new();
-        workers::spawn(ctx, &settings, cancel, &dry_run_report).await?;
+        workers::spawn(ctx, &settings, self.cancel.clone(), &dry_run_report).await?;
 
         let duration = start_time.elapsed();
         info!(

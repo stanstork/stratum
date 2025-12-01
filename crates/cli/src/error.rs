@@ -31,4 +31,13 @@ pub enum CliError {
 
     #[error("Unexpected error: {0}")]
     Unexpected(String),
+
+    #[error("Migration error: {0}")]
+    Migration(MigrationError),
+
+    #[error("Plan parsing error: {0}")]
+    PlanParse(SmqlError),
+
+    #[error("Shutdown requested")]
+    ShutdownRequested,
 }

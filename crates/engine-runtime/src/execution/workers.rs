@@ -4,10 +4,10 @@ use engine_core::{context::item::ItemContext, event_bus::bus::EventBus, metrics:
 use engine_processing::{consumer::create_consumer, producer::create_producer};
 use futures::lock::Mutex;
 use model::{events::migration::MigrationEvent, records::batch::Batch};
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub async fn spawn(
     ctx: Arc<Mutex<ItemContext>>,
@@ -60,14 +60,50 @@ pub async fn spawn(
             MigrationError::Unexpected(format!("Failed to start pipeline: {}", e))
         })?;
 
-    // Wait for pipeline to complete
-    coordinator.wait().await.map_err(|e| {
-        error!("Pipeline error: {}", e);
-        MigrationError::Unexpected(format!("Pipeline error: {}", e))
-    })?;
+    // Wait for pipeline to complete or shutdown
+    const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
-    info!("Pipeline completed successfully");
-    Ok(())
+    let cancel_fut = cancel.cancelled();
+    tokio::pin!(cancel_fut);
+
+    let wait_fut = coordinator.wait();
+    tokio::pin!(wait_fut);
+
+    tokio::select! {
+        result = &mut wait_fut => {
+            result.map_err(|e| {
+                error!("Pipeline error: {}", e);
+                MigrationError::Unexpected(format!("Pipeline error: {}", e))
+            })?;
+            info!("Pipeline completed successfully");
+            Ok(())
+        }
+        _ = &mut cancel_fut => {
+            warn!("Shutdown signal received, waiting for in-flight operations to complete");
+            info!("Waiting up to {}s for graceful shutdown", SHUTDOWN_TIMEOUT.as_secs());
+
+            // Give the pipeline time to finish in-flight operations
+            let shutdown_result = tokio::time::timeout(SHUTDOWN_TIMEOUT, wait_fut).await;
+
+            match shutdown_result {
+                Ok(Ok(())) => {
+                    info!("Pipeline shutdown completed gracefully");
+                    Err(MigrationError::ShutdownRequested)
+                }
+                Ok(Err(e)) => {
+                    error!("Pipeline error during shutdown: {}", e);
+                    Err(MigrationError::Unexpected(format!("Pipeline error during shutdown: {}", e)))
+                }
+                Err(_) => {
+                    warn!(
+                        "Pipeline did not complete within {}s timeout - progress has been checkpointed",
+                        SHUTDOWN_TIMEOUT.as_secs()
+                    );
+                    Err(MigrationError::ShutdownRequested)
+                }
+            }
+        }
+    }
 }
 
 /// Subscribes to migration events.

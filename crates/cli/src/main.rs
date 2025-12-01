@@ -13,10 +13,11 @@ use planner::plan::MigrationPlan;
 use std::{str::FromStr, sync::Arc};
 use tracing::{Level, info};
 
-pub mod commands;
-pub mod conn;
-pub mod error;
-pub mod output;
+mod commands;
+mod conn;
+mod error;
+mod output;
+mod shutdown;
 
 #[derive(Parser)]
 #[command(name = "stratum", version = "0.0.1", about = "Data migration tool")]
