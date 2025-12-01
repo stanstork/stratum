@@ -166,19 +166,33 @@ impl Actor<ConsumerMsg> for ConsumerActor {
             }
 
             ConsumerMsg::Tick => {
-                // Stop if not running or cancelled
-                if !self.running || self.cancel_token.is_cancelled() {
+                // Check if shutdown requested (but allow current tick to complete)
+                let shutdown_requested = self.cancel_token.is_cancelled();
+
+                if !self.running {
                     info!(actor = ctx.name(), "Consumer stopping");
-                    self.running = false;
                     let _ = self.consumer.stop().await;
                     // Drop self-reference to allow actor termination
                     self.actor_ref = None;
                     return Ok(());
                 }
 
+                // Process one tick to complete any in-flight batch
                 let response = match self.consumer.tick().await {
                     Ok(status) => {
                         self.breaker.record_success();
+
+                        if shutdown_requested {
+                            info!(
+                                actor = ctx.name(),
+                                "Consumer stopping after completing in-flight work"
+                            );
+                            self.running = false;
+                            let _ = self.consumer.stop().await;
+                            self.actor_ref = None;
+                            return Ok(());
+                        }
+
                         self.next_action(status)
                     }
                     Err(e) => self.handle_tick_error(e).await?,
