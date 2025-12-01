@@ -209,6 +209,10 @@ impl Actor<ProducerMsg> for ProducerActor {
                 // Stop if not running or cancelled
                 if !self.running || self.cancel_token.is_cancelled() {
                     info!(actor = ctx.name(), "Producer stopping");
+                    self.running = false;
+                    let _ = self.producer.stop().await;
+                    // Drop self-reference to allow actor termination
+                    self.actor_ref = None;
                     return Ok(());
                 }
 

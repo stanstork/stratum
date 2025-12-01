@@ -169,6 +169,10 @@ impl Actor<ConsumerMsg> for ConsumerActor {
                 // Stop if not running or cancelled
                 if !self.running || self.cancel_token.is_cancelled() {
                     info!(actor = ctx.name(), "Consumer stopping");
+                    self.running = false;
+                    let _ = self.consumer.stop().await;
+                    // Drop self-reference to allow actor termination
+                    self.actor_ref = None;
                     return Ok(());
                 }
 

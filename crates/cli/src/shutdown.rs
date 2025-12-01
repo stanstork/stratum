@@ -62,26 +62,4 @@ impl ShutdownCoordinator {
             info!("Shutdown signal broadcasted to all actors");
         });
     }
-
-    pub fn is_shutdown_requested(&self) -> bool {
-        self.shutdown_requested.load(Ordering::SeqCst)
-    }
-
-    pub fn cancel_token(&self) -> CancellationToken {
-        self.cancel_token.clone()
-    }
-}
-
-/// Exit codes for the CLI application.
-#[derive(Debug, Clone, Copy)]
-pub enum ExitCode {
-    Success = 0,
-    GeneralError = 1,
-    ShutdownRequested = 130, // Standard exit code for SIGINT
-}
-
-impl ExitCode {
-    pub fn as_i32(self) -> i32 {
-        self as i32
-    }
 }

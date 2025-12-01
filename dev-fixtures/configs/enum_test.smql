@@ -1,10 +1,9 @@
 CONNECTIONS(
-    SOURCE(MYSQL,  "mysql://root:root@localhost:3306/testdb"),
+    SOURCE(MYSQL,  "mysql://root:root@localhost:3306/migration_test"),
     DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/testdb")
 );
 MIGRATE(
-    SOURCE(TABLE, orders) -> DEST(TABLE, orders_flat) [
-        SETTINGS(INFER_SCHEMA=TRUE,CREATE_MISSING_COLUMNS=TRUE),
-        MAP(total * 1.4 -> order_price_with_tax)
+    SOURCE(TABLE, users) -> DEST(TABLE, users) [
+        SETTINGS(CREATE_MISSING_TABLES=TRUE)
     ]
 );

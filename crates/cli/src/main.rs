@@ -1,6 +1,7 @@
 use crate::{
     conn::{ConnectionKind, ConnectionPinger, MySqlConnectionPinger, PostgresConnectionPinger},
     error::CliError,
+    shutdown::ShutdownCoordinator,
 };
 use clap::Parser;
 use commands::Commands;
@@ -8,9 +9,13 @@ use engine_core::{
     progress::{ProgressService, ProgressStatus},
     state::{StateStore, sled_store::SledStateStore},
 };
-use engine_runtime::execution::{executor, source::load_metadata};
+use engine_runtime::{
+    error::MigrationError,
+    execution::{executor, source::load_metadata},
+};
 use planner::plan::MigrationPlan;
-use std::{str::FromStr, sync::Arc};
+use std::{process, str::FromStr, sync::Arc};
+use tokio_util::sync::CancellationToken;
 use tracing::{Level, info};
 
 mod commands;
@@ -27,16 +32,52 @@ struct Cli {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), CliError> {
+async fn main() {
     // Initialize logger
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
+    let exit_code = match run_cli().await {
+        Ok(()) => 0,
+        Err(e) => {
+            match &e {
+                CliError::ShutdownRequested => {
+                    info!("Application shutdown gracefully");
+                    130 // Standard exit code for SIGINT
+                }
+                _ => {
+                    tracing::error!("Application error: {}", e);
+                    1
+                }
+            }
+        }
+    };
+
+    process::exit(exit_code);
+}
+
+async fn run_cli() -> Result<(), CliError> {
     let cli = Cli::parse();
+    let cancel = CancellationToken::new();
+    let shutdown_coordinator = ShutdownCoordinator::new(cancel.clone());
+
+    shutdown_coordinator.register_handlers();
 
     match cli.command {
         Commands::Migrate { config, from_ast } => {
             let plan = load_migration_plan(&config, from_ast).await?;
-            executor::run(plan, false).await?;
+            let result = executor::run(plan, false, cancel).await;
+
+            match result {
+                Ok(_) => {
+                    info!("Migration completed successfully");
+                    Ok(())
+                }
+                Err(MigrationError::ShutdownRequested) => {
+                    info!("Migration stopped due to shutdown request - progress has been saved");
+                    Err(CliError::ShutdownRequested)
+                }
+                Err(e) => Err(CliError::Migration(e)),
+            }
         }
         Commands::Validate {
             config,
@@ -49,12 +90,14 @@ async fn main() -> Result<(), CliError> {
             );
 
             let plan = load_migration_plan(&config, from_ast).await?;
-            let states = executor::run(plan, true).await?;
+            let states = executor::run(plan, true, cancel).await?;
 
             match output {
                 Some(path) => output::write_report(states, path).await?,
                 None => output::print_report(states).await?,
             }
+
+            Ok(())
         }
         Commands::Source { command } => match command {
             commands::SourceCommand::Info {
@@ -74,6 +117,8 @@ async fn main() -> Result<(), CliError> {
                 } else {
                     println!("{metadata_json}");
                 }
+
+                Ok(())
             }
         },
         Commands::Ast { config } => {
@@ -81,6 +126,7 @@ async fn main() -> Result<(), CliError> {
             let plan = planner::plan::parse(&source)?;
             let json = serde_json::to_string_pretty(&plan).map_err(CliError::JsonSerialize)?;
             println!("{json}");
+            Ok(())
         }
         Commands::TestConn { format, conn_str } => {
             let kind = ConnectionKind::from_str(&format)
@@ -94,13 +140,13 @@ async fn main() -> Result<(), CliError> {
                 }
                 _ => return Err(CliError::UnsupportedConnectionKind),
             }
+            Ok(())
         }
         Commands::Progress { run, item, json } => {
             show_progress(&run, &item, json).await?;
+            Ok(())
         }
     }
-
-    Ok(())
 }
 
 async fn load_migration_plan(path: &str, from_ast: bool) -> Result<MigrationPlan, CliError> {

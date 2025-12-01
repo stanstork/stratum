@@ -35,9 +35,6 @@ pub enum CliError {
     #[error("Migration error: {0}")]
     Migration(MigrationError),
 
-    #[error("Plan parsing error: {0}")]
-    PlanParse(SmqlError),
-
     #[error("Shutdown requested")]
     ShutdownRequested,
 }
