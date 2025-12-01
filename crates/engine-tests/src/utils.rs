@@ -12,6 +12,7 @@ use std::{
     fs::File,
     io::{BufRead, BufReader},
 };
+use tokio_util::sync::CancellationToken;
 
 /// DDL statement to precreate the `actor` table in Postgres for testing various scenarios involving existing tables.
 pub const ACTORS_TABLE_DDL: &str = r#"CREATE TABLE actor (
@@ -80,7 +81,8 @@ pub enum DbType {
 pub async fn run_smql(template: &str, source_db: &str) {
     let smql = templated_smql(template, source_db);
     let plan = parse(&smql).expect("parse smql");
-    run(plan, false).await.expect("migration ran");
+    let cancel = CancellationToken::new();
+    run(plan, false, cancel).await.expect("migration ran");
 }
 
 /// Assert that a table exists (or not) in Postgres

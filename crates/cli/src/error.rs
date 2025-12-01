@@ -31,4 +31,10 @@ pub enum CliError {
 
     #[error("Unexpected error: {0}")]
     Unexpected(String),
+
+    #[error("Migration error: {0}")]
+    Migration(MigrationError),
+
+    #[error("Shutdown requested")]
+    ShutdownRequested,
 }

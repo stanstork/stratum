@@ -39,6 +39,10 @@ pub enum MigrationError {
     /// Unknown error.
     #[error("Unknown error: {0}")]
     Unknown(#[from] Box<dyn std::error::Error + Send + Sync>),
+
+    /// Graceful shutdown was requested.
+    #[error("Shutdown requested")]
+    ShutdownRequested,
 }
 
 /// Common error type for all actors in the engine.
