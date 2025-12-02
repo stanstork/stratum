@@ -188,12 +188,12 @@ jobs:
                   FLUSH PRIVILEGES;
                   SQL
 
-                  # Seed Sakila schema
-                  mysql -h 127.0.0.1 -P 3306 -usakila_user -pqwerty123 sakila \
+                  # Seed Sakila schema as root
+                  mysql -h 127.0.0.1 -P 3306 -uroot -proot sakila \
                       < .github/workflows/sakila-schema.sql
 
-                  # Seed Sakila data
-                  mysql -h 127.0.0.1 -P 3306 -usakila_user -pqwerty123 sakila \
+                  # Seed Sakila data as root
+                  mysql -h 127.0.0.1 -P 3306 -uroot -proot sakila \
                       < .github/workflows/sakila-data.sql
 
                   # Seed Orders DB
