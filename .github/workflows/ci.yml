@@ -146,28 +146,8 @@ jobs:
               run: |
                   # Create user "user" and database "testdb" owned by that user
                   psql -h localhost -U postgres -d postgres <<'SQL'
-                  DO
-                  \$do\$
-                  BEGIN
-                    IF NOT EXISTS (
-                      SELECT FROM pg_catalog.pg_roles WHERE rolname = 'user'
-                    ) THEN
-                      CREATE ROLE "user" LOGIN PASSWORD 'password';
-                    END IF;
-                  END
-                  \$do\$;
-
-                  DO
-                  \$do\$
-                  BEGIN
-                    IF NOT EXISTS (
-                      SELECT FROM pg_database WHERE datname = 'testdb'
-                    ) THEN
-                      CREATE DATABASE testdb OWNER "user";
-                    END IF;
-                  END
-                  \$do\$;
-
+                  CREATE ROLE "user" LOGIN PASSWORD 'password';
+                  CREATE DATABASE testdb OWNER "user";
                   GRANT ALL PRIVILEGES ON DATABASE testdb TO "user";
                   SQL
 
