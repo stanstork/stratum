@@ -72,7 +72,7 @@ pub fn combine_join_paths(paths: Vec<Vec<String>>, root: &str) -> Vec<String> {
     out
 }
 
-/// Build a Vec<JoinClause> that steps from `root` through `path`,
+/// Build a `Vec<JoinClause>` that steps from `root` through `path`,
 /// looking up FK metadata in `graph` to wire up ON conditions.
 pub fn build_join_clauses(
     root: &str,

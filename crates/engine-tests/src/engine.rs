@@ -534,7 +534,7 @@ mod tests {
         ValidatedSettings,
     ) {
         let source = factory::create_source(
-            &*global_ctx,
+            global_ctx,
             &plan.connections,
             mapping,
             migrate_item,
@@ -543,10 +543,9 @@ mod tests {
         .await
         .expect("create source");
 
-        let destination =
-            factory::create_destination(&*global_ctx, &plan.connections, migrate_item)
-                .await
-                .expect("create destination");
+        let destination = factory::create_destination(global_ctx, &plan.connections, migrate_item)
+            .await
+            .expect("create destination");
 
         let mut item_ctx = ItemContext::new(ItemContextParams {
             run_id: RUN_ID.to_string(),

@@ -69,8 +69,8 @@ pub trait SqlAdapter {
         &self,
         _tx: &Transaction<'_>,
         _table: &str,
-        _columns: &Vec<ColumnMetadata>,
-        _rows: &Vec<RowData>,
+        _columns: &[ColumnMetadata],
+        _rows: &[RowData],
     ) -> Result<(), DbError> {
         Err(DbError::Unknown(
             "Streaming COPY not implemented for this adapter".to_string(),

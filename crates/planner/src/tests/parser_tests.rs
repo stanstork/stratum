@@ -4,7 +4,7 @@ mod tests {
 
     fn assert_parses(input: &str) {
         match parse(input) {
-            Ok(_) => assert!(true),
+            Ok(_) => {}
             Err(e) => panic!("Failed to parse valid input: {e:?}"),
         }
     }
@@ -216,6 +216,6 @@ mod tests {
             );
             "#;
 
-        assert_parses(&config);
+        assert_parses(config);
     }
 }

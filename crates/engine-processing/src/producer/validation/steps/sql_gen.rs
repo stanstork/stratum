@@ -1,5 +1,8 @@
 use connectors::sql::base::query::generator::QueryGenerator;
-use engine_config::report::{finding::Finding, sql::{SqlKind, SqlStatement}};
+use engine_config::report::{
+    finding::Finding,
+    sql::{SqlKind, SqlStatement},
+};
 use engine_core::connectors::source::{DataSource, Source};
 use model::pagination::cursor::Cursor;
 
@@ -26,8 +29,7 @@ impl SqlGenerationStep {
                 let dialect = self.source.dialect();
                 let generator = QueryGenerator::new(dialect.as_ref());
 
-                let requests =
-                    db.build_fetch_rows_requests(self.sample_size, self.cursor.clone());
+                let requests = db.build_fetch_rows_requests(self.sample_size, self.cursor.clone());
                 let statements = requests
                     .into_iter()
                     .map(|req| {

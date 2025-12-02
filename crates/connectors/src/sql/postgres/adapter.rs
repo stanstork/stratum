@@ -204,8 +204,8 @@ impl SqlAdapter for PgAdapter {
         &self,
         tx: &Transaction<'_>,
         table: &str,
-        columns: &Vec<ColumnMetadata>,
-        rows: &Vec<RowData>,
+        columns: &[ColumnMetadata],
+        rows: &[RowData],
     ) -> Result<(), DbError> {
         if rows.is_empty() {
             return Ok(());

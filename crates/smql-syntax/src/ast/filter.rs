@@ -11,7 +11,7 @@ pub struct Filter {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FilterExpression {
-    /// e.g. table[col] > 3
+    /// e.g. table.column = value
     Condition(Condition),
 
     /// e.g. AND(expr1, expr2, …)
