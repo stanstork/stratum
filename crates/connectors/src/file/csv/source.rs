@@ -10,7 +10,7 @@ use model::{
     pagination::{cursor::Cursor, page::FetchResult},
     records::row::RowData,
 };
-use std::{sync::Arc, time::Instant};
+use std::sync::Arc;
 use tracing::warn;
 
 pub trait FileDataSource: MetadataHelper + Send + Sync {
@@ -42,7 +42,7 @@ impl FileDataSource for CsvDataSource {
     type Error = FileError;
 
     fn fetch(&mut self, batch_size: usize, cursor: Cursor) -> Result<FetchResult, Self::Error> {
-        let start = Instant::now();
+        let start = std::time::Instant::now();
         let meta = self.primary_meta.clone().expect("Metadata not set");
         let entity_name = meta.name.clone();
 

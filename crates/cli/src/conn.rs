@@ -1,9 +1,9 @@
 use crate::error::CliError;
 use async_trait::async_trait;
+use mysql_async::prelude::*;
 use smql_syntax::ast::connection::DataFormat;
-use sqlx::{MySql, Pool};
-use sqlx::{Postgres, Row};
 use std::str::FromStr;
+use tokio_postgres::NoTls;
 use tracing::{error, info};
 
 /// What kind of connection to check
@@ -60,22 +60,31 @@ impl ConnectionPinger for MySqlConnectionPinger {
         info!("Pinging MySQL at '{}'", &self.conn_str);
 
         // connect
-        let pool = Pool::<MySql>::connect(&self.conn_str).await.map_err(|e| {
+        let opts = mysql_async::Opts::from_url(&self.conn_str).map_err(|e| {
+            error!("MySQL connection string parse failed: {}", e);
+            CliError::MySql(mysql_async::Error::Url(e))
+        })?;
+        let pool = mysql_async::Pool::new(opts);
+        let mut conn = pool.get_conn().await.map_err(|e| {
             error!("MySQL connection to '{}' failed: {}", &self.conn_str, e);
-            CliError::Sql(e)
+            CliError::MySql(e)
         })?;
 
         // run the simple query
-        let row = sqlx::query("SELECT 1")
-            .fetch_one(&pool)
+        let val: i32 = conn
+            .query_first("SELECT 1")
             .await
             .map_err(|e| {
                 error!("MySQL ping query on '{}' failed: {}", &self.conn_str, e);
-                CliError::Sql(e)
+                CliError::MySql(e)
+            })?
+            .ok_or_else(|| {
+                let msg = format!("MySQL ping to '{}' returned no result", &self.conn_str);
+                error!("{}", msg);
+                CliError::Unexpected(msg)
             })?;
 
         // verify the result
-        let val: i32 = row.get(0);
         if val != 1 {
             let msg = format!(
                 "MySQL ping to '{}' returned unexpected result: {}",
@@ -86,6 +95,8 @@ impl ConnectionPinger for MySqlConnectionPinger {
         }
 
         info!("MySQL ping to '{}' succeeded", &self.conn_str);
+        drop(conn);
+        pool.disconnect().await.ok();
         Ok(())
     }
 }
@@ -96,21 +107,25 @@ impl ConnectionPinger for PostgresConnectionPinger {
         info!("Pinging Postgres at '{}'", &self.conn_str);
 
         // connect
-        let pool = Pool::<Postgres>::connect(&self.conn_str)
+        let (client, connection) = tokio_postgres::connect(&self.conn_str, NoTls)
             .await
             .map_err(|e| {
                 error!("Postgres connection to '{}' failed: {}", &self.conn_str, e);
-                CliError::Sql(e)
+                CliError::Postgres(e)
             })?;
 
+        // spawn the connection handler
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                error!("Postgres connection error: {}", e);
+            }
+        });
+
         // run the simple query
-        let row = sqlx::query("SELECT 1")
-            .fetch_one(&pool)
-            .await
-            .map_err(|e| {
-                error!("Postgres ping query on '{}' failed: {}", &self.conn_str, e);
-                CliError::Sql(e)
-            })?;
+        let row = client.query_one("SELECT 1", &[]).await.map_err(|e| {
+            error!("Postgres ping query on '{}' failed: {}", &self.conn_str, e);
+            CliError::Postgres(e)
+        })?;
 
         // verify the result
         let val: i32 = row.get(0);

@@ -25,9 +25,13 @@ pub enum CliError {
     #[error("Unsupported connection kind for testing")]
     UnsupportedConnectionKind,
 
-    /// Any SQL driver error.
-    #[error("SQL error: {0}")]
-    Sql(#[from] sqlx::Error),
+    /// MySQL driver error.
+    #[error("MySQL error: {0}")]
+    MySql(#[from] mysql_async::Error),
+
+    /// PostgreSQL driver error.
+    #[error("PostgreSQL error: {0}")]
+    Postgres(#[from] tokio_postgres::Error),
 
     #[error("Unexpected error: {0}")]
     Unexpected(String),
