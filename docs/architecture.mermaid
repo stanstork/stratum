@@ -1,0 +1,144 @@
+graph TB
+    subgraph CLI["CLI Layer (crates/cli)"]
+        CLI_CMDS["Commands: migrate | validate<br/>source info | test-conn | progress"]
+        CLI_SIG["Signal handling<br/>SIGINT/SIGTERM"]
+        CLI_SHUT["Graceful shutdown<br/>coordination"]
+    end
+
+    subgraph CONFIG["Configuration & Planning Layer"]
+        SMQL["SMQL Syntax<br/>Parser/AST<br/>CONNECTIONS<br/>MIGRATE"]
+        PLANNER["Planner<br/>MigrationPlan<br/>Plan hash<br/>Offset strategy"]
+        ENGINE_CFG["Engine Config<br/>Validation<br/>Settings<br/>Dry-run"]
+        
+        SMQL --> PLANNER
+        PLANNER --> ENGINE_CFG
+    end
+
+    subgraph EXEC["Execution Orchestration Layer<br/>(crates/engine-runtime/executor)"]
+        EXECUTOR["MigrationExecutor<br/>Manages GlobalContext (run_id, adapters)<br/>Initializes StateStore (sled embedded KV)<br/>Spawns workers for each MigrationItem"]
+    end
+
+    subgraph ACTOR["Actor Runtime Layer<br/>(crates/engine-runtime/actor)"]
+        COORD["PipelineCoordinator<br/>Orchestrates the entire snapshot + CDC pipeline lifecycle"]
+        
+        PRODUCER["ProducerActor<br/>ProducerMsg<br/>Start<br/>Stop<br/>Pause/Resume"]
+        CONSUMER["ConsumerActor<br/>ConsumerMsg<br/>Receive batch<br/>Flush<br/>Stop"]
+        EVENTBUS["EventBus<br/>Pub/Sub<br/>MigrationEvt<br/>ChangeEvent<br/>Metrics"]
+        
+        COORD --> PRODUCER
+        COORD --> CONSUMER
+        COORD --> EVENTBUS
+        
+        PROD_MB["MPSC Mailbox"]
+        CONS_MB["MPSC Mailbox"]
+        SUBS["Subscribers"]
+        
+        PRODUCER --> PROD_MB
+        CONSUMER --> CONS_MB
+        EVENTBUS --> SUBS
+    end
+
+    subgraph PIPELINE["Data Processing Pipeline Layer<br/>(crates/engine-processing)"]
+        subgraph PROD_SIDE["PRODUCER SIDE"]
+            SNAPSHOT["SnapshotReader<br/>Pagination<br/>Query execution"]
+            TRANSFORM["TransformService<br/>TransformPipeline<br/>TableMapper<br/>FieldMapper<br/>ComputedTransform"]
+            BATCH_COORD["BatchCoordinator<br/>Batching<br/>Send to channel"]
+            
+            SNAPSHOT --> TRANSFORM
+            TRANSFORM --> BATCH_COORD
+        end
+        
+        CHANNEL["MPSC Channel<br/>Batch (cap:64)"]
+        
+        subgraph CONS_SIDE["CONSUMER SIDE"]
+            WRITER["BatchWriter<br/>Fast-path (COPY)<br/>Fallback (INSERT)"]
+            STATE_MGR["StateManager<br/>Checkpoint tracking<br/>WAL"]
+            
+            WRITER --> STATE_MGR
+        end
+        
+        BATCH_COORD -.->|Batch| CHANNEL
+        CHANNEL -.-> WRITER
+        
+        STATES["States: Working → Idle → Finished"]
+        
+        CB["Circuit Breaker (cb.rs)<br/>Exponential backoff<br/>(1s, 2s, 4s, 8s, 16s, 30s)<br/>Failure threshold: 4"]
+    end
+
+    subgraph ADAPTER["Adapter Layer<br/>(crates/connectors)"]
+        subgraph SRC_ADAPT["Source Adapters"]
+            SQL_SRC["SQL (sql/base/)"]
+            MYSQL_SRC["MySqlAdapter<br/>mysql_async<br/>Query exec"]
+            PG_SRC["PostgresAdapter<br/>tokio-postgres<br/>Connection pool"]
+            CSV_SRC["CsvDataSource<br/>CSV parsing"]
+            SRC_COMMON["Common:<br/>Metadata providers<br/>Query generators<br/>Filter systems"]
+            
+            SQL_SRC --> MYSQL_SRC
+            SQL_SRC --> PG_SRC
+        end
+        
+        subgraph DEST_ADAPT["Destination Adapters"]
+            SQL_DEST["SQL (sql/base/)"]
+            PG_DEST["PgDestination<br/>COPY protocol<br/>tokio-postgres"]
+            DB_DEST["DbDataDestination<br/>INSERT/MERGE<br/>Type encoding"]
+            DEST_COMMON["Common:<br/>Type coercion<br/>Batch optimization<br/>Error handling"]
+            
+            SQL_DEST --> PG_DEST
+            SQL_DEST --> DB_DEST
+        end
+    end
+
+    subgraph CORE["Core Services Layer<br/>(crates/engine-core)"]
+        STORE["StateStore<br/>sled KV<br/>Checkpoints<br/>WAL<br/>Progress<br/>Resume capability"]
+        
+        CTX["Context System<br/>GlobalContext (run_id, adapters, state_store)<br/>ItemContext (source/dest, mapping, cursor)"]
+        
+        METRICS["Metrics<br/>records_processed<br/>bytes_transferred<br/>batches_processed<br/>failure_count<br/>retry_count<br/>(atomic counters)"]
+        
+        RETRY["Retry Policy<br/>& Circuit Breaker"]
+        
+        SCHEMA["Schema & Validation<br/>Schema inference<br/>Constraint detection<br/>Type coercion<br/>PKs, FKs, unique"]
+        
+        BUS["Event Bus (Type-safe Pub/Sub)<br/>subscribe<E>() → MPSC channels<br/>publish(event) → broadcast<br/>Monitoring & TUI integration"]
+        
+        PROGRESS["Progress Tracking<br/>ProgressService<br/>Stage, rows, cursor<br/>Query via CLI"]
+    end
+
+    subgraph EXTERNAL["External Systems & Runtime"]
+        TOKIO["Tokio Runtime<br/>async/await<br/>Task spawn<br/>Channels<br/>Timers"]
+        MYSQL_DB["MySQL DB<br/>(mysql_async)"]
+        PG_DB["PostgreSQL DB<br/>(tokio-postgres)"]
+        FS["File System<br/>CSV files<br/>~/.stratum/state/<br/>(sled DB)"]
+        
+        SIGNALS["Signal Handling: SIGINT, SIGTERM → CancellationToken → Graceful Shutdown"]
+    end
+
+    CLI --> CONFIG
+    CONFIG --> EXEC
+    EXEC --> ACTOR
+    ACTOR --> PIPELINE
+    PIPELINE --> ADAPTER
+    ADAPTER --> CORE
+    CORE --> EXTERNAL
+    
+    PROD_MB -.-> PROD_SIDE
+    CONS_MB -.-> CONS_SIDE
+    
+    SRC_ADAPT -.-> MYSQL_DB
+    SRC_ADAPT -.-> PG_DB
+    SRC_ADAPT -.-> FS
+    DEST_ADAPT -.-> PG_DB
+    DEST_ADAPT -.-> FS
+    
+    CORE -.-> FS
+    ACTOR -.-> TOKIO
+    PIPELINE -.-> TOKIO
+
+    style CLI fill:#e1f5ff
+    style CONFIG fill:#fff4e1
+    style EXEC fill:#f0e1ff
+    style ACTOR fill:#e1ffe8
+    style PIPELINE fill:#ffe1e8
+    style ADAPTER fill:#fff9e1
+    style CORE fill:#e8e1ff
+    style EXTERNAL fill:#f5f5f5

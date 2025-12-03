@@ -1,0 +1,254 @@
+{
+    "connections": {
+        "source": {
+            "conn_type": "Source",
+            "format": "MySql",
+            "conn_str": "mysql://user:password@172.17.0.1:3306/testdb"
+        },
+        "dest": {
+            "conn_type": "Dest",
+            "format": "Postgres",
+            "conn_str": "postgres://user:password@172.17.0.1:5432/testdb"
+        }
+    },
+    "migration": {
+        "migrate_items": [
+            {
+                "source": {
+                    "kind": "Table",
+                    "names": [
+                        "orders"
+                    ]
+                },
+                "destination": {
+                    "kind": "Table",
+                    "names": [
+                        "orders_flat"
+                    ]
+                },
+                "settings": {
+                    "infer_schema": true,
+                    "ignore_constraints": false,
+                    "create_missing_columns": true,
+                    "create_missing_tables": true,
+                    "copy_columns": "All",
+                    "batch_size": 1000,
+                    "cascade_schema": true,
+                    "csv_header": true,
+                    "csv_delimiter": ",",
+                    "csv_id_column": null
+                },
+                "filter": {
+                    "expression": {
+                        "FunctionCall": [
+                            "AND",
+                            [
+                                {
+                                    "Condition": {
+                                        "left": {
+                                            "Lookup": {
+                                                "entity": "orders",
+                                                "key": "total",
+                                                "field": null
+                                            }
+                                        },
+                                        "op": "GreaterThan",
+                                        "right": {
+                                            "Literal": {
+                                                "Integer": 400
+                                            }
+                                        }
+                                    }
+                                },
+                                {
+                                    "Condition": {
+                                        "left": {
+                                            "Lookup": {
+                                                "entity": "users",
+                                                "key": "id",
+                                                "field": null
+                                            }
+                                        },
+                                        "op": "NotEqual",
+                                        "right": {
+                                            "Literal": {
+                                                "Integer": 1
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        ]
+                    }
+                },
+                "load": {
+                    "entities": [
+                        "users",
+                        "order_items",
+                        "products"
+                    ],
+                    "matches": [
+                        {
+                            "left": {
+                                "Lookup": {
+                                    "entity": "users",
+                                    "key": "id",
+                                    "field": null
+                                }
+                            },
+                            "right": {
+                                "Lookup": {
+                                    "entity": "orders",
+                                    "key": "user_id",
+                                    "field": null
+                                }
+                            }
+                        },
+                        {
+                            "left": {
+                                "Lookup": {
+                                    "entity": "order_items",
+                                    "key": "order_id",
+                                    "field": null
+                                }
+                            },
+                            "right": {
+                                "Lookup": {
+                                    "entity": "orders",
+                                    "key": "id",
+                                    "field": null
+                                }
+                            }
+                        },
+                        {
+                            "left": {
+                                "Lookup": {
+                                    "entity": "products",
+                                    "key": "id",
+                                    "field": null
+                                }
+                            },
+                            "right": {
+                                "Lookup": {
+                                    "entity": "order_items",
+                                    "key": "id",
+                                    "field": null
+                                }
+                            }
+                        }
+                    ]
+                },
+                "map": {
+                    "mappings": [
+                        {
+                            "source": {
+                                "Lookup": {
+                                    "entity": "users",
+                                    "key": "name",
+                                    "field": null
+                                }
+                            },
+                            "target": "user_name"
+                        },
+                        {
+                            "source": {
+                                "Lookup": {
+                                    "entity": "users",
+                                    "key": "email",
+                                    "field": null
+                                }
+                            },
+                            "target": "user_email"
+                        },
+                        {
+                            "source": {
+                                "Lookup": {
+                                    "entity": "order_items",
+                                    "key": "price",
+                                    "field": null
+                                }
+                            },
+                            "target": "order_price"
+                        },
+                        {
+                            "source": {
+                                "Lookup": {
+                                    "entity": "products",
+                                    "key": "name",
+                                    "field": null
+                                }
+                            },
+                            "target": "product_name"
+                        },
+                        {
+                            "source": {
+                                "Lookup": {
+                                    "entity": "products",
+                                    "key": "price",
+                                    "field": null
+                                }
+                            },
+                            "target": "product_price"
+                        },
+                        {
+                            "source": {
+                                "Arithmetic": {
+                                    "left": {
+                                        "Lookup": {
+                                            "entity": "order_items",
+                                            "key": "price",
+                                            "field": null
+                                        }
+                                    },
+                                    "operator": "Multiply",
+                                    "right": {
+                                        "Literal": {
+                                            "Float": 1.4
+                                        }
+                                    }
+                                }
+                            },
+                            "target": "order_price_with_tax"
+                        },
+                        {
+                            "source": {
+                                "FunctionCall": {
+                                    "name": "CONCAT",
+                                    "arguments": [
+                                        {
+                                            "Lookup": {
+                                                "entity": "users",
+                                                "key": "name",
+                                                "field": null
+                                            }
+                                        },
+                                        {
+                                            "Lookup": {
+                                                "entity": "products",
+                                                "key": "name",
+                                                "field": null
+                                            }
+                                        }
+                                    ]
+                                }
+                            },
+                            "target": "concat_lookup_test"
+                        }
+                    ]
+                }
+            }
+        ],
+        "settings": {
+            "infer_schema": false,
+            "ignore_constraints": false,
+            "create_missing_columns": false,
+            "create_missing_tables": false,
+            "copy_columns": "All",
+            "batch_size": 1000,
+            "cascade_schema": false,
+            "csv_header": true,
+            "csv_delimiter": ",",
+            "csv_id_column": null
+        }
+    }
+}

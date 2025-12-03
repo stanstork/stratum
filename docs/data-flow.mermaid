@@ -1,0 +1,66 @@
+flowchart TD
+    START([User Request]) --> PARSE[Parse SMQL config → AST]
+    PARSE --> PLAN[Generate MigrationPlan<br/>with hash]
+    PLAN --> INIT[Initialize GlobalContext<br/>+ StateStore]
+    INIT --> LOOP{For each<br/>MigrationItem}
+    
+    LOOP --> CTX[Create ItemContext]
+    CTX --> SRC[Source adapter<br/>MySQL/Postgres/CSV]
+    CTX --> DEST[Destination adapter]
+    CTX --> MAP[Entity mapping]
+    
+    SRC --> META
+    DEST --> META
+    MAP --> META
+    
+    META[Load metadata<br/>introspect schemas] --> VALIDATE[Validate settings]
+    
+    VALIDATE --> SPAWN[Spawn Pipeline]
+    
+    SPAWN --> COORD[PipelineCoordinator]
+    COORD --> PROD_ACTOR[ProducerActor<br/>spawned as Tokio task]
+    COORD --> CONS_ACTOR[ConsumerActor<br/>spawned as Tokio task]
+    COORD --> CHANNEL_INIT[MPSC batch channel<br/>capacity: 64]
+    
+    PROD_ACTOR --> PROC_LOOP[Processing Loop]
+    CONS_ACTOR --> PROC_LOOP
+    CHANNEL_INIT --> PROC_LOOP
+    
+    PROC_LOOP --> PRODUCER_START[Producer Side]
+    
+    subgraph PRODUCER[Producer Processing]
+        PRODUCER_START --> SNAP[SnapshotReader<br/>reads batch]
+        SNAP --> TRANS[TransformService<br/>applies mappings]
+        TRANS --> BATCH_C[BatchCoordinator<br/>sends to channel]
+        BATCH_C --> PROD_STATE[State:<br/>Working/Idle/Finished]
+    end
+    
+    PROD_STATE --> MPSC[MPSC Channel<br/>backpressure]
+    
+    MPSC --> CONSUMER_START[Consumer Side]
+    
+    subgraph CONSUMER[Consumer Processing]
+        CONSUMER_START --> RECV[Receive batch<br/>from channel]
+        RECV --> WRITE[BatchWriter applies<br/>COPY/MERGE/INSERT]
+        WRITE --> STATE_UPD[StateManager<br/>updates checkpoint]
+        STATE_UPD --> METRICS_INC[Metrics increment]
+        METRICS_INC --> CONS_STATE[State:<br/>Working/Idle/Finished]
+    end
+    
+    CONS_STATE --> PROGRESS[Progress tracking]
+    PROGRESS --> EVENTBUS[EventBus]
+    EVENTBUS --> MONITOR[Monitoring]
+    
+    MONITOR --> CHECK{More<br/>MigrationItems?}
+    CHECK -->|Yes| LOOP
+    CHECK -->|No| END([Complete])
+    
+    style START fill:#90EE90
+    style END fill:#FFB6C1
+    style LOOP fill:#FFE4B5
+    style CHECK fill:#FFE4B5
+    style PRODUCER fill:#E6F3FF
+    style CONSUMER fill:#FFE6F0
+    style MPSC fill:#FFF9E6
+    style COORD fill:#F0E6FF
+    style MONITOR fill:#E6FFE6

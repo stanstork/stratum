@@ -1,0 +1,23 @@
+[workspace]
+members = [
+    # "adapters/csv",
+    # "adapters/sql/mysql",
+    # "adapters/sql/postgres",
+    # "adapters/sql/sql_adapter",
+    # "data-model",
+    # "engine",
+    # "query-builder",
+    # "smql",
+    "crates/model",
+    "crates/smql-syntax",
+    "crates/planner",
+    "crates/connectors",
+    "crates/engine-core",
+    "crates/engine-config",
+    "crates/engine-runtime",
+    "crates/engine-processing",
+    "crates/engine-tests",
+    "crates/cli",
+]
+
+resolver = "2"

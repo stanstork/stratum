@@ -1,0 +1,83 @@
+{
+    "connections": {
+        "source": {
+            "conn_type": "Source",
+            "format": "MySql",
+            "conn_str": "mysql://user:password@172.17.0.1:3306/testdb"
+        },
+        "dest": {
+            "conn_type": "Dest",
+            "format": "Postgres",
+            "conn_str": "postgres://user:password@172.17.0.1:5432/testdb"
+        }
+    },
+    "migration": {
+        "settings": {
+            "batch_size": 1000,
+            "csv_header": true,
+            "copy_columns": "MapOnly",
+            "infer_schema": false,
+            "csv_delimiter": ",",
+            "csv_id_column": null,
+            "cascade_schema": false,
+            "ignore_constraints": true,
+            "create_missing_tables": true,
+            "create_missing_columns": true
+        },
+        "migrate_items": [
+            {
+                "map": {
+                    "mappings": [
+                        {
+                            "source": {
+                                "Identifier": "user_id"
+                            },
+                            "target": "user_id"
+                        },
+                        {
+                            "source": {
+                                "Identifier": "id"
+                            },
+                            "target": "id"
+                        },
+                        {
+                            "source": {
+                                "Identifier": "total"
+                            },
+                            "target": "total"
+                        }
+                    ]
+                },
+                "load": {
+                    "matches": [],
+                    "entities": []
+                },
+                "filter": null,
+                "source": {
+                    "kind": "Table",
+                    "names": [
+                        "orders"
+                    ]
+                },
+                "settings": {
+                    "batch_size": 1000,
+                    "csv_header": true,
+                    "copy_columns": "MapOnly",
+                    "infer_schema": false,
+                    "csv_delimiter": ",",
+                    "csv_id_column": null,
+                    "cascade_schema": false,
+                    "ignore_constraints": true,
+                    "create_missing_tables": true,
+                    "create_missing_columns": true
+                },
+                "destination": {
+                    "kind": "Table",
+                    "names": [
+                        "orders_flat2"
+                    ]
+                }
+            }
+        ]
+    }
+}

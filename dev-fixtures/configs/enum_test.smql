@@ -1,0 +1,10 @@
+CONNECTIONS(
+    SOURCE(MYSQL,  "mysql://root:root@localhost:3306/migration_test"),
+    DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/testdb")
+);
+MIGRATE(
+    SOURCE(TABLE, users) -> DEST(TABLE, users) [
+        SETTINGS(CREATE_MISSING_TABLES=TRUE, BATCH_SIZE=50000),
+        OFFSET(STRATEGY -> pk, CURSOR -> users[id])
+    ]
+);
