@@ -1,6 +1,6 @@
 use crate::{
     ast::expr::Expression,
-    parser::{Rule, StatementParser},
+    parser_v2::{Rule, StatementParser},
 };
 use pest::iterators::Pair;
 use serde::{Deserialize, Serialize};

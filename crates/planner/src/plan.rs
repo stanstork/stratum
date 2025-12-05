@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use smql_syntax::{
     ast::{connection::Connection, migrate::MigrateBlock, statement::Statement},
     error::SmqlError,
-    parser::{Rule, SmqlParserV02, StatementParser},
+    parser_v2::{Rule, SmqlParserV02, StatementParser},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

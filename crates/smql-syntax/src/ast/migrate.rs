@@ -1,7 +1,7 @@
 use super::{filter::Filter, load::Load, mapping::MapSpec, setting::Settings};
 use crate::{
     ast::offset::Offset,
-    parser::{Rule, StatementParser},
+    parser_v2::{Rule, StatementParser},
 };
 use pest::iterators::Pair;
 use serde::{Deserialize, Serialize};

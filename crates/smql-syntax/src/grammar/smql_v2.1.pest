@@ -1,0 +1,131 @@
+// ============================================================
+// SMQL v2.1 Grammar
+// ============================================================
+
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+COMMENT    = _{ ("//" ~ (!"\n" ~ ANY)*) | ("/*" ~ (!"*/" ~ ANY)* ~ "*/") }
+
+// ============================================================
+// Keywords (with word boundary checking)
+// ============================================================
+
+kw_define     = @{ ^"define" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_connection = @{ ^"connection" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_pipeline   = @{ ^"pipeline" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_from       = @{ ^"from" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_to         = @{ ^"to" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_where      = @{ ^"where" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_with       = @{ ^"with" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_select     = @{ ^"select" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_when       = @{ ^"when" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_validate   = @{ ^"validate" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_on_error   = @{ ^"on_error" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_before     = @{ ^"before" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_after      = @{ ^"after" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_paginate   = @{ ^"paginate" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_settings   = @{ ^"settings" ~ !(ASCII_ALPHANUMERIC | "_") }
+
+// ============================================================
+// Literals
+// ============================================================
+
+lit_null    = @{ "null" ~ !(ASCII_ALPHANUMERIC | "_") }
+lit_boolean = @{ ("true" | "false") ~ !(ASCII_ALPHANUMERIC | "_") }
+lit_number  = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? ~ (("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT+)? }
+lit_string  = @{ "\"" ~ (!"\"" ~ ("\\" ~ ANY | ANY))* ~ "\"" | "'" ~ (!"'" ~ ("\\" ~ ANY | ANY))* ~ "'" }
+
+// ============================================================
+// Identifiers
+// ============================================================
+
+ident = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+
+// Dotted notation: table.column or schema.table.column
+dotted_ident = @{ ident ~ ("." ~ ident)+ }
+
+// ============================================================
+// Operators & Delimiters
+// ============================================================
+
+// Multi-character operators (must be before single-char)
+op_eq_eq = { "==" }
+op_neq   = { "!=" }
+op_gte   = { ">=" }
+op_lte   = { "<=" }
+op_and   = { "&&" }
+op_or    = { "||" }
+
+// Single-character operators
+op_eq    = { "=" }
+op_gt    = { ">" }
+op_lt    = { "<" }
+op_not   = { "!" }
+
+// Block & Expression Delimiters
+lbrace   = { "{" }
+rbrace   = { "}" }
+lparen   = { "(" }
+rparen   = { ")" }
+lbracket = { "[" }
+rbracket = { "]" }
+comma    = { "," }
+
+// ============================================================
+// Complex Structures
+// ============================================================
+
+// Array literal: [1, 2, 3]
+array_lit = { lbracket ~ (value ~ (comma ~ value)*)? ~ comma? ~ rbracket }
+
+// Function call: env("KEY") or now()
+fn_call = { ident ~ lparen ~ (value ~ (comma ~ value)*)? ~ rparen }
+
+// Value can be any literal, identifier, function, array, or nested expression
+value = _{
+    fn_call |
+    array_lit |
+    dotted_ident |
+    lit_null |
+    lit_boolean |
+    lit_number |
+    lit_string |
+    ident |
+    lparen ~ value ~ rparen
+}
+
+
+// ============================================================
+// Tokenization
+// ============================================================
+
+// Priority-ordered token matching
+// More specific matches (keywords, multi-char operators) must come first
+
+token = _{
+    // Keywords
+    kw_define | kw_connection | kw_pipeline | kw_from | kw_to | 
+    kw_where | kw_with | kw_select | kw_when | kw_validate | 
+    kw_on_error | kw_before | kw_after | kw_paginate | kw_settings |
+
+    // Literals (before ident to catch null/true/false)
+    lit_null | lit_boolean |
+
+    // Complex Structures (before ident)
+    fn_call |
+    array_lit |
+    dotted_ident |
+
+    // Simple literals and identifiers
+    lit_string | lit_number |
+    ident |
+
+    // Operators (multi-char before single-char)
+    op_eq_eq | op_neq | op_gte | op_lte | op_and | op_or |
+    op_eq | op_gt | op_lt | op_not |
+
+    // Delimiters
+    lbrace | rbrace | lbracket | rbracket | lparen | rparen | comma
+}
+
+// Main entry point
+program = { SOI ~ token* ~ EOI }

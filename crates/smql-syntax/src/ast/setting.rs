@@ -1,4 +1,4 @@
-use crate::parser::{Rule, StatementParser};
+use crate::parser_v2::{Rule, StatementParser};
 use pest::iterators::Pair;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
