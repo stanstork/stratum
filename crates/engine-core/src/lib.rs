@@ -1,8 +1,10 @@
 pub mod connectors;
 pub mod context;
+pub mod convert;
 pub mod error;
 pub mod event_bus;
 pub mod metrics;
+pub mod models;
 pub mod progress;
 pub mod retry;
 pub mod schema;
