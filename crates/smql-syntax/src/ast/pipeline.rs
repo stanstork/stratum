@@ -11,6 +11,7 @@ use crate::ast::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct PipelineBlock {
     pub name: String,
+    pub description: Option<String>,
     pub after: Option<Vec<Expression>>,
     pub from: Option<FromBlock>,
     pub to: Option<ToBlock>,

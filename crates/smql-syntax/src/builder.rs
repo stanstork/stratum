@@ -9,11 +9,15 @@ use crate::{
         literal::Literal,
         operator::BinaryOperator,
         pipeline::{
-            AfterBlock, BeforeBlock, FromBlock, NestedBlock, PaginateBlock, PipelineBlock,
-            SelectBlock, SettingsBlock, ToBlock, WhereClause, WithBlock,
+            AfterBlock, BeforeBlock, FieldMapping, FromBlock, JoinClause, NestedBlock,
+            PaginateBlock, PipelineBlock, SelectBlock, SettingsBlock, ToBlock, WhereClause,
+            WithBlock,
         },
         span::Span,
-        validation::{OnErrorBlock, ValidateBlock},
+        validation::{
+            FailedRowsBlock, OnErrorBlock, RetryBlock, ValidateBlock, ValidationBody,
+            ValidationCheck, ValidationKind,
+        },
     },
     errors::BuildError,
     parser::{Rule, SmqlParser},
@@ -186,6 +190,7 @@ fn build_pipeline_block(pair: Pair<Rule>) -> BuildResult<PipelineBlock> {
 
     Ok(PipelineBlock {
         name,
+        description: None,
         after,
         from,
         to,
@@ -227,56 +232,370 @@ fn build_nested_block(pair: Pair<Rule>) -> BuildResult<NestedBlock> {
 }
 
 fn build_after_dependencies(pair: Pair<Rule>) -> BuildResult<Vec<Expression>> {
-    todo!()
+    let mut deps = Vec::new();
+
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::expression {
+            deps.push(build_expression(inner)?);
+        }
+    }
+
+    Ok(deps)
 }
 
 fn build_from_block(pair: Pair<Rule>) -> BuildResult<FromBlock> {
-    todo!()
+    let span = pair_to_span(&pair);
+    let mut attributes = Vec::new();
+    let mut nested_blocks = Vec::new();
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::attribute => {
+                attributes.push(build_attribute(inner)?);
+            }
+            Rule::nested_block => {
+                nested_blocks.push(build_nested_block(inner)?);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(FromBlock {
+        attributes,
+        nested_blocks,
+        span,
+    })
 }
 
 fn build_to_block(pair: Pair<Rule>) -> BuildResult<ToBlock> {
-    todo!()
+    let span = pair_to_span(&pair);
+    let mut attributes = Vec::new();
+    let mut nested_blocks = Vec::new();
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::attribute => {
+                attributes.push(build_attribute(inner)?);
+            }
+            Rule::nested_block => {
+                nested_blocks.push(build_nested_block(inner)?);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(ToBlock {
+        attributes,
+        nested_blocks,
+        span,
+    })
 }
 
 fn build_where_clause(pair: Pair<Rule>) -> BuildResult<WhereClause> {
-    todo!()
+    let span = pair_to_span(&pair);
+    let mut label = None;
+    let mut conditions = Vec::new();
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::lit_string => {
+                label = Some(parse_string_literal(inner.as_str()));
+            }
+            Rule::expression => {
+                conditions.push(build_expression(inner)?);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(WhereClause {
+        label,
+        conditions,
+        span,
+    })
 }
 
 fn build_with_block(pair: Pair<Rule>) -> BuildResult<WithBlock> {
-    todo!()
+    let span = pair_to_span(&pair);
+    let mut joins = Vec::new();
+
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::join_clause {
+            joins.push(build_join_clause(inner)?);
+        }
+    }
+
+    Ok(WithBlock { joins, span })
+}
+
+fn build_join_clause(pair: Pair<Rule>) -> BuildResult<JoinClause> {
+    let span = pair_to_span(&pair);
+    let mut alias = Identifier::new("", span.clone());
+    let mut table = Identifier::new("", span.clone());
+    let mut condition = None;
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::ident => {
+                // First ident is alias, second is table
+                if alias.name.is_empty() {
+                    alias = Identifier::new(inner.as_str(), pair_to_span(&inner));
+                } else {
+                    table = Identifier::new(inner.as_str(), pair_to_span(&inner));
+                }
+            }
+            Rule::expression => {
+                condition = Some(build_expression(inner)?);
+            }
+            _ => {} // Skip keywords like kw_from, kw_where
+        }
+    }
+
+    Ok(JoinClause {
+        alias,
+        table,
+        condition,
+        span,
+    })
 }
 
 fn build_select_block(pair: Pair<Rule>) -> BuildResult<SelectBlock> {
-    todo!()
+    let span = pair_to_span(&pair);
+    let mut fields = Vec::new();
+
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::field_mapping {
+            fields.push(build_field_mapping(inner)?);
+        }
+    }
+
+    Ok(SelectBlock { fields, span })
+}
+
+fn build_field_mapping(pair: Pair<Rule>) -> BuildResult<FieldMapping> {
+    let span = pair_to_span(&pair);
+    let mut name = Identifier::new("", span.clone());
+    let mut value = Expression::new(ExpressionKind::Literal(Literal::Null), span);
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::ident => {
+                name = Identifier::new(inner.as_str(), pair_to_span(&inner));
+            }
+            Rule::expression => {
+                value = build_expression(inner)?;
+            }
+            _ => {}
+        }
+    }
+
+    Ok(FieldMapping { name, value, span })
 }
 
 fn build_validate_block(pair: Pair<Rule>) -> BuildResult<ValidateBlock> {
-    todo!()
+    let span = pair_to_span(&pair);
+    let mut checks = Vec::new();
+
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::validation_check {
+            checks.push(build_validation_check(inner)?);
+        }
+    }
+
+    Ok(ValidateBlock { checks, span })
+}
+
+fn build_validation_check(pair: Pair<Rule>) -> BuildResult<ValidationCheck> {
+    let span = pair_to_span(&pair);
+    let mut kind = ValidationKind::Assert;
+    let mut label = String::new();
+    let mut check = None;
+    let mut message = None;
+    let mut action = None;
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::kw_assert => kind = ValidationKind::Assert,
+            Rule::kw_warn => kind = ValidationKind::Warn,
+            Rule::lit_string => {
+                label = parse_string_literal(inner.as_str());
+            }
+            Rule::validation_body => {
+                // Parse the validation body which contains check, message, action assignments
+                let mut current_field = "";
+
+                for body_inner in inner.into_inner() {
+                    let text = body_inner.as_str();
+
+                    // Check if this is a field name (plain text, not a rule)
+                    if text == "check" || text == "message" || text == "action" {
+                        current_field = text;
+                    } else {
+                        // This is a value for the current field
+                        match current_field {
+                            "check" if body_inner.as_rule() == Rule::expression => {
+                                check = Some(build_expression(body_inner)?);
+                            }
+                            "message" if body_inner.as_rule() == Rule::lit_string => {
+                                message = Some(parse_string_literal(body_inner.as_str()));
+                            }
+                            "action" if body_inner.as_rule() == Rule::ident => {
+                                action = Some(body_inner.as_str().to_string());
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(ValidationCheck {
+        kind,
+        label,
+        body: ValidationBody {
+            check: check.unwrap_or_else(|| {
+                Expression::new(ExpressionKind::Literal(Literal::Boolean(true)), span)
+            }),
+            message: message.unwrap_or_default(),
+            action,
+        },
+        span,
+    })
 }
 
 fn build_on_error_block(pair: Pair<Rule>) -> BuildResult<OnErrorBlock> {
-    todo!()
+    let span = pair_to_span(&pair);
+    let mut retry = None;
+    let mut failed_rows = None;
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::retry_block => {
+                retry = Some(build_retry_block(inner)?);
+            }
+            Rule::failed_rows_block => {
+                failed_rows = Some(build_failed_rows_block(inner)?);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(OnErrorBlock {
+        retry,
+        failed_rows,
+        span,
+    })
+}
+
+fn build_retry_block(pair: Pair<Rule>) -> BuildResult<RetryBlock> {
+    let span = pair_to_span(&pair);
+    let mut attributes = Vec::new();
+
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::attribute {
+            attributes.push(build_attribute(inner)?);
+        }
+    }
+
+    Ok(RetryBlock { attributes, span })
+}
+
+fn build_failed_rows_block(pair: Pair<Rule>) -> BuildResult<FailedRowsBlock> {
+    let span = pair_to_span(&pair);
+    let mut attributes = Vec::new();
+
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::attribute {
+            attributes.push(build_attribute(inner)?);
+        }
+    }
+
+    Ok(FailedRowsBlock { attributes, span })
 }
 
 fn build_paginate_block(pair: Pair<Rule>) -> BuildResult<PaginateBlock> {
-    todo!()
+    let span = pair_to_span(&pair);
+    let mut attributes = Vec::new();
+
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::attribute {
+            attributes.push(build_attribute(inner)?);
+        }
+    }
+
+    Ok(PaginateBlock { attributes, span })
 }
 
 fn build_before_block(pair: Pair<Rule>) -> BuildResult<BeforeBlock> {
-    todo!()
+    let span = pair_to_span(&pair);
+    let mut sql = Vec::new();
+
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::sql_attr {
+            // sql_attr = { "sql" ~ op_eq ~ array_literal }
+            for sql_inner in inner.into_inner() {
+                if sql_inner.as_rule() == Rule::array_literal {
+                    // Build the array expression and extract string literals
+                    let array_expr = build_array_literal(sql_inner, span.clone())?;
+                    if let ExpressionKind::Array(elements) = array_expr.kind {
+                        for elem in elements {
+                            if let ExpressionKind::Literal(Literal::String(s)) = elem.kind {
+                                sql.push(s);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(BeforeBlock { sql, span })
 }
 
 fn build_after_block(pair: Pair<Rule>) -> BuildResult<AfterBlock> {
-    todo!()
+    let span = pair_to_span(&pair);
+    let mut sql = Vec::new();
+
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::sql_attr {
+            // sql_attr = { "sql" ~ op_eq ~ array_literal }
+            for sql_inner in inner.into_inner() {
+                if sql_inner.as_rule() == Rule::array_literal {
+                    // Build the array expression and extract string literals
+                    let array_expr = build_array_literal(sql_inner, span.clone())?;
+                    if let ExpressionKind::Array(elements) = array_expr.kind {
+                        for elem in elements {
+                            if let ExpressionKind::Literal(Literal::String(s)) = elem.kind {
+                                sql.push(s);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(AfterBlock { sql, span })
 }
 
 fn build_settings_block(pair: Pair<Rule>) -> BuildResult<SettingsBlock> {
-    todo!()
+    let span = pair_to_span(&pair);
+    let mut attributes = Vec::new();
+
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::attribute {
+            attributes.push(build_attribute(inner)?);
+        }
+    }
+
+    Ok(SettingsBlock { attributes, span })
 }
 
 fn build_attribute(pair: Pair<Rule>) -> BuildResult<Attribute> {
     let span = pair_to_span(&pair);
-    let mut key = Identifier::new("", span.clone());
+    let mut key = Identifier::new("", span);
     let mut value = Expression::new(ExpressionKind::Literal(Literal::Null), span);
 
     for inner in pair.into_inner() {
@@ -302,6 +621,7 @@ fn build_expression(pair: Pair<Rule>) -> BuildResult<Expression> {
 fn build_expression_inner(pair: Pair<Rule>, span: Span) -> BuildResult<Expression> {
     match pair.as_rule() {
         Rule::expression => {
+            // Unwrap the top-level expression rule
             let inner = pair.into_inner().next().unwrap();
             build_expression_inner(inner, span)
         }
@@ -311,6 +631,7 @@ fn build_expression_inner(pair: Pair<Rule>, span: Span) -> BuildResult<Expressio
         Rule::comparison => build_binary_expression(pair, span),
         Rule::additive => build_binary_expression(pair, span),
         Rule::multiplicative => build_binary_expression(pair, span),
+        Rule::is_null_check => build_is_null_check(pair, span),
         Rule::primary => build_primary_expression(pair, span),
         _ => Err(BuildError {
             message: format!("Unexpected rule in expression: {:?}", pair.as_rule()),
@@ -324,6 +645,7 @@ fn build_binary_expression(pair: Pair<Rule>, span: Span) -> BuildResult<Expressi
     let mut inner = pair.into_inner();
     let left = inner.next().unwrap();
 
+    // Check if there's an operator
     if let Some(op_pair) = inner.next() {
         let operator = match op_pair.as_str() {
             "||" => BinaryOperator::Or,
@@ -359,83 +681,22 @@ fn build_binary_expression(pair: Pair<Rule>, span: Span) -> BuildResult<Expressi
             span,
         ))
     } else {
+        // No operator, just recurse
         build_expression_inner(left, span)
     }
 }
 
 fn build_primary_expression(pair: Pair<Rule>, span: Span) -> BuildResult<Expression> {
     let inner = pair.into_inner().next().unwrap();
-
-    match inner.as_rule() {
-        Rule::lit_number => {
-            let num = inner.as_str().parse::<f64>().map_err(|e| BuildError {
-                message: format!("Invalid number literal: {}", e),
-                line: span.line,
-                column: span.column,
-            })?;
-            Ok(Expression::new(
-                ExpressionKind::Literal(Literal::Number(num)),
-                span,
-            ))
-        }
-        Rule::lit_string => {
-            let s = parse_string_literal(inner.as_str());
-            Ok(Expression::new(
-                ExpressionKind::Literal(Literal::String(s)),
-                span,
-            ))
-        }
-        Rule::lit_boolean => {
-            let b = inner.as_str() == "true";
-            Ok(Expression::new(
-                ExpressionKind::Literal(Literal::Boolean(b)),
-                span,
-            ))
-        }
-        Rule::lit_null => Ok(Expression::new(
-            ExpressionKind::Literal(Literal::Null),
-            span,
-        )),
-        Rule::ident => {
-            let name = inner.as_str().to_string();
-            Ok(Expression::new(ExpressionKind::Identifier(name), span))
-        }
-        Rule::dotted_ident => Ok(build_dot_notation(inner, span)?),
-        Rule::fn_call => Ok(build_function_call(inner, span)?),
-        Rule::array_literal => Ok(build_array_literal(inner, span)?),
-        Rule::when_expr => Ok(build_when_expression(inner, span)?),
-        Rule::is_null_check => {
-            let operand_pair = inner.into_inner().next().unwrap();
-            let operand = build_expression_inner(operand_pair, span.clone())?;
-            Ok(Expression::new(
-                ExpressionKind::IsNull(Box::new(operand)),
-                span,
-            ))
-        }
-        Rule::expression => {
-            // Grouped expression
-            let expr = build_expression_inner(inner, span)?;
-            Ok(Expression::new(
-                ExpressionKind::Grouped(Box::new(expr)),
-                span,
-            ))
-        }
-        _ => Err(BuildError {
-            message: format!("Unexpected primary expression: {:?}", inner.as_rule()),
-            line: span.line,
-            column: span.column,
-        }),
-    }
+    build_primary_inner(inner, span)
 }
 
 fn build_dot_notation(pair: Pair<Rule>, span: Span) -> BuildResult<Expression> {
-    let mut segments = Vec::new();
-
-    for inner in pair.into_inner() {
-        if inner.as_rule() == Rule::ident {
-            segments.push(inner.as_str().to_string());
-        }
-    }
+    // dotted_ident is an atomic rule (@), so we need to parse the string manually
+    let segments: Vec<String> = pair.as_str()
+        .split('.')
+        .map(|s| s.to_string())
+        .collect();
 
     Ok(Expression::new(
         ExpressionKind::DotNotation(DotPath::new(segments, span.clone())),
@@ -507,14 +768,20 @@ fn build_when_branch(pair: Pair<Rule>) -> BuildResult<crate::ast::expr::WhenBran
     let mut condition = Expression::new(ExpressionKind::Literal(Literal::Null), span);
     let mut value = Expression::new(ExpressionKind::Literal(Literal::Null), span);
 
-    let mut inner = pair.into_inner();
+    let inner = pair.into_inner();
 
-    if let Some(cond_pair) = inner.next() {
-        condition = build_expression_inner(cond_pair, span.clone())?;
-    }
-
-    if let Some(val_pair) = inner.next() {
-        value = build_expression_inner(val_pair, span.clone())?;
+    for item in inner {
+        match item.as_rule() {
+            Rule::expression => {
+                // First expression is condition, second is value
+                if matches!(condition.kind, ExpressionKind::Literal(Literal::Null)) {
+                    condition = build_expression_inner(item, span.clone())?;
+                } else {
+                    value = build_expression_inner(item, span.clone())?;
+                }
+            }
+            _ => {} // Skip kw_then
+        }
     }
 
     Ok(WhenBranch {
@@ -522,6 +789,111 @@ fn build_when_branch(pair: Pair<Rule>) -> BuildResult<crate::ast::expr::WhenBran
         value,
         span,
     })
+}
+
+fn build_is_null_check(pair: Pair<Rule>, span: Span) -> BuildResult<Expression> {
+    let mut inner = pair.into_inner().peekable();
+
+    // Since primary is a silent rule, we need to handle grouped expressions specially
+    // For grouped expressions: lparen ~ expression ~ rparen
+    // For other primaries: just the token itself
+    let primary_expr = if inner.peek().map(|p| p.as_rule()) == Some(Rule::lparen) {
+        // Skip lparen
+        inner.next();
+        // Get the expression
+        let expr = inner.next().unwrap();
+        let result = build_expression_inner(expr, span)?;
+        // Skip rparen
+        inner.next();
+        result
+    } else {
+        // Regular primary expression
+        let primary = inner.next().unwrap();
+        build_primary_inner(primary, span)?
+    };
+
+    // Check if there are "is null" or "is not null" keywords following
+    let mut has_is = false;
+    let mut has_not = false;
+    let mut has_null = false;
+
+    for token in inner {
+        match token.as_rule() {
+            Rule::kw_is => has_is = true,
+            Rule::kw_not => has_not = true,
+            Rule::kw_null => has_null = true,
+            _ => {}
+        }
+    }
+
+    // Wrap it based on what keywords we found
+    if has_is && has_not && has_null {
+        // "primary is not null"
+        Ok(Expression::new(
+            ExpressionKind::IsNotNull(Box::new(primary_expr)),
+            span,
+        ))
+    } else if has_is && has_null {
+        // "primary is null"
+        Ok(Expression::new(
+            ExpressionKind::IsNull(Box::new(primary_expr)),
+            span,
+        ))
+    } else {
+        Ok(primary_expr)
+    }
+}
+
+fn build_primary_inner(pair: Pair<Rule>, span: Span) -> BuildResult<Expression> {
+    match pair.as_rule() {
+        Rule::lit_number => {
+            let num = pair.as_str().parse::<f64>().map_err(|_| BuildError {
+                message: format!("Invalid number: {}", pair.as_str()),
+                line: span.line,
+                column: span.column,
+            })?;
+            Ok(Expression::new(
+                ExpressionKind::Literal(Literal::Number(num)),
+                span,
+            ))
+        }
+        Rule::lit_string => {
+            let s = parse_string_literal(pair.as_str());
+            Ok(Expression::new(
+                ExpressionKind::Literal(Literal::String(s)),
+                span,
+            ))
+        }
+        Rule::lit_boolean => {
+            let b = pair.as_str() == "true";
+            Ok(Expression::new(
+                ExpressionKind::Literal(Literal::Boolean(b)),
+                span,
+            ))
+        }
+        Rule::kw_null => Ok(Expression::new(
+            ExpressionKind::Literal(Literal::Null),
+            span,
+        )),
+        Rule::ident => {
+            let name = pair.as_str().to_string();
+            Ok(Expression::new(ExpressionKind::Identifier(name), span))
+        }
+        Rule::dotted_ident => Ok(build_dot_notation(pair, span)?),
+        Rule::fn_call => Ok(build_function_call(pair, span)?),
+        Rule::array_literal => Ok(build_array_literal(pair, span)?),
+        Rule::when_expr => Ok(build_when_expression(pair, span)?),
+        Rule::expression => {
+            // Grouped expression - just build the inner expression
+            // (the grouping is represented by context, not by wrapping)
+            build_expression_inner(pair, span)
+        }
+        _ => Err(BuildError {
+            message: format!("Unexpected primary expression: {:?}", pair.as_rule()),
+            line: span.line,
+            column: span.column,
+        }),
+    }
 }
 
 fn parse_string_literal(s: &str) -> String {
@@ -533,3 +905,6 @@ fn parse_string_literal(s: &str) -> String {
         .replace("\\\"", "\"")
         .replace("\\\\", "\\")
 }
+
+#[cfg(test)]
+mod tests;

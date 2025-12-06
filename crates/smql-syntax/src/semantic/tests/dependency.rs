@@ -83,6 +83,7 @@ fn test_circular_pipeline_dependency() {
         connections: vec![],
         pipelines: vec![
             PipelineBlock {
+                description: None,
                 name: "pipeline1".to_string(),
                 after: Some(vec![dot_notation(&["pipeline", "pipeline2"], s)]),
                 from: None,
@@ -99,6 +100,7 @@ fn test_circular_pipeline_dependency() {
                 span: s,
             },
             PipelineBlock {
+                description: None,
                 name: "pipeline2".to_string(),
                 after: Some(vec![dot_notation(&["pipeline", "pipeline1"], s)]),
                 from: None,

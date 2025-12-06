@@ -50,6 +50,7 @@ fn test_duplicate_pipeline_names() {
         connections: vec![],
         pipelines: vec![
             PipelineBlock {
+                description: None,
                 name: "sync1".to_string(),
                 after: None,
                 from: None,
@@ -66,6 +67,7 @@ fn test_duplicate_pipeline_names() {
                 span: span(1, 1),
             },
             PipelineBlock {
+                description: None,
                 name: "sync1".to_string(),
                 after: None,
                 from: None,

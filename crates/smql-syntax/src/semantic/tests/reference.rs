@@ -35,6 +35,7 @@ fn test_undefined_connection_reference() {
             span: span(1, 1),
         }],
         pipelines: vec![PipelineBlock {
+                description: None,
             name: "sync".to_string(),
             after: None,
             from: Some(FromBlock {
@@ -86,6 +87,7 @@ fn test_undefined_pipeline_reference() {
         define_block: None,
         connections: vec![],
         pipelines: vec![PipelineBlock {
+                description: None,
             name: "sync1".to_string(),
             after: Some(vec![dot_notation(
                 &["pipeline", "nonexistent"],
@@ -131,6 +133,7 @@ fn test_undefined_define_constant() {
         }),
         connections: vec![],
         pipelines: vec![PipelineBlock {
+                description: None,
             name: "sync".to_string(),
             after: None,
             from: None,
