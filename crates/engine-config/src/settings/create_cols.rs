@@ -18,7 +18,7 @@ use engine_core::{
 };
 use futures::lock::Mutex;
 use model::{core::data_type::DataType, transform::mapping::EntityMapping};
-use smql_syntax::ast::expr::Expression;
+use smql_syntax::ast_v2::expr::Expression;
 use std::sync::Arc;
 
 pub struct CreateMissingColumnsSetting {

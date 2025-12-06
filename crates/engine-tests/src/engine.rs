@@ -28,7 +28,7 @@ mod tests {
         plan::{MigrationPlan, parse},
         query::offsets::{OffsetStrategy, OffsetStrategyFactory},
     };
-    use smql_syntax::ast::migrate::MigrateItem;
+    use smql_syntax::ast_v2::migrate::MigrateItem;
     use std::sync::Arc;
     use tempfile::tempdir;
     use tokio_util::sync::CancellationToken;

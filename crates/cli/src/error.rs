@@ -1,5 +1,5 @@
 use engine_runtime::error::MigrationError;
-use smql_syntax::error::SmqlError;
+use smql_syntax::errors::SmqlError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]

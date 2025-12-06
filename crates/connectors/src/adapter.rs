@@ -3,7 +3,7 @@ use crate::{
     file::csv::{adapter::CsvAdapter, settings::CsvSettings},
     sql::{base::adapter::SqlAdapter, mysql::adapter::MySqlAdapter, postgres::adapter::PgAdapter},
 };
-use smql_syntax::ast::connection::DataFormat;
+use smql_syntax::ast_v2::connection::DataFormat;
 
 #[derive(Clone)]
 pub enum Adapter {

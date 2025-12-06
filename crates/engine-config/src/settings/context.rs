@@ -23,7 +23,7 @@ use engine_core::{
 };
 use futures::lock::Mutex;
 use model::{core::data_type::DataType, transform::mapping::EntityMapping};
-use smql_syntax::ast::setting::CopyColumns;
+use smql_syntax::ast_v2::setting::CopyColumns;
 use std::sync::Arc;
 
 pub struct SchemaSettingContext {

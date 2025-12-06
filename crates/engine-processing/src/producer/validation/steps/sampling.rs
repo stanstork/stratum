@@ -6,7 +6,7 @@ use engine_config::{
 };
 use engine_core::connectors::source::Source;
 use model::{pagination::cursor::Cursor, records::row::RowData, transform::mapping::EntityMapping};
-use smql_syntax::ast::setting::CopyColumns;
+use smql_syntax::ast_v2::setting::CopyColumns;
 use std::collections::{HashMap, HashSet};
 
 /// Result of sampling and transformation

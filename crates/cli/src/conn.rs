@@ -1,7 +1,7 @@
 use crate::error::CliError;
 use async_trait::async_trait;
 use mysql_async::prelude::*;
-use smql_syntax::ast::connection::DataFormat;
+use smql_syntax::ast_v2::connection::DataFormat;
 use std::str::FromStr;
 use tokio_postgres::NoTls;
 use tracing::{error, info};

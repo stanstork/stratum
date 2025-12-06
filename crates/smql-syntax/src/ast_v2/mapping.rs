@@ -1,5 +1,5 @@
 use super::expr::Expression;
-use crate::parser::{Rule, StatementParser};
+use crate::parser_v2::{Rule, StatementParser};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,7 +14,7 @@ pub struct Mapping {
 }
 
 impl StatementParser for MapSpec {
-    fn parse(pair: pest::iterators::Pair<crate::parser::Rule>) -> Self {
+    fn parse(pair: pest::iterators::Pair<crate::parser_v2::Rule>) -> Self {
         let mappings = pair
             .into_inner()
             .filter(|p| p.as_rule() == Rule::mapping)

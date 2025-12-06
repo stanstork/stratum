@@ -2,7 +2,7 @@ use crate::state::sled_store::SledStateStore;
 use connectors::{adapter::Adapter, error::AdapterError, file::csv::settings::CsvSettings};
 use futures::lock::Mutex;
 use planner::plan::MigrationPlan;
-use smql_syntax::ast::{connection::ConnectionPair, migrate::SpecKind};
+use smql_syntax::ast_v2::{connection::ConnectionPair, migrate::SpecKind};
 use std::{collections::HashMap, sync::Arc};
 
 /// Holds connections and file adapters for the duration of a migration.

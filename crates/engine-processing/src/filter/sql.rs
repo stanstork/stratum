@@ -1,6 +1,6 @@
 use super::compiler::FilterCompiler;
 use connectors::sql::base::filter::{SqlFilter, condition::Condition, expr::SqlFilterExpr};
-use smql_syntax::ast::{
+use smql_syntax::ast_v2::{
     expr::Expression,
     filter::{Comparator, FilterExpression},
 };
@@ -35,7 +35,7 @@ fn compile_sql_expr(expr: &FilterExpression) -> SqlFilterExpr {
 }
 
 fn from_stmt_condition(
-    c: &smql_syntax::ast::filter::Condition,
+    c: &smql_syntax::ast_v2::filter::Condition,
 ) -> Result<Condition, Box<dyn std::error::Error>> {
     // extract table & column
     let (table, column) = match &c.left {

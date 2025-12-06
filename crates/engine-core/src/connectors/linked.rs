@@ -7,7 +7,7 @@ use connectors::{
     },
 };
 use model::transform::{computed_field::ComputedField, mapping::EntityMapping};
-use smql_syntax::ast::{
+use smql_syntax::ast_v2::{
     connection::DataFormat,
     expr::Expression,
     load::{Load, MatchPair},

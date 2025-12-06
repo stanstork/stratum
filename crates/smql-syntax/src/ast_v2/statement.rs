@@ -1,5 +1,5 @@
 use super::{connection::Connection, migrate::MigrateBlock};
-use crate::parser::{Rule, StatementParser};
+use crate::parser_v2::{Rule, StatementParser};
 use pest::iterators::Pair;
 
 #[derive(Debug)]

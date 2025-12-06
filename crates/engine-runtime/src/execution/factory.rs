@@ -14,7 +14,7 @@ use engine_processing::filter::{
 };
 use model::transform::mapping::EntityMapping;
 use planner::query::offsets::OffsetStrategy;
-use smql_syntax::ast::{
+use smql_syntax::ast_v2::{
     connection::{Connection, ConnectionPair, DataFormat},
     migrate::{MigrateItem, SpecKind},
 };

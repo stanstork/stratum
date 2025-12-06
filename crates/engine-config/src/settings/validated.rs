@@ -1,4 +1,4 @@
-use smql_syntax::ast::setting::CopyColumns;
+use smql_syntax::ast_v2::setting::CopyColumns;
 
 /// Immutable, validated configuration used throughout the migration.
 #[derive(Debug, Clone)]

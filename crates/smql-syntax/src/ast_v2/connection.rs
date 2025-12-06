@@ -1,4 +1,4 @@
-use crate::parser::{Rule, StatementParser};
+use crate::parser_v2::{Rule, StatementParser};
 use bitflags::bitflags;
 use core::fmt;
 use pest::iterators::Pair;
@@ -48,7 +48,7 @@ const KEY_POSTGRES: &str = "POSTGRES";
 const KEY_SQLITE: &str = "SQLITE";
 
 impl StatementParser for Connection {
-    fn parse(pair: Pair<crate::parser::Rule>) -> Self {
+    fn parse(pair: Pair<crate::parser_v2::Rule>) -> Self {
         let mut source = None;
         let mut dest = None;
 
@@ -67,7 +67,7 @@ impl StatementParser for Connection {
 }
 
 impl StatementParser for ConnectionPair {
-    fn parse(pair: Pair<crate::parser::Rule>) -> Self {
+    fn parse(pair: Pair<crate::parser_v2::Rule>) -> Self {
         let mut inner = pair.into_inner();
 
         // parse connection type

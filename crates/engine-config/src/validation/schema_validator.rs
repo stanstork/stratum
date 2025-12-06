@@ -13,7 +13,7 @@ use model::{
     records::row::RowData,
     transform::mapping::EntityMapping,
 };
-use smql_syntax::ast::setting::CopyColumns;
+use smql_syntax::ast_v2::setting::CopyColumns;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug)]

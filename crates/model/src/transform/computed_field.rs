@@ -1,4 +1,4 @@
-use smql_syntax::ast::expr::Expression;
+use smql_syntax::ast_v2::expr::Expression;
 
 #[derive(Clone, Debug)]
 pub struct ComputedField {
