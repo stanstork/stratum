@@ -1,9 +1,15 @@
-pub mod connection;
+pub mod attribute;
+pub mod block;
+pub mod doc;
+pub mod dotpath;
 pub mod expr;
-pub mod filter;
-pub mod load;
-pub mod mapping;
-pub mod migrate;
-pub mod offset;
-pub mod setting;
-pub mod statement;
+pub mod ident;
+pub mod literal;
+pub mod operator;
+pub mod pipeline;
+pub mod span;
+pub mod validation;
+pub mod visitor;
+
+#[cfg(test)]
+mod tests;

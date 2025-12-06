@@ -12,7 +12,7 @@ use connectors::{
 use futures::lock::Mutex;
 use model::records::row::RowData;
 use planner::query::dialect;
-use smql_syntax::ast::connection::DataFormat;
+use smql_syntax::ast_v2::connection::DataFormat;
 use std::sync::Arc;
 
 #[derive(Clone)]

@@ -1,5 +1,5 @@
 use crate::transform::computed_field::ComputedField;
-use smql_syntax::ast::{expr::Expression, migrate::MigrateItem};
+use smql_syntax::ast_v2::{expr::Expression, migrate::MigrateItem};
 use std::collections::HashMap;
 
 #[derive(Default, Clone, Debug)]

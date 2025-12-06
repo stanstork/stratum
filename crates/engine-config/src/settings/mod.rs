@@ -12,7 +12,7 @@ use engine_core::context::item::ItemContext;
 use futures::lock::Mutex;
 use infer_schema::InferSchemaSetting;
 use phase::MigrationSettingsPhase;
-use smql_syntax::ast::setting::Settings;
+use smql_syntax::ast_v2::setting::Settings;
 use std::sync::Arc;
 use tracing::info;
 

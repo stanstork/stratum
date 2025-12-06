@@ -9,30 +9,41 @@ COMMENT    = _{ ("//" ~ (!"\n" ~ ANY)*) | ("/*" ~ (!"*/" ~ ANY)* ~ "*/") }
 // Keywords (with word boundary checking)
 // ============================================================
 
-kw_define     = @{ ^"define" ~ !(ASCII_ALPHANUMERIC | "_") }
-kw_connection = @{ ^"connection" ~ !(ASCII_ALPHANUMERIC | "_") }
-kw_pipeline   = @{ ^"pipeline" ~ !(ASCII_ALPHANUMERIC | "_") }
-kw_from       = @{ ^"from" ~ !(ASCII_ALPHANUMERIC | "_") }
-kw_to         = @{ ^"to" ~ !(ASCII_ALPHANUMERIC | "_") }
-kw_where      = @{ ^"where" ~ !(ASCII_ALPHANUMERIC | "_") }
-kw_with       = @{ ^"with" ~ !(ASCII_ALPHANUMERIC | "_") }
-kw_select     = @{ ^"select" ~ !(ASCII_ALPHANUMERIC | "_") }
-kw_when       = @{ ^"when" ~ !(ASCII_ALPHANUMERIC | "_") }
-kw_validate   = @{ ^"validate" ~ !(ASCII_ALPHANUMERIC | "_") }
-kw_on_error   = @{ ^"on_error" ~ !(ASCII_ALPHANUMERIC | "_") }
-kw_before     = @{ ^"before" ~ !(ASCII_ALPHANUMERIC | "_") }
-kw_after      = @{ ^"after" ~ !(ASCII_ALPHANUMERIC | "_") }
-kw_paginate   = @{ ^"paginate" ~ !(ASCII_ALPHANUMERIC | "_") }
-kw_settings   = @{ ^"settings" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_define      = @{ "define" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_connection  = @{ "connection" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_pipeline    = @{ "pipeline" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_from        = @{ "from" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_to          = @{ "to" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_where       = @{ "where" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_with        = @{ "with" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_select      = @{ "select" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_when        = @{ "when" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_then        = @{ "then" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_else        = @{ "else" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_validate    = @{ "validate" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_assert      = @{ "assert" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_warn        = @{ "warn" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_on_error    = @{ "on_error" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_before      = @{ "before" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_after       = @{ "after" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_paginate    = @{ "paginate" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_settings    = @{ "settings" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_retry       = @{ "retry" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_failed_rows = @{ "failed_rows" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_is          = @{ "is" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_not         = @{ "not" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_null        = @{ "null" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_and         = @{ "and" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_or          = @{ "or" ~ !(ASCII_ALPHANUMERIC | "_") }
 
 // ============================================================
 // Literals
 // ============================================================
 
-lit_null    = @{ "null" ~ !(ASCII_ALPHANUMERIC | "_") }
 lit_boolean = @{ ("true" | "false") ~ !(ASCII_ALPHANUMERIC | "_") }
 lit_number  = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? ~ (("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT+)? }
-lit_string  = @{ "\"" ~ (!"\"" ~ ("\\" ~ ANY | ANY))* ~ "\"" | "'" ~ (!"'" ~ ("\\" ~ ANY | ANY))* ~ "'" }
+lit_string  = @{ "\"" ~ (!"\"" ~ ("\\" ~ ANY | ANY))* ~ "\"" }
+lit_null    = @{ "null" ~ !(ASCII_ALPHANUMERIC | "_") }
 
 // ============================================================
 // Identifiers
@@ -47,85 +58,125 @@ dotted_ident = @{ ident ~ ("." ~ ident)+ }
 // Operators & Delimiters
 // ============================================================
 
-// Multi-character operators (must be before single-char)
 op_eq_eq = { "==" }
 op_neq   = { "!=" }
 op_gte   = { ">=" }
 op_lte   = { "<=" }
 op_and   = { "&&" }
 op_or    = { "||" }
-
-// Single-character operators
 op_eq    = { "=" }
 op_gt    = { ">" }
 op_lt    = { "<" }
 op_not   = { "!" }
+op_add   = { "+" }
+op_sub   = { "-" }
+op_mul   = { "*" }
+op_div   = { "/" }
 
-// Block & Expression Delimiters
 lbrace   = { "{" }
 rbrace   = { "}" }
-lparen   = { "(" }
-rparen   = { ")" }
 lbracket = { "[" }
 rbracket = { "]" }
+lparen   = { "(" }
+rparen   = { ")" }
 comma    = { "," }
 
 // ============================================================
-// Complex Structures
+// Top-Level Blocks
 // ============================================================
 
-// Array literal: [1, 2, 3]
-array_lit = { lbracket ~ (value ~ (comma ~ value)*)? ~ comma? ~ rbracket }
+// Define block (singleton, no name)
+define_block = { kw_define ~ lbrace ~ attribute* ~ rbrace }
 
-// Function call: env("KEY") or now()
-fn_call = { ident ~ lparen ~ (value ~ (comma ~ value)*)? ~ rparen }
+// Connection block (with string name)
+connection_block = { kw_connection ~ lit_string ~ lbrace ~ (attribute | nested_block)* ~ rbrace }
 
-// Value can be any literal, identifier, function, array, or nested expression
-value = _{
-    fn_call |
-    array_lit |
-    dotted_ident |
-    lit_null |
-    lit_boolean |
-    lit_number |
-    lit_string |
-    ident |
-    lparen ~ value ~ rparen
+// Pipeline block (with string name)
+pipeline_block = { kw_pipeline ~ lit_string ~ lbrace ~ pipeline_content* ~ rbrace }
+
+// ============================================================
+// Pipeline Content
+// ============================================================
+
+pipeline_content = _{
+    attribute
+  | from_block
+  | to_block
+  | where_block
+  | with_block
+  | select_block
+  | validate_block
+  | on_error_block
+  | paginate_block
+  | before_block
+  | after_block
+  | settings_block
 }
 
+from_block        = { kw_from ~ lbrace ~ (attribute | nested_block)* ~ rbrace }
+to_block          = { kw_to ~ lbrace ~ (attribute | nested_block)* ~ rbrace }
+where_block       = { kw_where ~ lit_string? ~ lbrace ~ expression* ~ rbrace }
+with_block        = { kw_with ~ lbrace ~ join_clause* ~ rbrace }
+join_clause       = { ident ~ kw_from ~ ident ~ (kw_where ~ expression)? }
+select_block      = { kw_select ~ lbrace ~ field_mapping* ~ rbrace }
+field_mapping     = { ident ~ op_eq ~ expression }
+validate_block    = { kw_validate ~ lbrace ~ validation_check* ~ rbrace }
+validation_check  = { (kw_assert | kw_warn) ~ lit_string ~ lbrace ~ validation_body ~ rbrace }
+validation_body   = { (("check" ~ op_eq ~ expression) | ("message" ~ op_eq ~ lit_string) | ("action" ~ op_eq ~ ident))* }
+on_error_block    = { kw_on_error ~ lbrace ~ (retry_block | failed_rows_block)* ~ rbrace }
+retry_block       = { kw_retry ~ lbrace ~ attribute* ~ rbrace }
+failed_rows_block = { kw_failed_rows ~ lbrace ~ attribute* ~ rbrace }
+paginate_block    = { kw_paginate ~ lbrace ~ attribute* ~ rbrace }
+before_block      = { kw_before ~ lbrace ~ sql_attr ~ rbrace }
+after_block       = { kw_after ~ lbrace ~ sql_attr ~ rbrace }
+sql_attr          = { "sql" ~ op_eq ~ array_literal }
+settings_block    = { kw_settings ~ lbrace ~ attribute* ~ rbrace }
 
 // ============================================================
-// Tokenization
+// Generic Blocks & Attributes
 // ============================================================
 
-// Priority-ordered token matching
-// More specific matches (keywords, multi-char operators) must come first
+nested_block = { ident ~ lbrace ~ attribute* ~ rbrace }
+attribute    = { ident ~ op_eq ~ expression }
 
-token = _{
-    // Keywords
-    kw_define | kw_connection | kw_pipeline | kw_from | kw_to | 
-    kw_where | kw_with | kw_select | kw_when | kw_validate | 
-    kw_on_error | kw_before | kw_after | kw_paginate | kw_settings |
+// ============================================================
+// Expressions
+// ============================================================
 
-    // Literals (before ident to catch null/true/false)
-    lit_null | lit_boolean |
+expression     = { logical_or }
+logical_or     = { logical_and ~ ((op_or | kw_or) ~ logical_and)* }
+logical_and    = { equality ~ ((op_and | kw_and) ~ equality)* }
+equality       = { comparison ~ ((op_eq_eq | op_neq) ~ comparison)* }
+comparison     = { additive ~ ((op_gte | op_lte | op_gt | op_lt) ~ additive)* }
+additive       = { multiplicative ~ ((op_add | op_sub) ~ multiplicative)* }
+multiplicative = { is_null_check ~ ((op_mul | op_div) ~ is_null_check)* }
 
-    // Complex Structures (before ident)
-    fn_call |
-    array_lit |
-    dotted_ident |
-
-    // Simple literals and identifiers
-    lit_string | lit_number |
-    ident |
-
-    // Operators (multi-char before single-char)
-    op_eq_eq | op_neq | op_gte | op_lte | op_and | op_or |
-    op_eq | op_gt | op_lt | op_not |
-
-    // Delimiters
-    lbrace | rbrace | lbracket | rbracket | lparen | rparen | comma
+is_null_check = { 
+    primary ~ (kw_is ~ kw_not ~ kw_null)?
+  | primary ~ (kw_is ~ kw_null)?
+  | primary
 }
 
-// Main entry point
-program = { SOI ~ token* ~ EOI }
+primary = _{
+    kw_null
+  | lit_boolean
+  | lit_number
+  | lit_string
+  | when_expr
+  | fn_call
+  | array_literal
+  | dotted_ident
+  | ident
+  | lparen ~ expression ~ rparen
+}
+
+when_expr     = { kw_when ~ lbrace ~ when_branch* ~ (kw_else ~ expression)? ~ rbrace }
+when_branch   = { expression ~ kw_then ~ expression }
+fn_call       = { ident ~ lparen ~ (expression ~ (comma ~ expression)*)? ~ rparen }
+array_literal = { lbracket ~ (expression ~ (comma ~ expression)*)? ~ comma? ~ rbracket }
+
+// ============================================================
+// Program Entry Point
+// ============================================================
+
+program = { SOI ~ (define_block | connection_block | pipeline_block)* ~ EOI }

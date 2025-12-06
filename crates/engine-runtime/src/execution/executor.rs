@@ -24,7 +24,7 @@ use engine_core::{
 use futures::lock::Mutex;
 use model::{pagination::cursor::Cursor, transform::mapping::EntityMapping};
 use planner::{plan::MigrationPlan, query::offsets::OffsetStrategyFactory};
-use smql_syntax::ast::migrate::MigrateItem;
+use smql_syntax::ast_v2::migrate::MigrateItem;
 use std::{collections::HashMap, sync::Arc};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};

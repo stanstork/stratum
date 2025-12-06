@@ -11,7 +11,7 @@ use model::{
     core::data_type::DataType,
     transform::{computed_field::ComputedField, mapping::EntityMapping},
 };
-use smql_syntax::ast::expr::{Expression, Literal};
+use smql_syntax::ast_v2::expr::{Expression, Literal};
 use std::sync::Arc;
 use tracing::warn;
 

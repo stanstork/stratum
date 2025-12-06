@@ -1,8 +1,8 @@
 use pest::Parser;
 use serde::{Deserialize, Serialize};
 use smql_syntax::{
-    ast::{connection::Connection, migrate::MigrateBlock, statement::Statement},
-    error::SmqlError,
+    ast_v2::{connection::Connection, migrate::MigrateBlock, statement::Statement},
+    errors::SmqlError,
     parser_v2::{Rule, SmqlParserV02, StatementParser},
 };
 

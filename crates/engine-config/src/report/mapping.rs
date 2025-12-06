@@ -1,6 +1,6 @@
 use model::transform::mapping::{EntityMapping, LookupField, NameMap};
 use serde::Serialize;
-use smql_syntax::ast::setting::CopyColumns;
+use smql_syntax::ast_v2::setting::CopyColumns;
 use std::collections::{HashMap, HashSet};
 
 /// A detailed report on the entity and field mappings.

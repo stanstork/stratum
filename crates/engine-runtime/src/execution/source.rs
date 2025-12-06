@@ -3,7 +3,7 @@ use connectors::{
     adapter::Adapter, metadata::entity::EntityMetadata,
     sql::base::metadata::provider::MetadataProvider,
 };
-use smql_syntax::ast::connection::DataFormat;
+use smql_syntax::ast_v2::connection::DataFormat;
 use std::collections::HashMap;
 use tracing::info;
 

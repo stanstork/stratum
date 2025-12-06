@@ -22,7 +22,7 @@ use engine_core::{
 };
 use futures::lock::Mutex;
 use model::transform::mapping::EntityMapping;
-use smql_syntax::ast::connection::DataFormat;
+use smql_syntax::ast_v2::connection::DataFormat;
 use std::{collections::HashMap, slice, sync::Arc};
 use tracing::info;
 

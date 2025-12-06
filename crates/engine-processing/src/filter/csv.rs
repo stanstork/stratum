@@ -1,6 +1,6 @@
 use super::compiler::FilterCompiler;
 use connectors::file::csv::filter::{CsvComparator, CsvCondition, CsvFilter, CsvFilterExpr};
-use smql_syntax::ast::{expr::Expression, filter::FilterExpression};
+use smql_syntax::ast_v2::{expr::Expression, filter::FilterExpression};
 use std::str::FromStr;
 
 pub struct CsvFilterCompiler;
@@ -15,7 +15,7 @@ impl FilterCompiler for CsvFilterCompiler {
 }
 
 fn from_stmt_condition(
-    cond: &smql_syntax::ast::filter::Condition,
+    cond: &smql_syntax::ast_v2::filter::Condition,
 ) -> Result<CsvCondition, Box<dyn std::error::Error>> {
     // Extract the lookup key for the left-hand side
     let field = match &cond.left {

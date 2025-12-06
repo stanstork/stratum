@@ -16,7 +16,7 @@ use connectors::{
 use futures::lock::Mutex;
 use model::{pagination::cursor::Cursor, transform::mapping::EntityMapping};
 use planner::query::offsets::OffsetStrategy;
-use smql_syntax::ast::connection::DataFormat;
+use smql_syntax::ast_v2::connection::DataFormat;
 use std::{future::Future, sync::Arc};
 
 /// Represents the context for a single item in the migration process.

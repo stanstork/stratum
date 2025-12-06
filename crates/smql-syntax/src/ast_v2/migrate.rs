@@ -1,6 +1,6 @@
 use super::{filter::Filter, load::Load, mapping::MapSpec, setting::Settings};
 use crate::{
-    ast::offset::Offset,
+    ast_v2::offset::Offset,
     parser_v2::{Rule, StatementParser},
 };
 use pest::iterators::Pair;

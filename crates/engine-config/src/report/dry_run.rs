@@ -12,7 +12,7 @@ use engine_core::connectors::{
 };
 use model::{pagination::cursor::Cursor, transform::mapping::EntityMapping};
 use serde::Serialize;
-use smql_syntax::ast::setting::CopyColumns;
+use smql_syntax::ast_v2::setting::CopyColumns;
 
 /// The overall status of the validation run.
 #[derive(Serialize, Debug, Clone, PartialEq, Default)]

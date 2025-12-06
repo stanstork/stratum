@@ -1,5 +1,5 @@
 use crate::{
-    ast::expr::Expression,
+    ast_v2::expr::Expression,
     parser_v2::{Rule, StatementParser},
 };
 use pest::iterators::Pair;

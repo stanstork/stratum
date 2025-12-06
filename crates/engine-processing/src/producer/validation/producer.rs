@@ -22,7 +22,7 @@ use engine_core::connectors::{destination::Destination, source::Source};
 use futures::lock::Mutex;
 use model::{pagination::cursor::Cursor, transform::mapping::EntityMapping};
 use planner::query::offsets::OffsetStrategy;
-use smql_syntax::ast::setting::CopyColumns;
+use smql_syntax::ast_v2::setting::CopyColumns;
 use std::sync::Arc;
 
 pub struct ValidationProducer {

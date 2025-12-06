@@ -1,6 +1,6 @@
 use bigdecimal::FromPrimitive;
 use model::{core::value::Value, records::row::RowData, transform::mapping::EntityMapping};
-use smql_syntax::ast::expr::{Expression, Literal, Operator};
+use smql_syntax::ast_v2::expr::{Expression, Literal, Operator};
 use tracing::warn;
 
 pub trait Evaluator {
