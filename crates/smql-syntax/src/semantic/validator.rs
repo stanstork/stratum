@@ -188,19 +188,20 @@ impl SemanticValidator {
                 self.validate_expression(dep_expr);
 
                 // Check if it's a pipeline reference
-                if let ExpressionKind::DotNotation(path) = &dep_expr.kind {
-                    if path.segments.len() == 2 && path.segments[0] == "pipeline" {
-                        let pipeline_name = &path.segments[1];
-                        self.symbols.mark_pipeline_used(pipeline_name);
+                if let ExpressionKind::DotNotation(path) = &dep_expr.kind
+                    && path.segments.len() == 2
+                    && path.segments[0] == "pipeline"
+                {
+                    let pipeline_name = &path.segments[1];
+                    self.symbols.mark_pipeline_used(pipeline_name);
 
-                        if !self.symbols.pipelines.contains_key(pipeline_name) {
-                            self.issues.add_error(ValidationIssue::error(
-                                ValidationIssueKind::UndefinedPipeline {
-                                    name: pipeline_name.clone(),
-                                },
-                                dep_expr.span,
-                            ));
-                        }
+                    if !self.symbols.pipelines.contains_key(pipeline_name) {
+                        self.issues.add_error(ValidationIssue::error(
+                            ValidationIssueKind::UndefinedPipeline {
+                                name: pipeline_name.clone(),
+                            },
+                            dep_expr.span,
+                        ));
                     }
                 }
             }
@@ -344,21 +345,21 @@ impl SemanticValidator {
             self.validate_expression(&attr.value);
 
             // Check connection reference
-            if attr.key.name == "connection" {
-                if let ExpressionKind::DotNotation(ref path) = attr.value.kind {
-                    if path.segments.len() == 2 && path.segments[0] == "connection" {
-                        let conn_name = &path.segments[1];
-                        self.symbols.mark_connection_used(conn_name);
+            if attr.key.name == "connection"
+                && let ExpressionKind::DotNotation(ref path) = attr.value.kind
+                && path.segments.len() == 2
+                && path.segments[0] == "connection"
+            {
+                let conn_name = &path.segments[1];
+                self.symbols.mark_connection_used(conn_name);
 
-                        if !self.symbols.connections.contains_key(conn_name) {
-                            self.issues.add_error(ValidationIssue::error(
-                                ValidationIssueKind::UndefinedConnection {
-                                    name: conn_name.clone(),
-                                },
-                                attr.value.span,
-                            ));
-                        }
-                    }
+                if !self.symbols.connections.contains_key(conn_name) {
+                    self.issues.add_error(ValidationIssue::error(
+                        ValidationIssueKind::UndefinedConnection {
+                            name: conn_name.clone(),
+                        },
+                        attr.value.span,
+                    ));
                 }
             }
         }
@@ -384,21 +385,21 @@ impl SemanticValidator {
             self.validate_expression(&attr.value);
 
             // Check connection references
-            if attr.key.name == "connection" {
-                if let ExpressionKind::DotNotation(ref path) = attr.value.kind {
-                    if path.segments.len() == 2 && path.segments[0] == "connection" {
-                        let conn_name = &path.segments[1];
-                        self.symbols.mark_connection_used(conn_name);
+            if attr.key.name == "connection"
+                && let ExpressionKind::DotNotation(ref path) = attr.value.kind
+                && path.segments.len() == 2
+                && path.segments[0] == "connection"
+            {
+                let conn_name = &path.segments[1];
+                self.symbols.mark_connection_used(conn_name);
 
-                        if !self.symbols.connections.contains_key(conn_name) {
-                            self.issues.add_error(ValidationIssue::error(
-                                ValidationIssueKind::UndefinedConnection {
-                                    name: conn_name.clone(),
-                                },
-                                attr.value.span,
-                            ));
-                        }
-                    }
+                if !self.symbols.connections.contains_key(conn_name) {
+                    self.issues.add_error(ValidationIssue::error(
+                        ValidationIssueKind::UndefinedConnection {
+                            name: conn_name.clone(),
+                        },
+                        attr.value.span,
+                    ));
                 }
             }
         }
@@ -411,9 +412,12 @@ impl SemanticValidator {
                 let mut visited = HashSet::new();
                 let mut path = Vec::new();
 
-                if let Some(cycle) =
-                    self.find_define_cycle(&attr.value, &define.attributes, &mut visited, &mut path)
-                {
+                if let Some(cycle) = Self::find_define_cycle(
+                    &attr.value,
+                    &define.attributes,
+                    &mut visited,
+                    &mut path,
+                ) {
                     self.issues.add_error(ValidationIssue::error(
                         ValidationIssueKind::CircularDefineDependency { chain: cycle },
                         attr.span,
@@ -429,7 +433,7 @@ impl SemanticValidator {
             let mut path = Vec::new();
 
             if let Some(cycle) =
-                self.find_pipeline_cycle(&pipeline.name, &pipeline_deps, &mut visited, &mut path)
+                Self::find_pipeline_cycle(&pipeline.name, &pipeline_deps, &mut visited, &mut path)
             {
                 self.issues.add_error(ValidationIssue::error(
                     ValidationIssueKind::CircularPipelineDependency { chain: cycle },
@@ -440,14 +444,13 @@ impl SemanticValidator {
     }
 
     fn find_define_cycle(
-        &self,
         expr: &Expression,
         all_attrs: &[Attribute],
         visited: &mut HashSet<String>,
         path: &mut Vec<String>,
     ) -> Option<Vec<String>> {
         // Extract referenced define constants from expression
-        let refs = self.extract_define_references(expr);
+        let refs = Self::extract_define_references(expr);
 
         for ref_name in refs {
             if path.contains(&ref_name) {
@@ -466,10 +469,10 @@ impl SemanticValidator {
             path.push(ref_name.clone());
 
             // Find the attribute with this name and recurse
-            if let Some(attr) = all_attrs.iter().find(|a| a.key.name == ref_name) {
-                if let Some(cycle) = self.find_define_cycle(&attr.value, all_attrs, visited, path) {
-                    return Some(cycle);
-                }
+            if let Some(attr) = all_attrs.iter().find(|a| a.key.name == ref_name)
+                && let Some(cycle) = Self::find_define_cycle(&attr.value, all_attrs, visited, path)
+            {
+                return Some(cycle);
             }
 
             path.pop();
@@ -478,7 +481,7 @@ impl SemanticValidator {
         None
     }
 
-    fn extract_define_references(&self, expr: &Expression) -> Vec<String> {
+    fn extract_define_references(expr: &Expression) -> Vec<String> {
         let mut refs = Vec::new();
 
         match &expr.kind {
@@ -488,20 +491,20 @@ impl SemanticValidator {
                 }
             }
             ExpressionKind::Binary { left, right, .. } => {
-                refs.extend(self.extract_define_references(left));
-                refs.extend(self.extract_define_references(right));
+                refs.extend(Self::extract_define_references(left));
+                refs.extend(Self::extract_define_references(right));
             }
             ExpressionKind::Unary { operand, .. } => {
-                refs.extend(self.extract_define_references(operand));
+                refs.extend(Self::extract_define_references(operand));
             }
             ExpressionKind::FunctionCall { arguments, .. } => {
                 for arg in arguments {
-                    refs.extend(self.extract_define_references(arg));
+                    refs.extend(Self::extract_define_references(arg));
                 }
             }
             ExpressionKind::Array(elements) => {
                 for elem in elements {
-                    refs.extend(self.extract_define_references(elem));
+                    refs.extend(Self::extract_define_references(elem));
                 }
             }
             ExpressionKind::WhenExpression {
@@ -509,11 +512,11 @@ impl SemanticValidator {
                 else_value,
             } => {
                 for branch in branches {
-                    refs.extend(self.extract_define_references(&branch.condition));
-                    refs.extend(self.extract_define_references(&branch.value));
+                    refs.extend(Self::extract_define_references(&branch.condition));
+                    refs.extend(Self::extract_define_references(&branch.value));
                 }
                 if let Some(else_expr) = else_value {
-                    refs.extend(self.extract_define_references(else_expr));
+                    refs.extend(Self::extract_define_references(else_expr));
                 }
             }
             _ => {}
@@ -533,11 +536,12 @@ impl SemanticValidator {
 
             if let Some(after_deps) = &pipeline.after {
                 for expr in after_deps {
-                    if let ExpressionKind::DotNotation(path) = &expr.kind {
-                        if path.segments.len() == 2 && path.segments[0] == "pipeline" {
-                            let dep_name = &path.segments[1];
-                            deps.push(dep_name.clone());
-                        }
+                    if let ExpressionKind::DotNotation(path) = &expr.kind
+                        && path.segments.len() == 2
+                        && path.segments[0] == "pipeline"
+                    {
+                        let dep_name = &path.segments[1];
+                        deps.push(dep_name.clone());
                     }
                 }
             }
@@ -549,7 +553,6 @@ impl SemanticValidator {
     }
 
     fn find_pipeline_cycle(
-        &self,
         current: &str,
         graph: &HashMap<String, Vec<String>>,
         visited: &mut HashSet<String>,
@@ -572,7 +575,7 @@ impl SemanticValidator {
                 visited.insert(dep.clone());
                 path.push(dep.clone());
 
-                if let Some(cycle) = self.find_pipeline_cycle(dep, graph, visited, path) {
+                if let Some(cycle) = Self::find_pipeline_cycle(dep, graph, visited, path) {
                     return Some(cycle);
                 }
 

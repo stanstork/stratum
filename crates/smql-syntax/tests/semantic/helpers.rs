@@ -1,4 +1,4 @@
-use crate::ast::{
+use smql_syntax::ast::{
     dotpath::DotPath,
     expr::{Expression, ExpressionKind},
     ident::Identifier,

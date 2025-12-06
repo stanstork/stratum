@@ -10,6 +10,3 @@ pub mod pipeline;
 pub mod span;
 pub mod validation;
 pub mod visitor;
-
-#[cfg(test)]
-mod tests;

@@ -1,5 +1,7 @@
-use crate::parser::{Rule, SmqlParser};
+//! Grammar tests for expression parsing (literals, operators, functions)
+
 use pest::Parser;
+use smql_syntax::parser::{Rule, SmqlParser};
 
 #[test]
 fn test_parse_literals() {

@@ -1,4 +1,4 @@
-use crate::{
+use smql_syntax::{
     ast::{
         attribute::Attribute,
         block::{ConnectionBlock, DefineBlock},
@@ -42,7 +42,7 @@ fn test_missing_required_fields_pipeline() {
         define_block: None,
         connections: vec![],
         pipelines: vec![PipelineBlock {
-                description: None,
+            description: None,
             name: "sync".to_string(),
             after: None,
             from: None, // Missing
@@ -181,7 +181,7 @@ fn test_valid_document_no_errors() {
             span: s,
         }],
         pipelines: vec![PipelineBlock {
-                description: None,
+            description: None,
             name: "sync".to_string(),
             after: None,
             from: Some(FromBlock {
@@ -258,7 +258,7 @@ fn test_multiple_errors_collected() {
             },
         ],
         pipelines: vec![PipelineBlock {
-                description: None,
+            description: None,
             name: "sync".to_string(),
             after: Some(vec![dot_notation(
                 &["pipeline", "nonexistent"],

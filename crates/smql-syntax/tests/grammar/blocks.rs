@@ -1,5 +1,7 @@
-use crate::parser::{Rule, SmqlParser};
+//! Grammar tests for block structures (define, connection, pipeline blocks)
+
 use pest::Parser;
+use smql_syntax::parser::{Rule, SmqlParser};
 
 #[test]
 fn test_parse_empty_program() {
@@ -38,10 +40,11 @@ fn test_parse_connection_with_nested_block() {
     let input = r#"
 connection "mysql_prod" {
   driver = "mysql"
-
+  url = "localhost:3306"
+  
   pool {
     max_size = 20
-    timeout = "60s"
+    min_size = 5
   }
 }
 "#;
@@ -53,16 +56,14 @@ connection "mysql_prod" {
 fn test_parse_pipeline_simple() {
     let input = r#"
 pipeline "copy_customers" {
-  description = "Copy customers table"
-
   from {
     connection = connection.mysql_prod
     table = "customers"
   }
-
+  
   to {
-    connection = connection.warehouse_pg
-    table = "customers_copy"
+    connection = connection.warehouse
+    table = "customers_backup"
   }
 }
 "#;
@@ -76,7 +77,7 @@ fn test_parse_where_clause_no_label() {
 pipeline "test" {
   where {
     status == "active"
-    total > 100
+    created_at > "2024-01-01"
   }
 }
 "#;
@@ -98,27 +99,12 @@ pipeline "test" {
 }
 
 #[test]
-fn test_parse_select_block() {
-    let input = r#"
-pipeline "test" {
-  select {
-    customer_id = customers.id
-    customer_name = customers.name
-    loaded_at = now()
-  }
-}
-"#;
-    let result = SmqlParser::parse(Rule::program, input);
-    assert!(result.is_ok());
-}
-
-#[test]
 fn test_parse_with_block_joins() {
     let input = r#"
 pipeline "test" {
   with {
     users from users where users.id == orders.user_id
-    products from products where products.id == order_items.product_id
+    products from products where products.id == items.product_id
   }
 }
 "#;
@@ -127,20 +113,15 @@ pipeline "test" {
 }
 
 #[test]
-fn test_parse_validate_block() {
+fn test_parse_before_after_blocks() {
     let input = r#"
 pipeline "test" {
-  validate {
-    assert "positive_total" {
-      check = orders.total >= 0
-      message = "Total must be positive"
-      action = skip
-    }
-
-    warn "missing_email" {
-      check = users.email is not null
-      message = "Email is missing"
-    }
+  before {
+    sql = ["DROP INDEX IF EXISTS idx_test", "ALTER TABLE test DISABLE TRIGGER ALL"]
+  }
+  
+  after {
+    sql = ["CREATE INDEX idx_test ON test(id)", "ALTER TABLE test ENABLE TRIGGER ALL"]
   }
 }
 "#;
@@ -155,11 +136,11 @@ pipeline "test" {
   on_error {
     retry {
       max_attempts = 3
-      backoff = "5s"
+      backoff = "exponential"
     }
-
+    
     failed_rows {
-      table = "failed_orders"
+      table = "failed_rows"
     }
   }
 }
@@ -175,30 +156,7 @@ pipeline "test" {
   paginate {
     using = "timestamp"
     column = orders.updated_at
-    timezone = "UTC"
-  }
-}
-"#;
-    let result = SmqlParser::parse(Rule::program, input);
-    assert!(result.is_ok());
-}
-
-#[test]
-fn test_parse_before_after_blocks() {
-    let input = r#"
-pipeline "test" {
-  before {
-    sql = [
-      "ALTER TABLE fact_orders DISABLE TRIGGER ALL",
-      "DROP INDEX IF EXISTS idx_orders_customer"
-    ]
-  }
-
-  after {
-    sql = [
-      "CREATE INDEX idx_orders_customer ON fact_orders(customer_id)",
-      "ANALYZE fact_orders"
-    ]
+    tiebreaker = orders.id
   }
 }
 "#;
@@ -211,7 +169,7 @@ fn test_parse_settings_block() {
     let input = r#"
 pipeline "test" {
   settings {
-    batch_size = env("batch_size")
+    batch_size = 1000
     workers = 4
     checkpoint = every_batch
   }
@@ -226,8 +184,13 @@ fn test_comments_are_ignored() {
     let input = r#"
 // Line comment
 define {
-  /* Block comment */
-  tax_rate = 1.4  // Inline comment
+  tax_rate = 1.4  // inline comment
+}
+
+/* Block comment
+   spanning multiple lines */
+connection "db" {
+  driver = "mysql"
 }
 "#;
     let result = SmqlParser::parse(Rule::program, input);

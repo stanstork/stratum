@@ -1,4 +1,4 @@
-use crate::{
+use smql_syntax::{
     ast::{
         attribute::Attribute,
         block::DefineBlock,

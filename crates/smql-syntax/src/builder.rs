@@ -87,11 +87,8 @@ fn build_define_block(pair: Pair<Rule>) -> BuildResult<DefineBlock> {
     let mut attributes = Vec::new();
 
     for inner in pair.into_inner() {
-        match inner.as_rule() {
-            Rule::attribute => {
-                attributes.push(build_attribute(inner)?);
-            }
-            _ => {}
+        if inner.as_rule() == Rule::attribute {
+            attributes.push(build_attribute(inner)?);
         }
     }
 
@@ -209,7 +206,7 @@ fn build_pipeline_block(pair: Pair<Rule>) -> BuildResult<PipelineBlock> {
 
 fn build_nested_block(pair: Pair<Rule>) -> BuildResult<NestedBlock> {
     let span = pair_to_span(&pair);
-    let mut name = Identifier::new("", span.clone());
+    let mut name = Identifier::new("", span);
     let mut attributes = Vec::new();
 
     for inner in pair.into_inner() {
@@ -330,8 +327,8 @@ fn build_with_block(pair: Pair<Rule>) -> BuildResult<WithBlock> {
 
 fn build_join_clause(pair: Pair<Rule>) -> BuildResult<JoinClause> {
     let span = pair_to_span(&pair);
-    let mut alias = Identifier::new("", span.clone());
-    let mut table = Identifier::new("", span.clone());
+    let mut alias = Identifier::new("", span);
+    let mut table = Identifier::new("", span);
     let mut condition = None;
 
     for inner in pair.into_inner() {
@@ -374,7 +371,7 @@ fn build_select_block(pair: Pair<Rule>) -> BuildResult<SelectBlock> {
 
 fn build_field_mapping(pair: Pair<Rule>) -> BuildResult<FieldMapping> {
     let span = pair_to_span(&pair);
-    let mut name = Identifier::new("", span.clone());
+    let mut name = Identifier::new("", span);
     let mut value = Expression::new(ExpressionKind::Literal(Literal::Null), span);
 
     for inner in pair.into_inner() {
@@ -538,7 +535,7 @@ fn build_before_block(pair: Pair<Rule>) -> BuildResult<BeforeBlock> {
             for sql_inner in inner.into_inner() {
                 if sql_inner.as_rule() == Rule::array_literal {
                     // Build the array expression and extract string literals
-                    let array_expr = build_array_literal(sql_inner, span.clone())?;
+                    let array_expr = build_array_literal(sql_inner, span)?;
                     if let ExpressionKind::Array(elements) = array_expr.kind {
                         for elem in elements {
                             if let ExpressionKind::Literal(Literal::String(s)) = elem.kind {
@@ -564,7 +561,7 @@ fn build_after_block(pair: Pair<Rule>) -> BuildResult<AfterBlock> {
             for sql_inner in inner.into_inner() {
                 if sql_inner.as_rule() == Rule::array_literal {
                     // Build the array expression and extract string literals
-                    let array_expr = build_array_literal(sql_inner, span.clone())?;
+                    let array_expr = build_array_literal(sql_inner, span)?;
                     if let ExpressionKind::Array(elements) = array_expr.kind {
                         for elem in elements {
                             if let ExpressionKind::Literal(Literal::String(s)) = elem.kind {
@@ -693,13 +690,10 @@ fn build_primary_expression(pair: Pair<Rule>, span: Span) -> BuildResult<Express
 
 fn build_dot_notation(pair: Pair<Rule>, span: Span) -> BuildResult<Expression> {
     // dotted_ident is an atomic rule (@), so we need to parse the string manually
-    let segments: Vec<String> = pair.as_str()
-        .split('.')
-        .map(|s| s.to_string())
-        .collect();
+    let segments: Vec<String> = pair.as_str().split('.').map(|s| s.to_string()).collect();
 
     Ok(Expression::new(
-        ExpressionKind::DotNotation(DotPath::new(segments, span.clone())),
+        ExpressionKind::DotNotation(DotPath::new(segments, span)),
         span,
     ))
 }
@@ -731,7 +725,7 @@ fn build_array_literal(pair: Pair<Rule>, span: Span) -> BuildResult<Expression> 
 
     for inner in pair.into_inner() {
         if inner.as_rule() == Rule::expression {
-            elements.push(build_expression_inner(inner, span.clone())?);
+            elements.push(build_expression_inner(inner, span)?);
         }
     }
 
@@ -748,7 +742,7 @@ fn build_when_expression(pair: Pair<Rule>, span: Span) -> BuildResult<Expression
                 branches.push(build_when_branch(inner)?);
             }
             Rule::expression => {
-                else_value = Some(Box::new(build_expression_inner(inner, span.clone())?));
+                else_value = Some(Box::new(build_expression_inner(inner, span)?));
             }
             _ => {}
         }
@@ -771,16 +765,13 @@ fn build_when_branch(pair: Pair<Rule>) -> BuildResult<crate::ast::expr::WhenBran
     let inner = pair.into_inner();
 
     for item in inner {
-        match item.as_rule() {
-            Rule::expression => {
-                // First expression is condition, second is value
-                if matches!(condition.kind, ExpressionKind::Literal(Literal::Null)) {
-                    condition = build_expression_inner(item, span.clone())?;
-                } else {
-                    value = build_expression_inner(item, span.clone())?;
-                }
+        if item.as_rule() == Rule::expression {
+            // First expression is condition, second is value
+            if matches!(condition.kind, ExpressionKind::Literal(Literal::Null)) {
+                condition = build_expression_inner(item, span)?;
+            } else {
+                value = build_expression_inner(item, span)?;
             }
-            _ => {} // Skip kw_then
         }
     }
 
@@ -905,6 +896,3 @@ fn parse_string_literal(s: &str) -> String {
         .replace("\\\"", "\"")
         .replace("\\\\", "\\")
 }
-
-#[cfg(test)]
-mod tests;
