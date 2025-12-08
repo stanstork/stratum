@@ -50,13 +50,42 @@ fn create_filter(
     pipeline: &Pipeline,
     format: &DataFormat,
 ) -> Result<Option<Filter>, MigrationError> {
-    let filter = &pipeline.source.filters[0];
+    if pipeline.source.filters.is_empty() {
+        return Ok(None);
+    }
+
+    // Combine all filter conditions with AND logic.
+    // Multiple where blocks or conditions in SMQL are semantically joined with AND,
+    // meaning ALL conditions must be satisfied (standard SQL WHERE clause behavior).
+    //
+    // Example: where { age > 18 } where { status == "active" }
+    // Results in: (age > 18) AND (status == "active")
+    let combined_condition = if pipeline.source.filters.len() == 1 {
+        pipeline.source.filters[0].condition.clone()
+    } else {
+        use model::execution::expr::{BinaryOp, CompiledExpression};
+
+        // Start with the first filter condition
+        let mut combined = pipeline.source.filters[0].condition.clone();
+
+        // AND all subsequent filter conditions together
+        for filter in &pipeline.source.filters[1..] {
+            combined = CompiledExpression::Binary {
+                left: Box::new(combined),
+                op: BinaryOp::And,
+                right: Box::new(filter.condition.clone()),
+            };
+        }
+
+        combined
+    };
+
     match format {
         DataFormat::MySql | DataFormat::Postgres => Ok(Some(Filter::Sql(
-            SqlFilterCompiler::compile(&filter.condition),
+            SqlFilterCompiler::compile(&combined_condition),
         ))),
         DataFormat::Csv => Ok(Some(Filter::Csv(CsvFilterCompiler::compile(
-            &filter.condition,
+            &combined_condition,
         )))),
     }
 }

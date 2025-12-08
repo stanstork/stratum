@@ -108,6 +108,14 @@ impl FieldTransformations {
         }
     }
 
+    pub fn reverse_resolve(&self, entity: &str, name: &str) -> String {
+        if let Some(name_map) = self.field_renames.get(entity) {
+            name_map.reverse_resolve(name)
+        } else {
+            name.to_string()
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.field_renames.is_empty()
     }

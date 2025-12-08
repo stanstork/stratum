@@ -142,8 +142,8 @@ impl TypeInferencer for ExpressionWrapper {
             CompiledExpression::DotPath(segments) if segments.len() >= 2 => {
                 let entity = &segments[0];
                 let key = &segments[1];
-                let table_name = mapping.entities.resolve(entity);
-                let meta = source.fetch_meta(table_name).await.ok()?;
+                // For DotPath, the entity name IS the source table name, not a destination
+                let meta = source.fetch_meta(entity.clone()).await.ok()?;
                 match meta {
                     EntityMetadata::Table(meta) => meta
                         .columns()

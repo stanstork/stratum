@@ -222,10 +222,12 @@ impl SchemaPlan {
         columns
             .iter()
             .map(|col| ColumnDef {
+                // col.name is a source column name, we need to get the target column name
+                // reverse_resolve: source -> target
                 name: self
                     .mapping
                     .field_mappings
-                    .resolve(&resolved_table, &col.name),
+                    .reverse_resolve(&resolved_table, &col.name),
                 ..col.clone()
             })
             .collect()

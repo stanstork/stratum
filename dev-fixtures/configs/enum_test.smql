@@ -1,10 +1,31 @@
-CONNECTIONS(
-    SOURCE(MYSQL,  "mysql://root:root@localhost:3306/migration_test"),
-    DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/testdb")
-);
-MIGRATE(
-    SOURCE(TABLE, users) -> DEST(TABLE, users) [
-        SETTINGS(CREATE_MISSING_TABLES=TRUE, BATCH_SIZE=50000),
-        OFFSET(STRATEGY -> pk, CURSOR -> users[id])
-    ]
-);
+connection "mysql_source" {
+  driver = "mysql"
+  url    = "mysql://user:password@localhost:3306/testdb"
+}
+
+connection "pg_destination" {
+  driver = "postgres"
+  url    = "postgres://user:password@localhost:5432/testdb"
+}
+
+pipeline "enum_test_pipeline" {
+  from {
+    connection = connection.mysql_source
+    table      = "orders"
+  }
+
+  to {
+    connection = connection.pg_destination
+    table      = "orders_flat"
+  }
+
+  select {
+    order_id = orders.id
+  }
+
+  settings {
+    batch_size            = 1000
+    copy_columns          = "map_only"
+    create_missing_tables = true
+  }
+}
