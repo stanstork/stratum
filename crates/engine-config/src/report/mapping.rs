@@ -1,6 +1,6 @@
-use model::transform::mapping::{EntityMapping, LookupField, NameMap};
+use model::transform::mapping::{CrossEntityReference, NameResolver, TransformationMetadata};
 use serde::Serialize;
-use smql_syntax::ast_v2::setting::CopyColumns;
+use crate::settings::CopyColumns;
 use std::collections::{HashMap, HashSet};
 
 /// A detailed report on the entity and field mappings.
@@ -69,11 +69,11 @@ pub struct LookupMappingReport {
 }
 
 impl MappingReport {
-    /// Creates a `MappingReport` from a given `EntityMapping` configuration.
-    pub fn from_mapping(mapping: &EntityMapping, copy_columns: &CopyColumns) -> Self {
+    /// Creates a `MappingReport` from a given `TransformationMetadata`.
+    pub fn from_mapping(meta: &TransformationMetadata, copy_columns: &CopyColumns) -> Self {
         let (entities, total_mapped_fields, total_computed_fields) =
-            Self::process_entity_reports(mapping, copy_columns);
-        let lookup_reports = Self::process_lookup_reports(mapping);
+            Self::process_entity_reports(meta, copy_columns);
+        let lookup_reports = Self::process_lookup_reports(meta);
 
         let totals = MappingTotals {
             entities: entities.len(),
@@ -86,23 +86,23 @@ impl MappingReport {
             totals,
             entities,
             lookups: lookup_reports,
-            mapping_hash: Some(compute_mapping_hash(mapping)),
+            mapping_hash: Some(compute_mapping_hash(meta)),
         }
     }
 
     fn process_entity_reports(
-        mapping: &EntityMapping,
+        meta: &TransformationMetadata,
         copy_columns: &CopyColumns,
     ) -> (Vec<EntityMappingReport>, usize, usize) {
         let mut total_mapped = 0;
         let mut total_computed = 0;
 
-        let reports = mapping
-            .entity_name_map
+        let reports = meta
+            .entities
             .source_to_target
             .iter()
             .map(|(source, dest)| {
-                let report = Self::create_single_entity_report(mapping, source, dest, copy_columns);
+                let report = Self::create_single_entity_report(meta, source, dest, copy_columns);
                 total_mapped += report.mapped_fields;
                 total_computed += report.created_fields;
                 report
@@ -113,13 +113,13 @@ impl MappingReport {
     }
 
     fn create_single_entity_report(
-        mapping: &EntityMapping,
+        meta: &TransformationMetadata,
         source_entity: &str,
         dest_entity: &str,
         copy_columns: &CopyColumns,
     ) -> EntityMappingReport {
-        let rename_map = mapping.field_mappings.column_mappings.get(dest_entity);
-        let computed_fields = mapping
+        let rename_map = meta.field_mappings.field_renames.get(dest_entity);
+        let computed_fields = meta
             .field_mappings
             .computed_fields
             .get(dest_entity)
@@ -152,10 +152,7 @@ impl MappingReport {
             .iter()
             .map(|c| ComputedPreview {
                 name: c.name.clone(),
-                expression_preview: c
-                    .expression
-                    .format()
-                    .unwrap_or_else(|_| "<complex expression>".to_string()),
+                expression_preview: format!("{:?}", c.expression),
             })
             .collect::<Vec<_>>();
 
@@ -176,7 +173,7 @@ impl MappingReport {
     }
 
     fn collect_entity_warnings(
-        rename_map: Option<&NameMap>,
+        rename_map: Option<&NameResolver>,
         computed: &[ComputedPreview],
     ) -> Vec<String> {
         let mut warnings = Vec::new();
@@ -201,15 +198,15 @@ impl MappingReport {
         warnings
     }
 
-    fn process_lookup_reports(mapping: &EntityMapping) -> Vec<LookupMappingReport> {
+    fn process_lookup_reports(mapping: &TransformationMetadata) -> Vec<LookupMappingReport> {
         mapping
-            .lookups
+            .foreign_fields
             .iter()
             .flat_map(|(source_entity, lookups)| {
                 lookups.iter().map(move |l| LookupMappingReport {
                     source_entity: source_entity.clone(),
                     entity: l.entity.clone(),
-                    key: l.key.clone(),
+                    key: l.field.clone(),
                     target: l.target.clone(),
                     warnings: lookup_warnings(mapping, source_entity, l),
                 })
@@ -224,19 +221,13 @@ fn has_duplicate_values(map: &HashMap<String, String>) -> bool {
 }
 
 fn lookup_warnings(
-    mapping: &EntityMapping,
+    meta: &TransformationMetadata,
     source_entity_key: &str,
-    l: &LookupField,
+    l: &CrossEntityReference,
 ) -> Vec<String> {
     let mut w = Vec::new();
-    if !mapping
-        .entity_name_map
-        .source_to_target
-        .contains_key(&l.entity)
-        && !mapping
-            .entity_name_map
-            .target_to_source
-            .contains_key(&l.entity)
+    if !meta.entities.source_to_target.contains_key(&l.entity)
+        && !meta.entities.target_to_source.contains_key(&l.entity)
     {
         w.push(format!(
             "Lookup entity '{}' is not present in entity_name_map",
@@ -244,11 +235,8 @@ fn lookup_warnings(
         ));
     }
 
-    if let Some(dest_entity) = mapping
-        .entity_name_map
-        .source_to_target
-        .get(source_entity_key)
-        && let Some(nm) = mapping.field_mappings.column_mappings.get(dest_entity)
+    if let Some(dest_entity) = meta.entities.source_to_target.get(source_entity_key)
+        && let Some(nm) = meta.field_mappings.field_renames.get(dest_entity)
         && let Some(target) = &l.target
         && nm.source_to_target.values().any(|t| t == target)
     {
@@ -259,7 +247,7 @@ fn lookup_warnings(
     w
 }
 
-fn compute_mapping_hash(mapping: &EntityMapping) -> String {
+fn compute_mapping_hash(meta: &TransformationMetadata) -> String {
     #[derive(Serialize)]
     struct Minimal<'a> {
         entities: Vec<(&'a String, &'a String)>,
@@ -268,12 +256,12 @@ fn compute_mapping_hash(mapping: &EntityMapping) -> String {
         lookup_targets: Vec<(&'a String, Vec<&'a Option<String>>)>,
     }
 
-    let mut entities: Vec<_> = mapping.entity_name_map.source_to_target.iter().collect();
+    let mut entities: Vec<_> = meta.entities.source_to_target.iter().collect();
     entities.sort_by_key(|a| a.0);
 
-    let mut renames: Vec<_> = mapping
+    let mut renames: Vec<_> = meta
         .field_mappings
-        .column_mappings
+        .field_renames
         .iter()
         .map(|(dest, nm)| {
             let mut pairs: Vec<_> = nm.source_to_target.iter().collect();
@@ -283,7 +271,7 @@ fn compute_mapping_hash(mapping: &EntityMapping) -> String {
         .collect();
     renames.sort_by_key(|a| a.0);
 
-    let mut computed: Vec<_> = mapping
+    let mut computed: Vec<_> = meta
         .field_mappings
         .computed_fields
         .iter()
@@ -295,8 +283,8 @@ fn compute_mapping_hash(mapping: &EntityMapping) -> String {
         .collect();
     computed.sort_by_key(|a| a.0);
 
-    let mut lookup_targets: Vec<_> = mapping
-        .lookups
+    let mut lookup_targets: Vec<_> = meta
+        .foreign_fields
         .iter()
         .map(|(src, v)| {
             let mut names: Vec<_> = v.iter().map(|l| &l.target).collect();

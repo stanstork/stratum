@@ -476,72 +476,8 @@ impl OffsetStrategyFactory {
         }
     }
 
-    /// Build a strategy from SMQL offset syntax.
-    pub fn from_smql(smql_offset: &smql_syntax::ast_v2::offset::Offset) -> Arc<dyn OffsetStrategy> {
-        let mut strategy: Option<String> = None;
-        let mut cursor: Option<QualCol> = None;
-        let mut tiebreaker: Option<QualCol> = None;
-        let mut timezone: Option<String> = None;
-
-        for pair in &smql_offset.pairs {
-            match pair.key {
-                smql_syntax::ast_v2::offset::OffsetKey::Strategy => {
-                    strategy = match &pair.value {
-                        smql_syntax::ast_v2::expr::Expression::Identifier(s) => Some(s.clone()),
-                        _ => panic!("Offset strategy must be an identifier"),
-                    }
-                }
-                smql_syntax::ast_v2::offset::OffsetKey::Cursor => {
-                    cursor = match &pair.value {
-                        smql_syntax::ast_v2::expr::Expression::Identifier(s) => Some(QualCol {
-                            table: "".to_string(),
-                            column: s.clone(),
-                        }),
-                        smql_syntax::ast_v2::expr::Expression::Lookup {
-                            entity,
-                            key,
-                            field: _,
-                        } => Some(QualCol {
-                            table: entity.clone(),
-                            column: key.clone(),
-                        }),
-                        _ => panic!("Offset cursor must be an identifier"),
-                    }
-                }
-                smql_syntax::ast_v2::offset::OffsetKey::TieBreaker => {
-                    tiebreaker = match &pair.value {
-                        smql_syntax::ast_v2::expr::Expression::Identifier(s) => Some(QualCol {
-                            table: "".to_string(),
-                            column: s.clone(),
-                        }),
-                        smql_syntax::ast_v2::expr::Expression::Lookup {
-                            entity,
-                            key,
-                            field: _,
-                        } => Some(QualCol {
-                            table: entity.clone(),
-                            column: key.clone(),
-                        }),
-                        _ => panic!("Offset tiebreaker must be an identifier"),
-                    }
-                }
-                smql_syntax::ast_v2::offset::OffsetKey::TimeZone => {
-                    timezone = match &pair.value {
-                        smql_syntax::ast_v2::expr::Expression::Identifier(s) => Some(s.clone()),
-                        _ => panic!("Offset timezone must be an identifier"),
-                    }
-                }
-            }
-        }
-
-        let config = OffsetConfig {
-            strategy,
-            cursor,
-            tiebreaker,
-            timezone,
-        };
-
-        Self::from_config(&config)
+    pub fn default_strategy() -> Arc<dyn OffsetStrategy> {
+        Arc::new(DefaultOffset { offset: 0 })
     }
 }
 

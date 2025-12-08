@@ -6,6 +6,23 @@ pub struct QualCol {
     pub column: String,
 }
 
+impl QualCol {
+    pub fn from_str(s: &str) -> Self {
+        let parts: Vec<&str> = s.split('.').collect();
+        if parts.len() == 2 {
+            QualCol {
+                table: parts[0].to_string(),
+                column: parts[1].to_string(),
+            }
+        } else {
+            QualCol {
+                table: "".to_string(),
+                column: s.to_string(),
+            }
+        }
+    }
+}
+
 /// Represents the pagination cursor.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Cursor {

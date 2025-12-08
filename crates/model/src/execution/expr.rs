@@ -1,4 +1,4 @@
-use model::core::value::Value;
+use crate::core::value::Value;
 use serde::{Deserialize, Serialize};
 
 /// Compiled expression ready for runtime evaluation

@@ -7,7 +7,7 @@ use connectors::{
         query::{column::ColumnDef, fk::ForeignKeyDef, generator::QueryGenerator},
     },
 };
-use model::transform::mapping::EntityMapping;
+use model::transform::mapping::TransformationMetadata;
 use planner::query::dialect;
 use std::collections::{HashMap, HashSet};
 use tracing::warn;
@@ -28,7 +28,7 @@ pub struct SchemaPlan {
     mapped_columns_only: bool,
 
     /// Mapping of table names from source to target database.
-    mapping: EntityMapping,
+    mapping: TransformationMetadata,
 
     /// Metadata graph containing all source tables and their relationships
     /// (both referencing and referenced dependencies).
@@ -50,7 +50,7 @@ impl SchemaPlan {
         type_engine: TypeEngine,
         ignore_constraints: bool,
         mapped_columns_only: bool,
-        mapping: EntityMapping,
+        mapping: TransformationMetadata,
     ) -> Self {
         Self {
             source,
@@ -73,7 +73,7 @@ impl SchemaPlan {
         let mut queries = HashSet::new();
 
         for (table, columns) in &self.column_definitions {
-            let resolved_table = self.mapping.entity_name_map.resolve(table);
+            let resolved_table = self.mapping.entities.resolve(table);
             let mut resolved_columns = self.resolve_column_definitions(table, columns);
 
             // Optionally drop unmapped columns
@@ -106,9 +106,9 @@ impl SchemaPlan {
         self.fk_definitions
             .iter()
             .flat_map(|(table, fks)| {
-                let resolved_table = self.mapping.entity_name_map.resolve(table);
+                let resolved_table = self.mapping.entities.resolve(table);
                 fks.iter().map(move |fk| {
-                    let ref_table = self.mapping.entity_name_map.resolve(&fk.referenced_table);
+                    let ref_table = self.mapping.entities.resolve(&fk.referenced_table);
                     let ref_column = self
                         .mapping
                         .field_mappings
@@ -218,7 +218,7 @@ impl SchemaPlan {
     }
 
     fn resolve_column_definitions(&self, table: &str, columns: &[ColumnDef]) -> Vec<ColumnDef> {
-        let resolved_table = self.mapping.entity_name_map.resolve(table);
+        let resolved_table = self.mapping.entities.resolve(table);
         columns
             .iter()
             .map(|col| ColumnDef {
@@ -234,7 +234,7 @@ impl SchemaPlan {
     async fn computed_column_definitions(&self, table: &str) -> Vec<ColumnDef> {
         let mut defs = Vec::new();
 
-        let resolved_table = self.mapping.entity_name_map.resolve(table);
+        let resolved_table = self.mapping.entities.resolve(table);
         let computed_fields = match self.mapping.field_mappings.get_computed(&resolved_table) {
             Some(fields) => fields,
             None => return defs,
@@ -296,7 +296,7 @@ impl SchemaPlan {
         let mapping = &self
             .mapping
             .field_mappings
-            .column_mappings
+            .field_renames
             .get(table)
             .expect("Mapping must exist for table");
         columns

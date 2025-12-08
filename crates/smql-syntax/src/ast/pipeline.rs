@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::ast::{
     attribute::Attribute,
     expr::Expression,
@@ -8,7 +10,7 @@ use crate::ast::{
 
 /// Pipeline block for data transformations
 /// Syntax: pipeline "copy_customers" { from { ... }, to { ... }, ... }
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PipelineBlock {
     pub name: String,
     pub description: Option<String>,
@@ -27,14 +29,14 @@ pub struct PipelineBlock {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FromBlock {
     pub attributes: Vec<Attribute>,
     pub nested_blocks: Vec<NestedBlock>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToBlock {
     pub attributes: Vec<Attribute>,
     pub nested_blocks: Vec<NestedBlock>,
@@ -42,7 +44,7 @@ pub struct ToBlock {
 }
 
 /// Generic nested block (e.g., pool { max_size = 20 })
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NestedBlock {
     pub kind: String,
     pub attributes: Vec<Attribute>,
@@ -51,7 +53,7 @@ pub struct NestedBlock {
 
 /// Where clause with optional label
 /// Syntax: where "active_only" { customers.status == "active" }
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WhereClause {
     pub label: Option<String>,
     pub conditions: Vec<Expression>,
@@ -60,13 +62,13 @@ pub struct WhereClause {
 
 /// With block for joins
 /// Syntax: with { users from users where users.id == orders.user_id }
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WithBlock {
     pub joins: Vec<JoinClause>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JoinClause {
     pub alias: Identifier,
     pub table: Identifier,
@@ -75,38 +77,38 @@ pub struct JoinClause {
 }
 
 /// Select block for field mappings
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SelectBlock {
     pub fields: Vec<FieldMapping>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FieldMapping {
     pub name: Identifier,
     pub value: Expression,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PaginateBlock {
     pub attributes: Vec<Attribute>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BeforeBlock {
     pub sql: Vec<String>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AfterBlock {
     pub sql: Vec<String>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SettingsBlock {
     pub attributes: Vec<Attribute>,
     pub span: Span,

@@ -1,16 +1,15 @@
-use crate::context::global::GlobalContext;
+use crate::connectors::source::DataFormat;
 use connectors::{
+    adapter::Adapter,
     error::AdapterError,
     sql::base::join::{
         clause::{JoinClause, JoinColumn, JoinCondition, JoinType, JoinedTable},
         source::JoinSource,
     },
 };
-use model::transform::{computed_field::ComputedField, mapping::EntityMapping};
-use smql_syntax::ast_v2::{
-    connection::DataFormat,
-    expr::Expression,
-    load::{Load, MatchPair},
+use model::{
+    execution::{expr::CompiledExpression, pipeline::Join},
+    transform::mapping::TransformationMetadata,
 };
 use std::collections::HashMap;
 
@@ -22,100 +21,117 @@ pub enum LinkedSource {
 
 impl LinkedSource {
     pub async fn new(
-        ctx: &GlobalContext,
-        format: DataFormat,
-        load: &Load,
-        mapping: &EntityMapping,
-    ) -> Result<Self, AdapterError> {
+        adapter: &Adapter,
+        format: &DataFormat,
+        joins: &Vec<Join>,
+        mapping: &TransformationMetadata,
+    ) -> Result<Option<Self>, AdapterError> {
+        if joins.is_empty() {
+            return Ok(None);
+        }
+
         if !matches!(format, DataFormat::MySql | DataFormat::Postgres) {
             return Err(AdapterError::UnsupportedFormat(format.to_string()));
         }
 
-        // check if the source adapter is available
-        // if not, return an error
-        let src_adapter = ctx
-            .src_conn
-            .as_ref()
-            .ok_or(AdapterError::AdapterNotFound(format.to_string()))?;
+        let tables = joins.iter().map(|j| j.table.clone()).collect::<Vec<_>>();
 
-        // precompute join clauses & projection
-        let join_clauses = Self::build_join_clauses(&load.matches);
-        let projection =
-            Self::extract_projection(&load.entities, &mapping.field_mappings.computed_fields);
+        // // precompute join clauses & projection
+        let join_clauses = Self::build_join_clauses(&joins);
+        let projection = Self::extract_projection(&tables, mapping);
 
         // fetch metadata for all tables
         let mut meta = HashMap::new();
-        for table in &load.entities {
-            let table_meta = src_adapter.get_sql().table_metadata(table).await?;
+        for table in &tables {
+            let table_meta = adapter.get_sql().table_metadata(table).await?;
             meta.insert(table.clone(), table_meta);
         }
 
-        Ok(LinkedSource::Table(Box::new(JoinSource::new(
+        Ok(Some(LinkedSource::Table(Box::new(JoinSource::new(
             meta,
             join_clauses,
             projection,
             mapping.clone(),
-        ))))
+        )))))
     }
 
-    fn build_join_clauses(matches: &[MatchPair]) -> Vec<JoinClause> {
-        matches
+    fn build_join_clauses(joins: &[Join]) -> Vec<JoinClause> {
+        joins
             .iter()
-            .map(|pair| {
-                let left_entity = pair.left.entity().expect("Left entity name is required");
-                let left_column = pair.left.key().expect("Left key name is required");
-                let right_entity = pair.right.entity().expect("Right entity name is required");
-                let right_column = pair.right.key().expect("Right key name is required");
+            .filter_map(|join| {
+                // Extract join condition from the CompiledExpression
+                // Expected format: Binary { left: DotPath, op: Equal, right: DotPath }
+                // Example: customers.id = orders.customer_id
+                let condition = join.condition.as_ref()?;
 
-                // build the single join condition
-                // we don't support composite keys yet
-                let condition = JoinCondition {
-                    left: JoinColumn {
-                        alias: left_entity.clone(),
-                        column: left_column.clone(),
-                    },
-                    right: JoinColumn {
-                        alias: right_entity.clone(),
-                        column: right_column.clone(),
-                    },
-                };
+                if let CompiledExpression::Binary { left, right, .. } = condition {
+                    // Extract both sides of the join condition
+                    let (left_table_alias, left_column) = Self::extract_dotpath_parts(left)?;
+                    let (right_table_alias, right_column) = Self::extract_dotpath_parts(right)?;
 
-                // assemble the clause
-                JoinClause {
-                    left: JoinedTable {
-                        table: left_entity.clone(),
-                        alias: left_entity.clone(),
-                    },
-                    right: JoinedTable {
-                        table: right_entity.clone(),
-                        alias: right_entity.clone(),
-                    },
-                    join_type: JoinType::Inner,
-                    conditions: vec![condition],
+                    let join_condition = JoinCondition {
+                        left: JoinColumn {
+                            alias: left_table_alias.clone(),
+                            column: left_column,
+                        },
+                        right: JoinColumn {
+                            alias: right_table_alias.clone(),
+                            column: right_column,
+                        },
+                    };
+
+                    // Build the join clause
+                    // The left table in the condition becomes the left side of the join
+                    // The joined table (from join.table/alias) becomes the right side
+                    Some(JoinClause {
+                        left: JoinedTable {
+                            table: left_table_alias.clone(),
+                            alias: left_table_alias,
+                        },
+                        right: JoinedTable {
+                            table: join.table.clone(),
+                            alias: join.alias.clone(),
+                        },
+                        join_type: JoinType::Inner,
+                        conditions: vec![join_condition],
+                    })
+                } else {
+                    None
                 }
             })
             .collect()
     }
 
+    /// Extract table alias and column name from a DotPath expression
+    fn extract_dotpath_parts(expr: &CompiledExpression) -> Option<(String, String)> {
+        if let CompiledExpression::DotPath(segments) = expr {
+            if segments.len() >= 2 {
+                Some((segments[0].clone(), segments[1].clone()))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Extracts the projection (columns to fetch) for each table from cross-entity references.
     fn extract_projection(
         tables: &[String],
-        computed: &HashMap<String, Vec<ComputedField>>,
+        metadata: &TransformationMetadata,
     ) -> HashMap<String, Vec<String>> {
         tables
             .iter()
             .map(|table| {
-                let keys = computed
-                    .values()
-                    .flat_map(|fields| fields.iter())
-                    .filter_map(|f| match &f.expression {
-                        Expression::Lookup { entity, key, .. }
-                            if entity.eq_ignore_ascii_case(table) =>
-                        {
-                            Some(key.clone())
-                        }
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
+                // Get all cross-entity references for this table
+                let refs = metadata.get_cross_entity_refs_for(table);
+
+                // Extract unique field names
+                let mut keys: Vec<String> = refs.iter().map(|r| r.field.clone()).collect();
+
+                // Remove duplicates
+                keys.sort();
+                keys.dedup();
 
                 (table.clone(), keys)
             })

@@ -3,13 +3,13 @@ use engine_config::report::dry_run::{FastPathCapabilities, FastPathSummary};
 use engine_config::settings::validated::ValidatedSettings;
 use engine_core::connectors::destination::Destination;
 use engine_core::connectors::source::Source;
-use model::transform::mapping::EntityMapping;
+use model::transform::mapping::TransformationMetadata;
 
 /// Step responsible for validating fast path capabilities
 pub struct FastPathValidationStep {
     source: Source,
     destination: Destination,
-    mapping: EntityMapping,
+    mapping: TransformationMetadata,
     settings: ValidatedSettings,
 }
 
@@ -17,7 +17,7 @@ impl FastPathValidationStep {
     pub fn new(
         source: Source,
         destination: Destination,
-        mapping: EntityMapping,
+        mapping: TransformationMetadata,
         settings: ValidatedSettings,
     ) -> Self {
         Self {
@@ -81,7 +81,7 @@ impl FastPathValidationStep {
                 Ok(false) if self.settings.create_missing_tables => {
                     let source_table = self
                         .mapping
-                        .entity_name_map
+                        .entities
                         .reverse_resolve(&self.destination.name);
                     match self.source.primary.fetch_meta(source_table.clone()).await {
                         Ok(EntityMetadata::Table(table_meta)) => {

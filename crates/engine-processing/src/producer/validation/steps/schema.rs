@@ -4,15 +4,15 @@ use engine_config::{
     validation::schema_validator::DestinationSchemaValidator,
 };
 use engine_core::connectors::{destination::Destination, source::Source};
-use model::transform::mapping::EntityMapping;
-use smql_syntax::ast_v2::setting::CopyColumns;
+use model::transform::mapping::TransformationMetadata;
+use engine_config::settings::CopyColumns;
 use std::collections::HashSet;
 
 /// Step responsible for schema validation
 pub struct SchemaValidationStep {
     source: Source,
     destination: Destination,
-    mapping: EntityMapping,
+    mapping: TransformationMetadata,
     settings: ValidatedSettings,
 }
 
@@ -20,7 +20,7 @@ impl SchemaValidationStep {
     pub fn new(
         source: Source,
         destination: Destination,
-        mapping: EntityMapping,
+        mapping: TransformationMetadata,
         settings: ValidatedSettings,
     ) -> Self {
         Self {

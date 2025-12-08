@@ -10,9 +10,9 @@ use engine_core::connectors::{
     destination::{DataDestination, Destination},
     source::{DataSource, Source},
 };
-use model::{pagination::cursor::Cursor, transform::mapping::EntityMapping};
+use model::{pagination::cursor::Cursor, transform::mapping::TransformationMetadata};
 use serde::Serialize;
-use smql_syntax::ast_v2::setting::CopyColumns;
+use crate::settings::CopyColumns;
 
 /// The overall status of the validation run.
 #[derive(Serialize, Debug, Clone, PartialEq, Default)]
@@ -73,7 +73,7 @@ pub struct DryRunReport {
 pub struct DryRunParams<'a> {
     pub source: EndpointType,
     pub destination: EndpointType,
-    pub mapping: &'a EntityMapping,
+    pub mapping: &'a TransformationMetadata,
     pub config_hash: &'a str,
     pub copy_columns: CopyColumns,
 }

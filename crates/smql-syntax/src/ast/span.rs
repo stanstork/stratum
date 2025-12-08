@@ -1,5 +1,7 @@
+use serde::{Deserialize, Serialize};
+
 /// Source location span for error reporting
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Span {
     pub start: usize,
     pub end: usize,

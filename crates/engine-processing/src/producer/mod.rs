@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use engine_config::{report::dry_run::DryRunReport, settings::validated::ValidatedSettings};
 use engine_core::context::item::ItemContext;
 use futures::lock::Mutex;
-use model::{records::batch::Batch, transform::mapping::EntityMapping};
+use model::{records::batch::Batch, transform::mapping::TransformationMetadata};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -23,12 +23,12 @@ pub mod config;
 pub mod live;
 pub mod validation;
 
-fn pipeline_for_mapping(mapping: &EntityMapping) -> TransformPipeline {
+fn pipeline_for_mapping(mapping: &TransformationMetadata) -> TransformPipeline {
     let mut pipeline = TransformPipeline::new();
 
     pipeline = pipeline
-        .add_if(!mapping.entity_name_map.is_empty(), || {
-            TableMapper::new(mapping.entity_name_map.clone())
+        .add_if(!mapping.entities.is_empty(), || {
+            TableMapper::new(mapping.entities.clone())
         })
         .add_if(!mapping.field_mappings.is_empty(), || {
             FieldMapper::new(mapping.field_mappings.clone())

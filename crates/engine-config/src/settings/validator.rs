@@ -1,9 +1,12 @@
 use crate::settings::{
     error::SettingsError,
     validated::{ValidatedSettings, ValidatedSettingsBuilder},
+    Settings,
 };
-use engine_core::connectors::{destination::Destination, source::Source};
-use smql_syntax::ast_v2::{connection::DataFormat, setting::Settings};
+use engine_core::connectors::{
+    destination::Destination,
+    source::{DataFormat, Source},
+};
 use tracing::{info, warn};
 
 /// Validates migration settings before they are applied.

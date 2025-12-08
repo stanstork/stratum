@@ -15,6 +15,8 @@ pub fn classify_adapter_error(err: &AdapterError) -> RetryDisposition {
         AdapterError::AdapterNotFound(_) => RetryDisposition::Stop,
         AdapterError::FileError(_) => RetryDisposition::Stop,
         AdapterError::InvalidMetadata(_) => RetryDisposition::Stop,
+        AdapterError::UnsupportedDriver(_) => RetryDisposition::Stop,
+        AdapterError::MissingProperty(_) => RetryDisposition::Stop,
     }
 }
 

@@ -1,8 +1,9 @@
 use crate::ast::{attribute::Attribute, pipeline::NestedBlock, span::Span};
+use serde::{Deserialize, Serialize};
 
 /// Define block for constants/computed values
 /// Syntax: define { tax_rate = 1.4, cutoff_date = "2024-01-01" }
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DefineBlock {
     pub attributes: Vec<Attribute>,
     pub span: Span,
@@ -10,7 +11,7 @@ pub struct DefineBlock {
 
 /// Connection block for data sources
 /// Syntax: connection "mysql_prod" { driver = "mysql", ... }
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConnectionBlock {
     pub name: String,
     pub attributes: Vec<Attribute>,

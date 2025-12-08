@@ -1,8 +1,9 @@
 use crate::ast::span::Span;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Dot-separated path (e.g., connection.mysql_prod, users.email)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DotPath {
     pub segments: Vec<String>,
     pub span: Span,

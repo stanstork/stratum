@@ -1,13 +1,13 @@
 use super::clause::JoinClause;
 use crate::sql::base::{metadata::table::TableMetadata, query::select::SelectField};
-use model::transform::mapping::EntityMapping;
+use model::transform::mapping::TransformationMetadata;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Debug, Clone)]
 pub struct JoinSource {
     pub meta: HashMap<String, TableMetadata>,
     pub clauses: Vec<JoinClause>,
-    pub mapping: EntityMapping,
+    pub mapping: TransformationMetadata,
     pub projection: HashMap<String, Vec<String>>,
 }
 
@@ -16,7 +16,7 @@ impl JoinSource {
         meta: HashMap<String, TableMetadata>,
         clauses: Vec<JoinClause>,
         projection: HashMap<String, Vec<String>>,
-        mapping: EntityMapping,
+        mapping: TransformationMetadata,
     ) -> Self {
         Self {
             meta,
@@ -51,10 +51,10 @@ impl JoinSource {
                         // apply any lookup aliases
                         if let Some(alias) = self
                             .mapping
-                            .get_lookups_for(&field.table)
+                            .get_cross_entity_refs_for(&field.table)
                             .iter()
                             .find_map(|lk| {
-                                (lk.key.eq_ignore_ascii_case(&field.column))
+                                (lk.field.eq_ignore_ascii_case(&field.column))
                                     .then(|| lk.target.clone())
                             })
                         {

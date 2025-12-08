@@ -3,9 +3,10 @@ use crate::ast::{
     pipeline::PipelineBlock,
     span::Span,
 };
+use serde::{Deserialize, Serialize};
 
 /// Root document containing all top-level declarations
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SmqlDocument {
     pub define_block: Option<DefineBlock>,
     pub connections: Vec<ConnectionBlock>,

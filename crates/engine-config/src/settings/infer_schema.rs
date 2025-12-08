@@ -8,13 +8,15 @@ use connectors::{
     metadata::entity::EntityMetadata, sql::base::metadata::provider::MetadataProvider,
 };
 use engine_core::{
-    connectors::{destination::Destination, source::Source},
+    connectors::{
+        destination::Destination,
+        source::{DataFormat, Source},
+    },
     context::item::ItemContext,
     schema::plan::SchemaPlan,
 };
 use futures::lock::Mutex;
-use model::transform::mapping::EntityMapping;
-use smql_syntax::ast_v2::connection::DataFormat;
+use model::transform::mapping::TransformationMetadata;
 use std::{slice, sync::Arc};
 use tracing::info;
 
@@ -47,7 +49,7 @@ impl InferSchemaSetting {
     pub async fn new(
         src: &Source,
         dest: &Destination,
-        mapping: &EntityMapping,
+        mapping: &TransformationMetadata,
         settings: &ValidatedSettings,
         dry_run_report: &Arc<Mutex<DryRunReport>>,
     ) -> Self {

@@ -1,6 +1,7 @@
-use model::core::value::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+use crate::core::value::Value;
 
 /// Global definitions from define {} block
 #[derive(Debug, Clone, Serialize, Deserialize)]

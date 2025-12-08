@@ -1,21 +1,19 @@
 use crate::{
-    error::ConvertError,
-    models::{
+    core::value::Value,
+    execution::{
         connection::Connection,
-        define::GlobalDefinitions,
+        errors::ConvertError,
         expr::{BinaryOp, CompiledExpression},
         pipeline::{
             BackoffStrategy, DataDestination, DataSource, ErrorHandling, FailedRowsAction,
             FailedRowsPolicy, Filter, Join, LifecycleHooks, Pagination, Pipeline, RetryPolicy,
             Transformation, ValidationAction, ValidationRule, ValidationSeverity, WriteMode,
         },
-        plan::ExecutionPlan,
+        properties::Properties,
     },
 };
-use model::core::value::Value;
 use smql_syntax::ast::{
     block::{ConnectionBlock, DefineBlock},
-    doc::SmqlDocument,
     expr::{Expression, ExpressionKind},
     literal::Literal,
     operator::BinaryOperator,
@@ -27,8 +25,8 @@ use std::collections::HashMap;
 /// Convert validated AST to execution plan
 pub struct PlanBuilder {
     // For resolving references
-    global_definitions: HashMap<String, Value>,
-    connections: HashMap<String, Connection>,
+    pub global_definitions: HashMap<String, Value>,
+    pub connections: HashMap<String, Connection>,
 }
 
 impl PlanBuilder {
@@ -39,34 +37,11 @@ impl PlanBuilder {
         }
     }
 
-    /// Build execution plan from SMQL document
-    pub fn build(mut self, doc: &SmqlDocument) -> Result<ExecutionPlan, ConvertError> {
-        if let Some(def_block) = &doc.define_block {
-            self.global_definitions = self.extract_definitions(def_block)?;
-        }
-
-        for conn_block in &doc.connections {
-            let connection = self.build_connection(conn_block)?;
-            self.connections.insert(connection.name.clone(), connection);
-        }
-
-        let mut pipelines = Vec::new();
-        for pipeline_block in &doc.pipelines {
-            let pipeline = self.build_pipeline(pipeline_block)?;
-            pipelines.push(pipeline);
-        }
-
-        Ok(ExecutionPlan {
-            definitions: GlobalDefinitions {
-                variables: self.global_definitions,
-            },
-            connections: self.connections.values().cloned().collect(),
-            pipelines,
-        })
-    }
-
-    fn build_connection(&self, conn_block: &ConnectionBlock) -> Result<Connection, ConvertError> {
-        let mut properties = HashMap::new();
+    pub fn build_connection(
+        &self,
+        conn_block: &ConnectionBlock,
+    ) -> Result<Connection, ConvertError> {
+        let mut properties = Properties::new();
         let mut nested_configs = HashMap::new();
 
         for attr in &conn_block.attributes {
@@ -86,18 +61,14 @@ impl PlanBuilder {
         Ok(Connection {
             name: conn_block.name.clone(),
             driver: properties
-                .get("driver")
-                .and_then(|v| match v {
-                    Value::String(s) => Some(s.clone()),
-                    _ => None,
-                })
+                .get_string("driver")
                 .ok_or_else(|| ConvertError::Connection("Connection missing driver".to_string()))?,
             properties,
             nested_configs,
         })
     }
 
-    fn build_pipeline(&self, pipeline_block: &PipelineBlock) -> Result<Pipeline, ConvertError> {
+    pub fn build_pipeline(&self, pipeline_block: &PipelineBlock) -> Result<Pipeline, ConvertError> {
         let source = self.build_source(pipeline_block)?;
         let destination = self.build_destination(pipeline_block)?;
         let dependencies = self.build_dependencies(pipeline_block)?;
@@ -158,20 +129,6 @@ impl PlanBuilder {
         };
 
         let pagination = pipeline_block.paginate_block.as_ref().map(|p| {
-            // Extract pagination config from attributes
-            let page_size = p
-                .attributes
-                .iter()
-                .find(|a| a.key.name == "page_size")
-                .and_then(|a| self.eval_expression(&a.value).ok())
-                .and_then(|v| match v {
-                    Value::Usize(n) => Some(n),
-                    Value::Int32(n) => Some(n as usize),
-                    Value::Float(f) => Some(f as usize),
-                    _ => None,
-                })
-                .unwrap_or(1000);
-
             let strategy = p
                 .attributes
                 .iter()
@@ -183,10 +140,31 @@ impl PlanBuilder {
                 })
                 .unwrap_or_else(|| "default".to_string());
 
-            let cursor_field = p
+            let cursor = p
                 .attributes
                 .iter()
-                .find(|a| a.key.name == "cursor_field")
+                .find(|a| a.key.name == "cursor")
+                .and_then(|a| self.eval_expression(&a.value).ok())
+                .and_then(|v| match v {
+                    Value::String(s) => Some(s),
+                    _ => None,
+                })
+                .unwrap_or_else(|| "id".to_string());
+
+            let tiebreaker = p
+                .attributes
+                .iter()
+                .find(|a| a.key.name == "tiebreaker")
+                .and_then(|a| self.eval_expression(&a.value).ok())
+                .and_then(|v| match v {
+                    Value::String(s) => Some(s),
+                    _ => None,
+                });
+
+            let timezone = p
+                .attributes
+                .iter()
+                .find(|a| a.key.name == "timezone")
                 .and_then(|a| self.eval_expression(&a.value).ok())
                 .and_then(|v| match v {
                     Value::String(s) => Some(s),
@@ -195,8 +173,9 @@ impl PlanBuilder {
 
             Pagination {
                 strategy,
-                page_size,
-                cursor_field,
+                cursor,
+                tiebreaker,
+                timezone,
             }
         });
 
@@ -213,7 +192,9 @@ impl PlanBuilder {
             .ok_or_else(|| ConvertError::Plan("From block missing table attribute".to_string()))?;
 
         Ok(DataSource {
-            connection,
+            connection: self.connections.get(&connection).cloned().ok_or_else(|| {
+                ConvertError::Connection(format!("Connection `{}` not found", connection))
+            })?,
             table,
             filters,
             joins,
@@ -262,7 +243,9 @@ impl PlanBuilder {
             .unwrap_or(WriteMode::Insert);
 
         Ok(DataDestination {
-            connection,
+            connection: self.connections.get(&connection).cloned().ok_or_else(|| {
+                ConvertError::Connection(format!("Connection `{}` not found", connection))
+            })?,
             table,
             mode,
         })
@@ -495,7 +478,7 @@ impl PlanBuilder {
         }
     }
 
-    fn extract_definitions(
+    pub fn extract_definitions(
         &self,
         def_block: &DefineBlock,
     ) -> Result<HashMap<String, Value>, ConvertError> {
@@ -540,12 +523,11 @@ mod tests {
             attribute::Attribute,
             dotpath::DotPath,
             ident::Identifier,
-            pipeline::{
-                AfterBlock, BeforeBlock, PaginateBlock,
-                SettingsBlock,
-            },
+            pipeline::{AfterBlock, BeforeBlock, PaginateBlock, SettingsBlock},
             span::Span,
-            validation::{OnErrorBlock, RetryBlock, ValidationBody, ValidationCheck, ValidateBlock},
+            validation::{
+                OnErrorBlock, RetryBlock, ValidateBlock, ValidationBody, ValidationCheck,
+            },
         },
         builder::parse,
     };
@@ -570,10 +552,7 @@ mod tests {
     }
 
     fn make_ident_expr(s: &str) -> Expression {
-        Expression::new(
-            ExpressionKind::Identifier(s.to_string()),
-            test_span(),
-        )
+        Expression::new(ExpressionKind::Identifier(s.to_string()), test_span())
     }
 
     fn make_dotpath_expr(segments: Vec<&str>) -> Expression {
@@ -890,9 +869,8 @@ mod tests {
             on_error_block: None,
             paginate_block: Some(PaginateBlock {
                 attributes: vec![
-                    make_attribute("page_size", make_number_expr(500.0)),
-                    make_attribute("strategy", make_string_expr("cursor")),
-                    make_attribute("cursor_field", make_string_expr("id")),
+                    make_attribute("strategy", make_string_expr("pk")),
+                    make_attribute("cursor", make_string_expr("id")),
                 ],
                 span: test_span(),
             }),
@@ -904,9 +882,8 @@ mod tests {
 
         let source = builder.build_source(&pipeline).unwrap();
         let pagination = source.pagination.unwrap();
-        assert_eq!(pagination.page_size, 500);
-        assert_eq!(pagination.strategy, "cursor");
-        assert_eq!(pagination.cursor_field, Some("id".to_string()));
+        assert_eq!(pagination.strategy, "pk");
+        assert_eq!(pagination.cursor, "id");
     }
 
     #[test]
@@ -1013,67 +990,5 @@ mod tests {
         assert_eq!(retry.max_attempts, 5);
         assert_eq!(retry.delay_ms, 1000);
         assert!(matches!(retry.backoff, BackoffStrategy::Exponential));
-    }
-
-    #[test]
-    fn test_full_document_conversion() {
-        let input = r#"
-define {
-    tax_rate = 1.4
-}
-
-connection "postgres_prod" {
-    driver = "postgres"
-    host = "localhost"
-}
-
-pipeline "copy_customers" {
-    from {
-        connection = connection.postgres_prod
-        table = "customers"
-    }
-
-    to {
-        connection = connection.postgres_prod
-        table = "customers_copy"
-        mode = "insert"
-    }
-
-    select {
-        id = id
-        total = amount * define.tax_rate
-    }
-}
-        "#;
-
-        let doc = parse(input).expect("Failed to parse SMQL");
-        let plan = PlanBuilder::new().build(&doc).unwrap();
-
-        // Check definitions
-        assert_eq!(plan.definitions.variables.len(), 1);
-        assert_eq!(
-            plan.definitions.variables.get("tax_rate"),
-            Some(&Value::Float(1.4))
-        );
-
-        // Check connections
-        assert_eq!(plan.connections.len(), 1);
-        assert_eq!(plan.connections[0].name, "postgres_prod");
-        assert_eq!(plan.connections[0].driver, "postgres");
-
-        // Check pipelines
-        assert_eq!(plan.pipelines.len(), 1);
-        assert_eq!(plan.pipelines[0].name, "copy_customers");
-        assert_eq!(plan.pipelines[0].source.table, "customers");
-        assert_eq!(plan.pipelines[0].destination.table, "customers_copy");
-        assert!(matches!(
-            plan.pipelines[0].destination.mode,
-            WriteMode::Insert
-        ));
-
-        // Check transformations
-        assert_eq!(plan.pipelines[0].transformations.len(), 2);
-        assert_eq!(plan.pipelines[0].transformations[0].target_field, "id");
-        assert_eq!(plan.pipelines[0].transformations[1].target_field, "total");
     }
 }

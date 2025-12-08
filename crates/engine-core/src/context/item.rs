@@ -1,7 +1,7 @@
 use crate::{
     connectors::{
         destination::{DataDestination, Destination},
-        source::{DataSource, Source},
+        source::{DataFormat, DataSource, Source},
     },
     state::sled_store::SledStateStore,
 };
@@ -14,9 +14,8 @@ use connectors::{
     },
 };
 use futures::lock::Mutex;
-use model::{pagination::cursor::Cursor, transform::mapping::EntityMapping};
+use model::{pagination::cursor::Cursor, transform::mapping::TransformationMetadata};
 use planner::query::offsets::OffsetStrategy;
-use smql_syntax::ast_v2::connection::DataFormat;
 use std::{future::Future, sync::Arc};
 
 /// Represents the context for a single item in the migration process.
@@ -25,7 +24,7 @@ pub struct ItemContext {
     pub item_id: String,
     pub source: Source,
     pub destination: Destination,
-    pub mapping: EntityMapping,
+    pub mapping: TransformationMetadata,
     pub state: Arc<SledStateStore>,
     pub offset_strategy: Arc<dyn OffsetStrategy>,
     pub cursor: Cursor,
@@ -37,7 +36,7 @@ pub struct ItemContextParams {
     pub item_id: String,
     pub source: Source,
     pub destination: Destination,
-    pub mapping: EntityMapping,
+    pub mapping: TransformationMetadata,
     pub state: Arc<SledStateStore>,
     pub offset_strategy: Arc<dyn OffsetStrategy>,
     pub cursor: Cursor,
@@ -106,12 +105,6 @@ impl ItemContext {
         Self::set_meta(name, db, fetch_meta_fn).await?;
 
         Ok(())
-    }
-
-    pub fn sql_databases() -> DataFormat {
-        DataFormat::MySql
-            .union(DataFormat::Postgres)
-            .union(DataFormat::Sqlite)
     }
 
     async fn set_meta<F, Fut, M>(

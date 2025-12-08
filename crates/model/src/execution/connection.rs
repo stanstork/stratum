@@ -1,4 +1,4 @@
-use model::core::value::Value;
+use crate::{core::value::Value, execution::properties::Properties};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -7,6 +7,6 @@ use std::collections::HashMap;
 pub struct Connection {
     pub name: String,
     pub driver: String,
-    pub properties: HashMap<String, Value>,
+    pub properties: Properties,
     pub nested_configs: HashMap<String, HashMap<String, Value>>,
 }

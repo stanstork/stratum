@@ -3,11 +3,12 @@
 use super::{TEST_MYSQL_URL_ORDERS, TEST_MYSQL_URL_SAKILA, TEST_PG_URL, mysql_pool};
 use crate::pg_pool;
 use connectors::{file::csv::error::FileError, sql::base::row::DbRow};
+use engine_core::plan::ExecutionPlan;
 use engine_runtime::execution::executor::run;
 use model::records::row::RowData;
 use mysql_async::Row as MySqlRow;
 use mysql_async::prelude::Queryable;
-use planner::plan::parse;
+use smql_syntax::builder::parse;
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -80,7 +81,8 @@ pub enum DbType {
 /// Parse & run the SMQL plan, panicking on any error
 pub async fn run_smql(template: &str, source_db: &str) {
     let smql = templated_smql(template, source_db);
-    let plan = parse(&smql).expect("parse smql");
+    let doc = parse(&smql).expect("parse smql");
+    let plan = ExecutionPlan::build(&doc).expect("build execution plan");
     let cancel = CancellationToken::new();
     run(plan, false, cancel).await.expect("migration ran");
 }

@@ -1,5 +1,7 @@
-use crate::models::expr::CompiledExpression;
-use model::core::value::Value;
+use crate::{
+    core::value::Value,
+    execution::{connection::Connection, expr::CompiledExpression},
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -21,7 +23,7 @@ pub struct Pipeline {
 /// From block - data source configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataSource {
-    pub connection: String,
+    pub connection: Connection,
     pub table: String,
     pub filters: Vec<Filter>,
     pub joins: Vec<Join>,
@@ -31,7 +33,7 @@ pub struct DataSource {
 /// To block - data destination configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataDestination {
-    pub connection: String,
+    pub connection: Connection,
     pub table: String,
     pub mode: WriteMode,
 }
@@ -63,8 +65,9 @@ pub struct Join {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pagination {
     pub strategy: String,
-    pub page_size: usize,
-    pub cursor_field: Option<String>,
+    pub cursor: String,
+    pub tiebreaker: Option<String>,
+    pub timezone: Option<String>,
 }
 
 /// Select block field mapping

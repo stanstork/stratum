@@ -2,18 +2,18 @@ use super::pipeline::Transform;
 use crate::expr::eval::Evaluator;
 use model::{
     core::value::{FieldValue, Value},
+    execution::expr::CompiledExpression,
     records::row::RowData,
-    transform::mapping::EntityMapping,
+    transform::mapping::TransformationMetadata,
 };
-use smql_syntax::ast_v2::expr::Expression;
 use tracing::warn;
 
 pub struct ComputedTransform {
-    mapping: EntityMapping,
+    mapping: TransformationMetadata,
 }
 
 impl ComputedTransform {
-    pub fn new(mapping: EntityMapping) -> Self {
+    pub fn new(mapping: TransformationMetadata) -> Self {
         Self { mapping }
     }
 }
@@ -26,9 +26,11 @@ impl Transform for ComputedTransform {
         if let Some(computed_fields) = self.mapping.field_mappings.computed_fields.get(&table) {
             for computed in computed_fields {
                 if let Some(value) = computed.expression.evaluate(&row, &self.mapping) {
-                    if let Expression::Lookup { .. } = computed.expression {
-                        // Skip lookup expressions as they are handled during data loading
-                        continue;
+                    // Skip cross-entity references (DotPath with 2+ segments) as they are handled during data loading
+                    if let CompiledExpression::DotPath(segments) = &computed.expression {
+                        if segments.len() >= 2 {
+                            continue;
+                        }
                     }
                     update_row(&mut row, &computed.name, &value);
                 } else {

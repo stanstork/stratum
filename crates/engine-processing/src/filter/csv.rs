@@ -1,6 +1,6 @@
 use super::compiler::FilterCompiler;
 use connectors::file::csv::filter::{CsvComparator, CsvCondition, CsvFilter, CsvFilterExpr};
-use smql_syntax::ast_v2::{expr::Expression, filter::FilterExpression};
+use model::execution::expr::{BinaryOp, CompiledExpression};
 use std::str::FromStr;
 
 pub struct CsvFilterCompiler;
@@ -8,49 +8,93 @@ pub struct CsvFilterCompiler;
 impl FilterCompiler for CsvFilterCompiler {
     type Filter = CsvFilter;
 
-    fn compile(expr: &FilterExpression) -> Self::Filter {
+    fn compile(expr: &CompiledExpression) -> Self::Filter {
         let csv_expr = compile_csv_expr(expr);
         CsvFilter::with_expr(csv_expr)
     }
 }
 
-fn from_stmt_condition(
-    cond: &smql_syntax::ast_v2::filter::Condition,
+fn from_compiled_condition(
+    left: &CompiledExpression,
+    op: &BinaryOp,
+    right: &CompiledExpression,
 ) -> Result<CsvCondition, Box<dyn std::error::Error>> {
-    // Extract the lookup key for the left-hand side
-    let field = match &cond.left {
-        Expression::Lookup { key, .. } => key.clone(),
-        other => return Err(format!("Unsupported expression type filter field: {other:?}").into()),
+    // Extract the field name from left side
+    let field = match left {
+        CompiledExpression::DotPath(segments) if segments.len() >= 2 => {
+            // For CSV, we just need the column name (second segment)
+            segments[1].clone()
+        }
+        CompiledExpression::Identifier(name) => name.clone(),
+        other => {
+            return Err(format!("Unsupported expression type for filter field: {other:?}").into());
+        }
     };
 
-    // Render the right-hand side to string
-    let value = cond
-        .right
-        .format()
-        .map_err(|e| format!("Unsupported expression type filter value: {e:?}"))?
+    // Convert right side to string value
+    let value = format_expr_value(right)?
         .trim_start_matches('\'')
         .trim_end_matches('\'')
+        .trim_start_matches('"')
+        .trim_end_matches('"')
         .to_string();
 
-    // Parse comparator
-    let op = CsvComparator::from_str(&cond.op.to_string())
-        .map_or(Err(format!("Unsupported comparator: {:?}", cond.op)), Ok)?;
+    // Map BinaryOp to CsvComparator
+    let op_str = match op {
+        BinaryOp::Equal => "=",
+        BinaryOp::NotEqual => "!=",
+        BinaryOp::GreaterThan => ">",
+        BinaryOp::GreaterOrEqual => ">=",
+        BinaryOp::LessThan => "<",
+        BinaryOp::LessOrEqual => "<=",
+        _ => return Err(format!("Unsupported operator for CSV filter: {:?}", op).into()),
+    };
+
+    let csv_op = CsvComparator::from_str(op_str)
+        .map_err(|_| format!("Unsupported comparator: {}", op_str))?;
 
     Ok(CsvCondition {
         left: field,
-        op,
+        op: csv_op,
         right: value,
     })
 }
 
-/// Recursively compiles a filter expression into a CSV filter AST.
-fn compile_csv_expr(expr: &FilterExpression) -> CsvFilterExpr {
+fn format_expr_value(expr: &CompiledExpression) -> Result<String, Box<dyn std::error::Error>> {
     match expr {
-        FilterExpression::Condition(cond) => {
-            let csv_cond = from_stmt_condition(cond).unwrap();
-            CsvFilterExpr::leaf(csv_cond)
+        CompiledExpression::Literal(value) => Ok(format!("{:?}", value)),
+        CompiledExpression::Identifier(name) => Ok(name.clone()),
+        CompiledExpression::DotPath(segments) => Ok(segments.join(".")),
+        _ => Err(format!("Unsupported expression type for filter value: {:?}", expr).into()),
+    }
+}
+
+/// Recursively compiles a filter expression into a CSV filter AST.
+fn compile_csv_expr(expr: &CompiledExpression) -> CsvFilterExpr {
+    match expr {
+        // Binary expression represents a condition
+        CompiledExpression::Binary { left, op, right } => {
+            // Check if this is a logical operator (AND/OR) or a comparison
+            if matches!(op, BinaryOp::And | BinaryOp::Or) {
+                // Logical operator - recursively compile both sides
+                let left_expr = compile_csv_expr(left);
+                let right_expr = compile_csv_expr(right);
+                let children = vec![left_expr, right_expr];
+
+                match op {
+                    BinaryOp::And => CsvFilterExpr::and(children),
+                    BinaryOp::Or => CsvFilterExpr::or(children),
+                    _ => unreachable!(),
+                }
+            } else {
+                // Comparison operator - create a leaf condition
+                let csv_cond = from_compiled_condition(left, op, right).unwrap();
+                CsvFilterExpr::leaf(csv_cond)
+            }
         }
-        FilterExpression::FunctionCall(name, args) => {
+
+        // Function call with logical operators
+        CompiledExpression::FunctionCall { name, args } => {
             let mut children = Vec::with_capacity(args.len());
             for arg in args {
                 children.push(compile_csv_expr(arg));
@@ -61,5 +105,7 @@ fn compile_csv_expr(expr: &FilterExpression) -> CsvFilterExpr {
                 _ => panic!("Unsupported function call: {name}"),
             }
         }
+
+        _ => panic!("Unsupported expression type for CSV filter: {:?}", expr),
     }
 }

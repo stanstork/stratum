@@ -6,6 +6,7 @@ use crate::{
 use clap::Parser;
 use commands::Commands;
 use engine_core::{
+    plan::ExecutionPlan,
     progress::{ProgressService, ProgressStatus},
     state::{StateStore, sled_store::SledStateStore},
 };
@@ -13,7 +14,7 @@ use engine_runtime::{
     error::MigrationError,
     execution::{executor, source::load_metadata},
 };
-use planner::plan::MigrationPlan;
+use smql_syntax::ast::doc::SmqlDocument;
 use std::{process, str::FromStr, sync::Arc};
 use tokio_util::sync::CancellationToken;
 use tracing::{Level, info};
@@ -107,7 +108,8 @@ async fn run_cli() -> Result<(), CliError> {
             } => {
                 let kind = ConnectionKind::from_str(&format)
                     .map_err(|_| CliError::InvalidConnectionFormat(format.clone()))?;
-                let metadata = load_metadata(&conn_str, kind.data_format()).await?;
+
+                let metadata = load_metadata(&conn_str, kind.driver()).await?;
 
                 let metadata_json =
                     serde_json::to_string_pretty(&metadata).map_err(CliError::JsonSerialize)?;
@@ -149,17 +151,16 @@ async fn run_cli() -> Result<(), CliError> {
     }
 }
 
-async fn load_migration_plan(path: &str, from_ast: bool) -> Result<MigrationPlan, CliError> {
+async fn load_migration_plan(path: &str, from_ast: bool) -> Result<ExecutionPlan, CliError> {
     let source = tokio::fs::read_to_string(path).await?;
-    if from_ast {
+    let doc: SmqlDocument = if from_ast {
         // If `from_ast` is true, read the config file as a pre-parsed AST
-        let plan = serde_json::from_str(&source)?;
-        Ok(plan)
+        serde_json::from_str(&source)?
     } else {
         // Otherwise, read the config file and parse it
-        let plan = planner::plan::parse(&source)?;
-        Ok(plan)
-    }
+        smql_syntax::builder::parse(&source)?
+    };
+    Ok(ExecutionPlan::build(&doc)?)
 }
 
 fn open_state_store() -> Result<Arc<dyn StateStore>, CliError> {

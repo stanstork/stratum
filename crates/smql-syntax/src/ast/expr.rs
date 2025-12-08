@@ -4,8 +4,9 @@ use crate::ast::{
     operator::{BinaryOperator, UnaryOperator},
     span::Span,
 };
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Expression {
     pub kind: ExpressionKind,
     pub span: Span,
@@ -18,7 +19,7 @@ impl Expression {
 }
 
 /// Expression types
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ExpressionKind {
     Literal(Literal),
     Identifier(String),
@@ -47,7 +48,7 @@ pub enum ExpressionKind {
 }
 
 /// When expression branch
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WhenBranch {
     pub condition: Expression,
     pub value: Expression,

@@ -1,25 +1,25 @@
 use super::pipeline::Transform;
 use model::{
     records::row::RowData,
-    transform::mapping::{FieldMappings, NameMap},
+    transform::mapping::{FieldTransformations, NameResolver},
 };
 
 pub struct FieldMapper {
-    ns_map: FieldMappings,
+    ns_map: FieldTransformations,
 }
 
 pub struct TableMapper {
-    name_map: NameMap,
+    name_map: NameResolver,
 }
 
 impl FieldMapper {
-    pub fn new(ns_map: FieldMappings) -> Self {
+    pub fn new(ns_map: FieldTransformations) -> Self {
         Self { ns_map }
     }
 }
 
 impl TableMapper {
-    pub fn new(name_map: NameMap) -> Self {
+    pub fn new(name_map: NameResolver) -> Self {
         Self { name_map }
     }
 }

@@ -1,5 +1,7 @@
+pub mod builder;
 pub mod connection;
 pub mod define;
+pub mod errors;
 pub mod expr;
 pub mod pipeline;
-pub mod plan;
+pub mod properties;

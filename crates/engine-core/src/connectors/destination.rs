@@ -1,4 +1,7 @@
-use crate::connectors::sink::{Sink, postgres::PostgresSink};
+use crate::connectors::{
+    sink::{Sink, postgres::PostgresSink},
+    source::DataFormat,
+};
 use connectors::{
     adapter::Adapter,
     sql::{
@@ -12,7 +15,6 @@ use connectors::{
 use futures::lock::Mutex;
 use model::records::row::RowData;
 use planner::query::dialect;
-use smql_syntax::ast_v2::connection::DataFormat;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -34,10 +36,10 @@ pub struct Destination {
 }
 
 impl DataDestination {
-    pub fn from_adapter(format: DataFormat, adapter: &Option<Adapter>) -> Result<Self, DbError> {
+    pub fn from_adapter(format: DataFormat, adapter: &Adapter) -> Result<Self, DbError> {
         match format {
             DataFormat::Postgres => match adapter {
-                Some(Adapter::Postgres(adapter)) => {
+                Adapter::Postgres(adapter) => {
                     let destination = PgDestination::new(adapter.clone());
                     let sink = Arc::new(PostgresSink::new(adapter.clone()));
                     Ok(DataDestination::Database(DatabaseDestination {
