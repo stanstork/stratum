@@ -14,7 +14,7 @@ use engine_runtime::{
     error::MigrationError,
     execution::{executor, source::load_metadata},
 };
-use smql_syntax::ast::doc::SmqlDocument;
+use smql_syntax::{ast::doc::SmqlDocument, builder::parse};
 use std::{process, str::FromStr, sync::Arc};
 use tokio_util::sync::CancellationToken;
 use tracing::{Level, info};
@@ -125,7 +125,7 @@ async fn run_cli() -> Result<(), CliError> {
         },
         Commands::Ast { config } => {
             let source = tokio::fs::read_to_string(&config).await?;
-            let plan = planner::plan::parse(&source)?;
+            let plan = parse(&source)?;
             let json = serde_json::to_string_pretty(&plan).map_err(CliError::JsonSerialize)?;
             println!("{json}");
             Ok(())
