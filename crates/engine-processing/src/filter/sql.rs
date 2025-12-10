@@ -94,8 +94,26 @@ fn from_compiled_condition(
 }
 
 fn format_expr_value(expr: &CompiledExpression) -> Result<String, Box<dyn std::error::Error>> {
+    use model::core::value::Value;
+
     match expr {
-        CompiledExpression::Literal(value) => Ok(format!("{:?}", value)),
+        CompiledExpression::Literal(value) => {
+            // Extract the actual value from the Value enum
+            let formatted = match value {
+                Value::SmallInt(v) => v.to_string(),
+                Value::Int32(v) => v.to_string(),
+                Value::Int(v) => v.to_string(),
+                Value::Uint(v) => v.to_string(),
+                Value::Usize(v) => v.to_string(),
+                Value::Float(v) => v.to_string(),
+                Value::Decimal(v) => v.to_string(),
+                Value::String(v) => v.clone(),
+                Value::Boolean(v) => v.to_string(),
+                Value::Null => "NULL".to_string(),
+                _ => return Err(format!("Unsupported value type for filter: {:?}", value).into()),
+            };
+            Ok(formatted)
+        }
         CompiledExpression::Identifier(name) => Ok(name.clone()),
         CompiledExpression::DotPath(segments) => Ok(segments.join(".")),
         _ => Err(format!("Unsupported expression type for filter value: {:?}", expr).into()),

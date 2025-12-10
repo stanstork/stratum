@@ -23,18 +23,22 @@ pub mod config;
 pub mod live;
 pub mod validation;
 
-fn pipeline_for_mapping(mapping: &TransformationMetadata) -> TransformPipeline {
+fn pipeline_for_mapping(mapping: &TransformationMetadata, prune_unmapped: bool) -> TransformPipeline {
     let mut pipeline = TransformPipeline::new();
 
     pipeline = pipeline
         .add_if(!mapping.entities.is_empty(), || {
             TableMapper::new(mapping.entities.clone())
         })
-        .add_if(!mapping.field_mappings.is_empty(), || {
+        .add_if(!mapping.field_mappings.field_renames.is_empty(), || {
             FieldMapper::new(mapping.field_mappings.clone())
         })
-        .add_if(!mapping.field_mappings.is_empty(), || {
+        .add_if(!mapping.field_mappings.computed_fields.is_empty(), || {
             ComputedTransform::new(mapping.clone())
+        })
+        .add_if(prune_unmapped, || {
+            use crate::transform::pruner::FieldPruner;
+            FieldPruner::new(mapping.clone())
         });
 
     pipeline
@@ -85,8 +89,10 @@ pub async fn create_producer(
         )
     };
 
+    let prune_unmapped = settings.mapped_columns_only();
+
     if settings.is_dry_run() {
-        let pipeline = pipeline_for_mapping(&mapping);
+        let pipeline = pipeline_for_mapping(&mapping, prune_unmapped);
         let validation_prod = ValidationProducer::new(ValidationProducerParams {
             source,
             destination,

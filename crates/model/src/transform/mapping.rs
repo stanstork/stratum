@@ -117,7 +117,7 @@ impl FieldTransformations {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.field_renames.is_empty()
+        self.field_renames.is_empty() && self.computed_fields.is_empty()
     }
 
     pub fn contains(&self, entity: &str) -> bool {

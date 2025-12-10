@@ -458,6 +458,17 @@ impl PlanBuilder {
                 left: Box::new(self.compile_expression(left)?),
                 right: Box::new(self.compile_expression(right)?),
             }),
+            ExpressionKind::FunctionCall { name, arguments } => {
+                let compiled_args = arguments
+                    .iter()
+                    .map(|arg| self.compile_expression(arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                Ok(CompiledExpression::FunctionCall {
+                    name: name.clone(),
+                    args: compiled_args,
+                })
+            }
             _ => Ok(CompiledExpression::Literal(Value::Null)),
         }
     }
@@ -845,7 +856,22 @@ mod tests {
 
     #[test]
     fn test_build_pagination_with_all_fields() {
-        let builder = PlanBuilder::new();
+        let mut builder = PlanBuilder::new();
+
+        // Add a test connection
+        let mut properties = Properties::new();
+        properties.insert("url".to_string(), Value::String("postgres://localhost/test".to_string()));
+
+        builder.connections.insert(
+            "postgres".to_string(),
+            Connection {
+                name: "postgres".to_string(),
+                driver: "postgres".to_string(),
+                properties,
+                nested_configs: HashMap::new(),
+            },
+        );
+
         let pipeline = PipelineBlock {
             name: "test".to_string(),
             description: None,

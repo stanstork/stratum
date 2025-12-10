@@ -26,12 +26,6 @@ impl Transform for ComputedTransform {
         if let Some(computed_fields) = self.mapping.field_mappings.computed_fields.get(&table) {
             for computed in computed_fields {
                 if let Some(value) = computed.expression.evaluate(&row, &self.mapping) {
-                    // Skip cross-entity references (DotPath with 2+ segments) as they are handled during data loading
-                    if let CompiledExpression::DotPath(segments) = &computed.expression {
-                        if segments.len() >= 2 {
-                            continue;
-                        }
-                    }
                     update_row(&mut row, &computed.name, &value);
                 } else {
                     warn!(

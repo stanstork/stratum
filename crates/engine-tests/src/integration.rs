@@ -20,13 +20,24 @@ mod tests {
         reset_postgres_schema().await;
 
         let tmpl = r#"
-            CONNECTIONS(
-                SOURCE(MYSQL,  "{mysql_url}"),
-                DESTINATION(POSTGRES, "{pg_url}")
-            );
-            MIGRATE(
-                SOURCE(TABLE, actor) -> DEST(TABLE, actor) []
-            );
+            connection "mysql_source" {
+                driver = "mysql"
+                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_actor" {
+                from {
+                    connection = connection.mysql_source
+                    table      = "actor"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "actor"
+                }
+            }
         "#;
 
         run_smql(tmpl, "sakila").await;
@@ -44,15 +55,27 @@ mod tests {
         reset_postgres_schema().await;
 
         let tmpl = r#"
-            CONNECTIONS(
-                SOURCE(MYSQL,  "{mysql_url}"),
-                DESTINATION(POSTGRES, "{pg_url}")
-            );
-            MIGRATE(
-                SOURCE(TABLE, actor) -> DEST(TABLE, actor) [
-                    SETTINGS(CREATE_MISSING_TABLES=TRUE)
-                ]
-            );
+            connection "mysql_source" {
+                driver = "mysql"
+                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_actor" {
+                from {
+                    connection = connection.mysql_source
+                    table      = "actor"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "actor"
+                }
+                settings {
+                    create_missing_tables = true
+                }
+            }
         "#;
 
         run_smql(tmpl, "sakila").await;
@@ -78,16 +101,30 @@ mod tests {
         execute(ACTORS_TABLE_DDL).await;
 
         let tmpl = r#"
-            CONNECTIONS(
-                SOURCE(MYSQL,  "{mysql_url}"),
-                DESTINATION(POSTGRES, "{pg_url}")
-            );
-            MIGRATE(
-                SOURCE(TABLE, actor) -> DEST(TABLE, actor) [
-                    SETTINGS(CREATE_MISSING_COLUMNS=TRUE),
-                    MAP(CONCAT(actor[first_name], actor[last_name]) -> full_name)
-                ]
-            );
+            connection "mysql_source" {
+                driver = "mysql"
+                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_actor" {
+                from {
+                    connection = connection.mysql_source
+                    table      = "actor"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "actor"
+                }
+                select {
+                    full_name = concat(actor.first_name, actor.last_name)
+                }
+                settings {
+                    create_missing_columns = true
+                }
+            }
         "#;
 
         run_smql(tmpl, "sakila").await;
@@ -110,13 +147,27 @@ mod tests {
         reset_postgres_schema().await;
 
         let tmpl = r#"
-            CONNECTIONS(
-                SOURCE(MYSQL,  "{mysql_url}"),
-                DESTINATION(POSTGRES, "{pg_url}")
-            );
-            MIGRATE(
-                SOURCE(TABLE, film) -> DEST(TABLE, film) [SETTINGS(INFER_SCHEMA=TRUE)]
-            );
+            connection "mysql_source" {
+                driver = "mysql"
+                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_film" {
+                from {
+                    connection = connection.mysql_source
+                    table      = "film"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "film"
+                }
+                settings {
+                    infer_schema = true
+                }
+            }
         "#;
 
         run_smql(tmpl, "sakila").await;
@@ -228,16 +279,32 @@ mod tests {
         reset_postgres_schema().await;
 
         let tmpl = r#"
-            CONNECTIONS(
-                SOURCE(MYSQL,  "{mysql_url}"),
-                DESTINATION(POSTGRES, "{pg_url}")
-            );
-            MIGRATE(
-                SOURCE(TABLE, orders) -> DEST(TABLE, orders_flat) [
-                    SETTINGS(CREATE_MISSING_TABLES=TRUE,IGNORE_CONSTRAINTS=TRUE,COPY_COLUMNS=MAP_ONLY),
-                    MAP(id->order_id)
-                ]
-            );
+            connection "mysql_source" {
+                driver = "mysql"
+                url    = "mysql://user:password@localhost:3306/testdb"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_orders" {
+                from {
+                    connection = connection.mysql_source
+                    table      = "orders"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "orders_flat"
+                }
+                select {
+                    id = orders.id
+                }
+                settings {
+                    create_missing_tables = true
+                    ignore_constraints    = true
+                    copy_columns          = "MAP_ONLY"
+                }
+            }
         "#;
 
         run_smql(tmpl, "orders").await;
@@ -247,7 +314,7 @@ mod tests {
             .unwrap();
 
         assert_row_count("orders", "orders", "orders_flat").await;
-        assert_column_exists("orders_flat", "order_id", true).await;
+        assert_column_exists("orders_flat", "id", true).await;
         assert_eq!(
             1,
             dest_columns.len(),
@@ -304,13 +371,24 @@ mod tests {
         execute(ACTORS_TABLE_DDL).await;
 
         let tmpl = r#"
-            CONNECTIONS(
-                SOURCE(MYSQL,  "{mysql_url}"),
-                DESTINATION(POSTGRES, "{pg_url}")
-            );
-            MIGRATE(
-                SOURCE(TABLE, actor) -> DEST(TABLE, actor) []
-            );
+            connection "mysql_source" {
+                driver = "mysql"
+                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_actor" {
+                from {
+                    connection = connection.mysql_source
+                    table      = "actor"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "actor"
+                }
+            }
         "#;
 
         run_smql(tmpl, "sakila").await;
@@ -381,16 +459,31 @@ mod tests {
         reset_postgres_schema().await;
 
         let tmpl = r#"
-            CONNECTIONS(
-                SOURCE(MYSQL,  "{mysql_url}"),
-                DESTINATION(POSTGRES, "{pg_url}")
-            );
-            MIGRATE(
-                SOURCE(TABLE, actor) -> DEST(TABLE, actor) [
-                    SETTINGS(CREATE_MISSING_TABLES=TRUE,IGNORE_CONSTRAINTS=TRUE),
-                    MAP(CONCAT(actor[first_name], actor[last_name]) -> full_name)
-                ]
-            );
+            connection "mysql_source" {
+                driver = "mysql"
+                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_actor" {
+                from {
+                    connection = connection.mysql_source
+                    table      = "actor"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "actor"
+                }
+                select {
+                    full_name = concat(actor.first_name, actor.last_name)
+                }
+                settings {
+                    create_missing_tables = true
+                    ignore_constraints    = true
+                }
+            }
         "#;
 
         run_smql(tmpl, "sakila").await;
@@ -422,16 +515,31 @@ mod tests {
         reset_postgres_schema().await;
 
         let tmpl = r#"
-            CONNECTIONS(
-                SOURCE(MYSQL,  "{mysql_url}"),
-                DESTINATION(POSTGRES, "{pg_url}")
-            );
-            MIGRATE(
-                SOURCE(TABLE, orders) -> DEST(TABLE, orders_flat) [
-                    SETTINGS(CREATE_MISSING_TABLES=TRUE,IGNORE_CONSTRAINTS=TRUE),
-                    LOAD(TABLES(users),MATCH(ON(users[id] -> orders[user_id])))
-                ]
-            );
+            connection "mysql_source" {
+                driver = "mysql"
+                url    = "mysql://user:password@localhost:3306/testdb"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_orders" {
+                from {
+                    connection = connection.mysql_source
+                    table      = "orders"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "orders_flat"
+                }
+                with {
+                    users    from users    where users.id == orders.user_id
+                }
+                settings {
+                    create_missing_tables = true
+                    ignore_constraints    = true
+                }
+            }
         "#;
 
         run_smql(tmpl, "orders").await;
@@ -472,21 +580,38 @@ mod tests {
         reset_postgres_schema().await;
 
         let tmpl = r#"
-            CONNECTIONS(
-                SOURCE(MYSQL,  "{mysql_url}"),
-                DESTINATION(POSTGRES, "{pg_url}")
-            );
-            MIGRATE(
-                SOURCE(TABLE, orders) -> DEST(TABLE, orders_flat) [
-                    SETTINGS(CREATE_MISSING_TABLES=TRUE,IGNORE_CONSTRAINTS=TRUE),
-                    LOAD(TABLES(users,order_items,products),MATCH(
-                        ON(users[id] -> orders[user_id]),
-                        ON(order_items[order_id] -> orders[id]),
-                        ON(products[id] -> order_items[id])
-                    )),
-                    MAP(users[email] -> user_email, order_items[price] -> order_price, products[name] -> product_name)
-                ]
-            );
+            connection "mysql_source" {
+                driver = "mysql"
+                url    = "mysql://user:password@localhost:3306/testdb"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_orders" {
+                from {
+                    connection = connection.mysql_source
+                    table      = "orders"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "orders_flat"
+                }
+                with {
+                    users       from users    where users.id == orders.user_id
+                    order_items from order_items where order_items.order_id == orders.id
+                    products    from products where products.id == order_items.id
+                }
+                select {
+                    user_email    = users.email
+                    order_price   = order_items.price
+                    product_name  = products.name
+                }
+                settings {
+                    create_missing_tables = true
+                    ignore_constraints    = true
+                }
+            }
         "#;
 
         run_smql(tmpl, "orders").await;
@@ -523,16 +648,31 @@ mod tests {
         reset_postgres_schema().await;
 
         let tmpl = r#"
-            CONNECTIONS(
-                SOURCE(MYSQL,  "{mysql_url}"),
-                DESTINATION(POSTGRES, "{pg_url}")
-            );
-            MIGRATE(
-                SOURCE(TABLE, orders) -> DEST(TABLE, orders) [
-                    SETTINGS(CREATE_MISSING_TABLES=TRUE,IGNORE_CONSTRAINTS=TRUE),
-                    FILTER(orders[total] > 400)
-                ]
-            );
+            connection "mysql_source" {
+                driver = "mysql"
+                url    = "mysql://user:password@localhost:3306/testdb"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_orders" {
+                from {
+                    connection = connection.mysql_source
+                    table      = "orders"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "orders"
+                }
+                where "valid_orders" {
+                    orders.total > 400
+                }
+                settings {
+                    create_missing_tables = true
+                    ignore_constraints    = true
+                }
+            }
         "#;
 
         run_smql(tmpl, "orders").await;
@@ -563,21 +703,42 @@ mod tests {
         reset_postgres_schema().await;
 
         let tmpl = r#"
-            CONNECTIONS(
-                SOURCE(MYSQL,  "{mysql_url}"),
-                DESTINATION(POSTGRES, "{pg_url}")
-            );
-            MIGRATE(
-                SOURCE(TABLE, orders) -> DEST(TABLE, orders) [
-                    SETTINGS(CREATE_MISSING_TABLES=TRUE,IGNORE_CONSTRAINTS=TRUE),
-                    LOAD(TABLES(users,order_items,products),MATCH(
-                        ON(users[id] -> orders[user_id]),
-                        ON(order_items[order_id] -> orders[id]),
-                        ON(products[id] -> order_items[id])
-                    )),
-                    FILTER(AND(orders[total]>400, OR(users[id]!=1, order_items[price]<1200)))
-                ]
-            );
+            connection "mysql_source" {
+                driver = "mysql"
+                url    = "mysql://user:password@localhost:3306/testdb"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_orders" {
+                from {
+                    connection = connection.mysql_source
+                    table      = "orders"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "orders"
+                }
+                with {
+                    users       from users    where users.id == orders.user_id
+                    order_items from order_items where order_items.order_id == orders.id
+                    products    from products where products.id == order_items.id
+                }
+                where "valid_orders" {
+                    orders.total > 400
+                    users.id != 1 || order_items.price < 1200
+                }
+                select {
+                    user_email    = users.email
+                    order_price   = order_items.price
+                    product_name  = products.name
+                }
+                settings {
+                    create_missing_tables = true
+                    ignore_constraints    = true
+                }
+            }
         "#;
 
         run_smql(tmpl, "orders").await;
@@ -605,12 +766,24 @@ mod tests {
 
         let csv_path = "src/data/customers.csv";
         let tmpl = r#"
-            CONNECTIONS(
-                DESTINATION(POSTGRES, "{pg_url}")
-            );
-            MIGRATE(
-                SOURCE(CSV, "{csv_path}") -> DEST(TABLE, customers) []
-            );
+            connection "csv_source" {
+                driver = "csv"
+                path   = "src/data/customers.csv"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_customers" {
+                from {
+                    connection = connection.csv_source
+                    table      = "customers"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "customers"
+                }
+            }
         "#
         .replace("{csv_path}", csv_path)
         .to_string();
@@ -634,14 +807,27 @@ mod tests {
 
         let csv_path = "src/data/customers.csv";
         let tmpl = r#"
-            CONNECTIONS(
-                DESTINATION(POSTGRES, "{pg_url}")
-            );
-            MIGRATE(
-                SOURCE(CSV, "{csv_path}") -> DEST(TABLE, customers) [
-                    SETTINGS(CREATE_MISSING_TABLES=TRUE,CSV_HEADER=TRUE)
-                ]
-            );
+            connection "csv_source" {
+                driver = "csv"
+                path   = "src/data/customers.csv"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_customers" {
+                from {
+                    connection = connection.csv_source
+                    table      = "customers"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "customers"
+                }
+                settings {
+                    create_missing_tables = true
+                }
+            }
         "#
         .replace("{csv_path}", csv_path)
         .to_string();
@@ -678,17 +864,30 @@ mod tests {
 
         let csv_path = "src/data/customers.csv";
         let tmpl = r#"
-            CONNECTIONS(
-                DESTINATION(POSTGRES, "{pg_url}")
-            );
-            MIGRATE(
-                SOURCE(CSV, "{csv_path}") -> DEST(TABLE, customers) [
-                    SETTINGS(CREATE_MISSING_COLUMNS=TRUE,CSV_HEADER=TRUE),
-                    MAP(
-                        CONCAT(customers[first_name], customers[last_name]) -> full_name
-                    )
-                ]
-            );
+            connection "csv_source" {
+                driver = "csv"
+                path   = "src/data/customers.csv"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_customers" {
+                from {
+                    connection = connection.csv_source
+                    table      = "customers"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "customers"
+                }
+                select {
+                    full_name = concat(customers.first_name, customers.last_name)
+                }
+                settings {
+                    create_missing_columns = true
+                }
+            }
         "#
         .replace("{csv_path}", csv_path)
         .to_string();
@@ -730,18 +929,31 @@ mod tests {
 
         let csv_path = "src/data/customers.csv";
         let tmpl = r#"
-            CONNECTIONS(
-                DESTINATION(POSTGRES, "{pg_url}")
-            );
-            MIGRATE(
-                SOURCE(CSV, "{csv_path}") -> DEST(TABLE, customers) [
-                    SETTINGS(CREATE_MISSING_TABLES=TRUE,CSV_HEADER=TRUE),
-                    MAP(
-                        index -> id,
-                        CONCAT(customers[first_name], customers[last_name]) -> full_name
-                    )
-                ]
-            );
+            connection "csv_source" {
+                driver = "csv"
+                path   = "src/data/customers.csv"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_customers" {
+                from {
+                    connection = connection.csv_source
+                    table      = "customers"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "customers"
+                }
+                select {
+                    id = customers.index
+                    full_name = concat(customers.first_name, customers.last_name)
+                }
+                settings {
+                    create_missing_tables = true
+                }
+            }
         "#
         .replace("{csv_path}", csv_path)
         .to_string();
@@ -777,15 +989,30 @@ mod tests {
 
         let csv_path = "src/data/customers.csv";
         let tmpl = r#"
-            CONNECTIONS(
-                DESTINATION(POSTGRES, "{pg_url}")
-            );
-            MIGRATE(
-                SOURCE(CSV, "{csv_path}") -> DEST(TABLE, customers) [
-                    SETTINGS(CREATE_MISSING_TABLES=TRUE,CSV_HEADER=TRUE),
-                    FILTER(customers[country] = "Poland")
-                ]
-            );
+            connection "csv_source" {
+                driver = "csv"
+                path   = "src/data/customers.csv"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_customers" {
+                from {
+                    connection = connection.csv_source
+                    table      = "customers"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "customers"
+                }
+                where "valid_country" {
+                    customers.country == Poland
+                }
+                settings {
+                    create_missing_tables = true
+                }
+            }
         "#
         .replace("{csv_path}", csv_path)
         .to_string();

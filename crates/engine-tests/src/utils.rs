@@ -79,8 +79,7 @@ pub enum DbType {
 }
 
 /// Parse & run the SMQL plan, panicking on any error
-pub async fn run_smql(template: &str, source_db: &str) {
-    let smql = templated_smql(template, source_db);
+pub async fn run_smql(smql: &str, source_db: &str) {
     let doc = parse(&smql).expect("parse smql");
     let plan = ExecutionPlan::build(&doc).expect("build execution plan");
     let cancel = CancellationToken::new();
