@@ -1,12 +1,10 @@
 use super::pipeline::Transform;
-use crate::expr::eval::Evaluator;
+use crate::{error::TransformError, expr::eval::Evaluator};
 use model::{
     core::value::{FieldValue, Value},
-    execution::expr::CompiledExpression,
     records::row::RowData,
     transform::mapping::TransformationMetadata,
 };
-use tracing::warn;
 
 pub struct ComputedTransform {
     mapping: TransformationMetadata,
@@ -19,23 +17,22 @@ impl ComputedTransform {
 }
 
 impl Transform for ComputedTransform {
-    fn apply(&self, row: &RowData) -> RowData {
-        let mut row = row.clone();
+    fn apply(&self, row: &mut RowData) -> Result<(), TransformError> {
         let table = row.entity.clone();
 
         if let Some(computed_fields) = self.mapping.field_mappings.computed_fields.get(&table) {
             for computed in computed_fields {
-                if let Some(value) = computed.expression.evaluate(&row, &self.mapping) {
-                    update_row(&mut row, &computed.name, &value);
+                if let Some(value) = computed.expression.evaluate(row, &self.mapping) {
+                    update_row(row, &computed.name, &value);
                 } else {
-                    warn!(
+                    return Err(TransformError::Transformation(format!(
                         "Failed to evaluate computed column `{}` in `{}`",
                         computed.name, table
-                    );
+                    )));
                 }
             }
         }
-        row
+        Ok(())
     }
 }
 

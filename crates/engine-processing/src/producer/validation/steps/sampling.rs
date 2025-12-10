@@ -1,4 +1,5 @@
 use crate::{error::ProducerError, transform::pipeline::TransformPipeline};
+use engine_config::settings::CopyColumns;
 use engine_config::{
     report::{finding::Finding, transform::TransformationRecord},
     settings::validated::ValidatedSettings,
@@ -8,7 +9,6 @@ use engine_core::connectors::source::Source;
 use model::{
     pagination::cursor::Cursor, records::row::RowData, transform::mapping::TransformationMetadata,
 };
-use engine_config::settings::CopyColumns;
 use std::collections::{HashMap, HashSet};
 
 /// Result of sampling and transformation
@@ -156,19 +156,46 @@ impl SamplingStep {
                     .into_iter()
                     .map(|input_row| {
                         let input_clone = input_row.clone();
-                        let mut output_row = self.pipeline.apply(&input_row);
+                        let mut output_row = input_row.clone();
 
-                        if output_row.entity.is_empty() {
-                            output_row.entity = input_clone.entity.clone();
-                        }
-                        self.prune_row(&mut output_row, &mut prune_findings, &mut omitted_columns);
-                        validator.validate(&output_row);
+                        match self.pipeline.apply(&mut output_row) {
+                            Ok(true) => {
+                                // Row passed through successfully
+                                if output_row.entity.is_empty() {
+                                    output_row.entity = input_clone.entity.clone();
+                                }
+                                self.prune_row(
+                                    &mut output_row,
+                                    &mut prune_findings,
+                                    &mut omitted_columns,
+                                );
+                                validator.validate(&output_row);
 
-                        TransformationRecord {
-                            input: input_clone,
-                            output: Some(output_row),
-                            error: None,
-                            warnings: None,
+                                TransformationRecord {
+                                    input: input_clone,
+                                    output: Some(output_row),
+                                    error: None,
+                                    warnings: None,
+                                }
+                            }
+                            Ok(false) => {
+                                // Row was filtered out
+                                TransformationRecord {
+                                    input: input_clone,
+                                    output: None,
+                                    error: Some("Row filtered out by pipeline".to_string()),
+                                    warnings: None,
+                                }
+                            }
+                            Err(e) => {
+                                // Transform failed
+                                TransformationRecord {
+                                    input: input_clone,
+                                    output: None,
+                                    error: Some(format!("Transformation error: {}", e)),
+                                    warnings: None,
+                                }
+                            }
                         }
                     })
                     .collect();

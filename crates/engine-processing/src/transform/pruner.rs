@@ -1,47 +1,37 @@
 use super::pipeline::Transform;
+use crate::error::TransformError;
 use model::{records::row::RowData, transform::mapping::TransformationMetadata};
+use std::collections::HashSet;
 
 /// Prunes unmapped columns from rows when copy_columns = MAP_ONLY.
-/// Keeps only fields that are explicitly mapped or computed.
 pub struct FieldPruner {
-    mapping: TransformationMetadata,
+    metadata: TransformationMetadata,
 }
 
 impl FieldPruner {
-    pub fn new(mapping: TransformationMetadata) -> Self {
-        Self { mapping }
+    pub fn new(metadata: TransformationMetadata) -> Self {
+        Self { metadata }
     }
 }
 
 impl Transform for FieldPruner {
-    fn apply(&self, row: &RowData) -> RowData {
-        let mut row = row.clone();
+    fn apply(&self, row: &mut RowData) -> Result<(), TransformError> {
         let table = row.entity.clone();
-
-        eprintln!("=== FieldPruner for table '{}', row has {} fields before pruning", table, row.field_values.len());
-
-        // Get the list of fields that should be kept
-        let mut keep_fields = std::collections::HashSet::new();
+        let mut keep_fields = HashSet::new();
 
         // Add all target fields from field renames (mapped fields)
-        if let Some(field_renames) = self.mapping.field_mappings.field_renames.get(&table) {
-            eprintln!("=== Found {} field renames", field_renames.source_to_target.len());
+        if let Some(field_renames) = self.metadata.field_mappings.field_renames.get(&table) {
             for target_field in field_renames.source_to_target.keys() {
-                eprintln!("=== Keeping mapped field: {}", target_field);
                 keep_fields.insert(target_field.to_ascii_lowercase());
             }
         }
 
         // Add all computed field names
-        if let Some(computed_fields) = self.mapping.field_mappings.computed_fields.get(&table) {
-            eprintln!("=== Found {} computed fields", computed_fields.len());
+        if let Some(computed_fields) = self.metadata.field_mappings.computed_fields.get(&table) {
             for computed in computed_fields {
-                eprintln!("=== Keeping computed field: {}", computed.name);
                 keep_fields.insert(computed.name.to_ascii_lowercase());
             }
         }
-
-        eprintln!("=== Total fields to keep: {}", keep_fields.len());
 
         // Filter the row to only keep the allowed fields
         row.field_values.retain(|field| {
@@ -52,7 +42,6 @@ impl Transform for FieldPruner {
             keep
         });
 
-        eprintln!("=== After pruning, row has {} fields", row.field_values.len());
-        row
+        Ok(())
     }
 }

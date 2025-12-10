@@ -2,12 +2,11 @@ use crate::{
     error::ProducerError,
     item::ItemId,
     producer::{
-        DataProducer, ProducerStatus,
+        DataProducer, ProducerStatus, build_transform_pipeline,
         components::{
             coordinator::BatchCoordinator, reader::SnapshotReader, transformer::TransformService,
         },
         config::ProducerConfig,
-        pipeline_for_mapping,
     },
     state_manager::StateManager,
 };
@@ -64,12 +63,11 @@ impl LiveProducer {
 
         let config = ProducerConfig::from_settings(settings);
         let ids = ItemId::new(run_id, item_id, part_id);
-        let prune_unmapped = settings.mapped_columns_only();
 
         // Create components
         let reader = SnapshotReader::new(source, RetryPolicy::for_database(), config.batch_size);
 
-        let pipeline = pipeline_for_mapping(&mapping, prune_unmapped);
+        let pipeline = build_transform_pipeline(&mapping, settings);
         let transformer = TransformService::new(pipeline, config.transform_concurrency);
 
         let state_manager = StateManager::new(ids.clone(), state_store);

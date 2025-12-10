@@ -1,4 +1,5 @@
 use super::error::SettingsError;
+use crate::settings::CopyColumns;
 use crate::{
     report::dry_run::DryRunReport,
     settings::{
@@ -18,12 +19,10 @@ use engine_core::{
         destination::{DataDestination, Destination},
         source::{DataSource, Source},
     },
-    context::item::ItemContext,
     schema::{plan::SchemaPlan, types::TypeEngine},
 };
 use futures::lock::Mutex;
 use model::{core::data_type::DataType, transform::mapping::TransformationMetadata};
-use crate::settings::CopyColumns;
 use std::sync::Arc;
 
 pub struct SchemaSettingContext {

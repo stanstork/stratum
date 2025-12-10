@@ -1,7 +1,7 @@
 use crate::{
     connectors::{
         destination::{DataDestination, Destination},
-        source::{DataFormat, DataSource, Source},
+        source::{DataSource, Source},
     },
     state::sled_store::SledStateStore,
 };
