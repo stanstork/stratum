@@ -11,13 +11,14 @@ use chrono::{TimeZone, Utc};
 use chrono_tz::Tz;
 use model::{
     core::value::Value,
+    execution::pipeline::Pagination,
     pagination::{
         cursor::{Cursor, QualCol},
         offset_config::OffsetConfig,
     },
     records::row::RowData,
 };
-use std::{convert::TryFrom, sync::Arc};
+use std::{convert::TryFrom, str::FromStr, sync::Arc};
 
 #[async_trait]
 pub trait OffsetStrategy: Send + Sync {
@@ -476,72 +477,39 @@ impl OffsetStrategyFactory {
         }
     }
 
-    /// Build a strategy from SMQL offset syntax.
-    pub fn from_smql(smql_offset: &smql_syntax::ast::offset::Offset) -> Arc<dyn OffsetStrategy> {
-        let mut strategy: Option<String> = None;
-        let mut cursor: Option<QualCol> = None;
-        let mut tiebreaker: Option<QualCol> = None;
-        let mut timezone: Option<String> = None;
+    pub fn from_pagination(pagination: &Option<Pagination>) -> Arc<dyn OffsetStrategy> {
+        if let Some(pagination) = pagination {
+            let mut cursor: Option<QualCol> = None;
+            let mut tiebreaker: Option<QualCol> = None;
+            let mut timezone: Option<String> = None;
 
-        for pair in &smql_offset.pairs {
-            match pair.key {
-                smql_syntax::ast::offset::OffsetKey::Strategy => {
-                    strategy = match &pair.value {
-                        smql_syntax::ast::expr::Expression::Identifier(s) => Some(s.clone()),
-                        _ => panic!("Offset strategy must be an identifier"),
-                    }
-                }
-                smql_syntax::ast::offset::OffsetKey::Cursor => {
-                    cursor = match &pair.value {
-                        smql_syntax::ast::expr::Expression::Identifier(s) => Some(QualCol {
-                            table: "".to_string(),
-                            column: s.clone(),
-                        }),
-                        smql_syntax::ast::expr::Expression::Lookup {
-                            entity,
-                            key,
-                            field: _,
-                        } => Some(QualCol {
-                            table: entity.clone(),
-                            column: key.clone(),
-                        }),
-                        _ => panic!("Offset cursor must be an identifier"),
-                    }
-                }
-                smql_syntax::ast::offset::OffsetKey::TieBreaker => {
-                    tiebreaker = match &pair.value {
-                        smql_syntax::ast::expr::Expression::Identifier(s) => Some(QualCol {
-                            table: "".to_string(),
-                            column: s.clone(),
-                        }),
-                        smql_syntax::ast::expr::Expression::Lookup {
-                            entity,
-                            key,
-                            field: _,
-                        } => Some(QualCol {
-                            table: entity.clone(),
-                            column: key.clone(),
-                        }),
-                        _ => panic!("Offset tiebreaker must be an identifier"),
-                    }
-                }
-                smql_syntax::ast::offset::OffsetKey::TimeZone => {
-                    timezone = match &pair.value {
-                        smql_syntax::ast::expr::Expression::Identifier(s) => Some(s.clone()),
-                        _ => panic!("Offset timezone must be an identifier"),
-                    }
-                }
+            if !pagination.cursor.is_empty() {
+                cursor = Some(QualCol::from_str(&pagination.cursor).unwrap());
             }
+
+            if let Some(tb) = &pagination.tiebreaker {
+                tiebreaker = Some(QualCol::from_str(tb).unwrap());
+            }
+
+            if let Some(tz) = &pagination.timezone {
+                timezone = Some(tz.clone());
+            }
+
+            let config = OffsetConfig {
+                strategy: Some(pagination.strategy.clone()),
+                cursor,
+                tiebreaker,
+                timezone,
+            };
+
+            OffsetStrategyFactory::from_config(&config)
+        } else {
+            OffsetStrategyFactory::default_strategy()
         }
+    }
 
-        let config = OffsetConfig {
-            strategy,
-            cursor,
-            tiebreaker,
-            timezone,
-        };
-
-        Self::from_config(&config)
+    pub fn default_strategy() -> Arc<dyn OffsetStrategy> {
+        Arc::new(DefaultOffset { offset: 0 })
     }
 }
 

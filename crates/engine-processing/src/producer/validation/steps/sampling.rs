@@ -1,12 +1,14 @@
 use crate::{error::ProducerError, transform::pipeline::TransformPipeline};
+use engine_config::settings::CopyColumns;
 use engine_config::{
     report::{finding::Finding, transform::TransformationRecord},
     settings::validated::ValidatedSettings,
     validation::schema_validator::DestinationSchemaValidator,
 };
 use engine_core::connectors::source::Source;
-use model::{pagination::cursor::Cursor, records::row::RowData, transform::mapping::EntityMapping};
-use smql_syntax::ast::setting::CopyColumns;
+use model::{
+    pagination::cursor::Cursor, records::row::RowData, transform::mapping::TransformationMetadata,
+};
 use std::collections::{HashMap, HashSet};
 
 /// Result of sampling and transformation
@@ -24,7 +26,7 @@ pub struct SampleResult {
 pub struct SamplingStep {
     source: Source,
     pipeline: TransformPipeline,
-    mapping: EntityMapping,
+    mapping: TransformationMetadata,
     settings: ValidatedSettings,
     cursor: Cursor,
     sample_size: usize,
@@ -34,7 +36,7 @@ impl SamplingStep {
     pub fn new(
         source: Source,
         pipeline: TransformPipeline,
-        mapping: EntityMapping,
+        mapping: TransformationMetadata,
         settings: ValidatedSettings,
         cursor: Cursor,
         sample_size: usize,
@@ -57,7 +59,7 @@ impl SamplingStep {
         let colmap = self
             .mapping
             .field_mappings
-            .column_mappings
+            .field_renames
             .get(table)
             .ok_or_else(|| Finding::new_mapping_missing(table, ""))?;
 
@@ -94,7 +96,7 @@ impl SamplingStep {
         if !self
             .mapping
             .field_mappings
-            .column_mappings
+            .field_renames
             .contains_key(table)
         {
             findings.push(Finding::new_mapping_missing(
@@ -120,7 +122,7 @@ impl SamplingStep {
             }
         });
 
-        let source_name = self.mapping.entity_name_map.reverse_resolve(table);
+        let source_name = self.mapping.entities.reverse_resolve(table);
         if !dropped.is_empty() {
             omitted
                 .entry(source_name)
@@ -154,19 +156,46 @@ impl SamplingStep {
                     .into_iter()
                     .map(|input_row| {
                         let input_clone = input_row.clone();
-                        let mut output_row = self.pipeline.apply(&input_row);
+                        let mut output_row = input_row.clone();
 
-                        if output_row.entity.is_empty() {
-                            output_row.entity = input_clone.entity.clone();
-                        }
-                        self.prune_row(&mut output_row, &mut prune_findings, &mut omitted_columns);
-                        validator.validate(&output_row);
+                        match self.pipeline.apply(&mut output_row) {
+                            Ok(true) => {
+                                // Row passed through successfully
+                                if output_row.entity.is_empty() {
+                                    output_row.entity = input_clone.entity.clone();
+                                }
+                                self.prune_row(
+                                    &mut output_row,
+                                    &mut prune_findings,
+                                    &mut omitted_columns,
+                                );
+                                validator.validate(&output_row);
 
-                        TransformationRecord {
-                            input: input_clone,
-                            output: Some(output_row),
-                            error: None,
-                            warnings: None,
+                                TransformationRecord {
+                                    input: input_clone,
+                                    output: Some(output_row),
+                                    error: None,
+                                    warnings: None,
+                                }
+                            }
+                            Ok(false) => {
+                                // Row was filtered out
+                                TransformationRecord {
+                                    input: input_clone,
+                                    output: None,
+                                    error: Some("Row filtered out by pipeline".to_string()),
+                                    warnings: None,
+                                }
+                            }
+                            Err(e) => {
+                                // Transform failed
+                                TransformationRecord {
+                                    input: input_clone,
+                                    output: None,
+                                    error: Some(format!("Transformation error: {}", e)),
+                                    warnings: None,
+                                }
+                            }
                         }
                     })
                     .collect();

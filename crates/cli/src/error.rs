@@ -1,5 +1,6 @@
 use engine_runtime::error::MigrationError;
-use smql_syntax::error::SmqlError;
+use model::execution::errors::ConvertError;
+use smql_syntax::errors::{BuildError, SmqlError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -41,4 +42,10 @@ pub enum CliError {
 
     #[error("Shutdown requested")]
     ShutdownRequested,
+
+    #[error("Plan build error: {0}")]
+    PlanBuild(#[from] BuildError),
+
+    #[error("Conversion error: {0}")]
+    Conversion(#[from] ConvertError),
 }

@@ -10,7 +10,7 @@ use engine_core::{
     context::item::ItemContext,
 };
 use futures::lock::Mutex;
-use model::transform::mapping::EntityMapping;
+use model::transform::mapping::TransformationMetadata;
 use std::sync::Arc;
 use tracing::info;
 
@@ -33,11 +33,7 @@ impl MigrationSetting for CreateMissingTablesSetting {
 
         // Resolve source name from the destination
         let dest_name = &self.context.destination.name;
-        let src_name = self
-            .context
-            .mapping
-            .entity_name_map
-            .reverse_resolve(dest_name);
+        let src_name = self.context.mapping.entities.reverse_resolve(dest_name);
 
         // Fetch metadata and build an empty plan
         let meta = self
@@ -57,7 +53,7 @@ impl MigrationSetting for CreateMissingTablesSetting {
                 if self
                     .context
                     .mapping
-                    .entity_name_map
+                    .entities
                     .contains_key(&fk.referenced_table)
                 {
                     plan.add_fk_def(&table_meta.name, fk.clone());
@@ -83,7 +79,7 @@ impl CreateMissingTablesSetting {
     pub async fn new(
         src: &Source,
         dest: &Destination,
-        mapping: &EntityMapping,
+        mapping: &TransformationMetadata,
         settings: &ValidatedSettings,
         dry_run_report: &Arc<Mutex<DryRunReport>>,
     ) -> Self {

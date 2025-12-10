@@ -1,4 +1,4 @@
-use crate::connectors::{filter::Filter, linked::LinkedSource};
+use crate::connectors::{filter::Filter, format::DataFormat, linked::LinkedSource};
 use connectors::{
     adapter::Adapter,
     error::AdapterError,
@@ -17,7 +17,6 @@ use planner::query::{
     dialect::{self, Dialect},
     offsets::OffsetStrategy,
 };
-use smql_syntax::ast::connection::DataFormat;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -28,6 +27,7 @@ pub enum DataSource {
     Database(Arc<Mutex<dyn DbDataSource<Error = DbError>>>),
     File(Arc<Mutex<dyn FileDataSource<Error = FileError>>>),
 }
+
 /// Represents a migration source,
 /// such as a database table, file, or API to be transformed and written to a destination.
 #[derive(Clone)]
@@ -42,14 +42,14 @@ pub struct Source {
 impl DataSource {
     pub fn from_adapter(
         format: DataFormat,
-        adapter: &Option<Adapter>,
+        adapter: &Adapter,
         linked: &Option<LinkedSource>,
         filter: &Option<Filter>,
         offset_strategy: Arc<dyn OffsetStrategy>,
     ) -> Result<Self, AdapterError> {
         match (format, adapter) {
             // MySQL + MySqlAdapter -> build a MySqlDataSource
-            (DataFormat::MySql, Some(Adapter::MySql(mysql_adapter))) => {
+            (DataFormat::MySql, Adapter::MySql(mysql_adapter)) => {
                 let sql_filter = filter.as_ref().map(|f| match f {
                     Filter::Sql(sql_filter) => sql_filter.clone(),
                     _ => panic!("Invalid filter type for MySQL"),
@@ -68,13 +68,13 @@ impl DataSource {
             }
 
             // Postgres + PostgresAdapter -> stub for future implementation
-            (DataFormat::Postgres, Some(Adapter::Postgres(_pg_adapter))) => {
+            (DataFormat::Postgres, Adapter::Postgres(_pg_adapter)) => {
                 // TODO: implement PostgresDataSource
                 panic!("Postgres data source is not implemented yet")
             }
 
             // CSV + FileAdapter -> build a CsvDataSource
-            (DataFormat::Csv, Some(Adapter::Csv(file_adapter))) => {
+            (DataFormat::Csv, Adapter::Csv(file_adapter)) => {
                 let csv_filter = filter.as_ref().map(|f| match f {
                     Filter::Csv(csv_filter) => csv_filter.clone(),
                     _ => panic!("Invalid filter type for CSV"),

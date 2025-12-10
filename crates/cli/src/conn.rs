@@ -1,7 +1,7 @@
 use crate::error::CliError;
 use async_trait::async_trait;
+use connectors::driver::SqlDriver;
 use mysql_async::prelude::*;
-use smql_syntax::ast::connection::DataFormat;
 use std::str::FromStr;
 use tokio_postgres::NoTls;
 use tracing::{error, info};
@@ -28,11 +28,11 @@ impl FromStr for ConnectionKind {
 }
 
 impl ConnectionKind {
-    pub fn data_format(&self) -> DataFormat {
+    pub fn driver(&self) -> SqlDriver {
         match self {
-            ConnectionKind::MySql => DataFormat::MySql,
-            ConnectionKind::Postgres => DataFormat::Postgres,
-            ConnectionKind::Ftp => DataFormat::Csv,
+            ConnectionKind::MySql => SqlDriver::MySql,
+            ConnectionKind::Postgres => SqlDriver::Postgres,
+            _ => panic!("No SQL driver for connection kind {:?}", self),
         }
     }
 }

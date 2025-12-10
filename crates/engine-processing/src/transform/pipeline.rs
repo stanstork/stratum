@@ -1,8 +1,14 @@
+use crate::error::TransformError;
 use model::records::row::RowData;
 use std::sync::Arc;
 
 pub trait Transform: Send + Sync {
-    fn apply(&self, row: &RowData) -> RowData;
+    fn apply(&self, row: &mut RowData) -> Result<(), TransformError>;
+}
+
+/// Trait for filter-like transforms that decide whether to keep a row.
+pub trait Filter: Send + Sync {
+    fn should_keep(&self, row: &RowData) -> bool;
 }
 
 pub trait TransformPipelineExt {
@@ -10,28 +16,73 @@ pub trait TransformPipelineExt {
     where
         T: Transform + 'static,
         F: FnOnce() -> T;
+
+    fn add_filter_if<F, Factory>(self, condition: bool, factory: Factory) -> Self
+    where
+        F: Filter + 'static,
+        Factory: FnOnce() -> F;
+}
+
+#[derive(Clone)]
+enum PipelineStage {
+    Transform(Arc<dyn Transform>),
+    Filter(Arc<dyn Filter>),
 }
 
 #[derive(Clone)]
 pub struct TransformPipeline {
-    transforms: Vec<Arc<dyn Transform>>,
+    stages: Vec<PipelineStage>,
 }
 
 impl TransformPipeline {
     pub fn new() -> Self {
-        Self {
-            transforms: Vec::new(),
-        }
+        Self { stages: Vec::new() }
     }
 
-    pub fn apply(&self, row: &RowData) -> RowData {
-        self.transforms
-            .iter()
-            .fold(row.clone(), |acc, transform| transform.apply(&acc))
+    /// Apply pipeline to a single row in-place.
+    pub fn apply(&self, row: &mut RowData) -> Result<bool, TransformError> {
+        for stage in &self.stages {
+            match stage {
+                PipelineStage::Transform(transform) => {
+                    transform.apply(row)?;
+                }
+                PipelineStage::Filter(filter) => {
+                    if !filter.should_keep(row) {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    pub fn apply_batch(
+        &self,
+        mut rows: Vec<RowData>,
+    ) -> (Vec<RowData>, Vec<RowData>, Vec<(RowData, TransformError)>) {
+        let mut successful = Vec::new();
+        let mut filtered = Vec::new();
+        let mut failed = Vec::new();
+
+        for mut row in rows.drain(..) {
+            match self.apply(&mut row) {
+                Ok(true) => successful.push(row),
+                Ok(false) => filtered.push(row),
+                Err(e) => failed.push((row, e)),
+            }
+        }
+
+        (successful, filtered, failed)
     }
 
     pub fn add_transform<T: Transform + 'static>(mut self, transform: T) -> Self {
-        self.transforms.push(Arc::new(transform));
+        self.stages
+            .push(PipelineStage::Transform(Arc::new(transform)));
+        self
+    }
+
+    pub fn add_filter<F: Filter + 'static>(mut self, filter: F) -> Self {
+        self.stages.push(PipelineStage::Filter(Arc::new(filter)));
         self
     }
 }
@@ -44,6 +95,17 @@ impl TransformPipelineExt for TransformPipeline {
     {
         if condition {
             self = self.add_transform(factory());
+        }
+        self
+    }
+
+    fn add_filter_if<F, Factory>(mut self, condition: bool, factory: Factory) -> Self
+    where
+        F: Filter + 'static,
+        Factory: FnOnce() -> F,
+    {
+        if condition {
+            self = self.add_filter(factory());
         }
         self
     }

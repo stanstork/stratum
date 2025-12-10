@@ -1,3 +1,5 @@
 pub mod ast;
-pub mod error;
+pub mod builder;
+pub mod errors;
 pub mod parser;
+pub mod semantic;

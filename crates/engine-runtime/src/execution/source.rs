@@ -1,19 +1,18 @@
 use crate::error::MigrationError;
 use connectors::{
-    adapter::Adapter, metadata::entity::EntityMetadata,
+    adapter::Adapter, driver::SqlDriver, metadata::entity::EntityMetadata,
     sql::base::metadata::provider::MetadataProvider,
 };
-use smql_syntax::ast::connection::DataFormat;
 use std::collections::HashMap;
 use tracing::info;
 
 pub async fn load_metadata(
     conn_str: &str,
-    format: DataFormat,
+    driver: SqlDriver,
 ) -> Result<HashMap<String, EntityMetadata>, MigrationError> {
     info!("Loading source metadata");
 
-    let adapter = Adapter::sql(format, conn_str).await?;
+    let adapter = Adapter::sql(driver, conn_str).await?;
     let names = adapter.get_sql().list_tables().await?;
 
     info!("Found {} source tables: {:?}", names.len(), names);

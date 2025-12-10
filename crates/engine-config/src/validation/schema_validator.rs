@@ -1,3 +1,4 @@
+use crate::settings::CopyColumns;
 use crate::{
     report::finding::{Finding, FindingKind},
     settings::validated::ValidatedSettings,
@@ -11,9 +12,8 @@ use engine_core::connectors::destination::Destination;
 use model::{
     core::value::{FieldValue, Value},
     records::row::RowData,
-    transform::mapping::EntityMapping,
+    transform::mapping::TransformationMetadata,
 };
-use smql_syntax::ast::setting::CopyColumns;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug)]
@@ -41,7 +41,7 @@ enum ColumnPolicy {
 }
 
 pub struct DestinationSchemaValidator {
-    mapping: EntityMapping,
+    mapping: TransformationMetadata,
     schemas: HashMap<String, TableMetadata>,
     findings: HashSet<Finding>,
 
@@ -55,7 +55,7 @@ pub struct DestinationSchemaValidator {
 impl DestinationSchemaValidator {
     pub async fn new(
         destination: &Destination,
-        mapping: EntityMapping,
+        mapping: TransformationMetadata,
         settings: &ValidatedSettings,
     ) -> Result<Self, DbError> {
         let adapter = destination.data_dest.adapter().await;
@@ -262,7 +262,7 @@ impl DestinationSchemaValidator {
     fn is_renamed_target(&self, table_name: &str, field_name: &str) -> bool {
         self.mapping
             .field_mappings
-            .column_mappings
+            .field_renames
             .get(table_name)
             .is_some_and(|map| map.source_to_target.values().any(|t| t == field_name))
     }

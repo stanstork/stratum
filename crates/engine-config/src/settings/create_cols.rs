@@ -17,8 +17,10 @@ use engine_core::{
     },
 };
 use futures::lock::Mutex;
-use model::{core::data_type::DataType, transform::mapping::EntityMapping};
-use smql_syntax::ast::expr::Expression;
+use model::{
+    core::data_type::DataType, execution::expr::CompiledExpression,
+    transform::mapping::TransformationMetadata,
+};
 use std::sync::Arc;
 
 pub struct CreateMissingColumnsSetting {
@@ -40,11 +42,7 @@ impl MigrationSetting for CreateMissingColumnsSetting {
             .fetch_meta(dest_name.clone())
             .await?;
 
-        let src_name = self
-            .context
-            .mapping
-            .entity_name_map
-            .reverse_resolve(&dest_name);
+        let src_name = self.context.mapping.entities.reverse_resolve(&dest_name);
         let src_meta = self
             .context
             .source
@@ -92,10 +90,12 @@ impl CreateMissingColumnsSetting {
         if let Some(computed) = self.context.mapping.field_mappings.get_computed(table) {
             for comp in computed.iter() {
                 if dest_meta.get_column(&comp.name).is_none() {
-                    // infer type (possibly lookup from another table)
+                    // infer type (possibly from a cross-entity reference)
                     let col_type = match &comp.expression {
-                        Expression::Lookup { entity: alias, .. } => {
-                            let table = self.context.mapping.entity_name_map.resolve(alias);
+                        CompiledExpression::DotPath(segments) if segments.len() >= 2 => {
+                            // Cross-entity reference (e.g., table.column)
+                            let alias = &segments[0];
+                            let table = self.context.mapping.entities.resolve(alias);
                             let meta = self.context.source.primary.fetch_meta(table).await?;
                             ExpressionWrapper(comp.expression.clone())
                                 .infer_type(&meta.columns(), &self.context.mapping, &source)
@@ -126,7 +126,7 @@ impl CreateMissingColumnsSetting {
     pub async fn new(
         src: &Source,
         dest: &Destination,
-        mapping: &EntityMapping,
+        mapping: &TransformationMetadata,
         settings: &ValidatedSettings,
         dry_run_report: &Arc<Mutex<DryRunReport>>,
     ) -> Self {

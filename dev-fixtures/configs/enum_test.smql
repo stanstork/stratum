@@ -1,10 +1,36 @@
-CONNECTIONS(
-    SOURCE(MYSQL,  "mysql://root:root@localhost:3306/migration_test"),
-    DESTINATION(POSTGRES, "postgres://user:password@localhost:5432/testdb")
-);
-MIGRATE(
-    SOURCE(TABLE, users) -> DEST(TABLE, users) [
-        SETTINGS(CREATE_MISSING_TABLES=TRUE, BATCH_SIZE=50000),
-        OFFSET(STRATEGY -> pk, CURSOR -> users[id])
-    ]
-);
+connection "mysql_source" {
+    driver = "mysql"
+    url    = "mysql://user:password@localhost:3306/testdb"
+}
+connection "pg_destination" {
+    driver = "postgres"
+    url    = "postgres://user:password@localhost:5432/testdb"
+}
+pipeline "migrate_orders" {
+    from {
+        connection = connection.mysql_source
+        table      = "orders"
+    }
+    to {
+        connection = connection.pg_destination
+        table      = "orders"
+    }
+    with {
+        users       from users    where users.id == orders.user_id
+        order_items from order_items where order_items.order_id == orders.id
+        products    from products where products.id == order_items.id
+    }
+    where "valid_orders" {
+        orders.total > 400
+        users.id != 1 || order_items.price < 1200
+    }
+    select {
+        user_email    = users.email
+        order_price   = order_items.price
+        product_name  = products.name
+    }
+    settings {
+        create_missing_tables = true
+        ignore_constraints    = true
+    }
+}

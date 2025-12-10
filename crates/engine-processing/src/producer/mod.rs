@@ -8,13 +8,14 @@ use crate::{
         computed::ComputedTransform,
         mapping::{FieldMapper, TableMapper},
         pipeline::{TransformPipeline, TransformPipelineExt},
+        pruner::FieldPruner,
     },
 };
 use async_trait::async_trait;
 use engine_config::{report::dry_run::DryRunReport, settings::validated::ValidatedSettings};
 use engine_core::context::item::ItemContext;
 use futures::lock::Mutex;
-use model::{records::batch::Batch, transform::mapping::EntityMapping};
+use model::{records::batch::Batch, transform::mapping::TransformationMetadata};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -23,18 +24,27 @@ pub mod config;
 pub mod live;
 pub mod validation;
 
-fn pipeline_for_mapping(mapping: &EntityMapping) -> TransformPipeline {
+/// Builds a transform pipeline based on mapping metadata and settings.
+fn build_transform_pipeline(
+    mapping: &TransformationMetadata,
+    settings: &ValidatedSettings,
+) -> TransformPipeline {
     let mut pipeline = TransformPipeline::new();
 
+    // Add transforms based on what's defined in the mapping metadata and settings.
+    // Each transform is only added if it's needed.
     pipeline = pipeline
-        .add_if(!mapping.entity_name_map.is_empty(), || {
-            TableMapper::new(mapping.entity_name_map.clone())
+        .add_if(!mapping.entities.is_empty(), || {
+            TableMapper::new(mapping.entities.clone())
         })
-        .add_if(!mapping.field_mappings.is_empty(), || {
+        .add_if(!mapping.field_mappings.field_renames.is_empty(), || {
             FieldMapper::new(mapping.field_mappings.clone())
         })
-        .add_if(!mapping.field_mappings.is_empty(), || {
+        .add_if(!mapping.field_mappings.computed_fields.is_empty(), || {
             ComputedTransform::new(mapping.clone())
+        })
+        .add_if(settings.mapped_columns_only(), || {
+            FieldPruner::new(mapping.clone())
         });
 
     pipeline
@@ -86,7 +96,7 @@ pub async fn create_producer(
     };
 
     if settings.is_dry_run() {
-        let pipeline = pipeline_for_mapping(&mapping);
+        let pipeline = build_transform_pipeline(&mapping, settings);
         let validation_prod = ValidationProducer::new(ValidationProducerParams {
             source,
             destination,

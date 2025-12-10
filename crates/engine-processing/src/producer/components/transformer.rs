@@ -1,66 +1,42 @@
 use crate::transform::pipeline::TransformPipeline;
-use futures::{StreamExt, stream};
 use model::records::row::RowData;
 use std::num::NonZeroUsize;
 
-/// Handles concurrent transformation of rows.
+/// Handles transformation of rows with batch processing.
 pub struct TransformService {
     pipeline: TransformPipeline,
-    concurrency: NonZeroUsize,
+    _concurrency: NonZeroUsize,
 }
 
 impl TransformService {
     pub fn new(pipeline: TransformPipeline, concurrency: NonZeroUsize) -> Self {
         Self {
             pipeline,
-            concurrency,
+            _concurrency: concurrency,
         }
     }
 
-    /// Apply transformations to a batch of rows concurrently.
+    /// Apply transformations to a batch of rows.
+    /// Returns only successfully transformed rows.
     pub async fn transform(&self, rows: Vec<RowData>) -> Vec<RowData> {
-        stream::iter(rows.into_iter().map(|row| {
-            let transform_pipeline = &self.pipeline;
-            async move { transform_pipeline.apply(&row) }
-        }))
-        .buffer_unordered(self.concurrency.get())
-        .collect()
-        .await
+        let (successful, _filtered, _failed) = self.pipeline.apply_batch(rows);
+        successful
     }
 
-    /// Transform rows and collect errors separately
+    /// Transform rows and collect errors and filtered rows separately.
+    /// Returns (successful_rows, filtered_rows, failed_rows_with_errors).
     pub async fn transform_with_errors(
         &self,
         rows: Vec<RowData>,
-    ) -> (Vec<RowData>, Vec<(RowData, String)>) {
-        let results: Vec<Result<RowData, (RowData, String)>> =
-            stream::iter(rows.into_iter().map(|row| {
-                let transform_pipeline = self.pipeline.clone();
-                let input_row = row.clone();
-                async move {
-                    let output = transform_pipeline.apply(&row);
-                    if output.field_values.is_empty() {
-                        Err((input_row, "Transform produced empty row".to_string()))
-                    } else {
-                        Ok(output)
-                    }
-                }
-            }))
-            .buffer_unordered(self.concurrency.get())
-            .collect()
-            .await;
+    ) -> (Vec<RowData>, Vec<RowData>, Vec<(RowData, String)>) {
+        let (successful, filtered, failed) = self.pipeline.apply_batch(rows);
 
-        let mut success = Vec::new();
-        let mut errors = Vec::new();
+        let failed_with_strings: Vec<(RowData, String)> = failed
+            .into_iter()
+            .map(|(row, err)| (row, err.to_string()))
+            .collect();
 
-        for result in results {
-            match result {
-                Ok(row) => success.push(row),
-                Err(e) => errors.push(e),
-            }
-        }
-
-        (success, errors)
+        (successful, filtered, failed_with_strings)
     }
 
     pub fn pipeline(&self) -> &TransformPipeline {

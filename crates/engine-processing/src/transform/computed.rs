@@ -1,45 +1,38 @@
 use super::pipeline::Transform;
-use crate::expr::eval::Evaluator;
+use crate::{error::TransformError, expr::eval::Evaluator};
 use model::{
     core::value::{FieldValue, Value},
     records::row::RowData,
-    transform::mapping::EntityMapping,
+    transform::mapping::TransformationMetadata,
 };
-use smql_syntax::ast::expr::Expression;
-use tracing::warn;
 
 pub struct ComputedTransform {
-    mapping: EntityMapping,
+    mapping: TransformationMetadata,
 }
 
 impl ComputedTransform {
-    pub fn new(mapping: EntityMapping) -> Self {
+    pub fn new(mapping: TransformationMetadata) -> Self {
         Self { mapping }
     }
 }
 
 impl Transform for ComputedTransform {
-    fn apply(&self, row: &RowData) -> RowData {
-        let mut row = row.clone();
+    fn apply(&self, row: &mut RowData) -> Result<(), TransformError> {
         let table = row.entity.clone();
 
         if let Some(computed_fields) = self.mapping.field_mappings.computed_fields.get(&table) {
             for computed in computed_fields {
-                if let Some(value) = computed.expression.evaluate(&row, &self.mapping) {
-                    if let Expression::Lookup { .. } = computed.expression {
-                        // Skip lookup expressions as they are handled during data loading
-                        continue;
-                    }
-                    update_row(&mut row, &computed.name, &value);
+                if let Some(value) = computed.expression.evaluate(row, &self.mapping) {
+                    update_row(row, &computed.name, &value);
                 } else {
-                    warn!(
+                    return Err(TransformError::Transformation(format!(
                         "Failed to evaluate computed column `{}` in `{}`",
                         computed.name, table
-                    );
+                    )));
                 }
             }
         }
-        row
+        Ok(())
     }
 }
 

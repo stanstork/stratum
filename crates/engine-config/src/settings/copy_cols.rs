@@ -1,6 +1,6 @@
 use super::{MigrationSetting, phase::MigrationSettingsPhase};
+use crate::settings::CopyColumns;
 use async_trait::async_trait;
-use smql_syntax::ast::setting::CopyColumns;
 
 pub struct CopyColumnsSetting(pub CopyColumns);
 

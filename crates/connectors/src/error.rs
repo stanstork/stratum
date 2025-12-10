@@ -33,4 +33,12 @@ pub enum AdapterError {
     /// Invalid metadata error.
     #[error("Invalid Metadata: {0}")]
     InvalidMetadata(String),
+
+    /// Unsupported driver error.
+    #[error("Unsupported driver: {0}")]
+    UnsupportedDriver(String),
+
+    /// Missing required property error.
+    #[error("Missing required property: {0}")]
+    MissingProperty(String),
 }

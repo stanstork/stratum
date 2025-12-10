@@ -1,4 +1,5 @@
 use super::error::SettingsError;
+use crate::settings::CopyColumns;
 use crate::{
     report::dry_run::DryRunReport,
     settings::{
@@ -18,18 +19,16 @@ use engine_core::{
         destination::{DataDestination, Destination},
         source::{DataSource, Source},
     },
-    context::item::ItemContext,
     schema::{plan::SchemaPlan, types::TypeEngine},
 };
 use futures::lock::Mutex;
-use model::{core::data_type::DataType, transform::mapping::EntityMapping};
-use smql_syntax::ast::setting::CopyColumns;
+use model::{core::data_type::DataType, transform::mapping::TransformationMetadata};
 use std::sync::Arc;
 
 pub struct SchemaSettingContext {
     pub source: Source,
     pub destination: Destination,
-    pub mapping: EntityMapping,
+    pub mapping: TransformationMetadata,
     pub settings: ValidatedSettings,
     pub dry_run_report: Arc<Mutex<DryRunReport>>,
     pub schema_manager: Box<dyn SchemaManager>,
@@ -39,7 +38,7 @@ impl SchemaSettingContext {
     pub async fn new(
         src: &Source,
         dest: &Destination,
-        mapping: &EntityMapping,
+        mapping: &TransformationMetadata,
         settings: &ValidatedSettings,
         dry_run_report: &Arc<Mutex<DryRunReport>>,
     ) -> Self {
@@ -98,17 +97,8 @@ impl SchemaSettingContext {
         &mut self,
         schema_plan: SchemaPlan,
     ) -> Result<(), SettingsError> {
-        if self
-            .destination
-            .format
-            .intersects(ItemContext::sql_databases())
-        {
-            self.schema_manager.infer_schema(&schema_plan).await?;
-            return Ok(());
-        }
-        Err(SettingsError::UnsupportedDestinationFormat(
-            self.destination.format.to_string(),
-        ))
+        self.schema_manager.infer_schema(&schema_plan).await?;
+        Ok(())
     }
 
     pub async fn build_schema_plan(&self) -> Result<SchemaPlan, SettingsError> {

@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 smql-syntax = { path = "../smql-syntax" }
 planner = { path = "../planner" }
+model = { path = "../model" }
+connectors = { path = "../connectors" }
 engine-runtime = { path = "../engine-runtime" }
 engine-config = { path = "../engine-config" }
 engine-core = { path = "../engine-core" }

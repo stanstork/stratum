@@ -107,3 +107,9 @@ pub enum StateError {
     #[error("Serialization error: {0}")]
     Serialization(String),
 }
+
+#[derive(Error, Debug)]
+pub enum TransformError {
+    #[error("Transformation failed: {0}")]
+    Transformation(String),
+}

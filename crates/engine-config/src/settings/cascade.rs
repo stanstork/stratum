@@ -16,13 +16,13 @@ use engine_core::{
     connectors::{
         destination::{DataDestination, Destination},
         filter::Filter,
+        format::DataFormat,
         source::{DataSource, Source},
     },
     context::item::ItemContext,
 };
 use futures::lock::Mutex;
-use model::transform::mapping::EntityMapping;
-use smql_syntax::ast::connection::DataFormat;
+use model::transform::mapping::TransformationMetadata;
 use std::{collections::HashMap, slice, sync::Arc};
 use tracing::info;
 
@@ -59,7 +59,7 @@ impl CascadeSchemaSetting {
     pub async fn new(
         src: &Source,
         dest: &Destination,
-        mapping: &EntityMapping,
+        mapping: &TransformationMetadata,
         settings: &ValidatedSettings,
         dry_run_report: &Arc<Mutex<DryRunReport>>,
     ) -> Self {

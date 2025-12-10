@@ -1,4 +1,4 @@
-use smql_syntax::ast::filter::FilterExpression;
+use model::execution::expr::CompiledExpression;
 
 /// A trait for compiling filter expressions into a specific format.
 pub trait FilterCompiler {
@@ -6,5 +6,5 @@ pub trait FilterCompiler {
     type Filter;
 
     /// Compile the AST into a filter.
-    fn compile(expr: &FilterExpression) -> Self::Filter;
+    fn compile(expr: &CompiledExpression) -> Self::Filter;
 }

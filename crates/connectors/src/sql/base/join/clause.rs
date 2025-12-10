@@ -1,4 +1,4 @@
-use model::transform::mapping::EntityMapping;
+use model::transform::mapping::TransformationMetadata;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JoinClause {
@@ -35,8 +35,8 @@ pub struct JoinColumn {
 }
 
 impl JoinClause {
-    pub fn apply_mapping(&mut self, mapping: &EntityMapping) {
-        self.right.table = mapping.entity_name_map.reverse_resolve(&self.right.table);
+    pub fn apply_mapping(&mut self, meta: &TransformationMetadata) {
+        self.right.table = meta.entities.reverse_resolve(&self.right.table);
         self.right.alias = self.right.table.clone();
     }
 }
