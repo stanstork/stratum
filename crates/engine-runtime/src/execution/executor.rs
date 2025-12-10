@@ -126,9 +126,9 @@ impl MigrationExecutor {
 
         let mapping = TransformationMetadata::new(pipeline);
         let source =
-            factory::create_source(&self.exec_ctx, &pipeline, &mapping, offset_strategy.clone())
+            factory::create_source(&self.exec_ctx, pipeline, &mapping, offset_strategy.clone())
                 .await?;
-        let destination = factory::create_destination(&self.exec_ctx, &pipeline).await?;
+        let destination = factory::create_destination(&self.exec_ctx, pipeline).await?;
 
         let state = self.exec_ctx.state.clone();
         let mut item_ctx = ItemContext::new(ItemContextParams {

@@ -98,7 +98,7 @@ impl SchemaSettingContext {
         schema_plan: SchemaPlan,
     ) -> Result<(), SettingsError> {
         self.schema_manager.infer_schema(&schema_plan).await?;
-        return Ok(());
+        Ok(())
     }
 
     pub async fn build_schema_plan(&self) -> Result<SchemaPlan, SettingsError> {

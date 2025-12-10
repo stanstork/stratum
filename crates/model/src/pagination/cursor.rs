@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct QualCol {
@@ -6,19 +7,21 @@ pub struct QualCol {
     pub column: String,
 }
 
-impl QualCol {
-    pub fn from_str(s: &str) -> Self {
+impl FromStr for QualCol {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split('.').collect();
         if parts.len() == 2 {
-            QualCol {
+            Ok(QualCol {
                 table: parts[0].to_string(),
                 column: parts[1].to_string(),
-            }
+            })
         } else {
-            QualCol {
+            Ok(QualCol {
                 table: "".to_string(),
                 column: s.to_string(),
-            }
+            })
         }
     }
 }

@@ -27,17 +27,17 @@ impl UnmappedTableFilter {
         }
 
         // Check if table has field mappings
-        if let Some(field_renames) = self.mapping.field_mappings.field_renames.get(table) {
-            if !field_renames.source_to_target.is_empty() {
-                return true;
-            }
+        if let Some(field_renames) = self.mapping.field_mappings.field_renames.get(table)
+            && !field_renames.source_to_target.is_empty()
+        {
+            return true;
         }
 
         // Check if table has computed fields
-        if let Some(computed_fields) = self.mapping.field_mappings.computed_fields.get(table) {
-            if !computed_fields.is_empty() {
-                return true;
-            }
+        if let Some(computed_fields) = self.mapping.field_mappings.computed_fields.get(table)
+            && !computed_fields.is_empty()
+        {
+            return true;
         }
 
         false

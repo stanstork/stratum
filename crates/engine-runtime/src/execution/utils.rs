@@ -1,6 +1,7 @@
 use model::execution::pipeline::Pagination;
 use model::pagination::{cursor::QualCol, offset_config::OffsetConfig};
 use planner::query::offsets::{OffsetStrategy, OffsetStrategyFactory};
+use std::str::FromStr;
 use std::sync::Arc;
 
 pub fn offset_from_pagination(pagination: &Option<Pagination>) -> Arc<dyn OffsetStrategy> {
@@ -10,11 +11,11 @@ pub fn offset_from_pagination(pagination: &Option<Pagination>) -> Arc<dyn Offset
         let mut timezone: Option<String> = None;
 
         if !pagination.cursor.is_empty() {
-            cursor = Some(QualCol::from_str(&pagination.cursor));
+            cursor = Some(QualCol::from_str(&pagination.cursor).unwrap());
         }
 
         if let Some(tb) = &pagination.tiebreaker {
-            tiebreaker = Some(QualCol::from_str(&tb));
+            tiebreaker = Some(QualCol::from_str(tb).unwrap());
         }
 
         if let Some(tz) = &pagination.timezone {

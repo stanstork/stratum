@@ -27,12 +27,6 @@ pub enum DataFormat {
     Csv,
 }
 
-impl DataFormat {
-    pub fn intersects(&self, other: &DataFormat) -> bool {
-        todo!()
-    }
-}
-
 impl Display for DataFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

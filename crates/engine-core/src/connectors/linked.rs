@@ -23,7 +23,7 @@ impl LinkedSource {
     pub async fn new(
         adapter: &Adapter,
         format: &DataFormat,
-        joins: &Vec<Join>,
+        joins: &[Join],
         mapping: &TransformationMetadata,
     ) -> Result<Option<Self>, AdapterError> {
         if joins.is_empty() {
@@ -37,7 +37,7 @@ impl LinkedSource {
         let tables = joins.iter().map(|j| j.table.clone()).collect::<Vec<_>>();
 
         // // precompute join clauses & projection
-        let join_clauses = Self::build_join_clauses(&joins);
+        let join_clauses = Self::build_join_clauses(joins);
         let projection = Self::extract_projection(&tables, mapping);
 
         // fetch metadata for all tables
