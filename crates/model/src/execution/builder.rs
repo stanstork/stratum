@@ -529,18 +529,13 @@ impl Default for PlanBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use smql_syntax::{
-        ast::{
-            attribute::Attribute,
-            dotpath::DotPath,
-            ident::Identifier,
-            pipeline::{AfterBlock, BeforeBlock, PaginateBlock, SettingsBlock},
-            span::Span,
-            validation::{
-                OnErrorBlock, RetryBlock, ValidateBlock, ValidationBody, ValidationCheck,
-            },
-        },
-        builder::parse,
+    use smql_syntax::ast::{
+        attribute::Attribute,
+        dotpath::DotPath,
+        ident::Identifier,
+        pipeline::{AfterBlock, BeforeBlock, PaginateBlock, SettingsBlock},
+        span::Span,
+        validation::{OnErrorBlock, RetryBlock, ValidateBlock, ValidationBody, ValidationCheck},
     };
 
     fn test_span() -> Span {
