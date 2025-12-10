@@ -1,6 +1,6 @@
 use super::{MigrationSetting, phase::MigrationSettingsPhase};
-use async_trait::async_trait;
 use crate::settings::CopyColumns;
+use async_trait::async_trait;
 
 pub struct CopyColumnsSetting(pub CopyColumns);
 

@@ -1,7 +1,7 @@
 use crate::settings::{
+    Settings,
     error::SettingsError,
     validated::{ValidatedSettings, ValidatedSettingsBuilder},
-    Settings,
 };
 use engine_core::connectors::{
     destination::Destination,

@@ -5,6 +5,7 @@ use crate::report::{
     sql::GeneratedSql,
     transform::TransformationReport,
 };
+use crate::settings::CopyColumns;
 use chrono::{DateTime, Utc};
 use engine_core::connectors::{
     destination::{DataDestination, Destination},
@@ -12,7 +13,6 @@ use engine_core::connectors::{
 };
 use model::{pagination::cursor::Cursor, transform::mapping::TransformationMetadata};
 use serde::Serialize;
-use crate::settings::CopyColumns;
 
 /// The overall status of the validation run.
 #[derive(Serialize, Debug, Clone, PartialEq, Default)]

@@ -1,3 +1,4 @@
+use crate::settings::CopyColumns;
 use crate::{
     report::finding::{Finding, FindingKind},
     settings::validated::ValidatedSettings,
@@ -13,7 +14,6 @@ use model::{
     records::row::RowData,
     transform::mapping::TransformationMetadata,
 };
-use crate::settings::CopyColumns;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug)]

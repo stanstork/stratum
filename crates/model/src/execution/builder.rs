@@ -860,7 +860,10 @@ mod tests {
 
         // Add a test connection
         let mut properties = Properties::new();
-        properties.insert("url".to_string(), Value::String("postgres://localhost/test".to_string()));
+        properties.insert(
+            "url".to_string(),
+            Value::String("postgres://localhost/test".to_string()),
+        );
 
         builder.connections.insert(
             "postgres".to_string(),

@@ -99,18 +99,18 @@ impl Evaluator for CompiledExpression {
                         return branch.value.evaluate(row, mapping);
                     }
                 }
-                else_expr
-                    .as_ref()
-                    .and_then(|e| e.evaluate(row, mapping))
+                else_expr.as_ref().and_then(|e| e.evaluate(row, mapping))
             }
 
-            CompiledExpression::IsNull(expr) => {
-                Some(Value::Boolean(matches!(expr.evaluate(row, mapping), Some(Value::Null) | None)))
-            }
+            CompiledExpression::IsNull(expr) => Some(Value::Boolean(matches!(
+                expr.evaluate(row, mapping),
+                Some(Value::Null) | None
+            ))),
 
-            CompiledExpression::IsNotNull(expr) => {
-                Some(Value::Boolean(!matches!(expr.evaluate(row, mapping), Some(Value::Null) | None)))
-            }
+            CompiledExpression::IsNotNull(expr) => Some(Value::Boolean(!matches!(
+                expr.evaluate(row, mapping),
+                Some(Value::Null) | None
+            ))),
 
             CompiledExpression::Array(_) => {
                 warn!("Array expressions are not yet supported");
@@ -123,8 +123,8 @@ impl Evaluator for CompiledExpression {
 }
 
 fn eval_arithmetic(left: &Value, right: &Value, op: &BinaryOp) -> Option<Value> {
-    use bigdecimal::ToPrimitive;
     use Value::*;
+    use bigdecimal::ToPrimitive;
 
     let as_float = |v: &Value| match v {
         Int(i) => Some(*i as f64),

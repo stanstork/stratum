@@ -1,6 +1,6 @@
+use crate::settings::CopyColumns;
 use model::transform::mapping::{CrossEntityReference, NameResolver, TransformationMetadata};
 use serde::Serialize;
-use crate::settings::CopyColumns;
 use std::collections::{HashMap, HashSet};
 
 /// A detailed report on the entity and field mappings.

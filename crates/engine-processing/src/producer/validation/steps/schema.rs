@@ -1,11 +1,11 @@
 use crate::error::ProducerError;
+use engine_config::settings::CopyColumns;
 use engine_config::{
     report::mapping::EntityMappingReport, settings::validated::ValidatedSettings,
     validation::schema_validator::DestinationSchemaValidator,
 };
 use engine_core::connectors::{destination::Destination, source::Source};
 use model::transform::mapping::TransformationMetadata;
-use engine_config::settings::CopyColumns;
 use std::collections::HashSet;
 
 /// Step responsible for schema validation

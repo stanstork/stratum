@@ -9,6 +9,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use connectors::sql::base::error::DbError;
+use engine_config::settings::CopyColumns;
 use engine_config::{
     report::{
         dry_run::{DryRunReport, DryRunStatus, FastPathSummary, OffsetValidationReport},
@@ -22,7 +23,6 @@ use engine_core::connectors::{destination::Destination, source::Source};
 use futures::lock::Mutex;
 use model::{pagination::cursor::Cursor, transform::mapping::TransformationMetadata};
 use planner::query::offsets::OffsetStrategy;
-use engine_config::settings::CopyColumns;
 use std::sync::Arc;
 
 pub struct ValidationProducer {
