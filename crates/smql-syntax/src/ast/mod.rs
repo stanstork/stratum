@@ -9,4 +9,3 @@ pub mod operator;
 pub mod pipeline;
 pub mod span;
 pub mod validation;
-pub mod visitor;

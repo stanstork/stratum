@@ -1,7 +1,6 @@
 use crate::error::MigrationError;
 use connectors::{
-    adapter::{Adapter, SqlDriver},
-    metadata::entity::EntityMetadata,
+    adapter::Adapter, driver::SqlDriver, metadata::entity::EntityMetadata,
     sql::base::metadata::provider::MetadataProvider,
 };
 use std::collections::HashMap;

@@ -8,10 +8,7 @@ use connectors::{
     metadata::entity::EntityMetadata, sql::base::metadata::provider::MetadataProvider,
 };
 use engine_core::{
-    connectors::{
-        destination::Destination,
-        source::{DataFormat, Source},
-    },
+    connectors::{destination::Destination, format::DataFormat, source::Source},
     context::item::ItemContext,
     schema::plan::SchemaPlan,
 };

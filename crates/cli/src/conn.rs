@@ -1,6 +1,6 @@
 use crate::error::CliError;
 use async_trait::async_trait;
-use connectors::adapter::SqlDriver;
+use connectors::driver::SqlDriver;
 use mysql_async::prelude::*;
 use std::str::FromStr;
 use tokio_postgres::NoTls;

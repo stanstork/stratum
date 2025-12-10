@@ -3,7 +3,6 @@ use crate::{
     execution::{
         factory,
         metadata::{self},
-        utils::offset_from_pagination,
         workers,
     },
 };
@@ -26,6 +25,7 @@ use engine_core::{
 use futures::lock::Mutex;
 use model::execution::pipeline::Pipeline;
 use model::{pagination::cursor::Cursor, transform::mapping::TransformationMetadata};
+use planner::query::offsets::OffsetStrategyFactory;
 use std::{collections::HashMap, sync::Arc};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
@@ -121,7 +121,7 @@ impl MigrationExecutor {
         let run_id = self.exec_ctx.run_id();
         let item_id = Self::make_item_id(&self.plan.hash(), pipeline, idx);
 
-        let offset_strategy = offset_from_pagination(&pipeline.source.pagination);
+        let offset_strategy = OffsetStrategyFactory::from_pagination(&pipeline.source.pagination);
         let cursor = Cursor::None;
 
         let mapping = TransformationMetadata::new(pipeline);

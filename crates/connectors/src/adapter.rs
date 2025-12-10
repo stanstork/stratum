@@ -1,14 +1,9 @@
 use crate::{
+    driver::SqlDriver,
     error::AdapterError,
     file::csv::{adapter::CsvAdapter, settings::CsvSettings},
     sql::{base::adapter::SqlAdapter, mysql::adapter::MySqlAdapter, postgres::adapter::PgAdapter},
 };
-
-#[derive(Clone)]
-pub enum SqlDriver {
-    MySql,
-    Postgres,
-}
 
 #[derive(Clone)]
 pub enum Adapter {

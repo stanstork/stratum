@@ -1,4 +1,4 @@
-use crate::connectors::source::DataFormat;
+use crate::connectors::format::DataFormat;
 use connectors::{
     adapter::Adapter,
     error::AdapterError,

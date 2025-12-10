@@ -11,13 +11,14 @@ use chrono::{TimeZone, Utc};
 use chrono_tz::Tz;
 use model::{
     core::value::Value,
+    execution::pipeline::Pagination,
     pagination::{
         cursor::{Cursor, QualCol},
         offset_config::OffsetConfig,
     },
     records::row::RowData,
 };
-use std::{convert::TryFrom, sync::Arc};
+use std::{convert::TryFrom, str::FromStr, sync::Arc};
 
 #[async_trait]
 pub trait OffsetStrategy: Send + Sync {
@@ -473,6 +474,37 @@ impl OffsetStrategyFactory {
             Cursor::Default { offset } => Arc::new(DefaultOffset { offset: *offset }),
 
             Cursor::None => Arc::new(DefaultOffset { offset: 0 }), // start from beginning
+        }
+    }
+
+    pub fn from_pagination(pagination: &Option<Pagination>) -> Arc<dyn OffsetStrategy> {
+        if let Some(pagination) = pagination {
+            let mut cursor: Option<QualCol> = None;
+            let mut tiebreaker: Option<QualCol> = None;
+            let mut timezone: Option<String> = None;
+
+            if !pagination.cursor.is_empty() {
+                cursor = Some(QualCol::from_str(&pagination.cursor).unwrap());
+            }
+
+            if let Some(tb) = &pagination.tiebreaker {
+                tiebreaker = Some(QualCol::from_str(tb).unwrap());
+            }
+
+            if let Some(tz) = &pagination.timezone {
+                timezone = Some(tz.clone());
+            }
+
+            let config = OffsetConfig {
+                strategy: Some(pagination.strategy.clone()),
+                cursor,
+                tiebreaker,
+                timezone,
+            };
+
+            OffsetStrategyFactory::from_config(&config)
+        } else {
+            OffsetStrategyFactory::default_strategy()
         }
     }
 

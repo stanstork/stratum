@@ -1,8 +1,6 @@
 use crate::{plan::ExecutionPlan, state::sled_store::SledStateStore};
 use connectors::{
-    adapter::{Adapter, SqlDriver},
-    error::AdapterError,
-    file::csv::settings::CsvSettings,
+    adapter::Adapter, driver::SqlDriver, error::AdapterError, file::csv::settings::CsvSettings,
 };
 use model::execution::connection::Connection;
 use std::{collections::HashMap, sync::Arc};

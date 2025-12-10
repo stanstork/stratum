@@ -1,4 +1,4 @@
-use crate::connectors::{filter::Filter, linked::LinkedSource};
+use crate::connectors::{filter::Filter, format::DataFormat, linked::LinkedSource};
 use connectors::{
     adapter::Adapter,
     error::AdapterError,
@@ -17,25 +17,8 @@ use planner::query::{
     dialect::{self, Dialect},
     offsets::OffsetStrategy,
 };
-use std::{fmt::Display, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::Mutex;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum DataFormat {
-    MySql,
-    Postgres,
-    Csv,
-}
-
-impl Display for DataFormat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DataFormat::MySql => write!(f, "MySQL"),
-            DataFormat::Postgres => write!(f, "Postgres"),
-            DataFormat::Csv => write!(f, "CSV"),
-        }
-    }
-}
 
 /// Represents a data source,
 /// such as a database table or file to be read from.
@@ -44,6 +27,7 @@ pub enum DataSource {
     Database(Arc<Mutex<dyn DbDataSource<Error = DbError>>>),
     File(Arc<Mutex<dyn FileDataSource<Error = FileError>>>),
 }
+
 /// Represents a migration source,
 /// such as a database table, file, or API to be transformed and written to a destination.
 #[derive(Clone)]

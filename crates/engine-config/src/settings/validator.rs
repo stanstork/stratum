@@ -3,10 +3,7 @@ use crate::settings::{
     error::SettingsError,
     validated::{ValidatedSettings, ValidatedSettingsBuilder},
 };
-use engine_core::connectors::{
-    destination::Destination,
-    source::{DataFormat, Source},
-};
+use engine_core::connectors::{destination::Destination, format::DataFormat, source::Source};
 use tracing::{info, warn};
 
 /// Validates migration settings before they are applied.

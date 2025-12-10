@@ -3,8 +3,9 @@ use engine_core::{
     connectors::{
         destination::{DataDestination, Destination},
         filter::Filter,
+        format::DataFormat,
         linked::LinkedSource,
-        source::{DataFormat, DataSource, Source},
+        source::{DataSource, Source},
     },
     context::exec::ExecutionContext,
 };

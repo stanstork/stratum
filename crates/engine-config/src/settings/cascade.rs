@@ -16,7 +16,8 @@ use engine_core::{
     connectors::{
         destination::{DataDestination, Destination},
         filter::Filter,
-        source::{DataFormat, DataSource, Source},
+        format::DataFormat,
+        source::{DataSource, Source},
     },
     context::item::ItemContext,
 };

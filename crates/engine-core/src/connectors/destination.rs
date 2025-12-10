@@ -1,6 +1,6 @@
 use crate::connectors::{
+    format::DataFormat,
     sink::{Sink, postgres::PostgresSink},
-    source::DataFormat,
 };
 use connectors::{
     adapter::Adapter,
