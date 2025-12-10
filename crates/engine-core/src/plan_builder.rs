@@ -1,4 +1,4 @@
-use crate::{
+use model::{
     core::value::Value,
     execution::{
         connection::Connection,
@@ -482,6 +482,52 @@ impl PlanBuilder {
                 Literal::Boolean(b) => Value::Boolean(*b),
                 Literal::Null => Value::Null,
             }),
+            ExpressionKind::FunctionCall { name, arguments } if name == "env" => {
+                use crate::context::env::{get_env, get_env_or};
+
+                match arguments.len() {
+                    1 => {
+                        // Required environment variable
+                        let var_name = match &arguments[0].kind {
+                            ExpressionKind::Literal(Literal::String(s)) => s,
+                            _ => {
+                                return Err(ConvertError::Expression(
+                                    "env() function requires a string literal for variable name"
+                                        .to_string(),
+                                ));
+                            }
+                        };
+
+                        get_env(var_name).map(Value::String).ok_or_else(|| {
+                            ConvertError::Expression(format!(
+                                "Required environment variable '{}' not found",
+                                var_name
+                            ))
+                        })
+                    }
+                    2 => {
+                        // Optional environment variable with default
+                        let var_name = match &arguments[0].kind {
+                            ExpressionKind::Literal(Literal::String(s)) => s,
+                            _ => {
+                                return Err(ConvertError::Expression(
+                                    "env() function requires a string literal for variable name"
+                                        .to_string(),
+                                ));
+                            }
+                        };
+
+                        let default_value = self.eval_expression(&arguments[1])?;
+                        let default_str = value_to_string(&default_value);
+
+                        Ok(Value::String(get_env_or(var_name, &default_str)))
+                    }
+                    _ => Err(ConvertError::Expression(format!(
+                        "env() function takes 1 or 2 arguments, got {}",
+                        arguments.len()
+                    ))),
+                }
+            }
             _ => Err(ConvertError::Expression(format!(
                 "cannot evaluate complex expression: {:?}",
                 expr
@@ -1014,5 +1060,28 @@ mod tests {
         assert_eq!(retry.max_attempts, 5);
         assert_eq!(retry.delay_ms, 1000);
         assert!(matches!(retry.backoff, BackoffStrategy::Exponential));
+    }
+}
+
+fn value_to_string(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        Value::SmallInt(i) => i.to_string(),
+        Value::Int32(i) => i.to_string(),
+        Value::Int(i) => i.to_string(),
+        Value::Uint(u) => u.to_string(),
+        Value::Usize(u) => u.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::Decimal(d) => d.to_string(),
+        Value::Boolean(b) => b.to_string(),
+        Value::Uuid(u) => u.to_string(),
+        Value::Date(d) => d.to_string(),
+        Value::Timestamp(t) => t.to_rfc3339(),
+        Value::TimestampNaive(t) => t.to_string(),
+        Value::Bytes(b) => String::from_utf8_lossy(b).to_string(),
+        Value::Json(v) => v.to_string(),
+        Value::Null => String::new(),
+        Value::Enum(_, v) => v.clone(),
+        Value::StringArray(v) => format!("{v:?}"),
     }
 }

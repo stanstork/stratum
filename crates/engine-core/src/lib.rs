@@ -4,6 +4,7 @@ pub mod error;
 pub mod event_bus;
 pub mod metrics;
 pub mod plan;
+pub mod plan_builder;
 pub mod progress;
 pub mod retry;
 pub mod schema;

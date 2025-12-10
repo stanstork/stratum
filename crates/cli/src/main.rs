@@ -1,5 +1,6 @@
 use crate::{
     conn::{ConnectionKind, ConnectionPinger, MySqlConnectionPinger, PostgresConnectionPinger},
+    env::EnvManager,
     error::CliError,
     shutdown::ShutdownCoordinator,
 };
@@ -10,6 +11,7 @@ use engine_core::{
     progress::{ProgressService, ProgressStatus},
     state::{StateStore, sled_store::SledStateStore},
 };
+use engine_processing::env_context::{EnvContext, init_env_context};
 use engine_runtime::{
     error::MigrationError,
     execution::{executor, source::load_metadata},
@@ -21,6 +23,7 @@ use tracing::{Level, info};
 
 mod commands;
 mod conn;
+mod env;
 mod error;
 mod output;
 mod shutdown;
@@ -64,7 +67,13 @@ async fn run_cli() -> Result<(), CliError> {
     shutdown_coordinator.register_handlers();
 
     match cli.command {
-        Commands::Migrate { config, from_ast } => {
+        Commands::Migrate {
+            config,
+            from_ast,
+            env_file,
+        } => {
+            init_env(env_file.as_deref())?;
+
             let plan = load_migration_plan(&config, from_ast).await?;
             let result = executor::run(plan, false, cancel).await;
 
@@ -84,11 +93,14 @@ async fn run_cli() -> Result<(), CliError> {
             config,
             from_ast,
             output,
+            env_file,
         } => {
             info!(
                 "Validating migration config: {}, from_ast: {}, output: {:?}",
                 config, from_ast, output
             );
+
+            init_env(env_file.as_deref())?;
 
             let plan = load_migration_plan(&config, from_ast).await?;
             let states = executor::run(plan, true, cancel).await?;
@@ -149,6 +161,24 @@ async fn run_cli() -> Result<(), CliError> {
             Ok(())
         }
     }
+}
+
+fn init_env(env_file: Option<&str>) -> Result<(), CliError> {
+    let mut env_manager = EnvManager::new();
+
+    if let Some(path) = env_file {
+        info!("Loading environment variables from: {}", path);
+        env_manager.load_from_file(path)?;
+    }
+
+    let mut env_context = EnvContext::empty();
+    for (key, value) in env_manager.all() {
+        env_context.set(key.clone(), value.clone());
+    }
+
+    init_env_context(env_context);
+
+    Ok(())
 }
 
 async fn load_migration_plan(path: &str, from_ast: bool) -> Result<ExecutionPlan, CliError> {

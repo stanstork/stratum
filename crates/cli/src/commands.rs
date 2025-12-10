@@ -11,6 +11,9 @@ pub enum Commands {
             help = "Treat the config file as already parsed AST, skipping parsing step"
         )]
         from_ast: bool,
+
+        #[arg(long, help = "Load environment variables from .env file")]
+        env_file: Option<String>,
     },
     Source {
         #[command(subcommand)]
@@ -31,6 +34,9 @@ pub enum Commands {
             help = "If specified, writes the JSON report to this file instead of stdout"
         )]
         output: Option<String>,
+
+        #[arg(long, help = "Load environment variables from .env file")]
+        env_file: Option<String>,
     },
     Ast {
         #[arg(long, help = "Config file path")]

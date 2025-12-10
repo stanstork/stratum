@@ -1,6 +1,6 @@
+use crate::plan_builder::PlanBuilder;
 use model::execution::{
-    builder::PlanBuilder, connection::Connection, define::GlobalDefinitions, errors::ConvertError,
-    pipeline::Pipeline,
+    connection::Connection, define::GlobalDefinitions, errors::ConvertError, pipeline::Pipeline,
 };
 use serde::{Deserialize, Serialize};
 use smql_syntax::ast::doc::SmqlDocument;
