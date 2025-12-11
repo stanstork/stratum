@@ -79,10 +79,7 @@ mod tests {
     #[test]
     fn test_parse_env_as_int() {
         let default = Value::Int(100);
-        assert_eq!(
-            parse_env_as_type("42", &default),
-            Some(Value::Uint(42))
-        );
+        assert_eq!(parse_env_as_type("42", &default), Some(Value::Uint(42)));
         assert_eq!(parse_env_as_type("not_a_number", &default), None);
     }
 
@@ -99,10 +96,7 @@ mod tests {
     fn test_parse_env_as_float_whole_number() {
         let default = Value::Float(100.0);
         // Should parse as integer when env var doesn't have decimal point
-        assert_eq!(
-            parse_env_as_type("5000", &default),
-            Some(Value::Uint(5000))
-        );
+        assert_eq!(parse_env_as_type("5000", &default), Some(Value::Uint(5000)));
         // Should parse as float when env var has decimal point
         assert_eq!(
             parse_env_as_type("5000.0", &default),

@@ -1,4 +1,8 @@
-use crate::{context::EvalContext, error::{ExpressionError, Result}, types::parse_env_as_type};
+use crate::{
+    context::EvalContext,
+    error::{ExpressionError, Result},
+    types::parse_env_as_type,
+};
 use model::core::value::Value;
 
 /// Evaluate env() function with type-aware default handling
@@ -179,10 +183,7 @@ mod tests {
             env_getter: test_env_getter,
         };
 
-        let args = vec![
-            Value::String("MISSING".to_string()),
-            Value::Float(1234.0),
-        ];
+        let args = vec![Value::String("MISSING".to_string()), Value::Float(1234.0)];
         let result = eval_env(&args, &ctx).unwrap();
         assert_eq!(result, Value::Float(1234.0));
 
@@ -204,10 +205,7 @@ mod tests {
             env_getter: test_env_getter,
         };
 
-        let args = vec![
-            Value::String("BAD_INT".to_string()),
-            Value::Float(100.0),
-        ];
+        let args = vec![Value::String("BAD_INT".to_string()), Value::Float(100.0)];
         let result = eval_env(&args, &ctx);
         assert!(result.is_err());
 

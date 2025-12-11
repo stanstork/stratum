@@ -1,4 +1,7 @@
-use crate::{context::EvalContext, error::{ExpressionError, Result}};
+use crate::{
+    context::EvalContext,
+    error::{ExpressionError, Result},
+};
 use model::core::value::Value;
 
 /// Convert string to lowercase
@@ -118,10 +121,7 @@ mod tests {
     #[test]
     fn test_concat_mixed_types() {
         with_dummy_ctx(|ctx| {
-            let args = vec![
-                Value::String("Count: ".to_string()),
-                Value::Int(42),
-            ];
+            let args = vec![Value::String("Count: ".to_string()), Value::Int(42)];
             let result = eval_concat(&args, ctx).unwrap();
             assert_eq!(result, Value::String("Count: 42".to_string()));
         });

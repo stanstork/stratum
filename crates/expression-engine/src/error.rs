@@ -5,7 +5,9 @@ pub enum ExpressionError {
     #[error("Missing required environment variable: {0}")]
     MissingRequiredEnvVar(String),
 
-    #[error("Failed to parse environment variable '{var}' with value '{value}' as {expected_type}")]
+    #[error(
+        "Failed to parse environment variable '{var}' with value '{value}' as {expected_type}"
+    )]
     EnvParseError {
         var: String,
         value: String,
