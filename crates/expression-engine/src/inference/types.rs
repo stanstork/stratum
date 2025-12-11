@@ -90,6 +90,8 @@ fn get_numeric_type(left: &DataType, right: &DataType) -> DataType {
 
 #[cfg(test)]
 mod tests {
+    use core::f64;
+
     use super::*;
 
     #[test]
@@ -107,7 +109,10 @@ mod tests {
             Some(DataType::Int)
         );
         assert_eq!(
-            infer_expression_type(&CompiledExpression::Literal(Value::Float(3.14)), &no_lookup),
+            infer_expression_type(
+                &CompiledExpression::Literal(Value::Float(f64::consts::PI)),
+                &no_lookup
+            ),
             Some(DataType::Float)
         );
         assert_eq!(

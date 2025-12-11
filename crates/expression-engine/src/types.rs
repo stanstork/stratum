@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn test_parse_env_as_float_with_decimal() {
-        let default = Value::Float(3.14);
+        let default = Value::Float(std::f64::consts::PI);
         assert_eq!(
             parse_env_as_type("2.71", &default),
             Some(Value::Float(2.71))

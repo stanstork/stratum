@@ -8,12 +8,11 @@ use connectors::{
 };
 use engine_core::connectors::source::DataSource;
 use model::{
-    core::{data_type::DataType, value::Value},
+    core::data_type::DataType,
     execution::expr::CompiledExpression,
     transform::{computed_field::ComputedField, mapping::TransformationMetadata},
 };
 use std::sync::Arc;
-use tracing::warn;
 
 /// A thin newtype wrapper around `CompiledExpression` to implement
 /// `TypeInferencer` without touching the model crate.
@@ -108,25 +107,25 @@ impl TypeInferencer for ExpressionWrapper {
     ) -> Option<DataType> {
         // Check if this is a cross-entity reference (DotPath with 2+ segments)
         // If so, handle it here with async metadata fetching
-        if let CompiledExpression::DotPath(segments) = &self.0 {
-            if segments.len() >= 2 {
-                let entity = &segments[0];
-                let key = &segments[1];
-                let table_name = mapping.entities.resolve(entity);
-                let meta = source.fetch_meta(table_name).await.ok()?;
-                return match meta {
-                    EntityMetadata::Table(meta) => meta
-                        .columns()
-                        .iter()
-                        .find(|col| col.name.eq_ignore_ascii_case(key))
-                        .map(|col| col.data_type.clone()),
-                    EntityMetadata::Csv(meta) => meta
-                        .columns
-                        .iter()
-                        .find(|col| col.name.eq_ignore_ascii_case(key))
-                        .map(|col| col.data_type.clone()),
-                };
-            }
+        if let CompiledExpression::DotPath(segments) = &self.0
+            && segments.len() >= 2
+        {
+            let entity = &segments[0];
+            let key = &segments[1];
+            let table_name = mapping.entities.resolve(entity);
+            let meta = source.fetch_meta(table_name).await.ok()?;
+            return match meta {
+                EntityMetadata::Table(meta) => meta
+                    .columns()
+                    .iter()
+                    .find(|col| col.name.eq_ignore_ascii_case(key))
+                    .map(|col| col.data_type.clone()),
+                EntityMetadata::Csv(meta) => meta
+                    .columns
+                    .iter()
+                    .find(|col| col.name.eq_ignore_ascii_case(key))
+                    .map(|col| col.data_type.clone()),
+            };
         }
 
         // For all other cases, delegate to expression-engine's synchronous inference
