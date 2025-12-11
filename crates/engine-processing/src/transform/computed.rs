@@ -1,5 +1,7 @@
 use super::pipeline::Transform;
-use crate::{error::TransformError, expr::eval::Evaluator};
+use crate::error::TransformError;
+use engine_core::context::env::get_env;
+use expression_engine::Evaluator;
 use model::{
     core::value::{FieldValue, Value},
     records::row::RowData,
@@ -22,7 +24,7 @@ impl Transform for ComputedTransform {
 
         if let Some(computed_fields) = self.mapping.field_mappings.computed_fields.get(&table) {
             for computed in computed_fields {
-                if let Some(value) = computed.expression.evaluate(row, &self.mapping) {
+                if let Some(value) = computed.expression.evaluate(row, &self.mapping, get_env) {
                     update_row(row, &computed.name, &value);
                 } else {
                     return Err(TransformError::Transformation(format!(

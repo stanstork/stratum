@@ -773,6 +773,7 @@ dependencies = [
  "bincode",
  "chrono",
  "connectors",
+ "expression-engine",
  "futures",
  "model",
  "planner",
@@ -801,6 +802,7 @@ dependencies = [
  "connectors",
  "engine-config",
  "engine-core",
+ "expression-engine",
  "futures",
  "model",
  "mysql_async 0.36.1",
@@ -883,6 +885,18 @@ checksum = "33d852cb9b869c2a9b3df2f71a3074817f01e1844f839a144f5fcef059a4eb5d"
 dependencies = [
  "libc",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "expression-engine"
+version = "0.1.0"
+dependencies = [
+ "bigdecimal",
+ "engine-core",
+ "model",
+ "smql-syntax",
+ "thiserror 2.0.12",
+ "tracing",
 ]
 
 [[package]]
