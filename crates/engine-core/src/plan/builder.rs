@@ -46,14 +46,14 @@ impl PlanBuilder {
         let mut nested_configs = HashMap::new();
 
         for attr in &conn_block.attributes {
-            let value = self.eval_expression(&attr.value)?;
+            let value = Self::eval_expression(&attr.value)?;
             properties.insert(attr.key.name.clone(), value);
         }
 
         for nested in &conn_block.nested_blocks {
             let mut nested_props = HashMap::new();
             for attr in &nested.attributes {
-                let value = self.eval_expression(&attr.value)?;
+                let value = Self::eval_expression(&attr.value)?;
                 nested_props.insert(attr.key.name.clone(), value);
             }
             nested_configs.insert(nested.kind.clone(), nested_props);
@@ -134,7 +134,7 @@ impl PlanBuilder {
                 .attributes
                 .iter()
                 .find(|a| a.key.name == "strategy")
-                .and_then(|a| self.eval_expression(&a.value).ok())
+                .and_then(|a| Self::eval_expression(&a.value).ok())
                 .and_then(|v| match v {
                     Value::String(s) => Some(s),
                     _ => None,
@@ -145,7 +145,7 @@ impl PlanBuilder {
                 .attributes
                 .iter()
                 .find(|a| a.key.name == "cursor")
-                .and_then(|a| self.eval_expression(&a.value).ok())
+                .and_then(|a| Self::eval_expression(&a.value).ok())
                 .and_then(|v| match v {
                     Value::String(s) => Some(s),
                     _ => None,
@@ -156,7 +156,7 @@ impl PlanBuilder {
                 .attributes
                 .iter()
                 .find(|a| a.key.name == "tiebreaker")
-                .and_then(|a| self.eval_expression(&a.value).ok())
+                .and_then(|a| Self::eval_expression(&a.value).ok())
                 .and_then(|v| match v {
                     Value::String(s) => Some(s),
                     _ => None,
@@ -166,7 +166,7 @@ impl PlanBuilder {
                 .attributes
                 .iter()
                 .find(|a| a.key.name == "timezone")
-                .and_then(|a| self.eval_expression(&a.value).ok())
+                .and_then(|a| Self::eval_expression(&a.value).ok())
                 .and_then(|v| match v {
                     Value::String(s) => Some(s),
                     _ => None,
@@ -185,7 +185,7 @@ impl PlanBuilder {
             .attributes
             .iter()
             .find(|a| a.key.name == "table")
-            .and_then(|a| self.eval_expression(&a.value).ok())
+            .and_then(|a| Self::eval_expression(&a.value).ok())
             .and_then(|v| match v {
                 Value::String(s) => Some(s),
                 _ => None,
@@ -219,7 +219,7 @@ impl PlanBuilder {
             .attributes
             .iter()
             .find(|a| a.key.name == "table")
-            .and_then(|a| self.eval_expression(&a.value).ok())
+            .and_then(|a| Self::eval_expression(&a.value).ok())
             .and_then(|v| match v {
                 Value::String(s) => Some(s),
                 _ => None,
@@ -230,7 +230,7 @@ impl PlanBuilder {
             .attributes
             .iter()
             .find(|a| a.key.name == "mode")
-            .and_then(|a| self.eval_expression(&a.value).ok())
+            .and_then(|a| Self::eval_expression(&a.value).ok())
             .and_then(|v| match v {
                 Value::String(s) => match s.as_str() {
                     "insert" => Some(WriteMode::Insert),
@@ -334,7 +334,7 @@ impl PlanBuilder {
                     .attributes
                     .iter()
                     .find(|a| a.key.name == "max_attempts")
-                    .and_then(|a| self.eval_expression(&a.value).ok())
+                    .and_then(|a| Self::eval_expression(&a.value).ok())
                     .and_then(|v| match v {
                         Value::Int32(n) => Some(n as u32),
                         Value::Float(f) => Some(f as u32),
@@ -389,7 +389,7 @@ impl PlanBuilder {
         if let Some(settings) = &pipeline_block.settings_block {
             let mut settings_map = HashMap::new();
             for attr in &settings.attributes {
-                let value = self.eval_expression(&attr.value)?;
+                let value = Self::eval_expression(&attr.value)?;
                 settings_map.insert(attr.key.name.clone(), value);
             }
             Ok(settings_map)
@@ -474,7 +474,7 @@ impl PlanBuilder {
         }
     }
 
-    fn eval_expression(&self, expr: &Expression) -> Result<Value, ConvertError> {
+    fn eval_expression(expr: &Expression) -> Result<Value, ConvertError> {
         // Evaluate simple expressions to values
         match &expr.kind {
             ExpressionKind::Literal(lit) => Ok(match lit {
@@ -518,7 +518,7 @@ impl PlanBuilder {
                             }
                         };
 
-                        let default_value = self.eval_expression(&arguments[1])?;
+                        let default_value = Self::eval_expression(&arguments[1])?;
 
                         // If env var exists, try to parse it as the type of the default value
                         if let Some(env_str) = get_env(var_name) {
@@ -552,7 +552,7 @@ impl PlanBuilder {
     ) -> Result<HashMap<String, Value>, ConvertError> {
         let mut definitions = HashMap::new();
         for attr in &def_block.attributes {
-            let value = self.eval_expression(&attr.value)?;
+            let value = Self::eval_expression(&attr.value)?;
             definitions.insert(attr.key.name.clone(), value);
         }
         Ok(definitions)
@@ -1092,8 +1092,6 @@ mod tests {
         env_ctx.set("THRESHOLD".to_string(), "0.95".to_string());
         init_env_context(env_ctx);
 
-        let builder = PlanBuilder::new();
-
         // Test integer default - env var exists
         let expr_int = Expression::new(
             ExpressionKind::FunctionCall {
@@ -1105,7 +1103,7 @@ mod tests {
             },
             test_span(),
         );
-        let result_int = builder.eval_expression(&expr_int).unwrap();
+        let result_int = PlanBuilder::eval_expression(&expr_int).unwrap();
         // Should parse as Uint since positive integer
         assert!(matches!(result_int, Value::Uint(5000)));
 
@@ -1120,7 +1118,7 @@ mod tests {
             },
             test_span(),
         );
-        let result_bool = builder.eval_expression(&expr_bool).unwrap();
+        let result_bool = PlanBuilder::eval_expression(&expr_bool).unwrap();
         assert!(matches!(result_bool, Value::Boolean(true)));
 
         // Test float default - env var exists
@@ -1134,7 +1132,7 @@ mod tests {
             },
             test_span(),
         );
-        let result_float = builder.eval_expression(&expr_float).unwrap();
+        let result_float = PlanBuilder::eval_expression(&expr_float).unwrap();
         assert!(matches!(result_float, Value::Float(v) if (v - 0.95).abs() < 0.001));
 
         // Test when env var doesn't exist - should return typed default
@@ -1148,7 +1146,7 @@ mod tests {
             },
             test_span(),
         );
-        let result_missing = builder.eval_expression(&expr_missing_int).unwrap();
+        let result_missing = PlanBuilder::eval_expression(&expr_missing_int).unwrap();
         assert!(matches!(result_missing, Value::Float(1234.0)));
 
         clear_env_context();
@@ -1166,8 +1164,6 @@ mod tests {
         env_ctx.set("BAD_INT".to_string(), "not_a_number".to_string());
         init_env_context(env_ctx);
 
-        let builder = PlanBuilder::new();
-
         // Try to parse invalid integer
         let expr = Expression::new(
             ExpressionKind::FunctionCall {
@@ -1177,7 +1173,7 @@ mod tests {
             test_span(),
         );
 
-        let result = builder.eval_expression(&expr);
+        let result = PlanBuilder::eval_expression(&expr);
         assert!(result.is_err());
         assert!(
             result
