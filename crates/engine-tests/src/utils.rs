@@ -3,7 +3,7 @@
 use super::{TEST_MYSQL_URL_ORDERS, TEST_MYSQL_URL_SAKILA, TEST_PG_URL, mysql_pool};
 use crate::pg_pool;
 use connectors::{file::csv::error::FileError, sql::base::row::DbRow};
-use engine_core::plan::ExecutionPlan;
+use engine_core::plan::execution::ExecutionPlan;
 use engine_runtime::execution::executor::run;
 use model::records::row::RowData;
 use mysql_async::Row as MySqlRow;

@@ -134,6 +134,7 @@ impl TypeInferencer for ExpressionWrapper {
             CompiledExpression::FunctionCall { name, .. } => {
                 match name.to_ascii_lowercase().as_str() {
                     "lower" | "upper" | "concat" => Some(DataType::VarChar),
+                    "env" => Some(DataType::VarChar), // env() always returns string
                     _ => None,
                 }
             }

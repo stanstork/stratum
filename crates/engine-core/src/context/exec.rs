@@ -1,4 +1,4 @@
-use crate::{plan::ExecutionPlan, state::sled_store::SledStateStore};
+use crate::{plan::execution::ExecutionPlan, state::sled_store::SledStateStore};
 use connectors::{
     adapter::Adapter, driver::SqlDriver, error::AdapterError, file::csv::settings::CsvSettings,
 };

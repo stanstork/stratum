@@ -19,7 +19,7 @@ use engine_core::{
         exec::ExecutionContext,
         item::{ItemContext, ItemContextParams},
     },
-    plan::ExecutionPlan,
+    plan::execution::ExecutionPlan,
     state::{StateStore, models::WalEntry, sled_store::SledStateStore},
 };
 use futures::lock::Mutex;

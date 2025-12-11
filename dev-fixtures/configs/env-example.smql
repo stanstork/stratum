@@ -1,0 +1,35 @@
+connection "mysql_prod" {
+  driver = "mysql"
+  url    = env("SOURCE_DB_URL")  // Required environment variable
+}
+
+connection "postgres_target" {
+  driver = "postgres"
+  url    = env("TARGET_DB_URL")  // Required environment variable
+}
+
+pipeline "migrate_orders" {
+  from {
+    connection = connection.mysql_prod
+    table = "orders"
+  }
+
+  to {
+    connection = connection.postgres_target
+    table = "orders"
+  }
+
+  settings {
+    create_missing_tables = true
+    batch_size = env("BATCH_SIZE", 1000)
+    copy_columns = "MAP_ONLY"
+  }
+
+  select {
+    id = id
+    user_id = user_id
+    total = total
+    // Use env() in transformations
+    region = env("DEFAULT_REGION", "US")
+  }
+}

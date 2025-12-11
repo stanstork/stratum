@@ -1,4 +1,5 @@
-use crate::{
+use crate::plan::env_parser::parse_env_as_type;
+use model::{
     core::value::Value,
     execution::{
         connection::Connection,
@@ -45,14 +46,14 @@ impl PlanBuilder {
         let mut nested_configs = HashMap::new();
 
         for attr in &conn_block.attributes {
-            let value = self.eval_expression(&attr.value)?;
+            let value = Self::eval_expression(&attr.value)?;
             properties.insert(attr.key.name.clone(), value);
         }
 
         for nested in &conn_block.nested_blocks {
             let mut nested_props = HashMap::new();
             for attr in &nested.attributes {
-                let value = self.eval_expression(&attr.value)?;
+                let value = Self::eval_expression(&attr.value)?;
                 nested_props.insert(attr.key.name.clone(), value);
             }
             nested_configs.insert(nested.kind.clone(), nested_props);
@@ -133,7 +134,7 @@ impl PlanBuilder {
                 .attributes
                 .iter()
                 .find(|a| a.key.name == "strategy")
-                .and_then(|a| self.eval_expression(&a.value).ok())
+                .and_then(|a| Self::eval_expression(&a.value).ok())
                 .and_then(|v| match v {
                     Value::String(s) => Some(s),
                     _ => None,
@@ -144,7 +145,7 @@ impl PlanBuilder {
                 .attributes
                 .iter()
                 .find(|a| a.key.name == "cursor")
-                .and_then(|a| self.eval_expression(&a.value).ok())
+                .and_then(|a| Self::eval_expression(&a.value).ok())
                 .and_then(|v| match v {
                     Value::String(s) => Some(s),
                     _ => None,
@@ -155,7 +156,7 @@ impl PlanBuilder {
                 .attributes
                 .iter()
                 .find(|a| a.key.name == "tiebreaker")
-                .and_then(|a| self.eval_expression(&a.value).ok())
+                .and_then(|a| Self::eval_expression(&a.value).ok())
                 .and_then(|v| match v {
                     Value::String(s) => Some(s),
                     _ => None,
@@ -165,7 +166,7 @@ impl PlanBuilder {
                 .attributes
                 .iter()
                 .find(|a| a.key.name == "timezone")
-                .and_then(|a| self.eval_expression(&a.value).ok())
+                .and_then(|a| Self::eval_expression(&a.value).ok())
                 .and_then(|v| match v {
                     Value::String(s) => Some(s),
                     _ => None,
@@ -184,7 +185,7 @@ impl PlanBuilder {
             .attributes
             .iter()
             .find(|a| a.key.name == "table")
-            .and_then(|a| self.eval_expression(&a.value).ok())
+            .and_then(|a| Self::eval_expression(&a.value).ok())
             .and_then(|v| match v {
                 Value::String(s) => Some(s),
                 _ => None,
@@ -218,7 +219,7 @@ impl PlanBuilder {
             .attributes
             .iter()
             .find(|a| a.key.name == "table")
-            .and_then(|a| self.eval_expression(&a.value).ok())
+            .and_then(|a| Self::eval_expression(&a.value).ok())
             .and_then(|v| match v {
                 Value::String(s) => Some(s),
                 _ => None,
@@ -229,7 +230,7 @@ impl PlanBuilder {
             .attributes
             .iter()
             .find(|a| a.key.name == "mode")
-            .and_then(|a| self.eval_expression(&a.value).ok())
+            .and_then(|a| Self::eval_expression(&a.value).ok())
             .and_then(|v| match v {
                 Value::String(s) => match s.as_str() {
                     "insert" => Some(WriteMode::Insert),
@@ -333,7 +334,7 @@ impl PlanBuilder {
                     .attributes
                     .iter()
                     .find(|a| a.key.name == "max_attempts")
-                    .and_then(|a| self.eval_expression(&a.value).ok())
+                    .and_then(|a| Self::eval_expression(&a.value).ok())
                     .and_then(|v| match v {
                         Value::Int32(n) => Some(n as u32),
                         Value::Float(f) => Some(f as u32),
@@ -388,7 +389,7 @@ impl PlanBuilder {
         if let Some(settings) = &pipeline_block.settings_block {
             let mut settings_map = HashMap::new();
             for attr in &settings.attributes {
-                let value = self.eval_expression(&attr.value)?;
+                let value = Self::eval_expression(&attr.value)?;
                 settings_map.insert(attr.key.name.clone(), value);
             }
             Ok(settings_map)
@@ -473,7 +474,7 @@ impl PlanBuilder {
         }
     }
 
-    fn eval_expression(&self, expr: &Expression) -> Result<Value, ConvertError> {
+    fn eval_expression(expr: &Expression) -> Result<Value, ConvertError> {
         // Evaluate simple expressions to values
         match &expr.kind {
             ExpressionKind::Literal(lit) => Ok(match lit {
@@ -482,6 +483,62 @@ impl PlanBuilder {
                 Literal::Boolean(b) => Value::Boolean(*b),
                 Literal::Null => Value::Null,
             }),
+            ExpressionKind::FunctionCall { name, arguments } if name == "env" => {
+                use crate::context::env::get_env;
+
+                match arguments.len() {
+                    1 => {
+                        // Required environment variable
+                        let var_name = match &arguments[0].kind {
+                            ExpressionKind::Literal(Literal::String(s)) => s,
+                            _ => {
+                                return Err(ConvertError::Expression(
+                                    "env() function requires a string literal for variable name"
+                                        .to_string(),
+                                ));
+                            }
+                        };
+
+                        get_env(var_name).map(Value::String).ok_or_else(|| {
+                            ConvertError::Expression(format!(
+                                "Required environment variable '{}' not found",
+                                var_name
+                            ))
+                        })
+                    }
+                    2 => {
+                        // Optional environment variable with default
+                        let var_name = match &arguments[0].kind {
+                            ExpressionKind::Literal(Literal::String(s)) => s,
+                            _ => {
+                                return Err(ConvertError::Expression(
+                                    "env() function requires a string literal for variable name"
+                                        .to_string(),
+                                ));
+                            }
+                        };
+
+                        let default_value = Self::eval_expression(&arguments[1])?;
+
+                        // If env var exists, try to parse it as the type of the default value
+                        if let Some(env_str) = get_env(var_name) {
+                            parse_env_as_type(&env_str, &default_value).ok_or_else(|| {
+                                ConvertError::Expression(format!(
+                                    "Failed to parse environment variable '{}' with value '{}' as {:?}",
+                                    var_name, env_str, default_value
+                                ))
+                            })
+                        } else {
+                            // Return default value with its original type
+                            Ok(default_value)
+                        }
+                    }
+                    _ => Err(ConvertError::Expression(format!(
+                        "env() function takes 1 or 2 arguments, got {}",
+                        arguments.len()
+                    ))),
+                }
+            }
             _ => Err(ConvertError::Expression(format!(
                 "cannot evaluate complex expression: {:?}",
                 expr
@@ -495,7 +552,7 @@ impl PlanBuilder {
     ) -> Result<HashMap<String, Value>, ConvertError> {
         let mut definitions = HashMap::new();
         for attr in &def_block.attributes {
-            let value = self.eval_expression(&attr.value)?;
+            let value = Self::eval_expression(&attr.value)?;
             definitions.insert(attr.key.name.clone(), value);
         }
         Ok(definitions)
@@ -537,6 +594,10 @@ mod tests {
         span::Span,
         validation::{OnErrorBlock, RetryBlock, ValidateBlock, ValidationBody, ValidationCheck},
     };
+    use std::sync::Mutex;
+
+    // Shared lock for tests that use the global EnvContext to prevent race conditions
+    static ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn test_span() -> Span {
         Span::new(0, 10, 1, 1)
@@ -1014,5 +1075,113 @@ mod tests {
         assert_eq!(retry.max_attempts, 5);
         assert_eq!(retry.delay_ms, 1000);
         assert!(matches!(retry.backoff, BackoffStrategy::Exponential));
+    }
+
+    #[test]
+    fn test_env_function_with_typed_defaults() {
+        use crate::context::env::{EnvContext, clear_env_context, init_env_context};
+
+        // Use a static mutex to ensure tests using global env context don't run in parallel
+        let _guard = ENV_TEST_LOCK.lock().unwrap();
+
+        // Clean up and create fresh context
+        clear_env_context();
+        let mut env_ctx = EnvContext::empty();
+        env_ctx.set("BATCH_SIZE".to_string(), "5000".to_string());
+        env_ctx.set("CREATE_TABLES".to_string(), "true".to_string());
+        env_ctx.set("THRESHOLD".to_string(), "0.95".to_string());
+        init_env_context(env_ctx);
+
+        // Test integer default - env var exists
+        let expr_int = Expression::new(
+            ExpressionKind::FunctionCall {
+                name: "env".to_string(),
+                arguments: vec![
+                    make_string_expr("BATCH_SIZE"),
+                    make_number_expr(1000.0), // default
+                ],
+            },
+            test_span(),
+        );
+        let result_int = PlanBuilder::eval_expression(&expr_int).unwrap();
+        // Should parse as Uint since positive integer
+        assert!(matches!(result_int, Value::Uint(5000)));
+
+        // Test boolean default - env var exists
+        let expr_bool = Expression::new(
+            ExpressionKind::FunctionCall {
+                name: "env".to_string(),
+                arguments: vec![
+                    make_string_expr("CREATE_TABLES"),
+                    make_bool_expr(false), // default
+                ],
+            },
+            test_span(),
+        );
+        let result_bool = PlanBuilder::eval_expression(&expr_bool).unwrap();
+        assert!(matches!(result_bool, Value::Boolean(true)));
+
+        // Test float default - env var exists
+        let expr_float = Expression::new(
+            ExpressionKind::FunctionCall {
+                name: "env".to_string(),
+                arguments: vec![
+                    make_string_expr("THRESHOLD"),
+                    make_number_expr(0.5), // default
+                ],
+            },
+            test_span(),
+        );
+        let result_float = PlanBuilder::eval_expression(&expr_float).unwrap();
+        assert!(matches!(result_float, Value::Float(v) if (v - 0.95).abs() < 0.001));
+
+        // Test when env var doesn't exist - should return typed default
+        let expr_missing_int = Expression::new(
+            ExpressionKind::FunctionCall {
+                name: "env".to_string(),
+                arguments: vec![
+                    make_string_expr("MISSING_VAR"),
+                    make_number_expr(1234.0), // default
+                ],
+            },
+            test_span(),
+        );
+        let result_missing = PlanBuilder::eval_expression(&expr_missing_int).unwrap();
+        assert!(matches!(result_missing, Value::Float(1234.0)));
+
+        clear_env_context();
+    }
+
+    #[test]
+    fn test_env_function_parse_failure() {
+        use crate::context::env::{EnvContext, clear_env_context, init_env_context};
+
+        // Use a static mutex to ensure tests using global env context don't run in parallel
+        let _guard = ENV_TEST_LOCK.lock().unwrap();
+
+        clear_env_context();
+        let mut env_ctx = EnvContext::empty();
+        env_ctx.set("BAD_INT".to_string(), "not_a_number".to_string());
+        init_env_context(env_ctx);
+
+        // Try to parse invalid integer
+        let expr = Expression::new(
+            ExpressionKind::FunctionCall {
+                name: "env".to_string(),
+                arguments: vec![make_string_expr("BAD_INT"), make_number_expr(100.0)],
+            },
+            test_span(),
+        );
+
+        let result = PlanBuilder::eval_expression(&expr);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to parse environment variable")
+        );
+
+        clear_env_context();
     }
 }

@@ -1,4 +1,5 @@
 use bigdecimal::FromPrimitive;
+use engine_core::context::env::{get_env, get_env_or};
 use model::{
     core::value::Value,
     execution::expr::{BinaryOp, CompiledExpression},
@@ -226,10 +227,157 @@ fn eval_function(name: &str, args: &[Value]) -> Option<Value> {
                 .join("");
             Some(Value::String(concatenated))
         }
+        "env" => {
+            // env(var_name) - required
+            // env(var_name, default) - optional with default
+            match args.len() {
+                1 => {
+                    // Required environment variable
+                    let var_name = match args.first()? {
+                        Value::String(s) => s.as_str(),
+                        _ => {
+                            warn!("env() function requires a string argument for variable name");
+                            return None;
+                        }
+                    };
+
+                    match get_env(var_name) {
+                        Some(value) => Some(Value::String(value)),
+                        None => {
+                            warn!("Required environment variable '{}' not found", var_name);
+                            None
+                        }
+                    }
+                }
+                2 => {
+                    // Optional environment variable with default
+                    let var_name = match args.first()? {
+                        Value::String(s) => s.as_str(),
+                        _ => {
+                            warn!("env() function requires a string argument for variable name");
+                            return None;
+                        }
+                    };
+
+                    let default_value = args.get(1)?;
+                    let default_str = default_value.as_string().unwrap_or_default();
+
+                    let value = get_env_or(var_name, &default_str);
+                    Some(Value::String(value))
+                }
+                _ => {
+                    warn!("env() function takes 1 or 2 arguments, got {}", args.len());
+                    None
+                }
+            }
+        }
 
         _ => {
             warn!("Unsupported function: {}", name);
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use engine_core::context::env::{EnvContext, clear_env_context, init_env_context};
+    use std::sync::Mutex;
+
+    // Use a mutex to ensure tests run serially
+    static TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn test_env_function_required() {
+        let _lock = TEST_MUTEX.lock().unwrap();
+        clear_env_context();
+
+        let mut ctx = EnvContext::empty();
+        ctx.set("TEST_VAR_REQUIRED".to_string(), "test_value".to_string());
+        init_env_context(ctx);
+
+        let args = vec![Value::String("TEST_VAR_REQUIRED".to_string())];
+        let result = eval_function("env", &args);
+
+        assert_eq!(result, Some(Value::String("test_value".to_string())));
+
+        clear_env_context();
+    }
+
+    #[test]
+    fn test_env_function_with_default() {
+        let _lock = TEST_MUTEX.lock().unwrap();
+        clear_env_context();
+
+        let ctx = EnvContext::empty();
+        init_env_context(ctx);
+
+        let args = vec![
+            Value::String("MISSING_VAR_DEFAULT".to_string()),
+            Value::String("default_value".to_string()),
+        ];
+        let result = eval_function("env", &args);
+
+        assert_eq!(result, Some(Value::String("default_value".to_string())));
+
+        clear_env_context();
+    }
+
+    #[test]
+    fn test_env_function_with_default_int() {
+        let _lock = TEST_MUTEX.lock().unwrap();
+        clear_env_context();
+
+        let ctx = EnvContext::empty();
+        init_env_context(ctx);
+
+        let args = vec![Value::String("MISSING_VAR_INT".to_string()), Value::Int(42)];
+        let result = eval_function("env", &args);
+
+        assert_eq!(result, Some(Value::String("42".to_string())));
+
+        clear_env_context();
+    }
+
+    #[test]
+    fn test_env_function_missing_required() {
+        let _lock = TEST_MUTEX.lock().unwrap();
+        clear_env_context();
+
+        let ctx = EnvContext::empty();
+        init_env_context(ctx);
+
+        let args = vec![Value::String("MISSING_VAR_REQ".to_string())];
+        let result = eval_function("env", &args);
+
+        assert_eq!(result, None);
+
+        clear_env_context();
+    }
+
+    #[test]
+    fn test_env_function_invalid_args() {
+        let _lock = TEST_MUTEX.lock().unwrap();
+        clear_env_context();
+
+        let ctx = EnvContext::empty();
+        init_env_context(ctx);
+
+        // Wrong type for variable name
+        let args = vec![Value::Int(123)];
+        let result = eval_function("env", &args);
+        assert_eq!(result, None);
+
+        // Too many arguments
+        let args = vec![
+            Value::String("VAR".to_string()),
+            Value::String("default".to_string()),
+            Value::String("extra".to_string()),
+        ];
+        let result = eval_function("env", &args);
+        assert_eq!(result, None);
+
+        clear_env_context();
     }
 }

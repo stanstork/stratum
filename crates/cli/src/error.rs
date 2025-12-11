@@ -48,4 +48,7 @@ pub enum CliError {
 
     #[error("Conversion error: {0}")]
     Conversion(#[from] ConvertError),
+
+    #[error("Configuration error: {0}")]
+    Config(String),
 }
