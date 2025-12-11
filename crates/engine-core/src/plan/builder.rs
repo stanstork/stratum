@@ -1,3 +1,4 @@
+use crate::plan::env_parser::parse_env_as_type;
 use model::{
     core::value::Value,
     execution::{
@@ -483,7 +484,7 @@ impl PlanBuilder {
                 Literal::Null => Value::Null,
             }),
             ExpressionKind::FunctionCall { name, arguments } if name == "env" => {
-                use crate::context::env::{get_env, get_env_or};
+                use crate::context::env::get_env;
 
                 match arguments.len() {
                     1 => {
@@ -518,9 +519,19 @@ impl PlanBuilder {
                         };
 
                         let default_value = self.eval_expression(&arguments[1])?;
-                        let default_str = value_to_string(&default_value);
 
-                        Ok(Value::String(get_env_or(var_name, &default_str)))
+                        // If env var exists, try to parse it as the type of the default value
+                        if let Some(env_str) = get_env(var_name) {
+                            parse_env_as_type(&env_str, &default_value).ok_or_else(|| {
+                                ConvertError::Expression(format!(
+                                    "Failed to parse environment variable '{}' with value '{}' as {:?}",
+                                    var_name, env_str, default_value
+                                ))
+                            })
+                        } else {
+                            // Return default value with its original type
+                            Ok(default_value)
+                        }
                     }
                     _ => Err(ConvertError::Expression(format!(
                         "env() function takes 1 or 2 arguments, got {}",
@@ -583,6 +594,10 @@ mod tests {
         span::Span,
         validation::{OnErrorBlock, RetryBlock, ValidateBlock, ValidationBody, ValidationCheck},
     };
+    use std::sync::Mutex;
+
+    // Shared lock for tests that use the global EnvContext to prevent race conditions
+    static ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn test_span() -> Span {
         Span::new(0, 10, 1, 1)
@@ -1061,27 +1076,116 @@ mod tests {
         assert_eq!(retry.delay_ms, 1000);
         assert!(matches!(retry.backoff, BackoffStrategy::Exponential));
     }
-}
 
-fn value_to_string(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.clone(),
-        Value::SmallInt(i) => i.to_string(),
-        Value::Int32(i) => i.to_string(),
-        Value::Int(i) => i.to_string(),
-        Value::Uint(u) => u.to_string(),
-        Value::Usize(u) => u.to_string(),
-        Value::Float(f) => f.to_string(),
-        Value::Decimal(d) => d.to_string(),
-        Value::Boolean(b) => b.to_string(),
-        Value::Uuid(u) => u.to_string(),
-        Value::Date(d) => d.to_string(),
-        Value::Timestamp(t) => t.to_rfc3339(),
-        Value::TimestampNaive(t) => t.to_string(),
-        Value::Bytes(b) => String::from_utf8_lossy(b).to_string(),
-        Value::Json(v) => v.to_string(),
-        Value::Null => String::new(),
-        Value::Enum(_, v) => v.clone(),
-        Value::StringArray(v) => format!("{v:?}"),
+    #[test]
+    fn test_env_function_with_typed_defaults() {
+        use crate::context::env::{EnvContext, clear_env_context, init_env_context};
+
+        // Use a static mutex to ensure tests using global env context don't run in parallel
+        let _guard = ENV_TEST_LOCK.lock().unwrap();
+
+        // Clean up and create fresh context
+        clear_env_context();
+        let mut env_ctx = EnvContext::empty();
+        env_ctx.set("BATCH_SIZE".to_string(), "5000".to_string());
+        env_ctx.set("CREATE_TABLES".to_string(), "true".to_string());
+        env_ctx.set("THRESHOLD".to_string(), "0.95".to_string());
+        init_env_context(env_ctx);
+
+        let builder = PlanBuilder::new();
+
+        // Test integer default - env var exists
+        let expr_int = Expression::new(
+            ExpressionKind::FunctionCall {
+                name: "env".to_string(),
+                arguments: vec![
+                    make_string_expr("BATCH_SIZE"),
+                    make_number_expr(1000.0), // default
+                ],
+            },
+            test_span(),
+        );
+        let result_int = builder.eval_expression(&expr_int).unwrap();
+        // Should parse as Uint since positive integer
+        assert!(matches!(result_int, Value::Uint(5000)));
+
+        // Test boolean default - env var exists
+        let expr_bool = Expression::new(
+            ExpressionKind::FunctionCall {
+                name: "env".to_string(),
+                arguments: vec![
+                    make_string_expr("CREATE_TABLES"),
+                    make_bool_expr(false), // default
+                ],
+            },
+            test_span(),
+        );
+        let result_bool = builder.eval_expression(&expr_bool).unwrap();
+        assert!(matches!(result_bool, Value::Boolean(true)));
+
+        // Test float default - env var exists
+        let expr_float = Expression::new(
+            ExpressionKind::FunctionCall {
+                name: "env".to_string(),
+                arguments: vec![
+                    make_string_expr("THRESHOLD"),
+                    make_number_expr(0.5), // default
+                ],
+            },
+            test_span(),
+        );
+        let result_float = builder.eval_expression(&expr_float).unwrap();
+        assert!(matches!(result_float, Value::Float(v) if (v - 0.95).abs() < 0.001));
+
+        // Test when env var doesn't exist - should return typed default
+        let expr_missing_int = Expression::new(
+            ExpressionKind::FunctionCall {
+                name: "env".to_string(),
+                arguments: vec![
+                    make_string_expr("MISSING_VAR"),
+                    make_number_expr(1234.0), // default
+                ],
+            },
+            test_span(),
+        );
+        let result_missing = builder.eval_expression(&expr_missing_int).unwrap();
+        assert!(matches!(result_missing, Value::Float(1234.0)));
+
+        clear_env_context();
+    }
+
+    #[test]
+    fn test_env_function_parse_failure() {
+        use crate::context::env::{EnvContext, clear_env_context, init_env_context};
+
+        // Use a static mutex to ensure tests using global env context don't run in parallel
+        let _guard = ENV_TEST_LOCK.lock().unwrap();
+
+        clear_env_context();
+        let mut env_ctx = EnvContext::empty();
+        env_ctx.set("BAD_INT".to_string(), "not_a_number".to_string());
+        init_env_context(env_ctx);
+
+        let builder = PlanBuilder::new();
+
+        // Try to parse invalid integer
+        let expr = Expression::new(
+            ExpressionKind::FunctionCall {
+                name: "env".to_string(),
+                arguments: vec![make_string_expr("BAD_INT"), make_number_expr(100.0)],
+            },
+            test_span(),
+        );
+
+        let result = builder.eval_expression(&expr);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to parse environment variable")
+        );
+
+        clear_env_context();
     }
 }

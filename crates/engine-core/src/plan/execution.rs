@@ -1,9 +1,10 @@
-use crate::plan_builder::PlanBuilder;
 use model::execution::{
     connection::Connection, define::GlobalDefinitions, errors::ConvertError, pipeline::Pipeline,
 };
 use serde::{Deserialize, Serialize};
 use smql_syntax::ast::doc::SmqlDocument;
+
+use crate::plan::builder::PlanBuilder;
 
 /// Top-level execution plan compiled from SMQL AST
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,9 +61,10 @@ impl ExecutionPlan {
 
 #[cfg(test)]
 mod tests {
-    use crate::plan::ExecutionPlan;
     use model::{core::value::Value, execution::pipeline::WriteMode};
     use smql_syntax::builder::parse;
+
+    use crate::plan::execution::ExecutionPlan;
 
     #[test]
     fn test_full_document_conversion() {

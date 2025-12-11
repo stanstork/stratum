@@ -7,7 +7,7 @@ use crate::{
 use clap::Parser;
 use commands::Commands;
 use engine_core::{
-    plan::ExecutionPlan,
+    plan::execution::ExecutionPlan,
     progress::{ProgressService, ProgressStatus},
     state::{StateStore, sled_store::SledStateStore},
 };
