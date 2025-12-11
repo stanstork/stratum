@@ -8,12 +8,11 @@ use connectors::{
 };
 use engine_core::connectors::source::DataSource;
 use model::{
-    core::{data_type::DataType, value::Value},
+    core::data_type::DataType,
     execution::expr::CompiledExpression,
     transform::{computed_field::ComputedField, mapping::TransformationMetadata},
 };
 use std::sync::Arc;
-use tracing::warn;
 
 /// A thin newtype wrapper around `CompiledExpression` to implement
 /// `TypeInferencer` without touching the model crate.
@@ -106,122 +105,37 @@ impl TypeInferencer for ExpressionWrapper {
         mapping: &TransformationMetadata,
         source: &DataSource,
     ) -> Option<DataType> {
-        match &self.0 {
-            CompiledExpression::Identifier(identifier) => columns
-                .iter()
-                .find(|col| col.name().eq_ignore_ascii_case(identifier))
-                .map(|col| col.data_type()),
-
-            CompiledExpression::Literal(value) => Some(match value {
-                Value::String(_) => DataType::String,
-                Value::Int(_) => DataType::Int,
-                Value::Float(_) => DataType::Float,
-                Value::Boolean(_) => DataType::Boolean,
-                Value::Null => DataType::String, // Default for null
-                _ => DataType::String,           // Fallback for other types
-            }),
-
-            CompiledExpression::Binary { left, right, .. } => {
-                let lt = ExpressionWrapper((**left).clone())
-                    .infer_type(columns, mapping, source)
-                    .await?;
-                let rt = ExpressionWrapper((**right).clone())
-                    .infer_type(columns, mapping, source)
-                    .await?;
-                Some(get_numeric_type(&lt, &rt))
-            }
-
-            CompiledExpression::FunctionCall { name, .. } => {
-                match name.to_ascii_lowercase().as_str() {
-                    "lower" | "upper" | "concat" => Some(DataType::VarChar),
-                    _ => None,
-                }
-            }
-
-            // DotPath with 2+ segments = cross-entity reference (table.column)
-            CompiledExpression::DotPath(segments) if segments.len() >= 2 => {
-                let entity = &segments[0];
-                let key = &segments[1];
-                let table_name = mapping.entities.resolve(entity);
-                let meta = source.fetch_meta(table_name).await.ok()?;
-                match meta {
-                    EntityMetadata::Table(meta) => meta
-                        .columns()
-                        .iter()
-                        .find(|col| col.name.eq_ignore_ascii_case(key))
-                        .map(|col| col.data_type.clone()),
-                    EntityMetadata::Csv(meta) => meta
-                        .columns
-                        .iter()
-                        .find(|col| col.name.eq_ignore_ascii_case(key))
-                        .map(|col| col.data_type.clone()),
-                }
-            }
-
-            // Single-segment DotPath is just a field reference
-            CompiledExpression::DotPath(segments) if segments.len() == 1 => columns
-                .iter()
-                .find(|col| col.name().eq_ignore_ascii_case(&segments[0]))
-                .map(|col| col.data_type()),
-
-            // Handle other expression types
-            CompiledExpression::Unary { operand, .. } => {
-                ExpressionWrapper((**operand).clone())
-                    .infer_type(columns, mapping, source)
-                    .await
-            }
-
-            CompiledExpression::Grouped(expr) => {
-                ExpressionWrapper((**expr).clone())
-                    .infer_type(columns, mapping, source)
-                    .await
-            }
-
-            CompiledExpression::When {
-                branches,
-                else_expr,
-            } => {
-                // Try to infer from first branch value, fallback to else
-                if let Some(branch) = branches.first() {
-                    ExpressionWrapper(branch.value.clone())
-                        .infer_type(columns, mapping, source)
-                        .await
-                } else if let Some(else_val) = else_expr {
-                    ExpressionWrapper((**else_val).clone())
-                        .infer_type(columns, mapping, source)
-                        .await
-                } else {
-                    None
-                }
-            }
-
-            CompiledExpression::IsNull(_) | CompiledExpression::IsNotNull(_) => {
-                Some(DataType::Boolean)
-            }
-
-            CompiledExpression::Array(_) => None, // Arrays not yet supported
-            CompiledExpression::DotPath(_) => None, // Empty DotPath
+        // Check if this is a cross-entity reference (DotPath with 2+ segments)
+        // If so, handle it here with async metadata fetching
+        if let CompiledExpression::DotPath(segments) = &self.0
+            && segments.len() >= 2
+        {
+            let entity = &segments[0];
+            let key = &segments[1];
+            let table_name = mapping.entities.resolve(entity);
+            let meta = source.fetch_meta(table_name).await.ok()?;
+            return match meta {
+                EntityMetadata::Table(meta) => meta
+                    .columns()
+                    .iter()
+                    .find(|col| col.name.eq_ignore_ascii_case(key))
+                    .map(|col| col.data_type.clone()),
+                EntityMetadata::Csv(meta) => meta
+                    .columns
+                    .iter()
+                    .find(|col| col.name.eq_ignore_ascii_case(key))
+                    .map(|col| col.data_type.clone()),
+            };
         }
-    }
-}
 
-fn get_numeric_type(left: &DataType, right: &DataType) -> DataType {
-    match (left, right) {
-        (DataType::Int, DataType::Int) => DataType::Int,
-        (DataType::Float, DataType::Float) => DataType::Float,
-        (DataType::Int, DataType::Float) => DataType::Float,
-        (DataType::Float, DataType::Int) => DataType::Float,
-        (DataType::Decimal, DataType::Decimal) => DataType::Decimal,
-        (DataType::Int, DataType::Decimal) => DataType::Decimal,
-        (DataType::Decimal, DataType::Int) => DataType::Decimal,
-        (DataType::Float, DataType::Decimal) => DataType::Decimal,
-        (DataType::Decimal, DataType::Float) => DataType::Decimal,
-        _ => {
-            warn!(
-                "Incompatible types for arithmetic operation: {:?} and {:?}",
-                left, right
-            );
-            DataType::String // Fallback to String for unsupported types
-        }
+        // For all other cases, delegate to expression-engine's synchronous inference
+        let column_lookup = |name: &str| {
+            columns
+                .iter()
+                .find(|col| col.name().eq_ignore_ascii_case(name))
+                .map(|col| col.data_type())
+        };
+
+        expression_engine::infer_expression_type(&self.0, &column_lookup)
     }
 }

@@ -1,4 +1,4 @@
-use crate::plan::env_parser::parse_env_as_type;
+use crate::context::env::get_env;
 use model::{
     core::value::Value,
     execution::{
@@ -474,76 +474,11 @@ impl PlanBuilder {
         }
     }
 
+    // Used for simple expressions only during plan building
     fn eval_expression(expr: &Expression) -> Result<Value, ConvertError> {
-        // Evaluate simple expressions to values
-        match &expr.kind {
-            ExpressionKind::Literal(lit) => Ok(match lit {
-                Literal::String(s) => Value::String(s.clone()),
-                Literal::Number(n) => Value::Float(*n),
-                Literal::Boolean(b) => Value::Boolean(*b),
-                Literal::Null => Value::Null,
-            }),
-            ExpressionKind::FunctionCall { name, arguments } if name == "env" => {
-                use crate::context::env::get_env;
-
-                match arguments.len() {
-                    1 => {
-                        // Required environment variable
-                        let var_name = match &arguments[0].kind {
-                            ExpressionKind::Literal(Literal::String(s)) => s,
-                            _ => {
-                                return Err(ConvertError::Expression(
-                                    "env() function requires a string literal for variable name"
-                                        .to_string(),
-                                ));
-                            }
-                        };
-
-                        get_env(var_name).map(Value::String).ok_or_else(|| {
-                            ConvertError::Expression(format!(
-                                "Required environment variable '{}' not found",
-                                var_name
-                            ))
-                        })
-                    }
-                    2 => {
-                        // Optional environment variable with default
-                        let var_name = match &arguments[0].kind {
-                            ExpressionKind::Literal(Literal::String(s)) => s,
-                            _ => {
-                                return Err(ConvertError::Expression(
-                                    "env() function requires a string literal for variable name"
-                                        .to_string(),
-                                ));
-                            }
-                        };
-
-                        let default_value = Self::eval_expression(&arguments[1])?;
-
-                        // If env var exists, try to parse it as the type of the default value
-                        if let Some(env_str) = get_env(var_name) {
-                            parse_env_as_type(&env_str, &default_value).ok_or_else(|| {
-                                ConvertError::Expression(format!(
-                                    "Failed to parse environment variable '{}' with value '{}' as {:?}",
-                                    var_name, env_str, default_value
-                                ))
-                            })
-                        } else {
-                            // Return default value with its original type
-                            Ok(default_value)
-                        }
-                    }
-                    _ => Err(ConvertError::Expression(format!(
-                        "env() function takes 1 or 2 arguments, got {}",
-                        arguments.len()
-                    ))),
-                }
-            }
-            _ => Err(ConvertError::Expression(format!(
-                "cannot evaluate complex expression: {:?}",
-                expr
-            ))),
-        }
+        let definitions = HashMap::new();
+        expression_engine::eval_ast_expression(expr, &definitions, get_env)
+            .map_err(|e| ConvertError::Expression(e.to_string()))
     }
 
     pub fn extract_definitions(

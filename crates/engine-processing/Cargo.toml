@@ -10,6 +10,7 @@ connectors = { path = "../connectors" }
 planner = { path = "../planner" }
 engine-core = { path = "../engine-core" }
 engine-config = { path = "../engine-config" }
+expression-engine = { path = "../expression-engine" }
 
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }

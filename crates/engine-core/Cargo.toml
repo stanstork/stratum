@@ -8,6 +8,7 @@ connectors = { path = "../connectors" }
 planner = { path = "../planner" }
 model = { path = "../model" }
 smql-syntax = { path = "../smql-syntax" }
+expression-engine = { path = "../expression-engine" }
 
 tokio = { version = "1.43.0", features = ["full"] }
 tokio-postgres = "0.7.15"
