@@ -1,6 +1,10 @@
-use crate::error::TransformError;
+use crate::{
+    error::TransformError,
+    transform::validation::{ValidationAction, ValidationResult},
+};
 use model::records::row::RowData;
 use std::sync::Arc;
+use tracing::warn;
 
 pub trait Transform: Send + Sync {
     fn apply(&self, row: &mut RowData) -> Result<(), TransformError>;
@@ -9,6 +13,10 @@ pub trait Transform: Send + Sync {
 /// Trait for filter-like transforms that decide whether to keep a row.
 pub trait Filter: Send + Sync {
     fn should_keep(&self, row: &RowData) -> bool;
+}
+
+pub trait Validator: Send + Sync {
+    fn validate(&self, row: &RowData) -> Result<ValidationResult, TransformError>;
 }
 
 pub trait TransformPipelineExt {
@@ -21,12 +29,18 @@ pub trait TransformPipelineExt {
     where
         F: Filter + 'static,
         Factory: FnOnce() -> F;
+
+    fn add_validator_if<V, Factory>(self, condition: bool, factory: Factory) -> Self
+    where
+        V: Validator + 'static,
+        Factory: FnOnce() -> V;
 }
 
 #[derive(Clone)]
 enum PipelineStage {
     Transform(Arc<dyn Transform>),
     Filter(Arc<dyn Filter>),
+    ValidationStage(Arc<dyn Validator>),
 }
 
 #[derive(Clone)]
@@ -51,6 +65,30 @@ impl TransformPipeline {
                         return Ok(false);
                     }
                 }
+                PipelineStage::ValidationStage(validator) => match validator.validate(&row) {
+                    Ok(res) => match res {
+                        ValidationResult::Pass => {
+                            // Row is valid, continue processing
+                        }
+                        ValidationResult::Failed {
+                            rule,
+                            message,
+                            action,
+                        } => match action {
+                            ValidationAction::Skip => {
+                                warn!("Validation '{}' failed: {} (skipping row)", rule, message);
+                                return Ok(false);
+                            }
+                            ValidationAction::Fail => {
+                                return Err(TransformError::ValidationFailed { rule, message });
+                            }
+                            ValidationAction::Warn => {
+                                warn!("Validation '{}' failed: {} (continuing)", rule, message);
+                            }
+                        },
+                    },
+                    Err(e) => return Err(e),
+                },
             }
         }
         Ok(true)
@@ -68,7 +106,14 @@ impl TransformPipeline {
             match self.apply(&mut row) {
                 Ok(true) => successful.push(row),
                 Ok(false) => filtered.push(row),
-                Err(e) => failed.push((row, e)),
+                Err(e) => {
+                    if matches!(e, TransformError::ValidationFailed { .. }) {
+                        failed.push((row, e));
+                        // Stop processing remaining rows - validation failure should halt pipeline
+                        break;
+                    }
+                    failed.push((row, e));
+                }
             }
         }
 
@@ -83,6 +128,12 @@ impl TransformPipeline {
 
     pub fn add_filter<F: Filter + 'static>(mut self, filter: F) -> Self {
         self.stages.push(PipelineStage::Filter(Arc::new(filter)));
+        self
+    }
+
+    pub fn add_validator<V: Validator + 'static>(mut self, validator: V) -> Self {
+        self.stages
+            .push(PipelineStage::ValidationStage(Arc::new(validator)));
         self
     }
 }
@@ -106,6 +157,17 @@ impl TransformPipelineExt for TransformPipeline {
     {
         if condition {
             self = self.add_filter(factory());
+        }
+        self
+    }
+
+    fn add_validator_if<V, Factory>(mut self, condition: bool, factory: Factory) -> Self
+    where
+        V: Validator + 'static,
+        Factory: FnOnce() -> V,
+    {
+        if condition {
+            self = self.add_validator(factory());
         }
         self
     }

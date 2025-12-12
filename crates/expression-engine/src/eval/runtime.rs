@@ -1,5 +1,4 @@
-use crate::{context::EvalContext, functions::FunctionRegistry};
-use bigdecimal::{FromPrimitive, ToPrimitive};
+use crate::{context::EvalContext, eval::binary::BinaryOpEvaluator, functions::FunctionRegistry};
 use model::{
     core::value::Value,
     execution::expr::{BinaryOp, CompiledExpression},
@@ -38,7 +37,7 @@ impl Evaluator for CompiledExpression {
             CompiledExpression::Binary { left, op, right } => {
                 let left_val = left.evaluate(row, mapping, env_getter)?;
                 let right_val = right.evaluate(row, mapping, env_getter)?;
-                eval_arithmetic(&left_val, &right_val, op)
+                eval_binary_op(&left_val, &right_val, op)
             }
 
             CompiledExpression::FunctionCall { name, args } => {
@@ -138,67 +137,9 @@ impl Evaluator for CompiledExpression {
     }
 }
 
-fn eval_arithmetic(left: &Value, right: &Value, op: &BinaryOp) -> Option<Value> {
-    use Value::*;
-
-    let as_float = |v: &Value| match v {
-        Int(i) => Some(*i as f64),
-        Float(f) => Some(*f),
-        Decimal(d) => d.to_f64(),
-        _ => None,
-    };
-
-    match (left, right) {
-        (Int(l), Int(r)) => Some(match op {
-            BinaryOp::Add => Int(l + r),
-            BinaryOp::Subtract => Int(l - r),
-            BinaryOp::Multiply => Int(l * r),
-            BinaryOp::Divide => Int(l / r),
-            BinaryOp::Modulo => Int(l % r),
-            _ => {
-                warn!("Unsupported binary operation for Int: {:?}", op);
-                return None;
-            }
-        }),
-
-        (Int(_), Float(_)) | (Float(_), Int(_)) | (Float(_), Float(_)) => {
-            let l = as_float(left)?;
-            let r = as_float(right)?;
-            Some(match op {
-                BinaryOp::Add => Float(l + r),
-                BinaryOp::Subtract => Float(l - r),
-                BinaryOp::Multiply => Float(l * r),
-                BinaryOp::Divide => Float(l / r),
-                BinaryOp::Modulo => Float(l % r),
-                _ => {
-                    warn!("Unsupported binary operation for Float: {:?}", op);
-                    return None;
-                }
-            })
-        }
-
-        (Decimal(_), Decimal(_))
-        | (Decimal(_), Int(_))
-        | (Int(_), Decimal(_))
-        | (Decimal(_), Float(_))
-        | (Float(_), Decimal(_)) => {
-            let l = as_float(left)?;
-            let r = as_float(right)?;
-            Some(match op {
-                BinaryOp::Add => Decimal(bigdecimal::BigDecimal::from_f64(l + r)?),
-                BinaryOp::Subtract => Decimal(bigdecimal::BigDecimal::from_f64(l - r)?),
-                BinaryOp::Multiply => Decimal(bigdecimal::BigDecimal::from_f64(l * r)?),
-                BinaryOp::Divide => Decimal(bigdecimal::BigDecimal::from_f64(l / r)?),
-                BinaryOp::Modulo => Decimal(bigdecimal::BigDecimal::from_f64(l % r)?),
-                _ => {
-                    warn!("Unsupported binary operation for Decimal: {:?}", op);
-                    return None;
-                }
-            })
-        }
-
-        _ => None,
-    }
+/// Evaluates a binary operation (arithmetic, comparison, logical, string ops)
+fn eval_binary_op(left: &Value, right: &Value, op: &BinaryOp) -> Option<Value> {
+    BinaryOpEvaluator::new(left, right, op).evaluate()
 }
 
 fn eval_function(

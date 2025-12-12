@@ -116,6 +116,8 @@ impl MigrationExecutor {
         idx: usize,
         pipeline: &Pipeline,
     ) -> Result<SummaryReport, MigrationError> {
+        println!("Pipeline Details: {:#?}", pipeline);
+
         let start_time = std::time::Instant::now();
         info!("Starting migration pipeline {}", pipeline.destination.table);
         let run_id = self.exec_ctx.run_id();
@@ -136,6 +138,7 @@ impl MigrationExecutor {
             item_id: item_id.clone(),
             source: source.clone(),
             destination: destination.clone(),
+            pipeline: pipeline.clone(),
             mapping: mapping.clone(),
             state: state.clone(),
             offset_strategy: offset_strategy.clone(),

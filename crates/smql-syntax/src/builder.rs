@@ -418,29 +418,27 @@ fn build_validation_check(pair: Pair<Rule>) -> BuildResult<ValidationCheck> {
                 label = parse_string_literal(inner.as_str());
             }
             Rule::validation_body => {
-                // Parse the validation body which contains check, message, action assignments
-                let mut current_field = "";
-
-                for body_inner in inner.into_inner() {
-                    let text = body_inner.as_str();
-
-                    // Check if this is a field name (plain text, not a rule)
-                    if text == "check" || text == "message" || text == "action" {
-                        current_field = text;
-                    } else {
-                        // This is a value for the current field
-                        match current_field {
-                            "check" if body_inner.as_rule() == Rule::expression => {
-                                check = Some(build_expression(body_inner)?);
+                let mut pairs = inner.into_inner();
+                while let Some(pair) = pairs.next() {
+                    match pair.as_rule() {
+                        Rule::op_eq => {
+                            // After '=', the next token is the value
+                            if let Some(value_pair) = pairs.next() {
+                                match value_pair.as_rule() {
+                                    Rule::expression => {
+                                        check = Some(build_expression(value_pair)?);
+                                    }
+                                    Rule::lit_string => {
+                                        message = Some(parse_string_literal(value_pair.as_str()));
+                                    }
+                                    Rule::ident => {
+                                        action = Some(value_pair.as_str().to_string());
+                                    }
+                                    _ => {}
+                                }
                             }
-                            "message" if body_inner.as_rule() == Rule::lit_string => {
-                                message = Some(parse_string_literal(body_inner.as_str()));
-                            }
-                            "action" if body_inner.as_rule() == Rule::ident => {
-                                action = Some(body_inner.as_str().to_string());
-                            }
-                            _ => {}
                         }
+                        _ => {}
                     }
                 }
             }

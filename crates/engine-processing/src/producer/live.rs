@@ -48,13 +48,14 @@ impl LiveProducer {
         batch_tx: mpsc::Sender<Batch>,
         settings: &ValidatedSettings,
     ) -> Self {
-        let (run_id, item_id, part_id, source, mapping, state_store, cursor) = {
+        let (run_id, item_id, part_id, source, pipeline, mapping, state_store, cursor) = {
             let c = ctx.lock().await;
             (
                 c.run_id.clone(),
                 c.item_id.clone(),
                 "part-0".to_string(),
                 c.source.clone(),
+                c.pipeline.clone(),
                 c.mapping.clone(),
                 c.state.clone(),
                 c.cursor.clone(),
@@ -67,8 +68,8 @@ impl LiveProducer {
         // Create components
         let reader = SnapshotReader::new(source, RetryPolicy::for_database(), config.batch_size);
 
-        let pipeline = build_transform_pipeline(&mapping, settings);
-        let transformer = TransformService::new(pipeline, config.transform_concurrency);
+        let transform_pipeline = build_transform_pipeline(&pipeline, &mapping, settings);
+        let transformer = TransformService::new(transform_pipeline, config.transform_concurrency);
 
         let state_manager = StateManager::new(ids.clone(), state_store);
         let coordinator = BatchCoordinator::new(batch_tx, state_manager);

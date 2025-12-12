@@ -1024,4 +1024,55 @@ mod tests {
 
         assert_eq!(1, cnt, "expected same number of rows in destination table");
     }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn tc21() {
+        reset_postgres_schema().await;
+
+        let tmpl = r#"
+            connection "mysql_source" {
+                driver = "mysql"
+                url    = "mysql://user:password@localhost:3306/testdb"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+
+            pipeline "migrate_orders" {
+                from {
+                    connection = connection.mysql_source
+                    table = "orders"
+                }
+
+                to {
+                    connection = connection.pg_destination
+                    table = "orders"
+                }
+
+                settings {
+                    create_missing_tables = true
+                    batch_size = env("BATCH_SIZE", 1000)
+                    copy_columns = "MAP_ONLY"
+                }
+
+                validate {
+                    assert "total_grater_600" {
+                        check   = orders.total < 600
+                        message = "Order total cannot be less then 600"
+                        action  = warn  // skip, fail, or warn
+                    }
+                }
+
+                select {
+                    id = orders.id
+                    user_id = orders.user_id
+                    total = orders.total
+                }
+            }
+        "#;
+
+        run_smql(tmpl).await;
+    }
 }

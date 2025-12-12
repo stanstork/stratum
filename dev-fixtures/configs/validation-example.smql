@@ -1,0 +1,41 @@
+connection "mysql_prod" {
+  driver = "mysql"
+  url    = env("SOURCE_DB_URL")
+}
+
+connection "postgres_target" {
+  driver = "postgres"
+  url    = env("TARGET_DB_URL")
+}
+
+pipeline "migrate_orders" {
+  from {
+    connection = connection.mysql_prod
+    table = "orders"
+  }
+
+  to {
+    connection = connection.postgres_target
+    table = "orders"
+  }
+
+  settings {
+    create_missing_tables = true
+    batch_size = env("BATCH_SIZE", 1000)
+    copy_columns = "MAP_ONLY"
+  }
+
+  validate {
+    assert "total_grater_400" {
+      check   = orders.total > 400
+      message = "Order total cannot be less then 400"
+      action  = skip  // skip, fail, or warn
+    }
+  }
+
+  select {
+    id = orders.id
+    user_id = orders.user_id
+    total = orders.total
+  }
+}

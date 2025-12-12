@@ -112,4 +112,7 @@ pub enum StateError {
 pub enum TransformError {
     #[error("Transformation failed: {0}")]
     Transformation(String),
+
+    #[error("Validation failed: {rule} - {message}")]
+    ValidationFailed { rule: String, message: String },
 }
