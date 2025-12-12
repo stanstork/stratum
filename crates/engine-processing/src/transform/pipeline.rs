@@ -1,6 +1,6 @@
-use crate::{
+use crate::transform::{
     error::TransformError,
-    transform::validation::{ValidationAction, ValidationResult},
+    validation::{ValidationAction, ValidationResult},
 };
 use model::records::row::RowData;
 use std::sync::Arc;

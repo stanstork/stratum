@@ -1,5 +1,5 @@
 use super::pipeline::Transform;
-use crate::error::TransformError;
+use crate::transform::error::TransformError;
 use model::{records::row::RowData, transform::mapping::TransformationMetadata};
 use std::collections::HashSet;
 

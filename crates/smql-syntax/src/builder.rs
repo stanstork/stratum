@@ -496,14 +496,25 @@ fn build_retry_block(pair: Pair<Rule>) -> BuildResult<RetryBlock> {
 fn build_failed_rows_block(pair: Pair<Rule>) -> BuildResult<FailedRowsBlock> {
     let span = pair_to_span(&pair);
     let mut attributes = Vec::new();
+    let mut nested_blocks = Vec::new();
 
     for inner in pair.into_inner() {
-        if inner.as_rule() == Rule::attribute {
-            attributes.push(build_attribute(inner)?);
+        match inner.as_rule() {
+            Rule::attribute => {
+                attributes.push(build_attribute(inner)?);
+            }
+            Rule::nested_block => {
+                nested_blocks.push(build_nested_block(inner)?);
+            }
+            _ => {}
         }
     }
 
-    Ok(FailedRowsBlock { attributes, span })
+    Ok(FailedRowsBlock {
+        attributes,
+        nested_blocks,
+        span,
+    })
 }
 
 fn build_paginate_block(pair: Pair<Rule>) -> BuildResult<PaginateBlock> {

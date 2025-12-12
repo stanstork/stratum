@@ -111,12 +111,12 @@ pub struct LifecycleHooks {
 /// On_error block configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorHandling {
-    pub retry: Option<RetryPolicy>,
-    pub failed_rows: Option<FailedRowsPolicy>,
+    pub retry: Option<RetryConfig>,
+    pub failed_rows: Option<FailedRowsConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RetryPolicy {
+pub struct RetryConfig {
     pub max_attempts: u32,
     pub delay_ms: u64,
     pub backoff: BackoffStrategy,
@@ -130,9 +130,9 @@ pub enum BackoffStrategy {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FailedRowsPolicy {
+pub struct FailedRowsConfig {
     pub action: FailedRowsAction,
-    pub output_table: Option<String>,
+    pub destination: Option<FailedRowsDestination>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,4 +140,24 @@ pub enum FailedRowsAction {
     Skip,
     Log,
     SaveToTable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FailedRowsDestination {
+    Table {
+        connection: String,
+        table: String,
+        schema: Option<String>,
+    },
+    File {
+        path: String,
+        format: FileFormat,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FileFormat {
+    Json,
+    Csv,
+    Parquet,
 }
