@@ -371,7 +371,7 @@ impl PlanBuilder {
                 // Extract destination from nested blocks or attributes
                 let destination = if let Some(table_block) = fr.nested_blocks.iter().find(|b| b.kind == "table") {
                     // Parse table block
-                    let connection = table_block
+                    let connection_name = table_block
                         .attributes
                         .iter()
                         .find(|a| a.key.name == "connection")
@@ -408,12 +408,17 @@ impl PlanBuilder {
                             _ => None,
                         });
 
-                    if let (Some(conn), Some(tbl)) = (connection, table) {
-                        Some(FailedRowsDestination::Table {
-                            connection: conn,
-                            table: tbl,
-                            schema,
-                        })
+                    if let (Some(conn_name), Some(tbl)) = (connection_name, table) {
+                        // Look up the connection from the connections map
+                        if let Some(connection) = self.connections.get(&conn_name) {
+                            Some(FailedRowsDestination::Table {
+                                connection: connection.clone(),
+                                table: tbl,
+                                schema,
+                            })
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }
@@ -470,17 +475,27 @@ impl PlanBuilder {
                             if let ExpressionKind::DotNotation(path) = &a.value.kind {
                                 // Parse table destination: connection.table or connection.schema.table
                                 if path.segments.len() == 2 {
-                                    Some(FailedRowsDestination::Table {
-                                        connection: path.segments[0].clone(),
-                                        table: path.segments[1].clone(),
-                                        schema: None,
-                                    })
+                                    // Look up the connection
+                                    if let Some(connection) = self.connections.get(&path.segments[0]) {
+                                        Some(FailedRowsDestination::Table {
+                                            connection: connection.clone(),
+                                            table: path.segments[1].clone(),
+                                            schema: None,
+                                        })
+                                    } else {
+                                        None
+                                    }
                                 } else if path.segments.len() == 3 {
-                                    Some(FailedRowsDestination::Table {
-                                        connection: path.segments[0].clone(),
-                                        table: path.segments[2].clone(),
-                                        schema: Some(path.segments[1].clone()),
-                                    })
+                                    // Look up the connection
+                                    if let Some(connection) = self.connections.get(&path.segments[0]) {
+                                        Some(FailedRowsDestination::Table {
+                                            connection: connection.clone(),
+                                            table: path.segments[2].clone(),
+                                            schema: Some(path.segments[1].clone()),
+                                        })
+                                    } else {
+                                        None
+                                    }
                                 } else {
                                     None
                                 }
@@ -1185,7 +1200,19 @@ mod tests {
 
     #[test]
     fn test_failed_rows_with_table_block_with_schema() {
-        let builder = PlanBuilder::new();
+        let mut builder = PlanBuilder::new();
+
+        // Add a test connection to the builder's connections map
+        builder.connections.insert(
+            "warehouse".to_string(),
+            Connection {
+                name: "warehouse".to_string(),
+                driver: "postgres".to_string(),
+                properties: Properties::new(),
+                nested_configs: HashMap::new(),
+            },
+        );
+
         let pipeline = PipelineBlock {
             name: "test".to_string(),
             description: None,
@@ -1233,7 +1260,8 @@ mod tests {
                 table,
                 schema,
             } => {
-                assert_eq!(connection, "warehouse");
+                assert_eq!(connection.name, "warehouse");
+                assert_eq!(connection.driver, "postgres");
                 assert_eq!(table, "failed_orders");
                 assert_eq!(schema, Some("dlq".to_string()));
             }
@@ -1243,7 +1271,19 @@ mod tests {
 
     #[test]
     fn test_failed_rows_with_table_block_without_schema() {
-        let builder = PlanBuilder::new();
+        let mut builder = PlanBuilder::new();
+
+        // Add a test connection to the builder's connections map
+        builder.connections.insert(
+            "error_db".to_string(),
+            Connection {
+                name: "error_db".to_string(),
+                driver: "mysql".to_string(),
+                properties: Properties::new(),
+                nested_configs: HashMap::new(),
+            },
+        );
+
         let pipeline = PipelineBlock {
             name: "test".to_string(),
             description: None,
@@ -1291,7 +1331,8 @@ mod tests {
                 table,
                 schema,
             } => {
-                assert_eq!(connection, "error_db");
+                assert_eq!(connection.name, "error_db");
+                assert_eq!(connection.driver, "mysql");
                 assert_eq!(table, "failed_rows");
                 assert_eq!(schema, None);
             }
@@ -1398,7 +1439,19 @@ mod tests {
 
     #[test]
     fn test_failed_rows_with_old_style_attribute_table() {
-        let builder = PlanBuilder::new();
+        let mut builder = PlanBuilder::new();
+
+        // Add a test connection to the builder's connections map
+        builder.connections.insert(
+            "myconn".to_string(),
+            Connection {
+                name: "myconn".to_string(),
+                driver: "postgres".to_string(),
+                properties: Properties::new(),
+                nested_configs: HashMap::new(),
+            },
+        );
+
         let pipeline = PipelineBlock {
             name: "test".to_string(),
             description: None,
@@ -1442,7 +1495,8 @@ mod tests {
                 table,
                 schema,
             } => {
-                assert_eq!(connection, "myconn");
+                assert_eq!(connection.name, "myconn");
+                assert_eq!(connection.driver, "postgres");
                 assert_eq!(table, "failed_users");
                 assert_eq!(schema, Some("public".to_string()));
             }

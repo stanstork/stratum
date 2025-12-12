@@ -145,7 +145,7 @@ pub enum FailedRowsAction {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FailedRowsDestination {
     Table {
-        connection: String,
+        connection: Connection,
         table: String,
         schema: Option<String>,
     },
