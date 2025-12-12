@@ -9,13 +9,17 @@ use crate::{
         mapping::{FieldMapper, TableMapper},
         pipeline::{TransformPipeline, TransformPipelineExt},
         pruner::FieldPruner,
+        validation::PipelineValidator,
     },
 };
 use async_trait::async_trait;
 use engine_config::{report::dry_run::DryRunReport, settings::validated::ValidatedSettings};
 use engine_core::context::item::ItemContext;
 use futures::lock::Mutex;
-use model::{records::batch::Batch, transform::mapping::TransformationMetadata};
+use model::{
+    execution::pipeline::Pipeline, records::batch::Batch,
+    transform::mapping::TransformationMetadata,
+};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -24,16 +28,15 @@ pub mod config;
 pub mod live;
 pub mod validation;
 
-/// Builds a transform pipeline based on mapping metadata and settings.
 fn build_transform_pipeline(
+    pipeline: &Pipeline,
     mapping: &TransformationMetadata,
     settings: &ValidatedSettings,
 ) -> TransformPipeline {
-    let mut pipeline = TransformPipeline::new();
+    let mut transform_pipeline = TransformPipeline::new();
 
-    // Add transforms based on what's defined in the mapping metadata and settings.
     // Each transform is only added if it's needed.
-    pipeline = pipeline
+    transform_pipeline = transform_pipeline
         .add_if(!mapping.entities.is_empty(), || {
             TableMapper::new(mapping.entities.clone())
         })
@@ -45,9 +48,12 @@ fn build_transform_pipeline(
         })
         .add_if(settings.mapped_columns_only(), || {
             FieldPruner::new(mapping.clone())
+        })
+        .add_validator_if(!pipeline.validations.is_empty(), || {
+            PipelineValidator::new(pipeline.validations.clone(), mapping.clone())
         });
 
-    pipeline
+    transform_pipeline
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -84,11 +90,12 @@ pub async fn create_producer(
     settings: &ValidatedSettings,
     report: &Arc<Mutex<DryRunReport>>,
 ) -> Box<dyn DataProducer + Send + 'static> {
-    let (source, destination, mapping, offset_strategy, cursor) = {
+    let (source, destination, pipeline, mapping, offset_strategy, cursor) = {
         let guard = ctx.lock().await;
         (
             guard.source.clone(),
             guard.destination.clone(),
+            guard.pipeline.clone(),
             guard.mapping.clone(),
             guard.offset_strategy.clone(),
             guard.cursor.clone(),
@@ -96,11 +103,11 @@ pub async fn create_producer(
     };
 
     if settings.is_dry_run() {
-        let pipeline = build_transform_pipeline(&mapping, settings);
+        let transform_pipeline = build_transform_pipeline(&pipeline, &mapping, settings);
         let validation_prod = ValidationProducer::new(ValidationProducerParams {
             source,
             destination,
-            pipeline,
+            pipeline: transform_pipeline,
             mapping,
             settings: settings.clone(),
             offset_strategy,

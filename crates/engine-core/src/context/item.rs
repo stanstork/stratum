@@ -14,7 +14,10 @@ use connectors::{
     },
 };
 use futures::lock::Mutex;
-use model::{pagination::cursor::Cursor, transform::mapping::TransformationMetadata};
+use model::{
+    execution::pipeline::Pipeline, pagination::cursor::Cursor,
+    transform::mapping::TransformationMetadata,
+};
 use planner::query::offsets::OffsetStrategy;
 use std::{future::Future, sync::Arc};
 
@@ -24,6 +27,7 @@ pub struct ItemContext {
     pub item_id: String,
     pub source: Source,
     pub destination: Destination,
+    pub pipeline: Pipeline,
     pub mapping: TransformationMetadata,
     pub state: Arc<SledStateStore>,
     pub offset_strategy: Arc<dyn OffsetStrategy>,
@@ -36,6 +40,7 @@ pub struct ItemContextParams {
     pub item_id: String,
     pub source: Source,
     pub destination: Destination,
+    pub pipeline: Pipeline,
     pub mapping: TransformationMetadata,
     pub state: Arc<SledStateStore>,
     pub offset_strategy: Arc<dyn OffsetStrategy>,
@@ -50,6 +55,7 @@ impl ItemContext {
             item_id,
             source,
             destination,
+            pipeline,
             mapping,
             state,
             offset_strategy,
@@ -61,6 +67,7 @@ impl ItemContext {
             item_id,
             source,
             destination,
+            pipeline,
             mapping,
             state,
             offset_strategy,

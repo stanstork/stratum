@@ -136,6 +136,7 @@ impl MigrationExecutor {
             item_id: item_id.clone(),
             source: source.clone(),
             destination: destination.clone(),
+            pipeline: pipeline.clone(),
             mapping: mapping.clone(),
             state: state.clone(),
             offset_strategy: offset_strategy.clone(),

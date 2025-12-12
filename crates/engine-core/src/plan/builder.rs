@@ -315,7 +315,7 @@ impl PlanBuilder {
                             "continue" => Some(ValidationAction::Continue),
                             _ => None,
                         })
-                        .unwrap_or(ValidationAction::Fail),
+                        .unwrap_or(ValidationAction::Warn),
                 })
                 .collect())
         } else {
