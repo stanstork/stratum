@@ -420,25 +420,21 @@ fn build_validation_check(pair: Pair<Rule>) -> BuildResult<ValidationCheck> {
             Rule::validation_body => {
                 let mut pairs = inner.into_inner();
                 while let Some(pair) = pairs.next() {
-                    match pair.as_rule() {
-                        Rule::op_eq => {
-                            // After '=', the next token is the value
-                            if let Some(value_pair) = pairs.next() {
-                                match value_pair.as_rule() {
-                                    Rule::expression => {
-                                        check = Some(build_expression(value_pair)?);
-                                    }
-                                    Rule::lit_string => {
-                                        message = Some(parse_string_literal(value_pair.as_str()));
-                                    }
-                                    Rule::ident => {
-                                        action = Some(value_pair.as_str().to_string());
-                                    }
-                                    _ => {}
-                                }
+                    if pair.as_rule() == Rule::op_eq
+                        && let Some(value_pair) = pairs.next()
+                    {
+                        match value_pair.as_rule() {
+                            Rule::expression => {
+                                check = Some(build_expression(value_pair)?);
                             }
+                            Rule::lit_string => {
+                                message = Some(parse_string_literal(value_pair.as_str()));
+                            }
+                            Rule::ident => {
+                                action = Some(value_pair.as_str().to_string());
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
                 }
             }

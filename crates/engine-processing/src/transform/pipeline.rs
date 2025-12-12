@@ -65,7 +65,7 @@ impl TransformPipeline {
                         return Ok(false);
                     }
                 }
-                PipelineStage::ValidationStage(validator) => match validator.validate(&row) {
+                PipelineStage::ValidationStage(validator) => match validator.validate(row) {
                     Ok(res) => match res {
                         ValidationResult::Pass => {
                             // Row is valid, continue processing
