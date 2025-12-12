@@ -1,5 +1,11 @@
-use connectors::sql::base::error::DbError;
-use engine_core::{connectors::destination::Destination, context::exec::ExecutionContext};
+use connectors::{adapter::Adapter, sql::base::error::DbError};
+use engine_core::{
+    connectors::{
+        destination::{DataDestination, Destination},
+        format::DataFormat,
+    },
+    context::exec::ExecutionContext,
+};
 use model::{
     core::{
         data_type::DataType,
@@ -55,22 +61,15 @@ impl FailedRowWriter {
     }
 
     pub async fn write(&self, failed_row: &FailedRow) -> Result<(), FailedRowWriterError> {
-        match &self.destination {
-            FailedRowsDestination::Table {
-                connection,
-                table,
-                schema,
-            } => {
-                self.write_to_table(failed_row, connection, table, schema.as_deref())
-                    .await
-            }
-            FailedRowsDestination::File { path, format } => {
-                self.write_to_file(failed_row, path, format)
-            }
-        }
+        // Use write_batch internally to avoid duplicating adapter/destination creation
+        self.write_batch(std::slice::from_ref(failed_row)).await
     }
 
     pub async fn write_batch(&self, failed_rows: &[FailedRow]) -> Result<(), FailedRowWriterError> {
+        if failed_rows.is_empty() {
+            return Ok(());
+        }
+
         match &self.destination {
             FailedRowsDestination::Table {
                 connection,
@@ -89,58 +88,6 @@ impl FailedRowWriter {
         }
     }
 
-    async fn write_to_table(
-        &self,
-        failed_row: &FailedRow,
-        connection: &Connection,
-        table: &str,
-        schema: Option<&str>,
-    ) -> Result<(), FailedRowWriterError> {
-        // Get adapter from execution context using the provided connection
-        let adapter = self.context.get_adapter(connection).await?;
-
-        // Determine format from adapter type
-        let format = match &adapter {
-            connectors::adapter::Adapter::Postgres(_) => {
-                engine_core::connectors::format::DataFormat::Postgres
-            }
-            connectors::adapter::Adapter::MySql(_) => {
-                engine_core::connectors::format::DataFormat::MySql
-            }
-            connectors::adapter::Adapter::Csv(_) => {
-                engine_core::connectors::format::DataFormat::Csv
-            }
-        };
-
-        let data_dest =
-            engine_core::connectors::destination::DataDestination::from_adapter(format, &adapter)?;
-        let destination = Destination::new(connection.name.clone(), format, data_dest);
-
-        // Get table metadata
-        let full_table_name = if let Some(schema) = schema {
-            format!("{}.{}", schema, table)
-        } else {
-            table.to_string()
-        };
-
-        let meta = destination
-            .data_dest
-            .fetch_meta(full_table_name.clone())
-            .await?;
-
-        // Convert FailedRow to RowData
-        let row_data = self.failed_row_to_row_data(failed_row, &full_table_name);
-
-        // Write to database
-        destination.write_batch(&meta, &[row_data]).await?;
-
-        info!(
-            "Wrote failed row {} to table {}",
-            failed_row.id, full_table_name
-        );
-        Ok(())
-    }
-
     async fn write_batch_to_table(
         &self,
         failed_rows: &[FailedRow],
@@ -154,22 +101,9 @@ impl FailedRowWriter {
 
         // Get adapter from execution context using the provided connection
         let adapter = self.context.get_adapter(connection).await?;
+        let format = data_format(&adapter);
 
-        // Determine format from adapter type
-        let format = match &adapter {
-            connectors::adapter::Adapter::Postgres(_) => {
-                engine_core::connectors::format::DataFormat::Postgres
-            }
-            connectors::adapter::Adapter::MySql(_) => {
-                engine_core::connectors::format::DataFormat::MySql
-            }
-            connectors::adapter::Adapter::Csv(_) => {
-                engine_core::connectors::format::DataFormat::Csv
-            }
-        };
-
-        let data_dest =
-            engine_core::connectors::destination::DataDestination::from_adapter(format, &adapter)?;
+        let data_dest = DataDestination::from_adapter(format, &adapter)?;
         let destination = Destination::new(connection.name.clone(), format, data_dest);
 
         // Get table metadata
@@ -271,6 +205,14 @@ impl FailedRowWriter {
 
         debug!("Wrote failed row {} to {}", failed_row.id, path);
         Ok(())
+    }
+}
+
+fn data_format(adapter: &Adapter) -> DataFormat {
+    match adapter {
+        Adapter::MySql(_) => DataFormat::MySql,
+        Adapter::Postgres(_) => DataFormat::Postgres,
+        Adapter::Csv(_) => DataFormat::Csv,
     }
 }
 
