@@ -809,6 +809,7 @@ dependencies = [
  "planner",
  "serde_json",
  "smql-syntax",
+ "tempfile",
  "thiserror 2.0.12",
  "tokio",
  "tokio-postgres",
