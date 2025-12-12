@@ -116,8 +116,6 @@ impl MigrationExecutor {
         idx: usize,
         pipeline: &Pipeline,
     ) -> Result<SummaryReport, MigrationError> {
-        println!("Pipeline Details: {:#?}", pipeline);
-
         let start_time = std::time::Instant::now();
         info!("Starting migration pipeline {}", pipeline.destination.table);
         let run_id = self.exec_ctx.run_id();

@@ -40,7 +40,7 @@ pub trait TransformPipelineExt {
 enum PipelineStage {
     Transform(Arc<dyn Transform>),
     Filter(Arc<dyn Filter>),
-    ValidationStage(Arc<dyn Validator>),
+    Validation(Arc<dyn Validator>),
 }
 
 #[derive(Clone)]
@@ -65,7 +65,7 @@ impl TransformPipeline {
                         return Ok(false);
                     }
                 }
-                PipelineStage::ValidationStage(validator) => match validator.validate(row) {
+                PipelineStage::Validation(validator) => match validator.validate(row) {
                     Ok(res) => match res {
                         ValidationResult::Pass => {
                             // Row is valid, continue processing
@@ -133,7 +133,7 @@ impl TransformPipeline {
 
     pub fn add_validator<V: Validator + 'static>(mut self, validator: V) -> Self {
         self.stages
-            .push(PipelineStage::ValidationStage(Arc::new(validator)));
+            .push(PipelineStage::Validation(Arc::new(validator)));
         self
     }
 }
