@@ -1,41 +1,139 @@
-connection "mysql_prod" {
-  driver = "mysql"
-  url    = env("SOURCE_DB_URL")
+connection "mysql_source" {
+    driver = "mysql"
+    url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
+}
+connection "pg_destination" {
+    driver = "postgres"
+    url    = "postgres://user:password@localhost:5432/testdb"
 }
 
-connection "postgres_target" {
-  driver = "postgres"
-  url    = env("TARGET_DB_URL")
-}
-
-pipeline "migrate_orders" {
-  from {
-    connection = connection.mysql_prod
-    table = "orders"
-  }
-
-  to {
-    connection = connection.postgres_target
-    table = "orders"
-  }
-
-  settings {
-    create_missing_tables = true
-    batch_size = env("BATCH_SIZE", 1000)
-    copy_columns = "MAP_ONLY"
-  }
-
-  validate {
-    assert "total_grater_400" {
-      check   = orders.total > 400
-      message = "Order total cannot be less then 400"
-      action  = skip  // skip, fail, or warn
+// Pipeline: Test validation with joined tables and transformed fields
+pipeline "migrate_film_actors" {
+    from {
+        connection = connection.mysql_source
+        table = "film_actor"
     }
-  }
 
-  select {
-    id = orders.id
-    user_id = orders.user_id
-    total = orders.total
-  }
+    to {
+        connection = connection.pg_destination
+        table = "film_actor_details"
+    }
+
+    with {
+        actor from actor where actor.actor_id == film_actor.actor_id
+        film  from film  where film.film_id == film_actor.film_id
+    }
+
+    settings {
+        create_missing_tables = true
+        ignore_constraints = true
+        batch_size = 500
+        copy_columns = "MAP_ONLY"
+    }
+
+    select {
+        actor_id = film_actor.actor_id
+        film_id = film_actor.film_id
+        actor_full_name = concat(actor.first_name, " ", actor.last_name)
+        film_title = film.title
+        film_rental_rate = film.rental_rate
+        film_rental_duration = film.rental_duration
+        film_replacement_cost = film.replacement_cost
+        estimated_weekly_cost = film.rental_rate * 7
+    }
+
+    validate {
+        // SKIP: Validate joined table field - skip films with high rental rates (> 2.99)
+        assert "reasonable_rental_rate" {
+            check   = film.rental_rate <= 2.99
+            message = "Film rental rate is too high"
+            action  = skip
+        }
+
+        // SKIP: Validate joined table field - skip expensive replacements (> 20.00)
+        assert "reasonable_replacement_cost" {
+            check   = film.replacement_cost <= 20.00
+            message = "Film has high replacement cost"
+            action  = skip
+        }
+
+        // WARN: Validate transformed field (source fields) - warn about actor name completeness
+        warn "complete_actor_name" {
+            check   = actor.first_name != "" && actor.last_name != ""
+            message = "Actor should have complete name"
+        }
+
+        // WARN: Validate transformed field directly - warn about actor full name
+        warn "actor_full_name_valid" {
+            check   = actor_full_name != " "
+            message = "Actor full name should not be just a space"
+        }
+    }
+}
+
+// Pipeline 2: Test validation with transformed fields and expressions
+pipeline "migrate_customer_summary" {
+    from {
+        connection = connection.mysql_source
+        table = "customer"
+    }
+
+    to {
+        connection = connection.pg_destination
+        table = "customer_summary"
+    }
+
+    with {
+        address from address where address.address_id == customer.address_id
+        city    from city    where city.city_id == address.city_id
+    }
+
+    settings {
+        create_missing_tables = true
+        ignore_constraints = true
+        batch_size = 500
+        copy_columns = "MAP_ONLY"
+    }
+
+    select {
+        customer_id = customer.customer_id
+        full_name = concat(customer.first_name, " ", customer.last_name)
+        email = customer.email
+        full_address = concat(address.address, ", ", city.city)
+        store_id = customer.store_id
+        is_active = customer.active
+    }
+
+    validate {
+        // WARN: Validate transformed field - warn if customer identifier is too short
+        warn "valid_customer_identifier" {
+            check   = customer.first_name != "" && customer.email != ""
+            message = "Customer should have both name and email for identification"
+        }
+
+        // WARN: Check store assignment from joined context
+        warn "valid_store" {
+            check   = customer.store_id > 0
+            message = "Customer store assignment should be verified"
+        }
+
+        // WARN: Validate joined field - warn about address completeness
+        warn "check_address_complete" {
+            check   = address.address != "" && city.city != ""
+            message = "Address or city information may be incomplete"
+        }
+
+        // SKIP: Validate the transformed full_name field directly
+        assert "full_name_length" {
+            check   = full_name != " "
+            message = "Full name must not be just a space"
+            action  = skip
+        }
+
+        // WARN: Validate the transformed full_address field directly
+        warn "full_address_reasonable" {
+            check   = full_address != ", "
+            message = "Full address appears to be incomplete"
+        }
+    }
 }
