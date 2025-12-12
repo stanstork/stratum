@@ -1534,7 +1534,10 @@ mod tests {
         let rows2 = fetch_rows(query2, "sakila", DbType::Postgres)
             .await
             .expect("fetch rows");
-        assert!(!rows2.is_empty(), "Expected at least one customer summary row");
+        assert!(
+            !rows2.is_empty(),
+            "Expected at least one customer summary row"
+        );
     }
 
     // Test Validation: FAIL action stops pipeline execution.
@@ -1609,7 +1612,8 @@ mod tests {
 
         // Query source to see how many rows WOULD have been migrated with validation
         let expected_query = "SELECT COUNT(*) as cnt FROM actor WHERE actor_id = 1";
-        let expected_count = get_cell_as_usize(expected_query, "sakila", DbType::MySql, "cnt").await;
+        let expected_count =
+            get_cell_as_usize(expected_query, "sakila", DbType::MySql, "cnt").await;
 
         // With FAIL action, the pipeline stops on the first validation failure
         // Since we have actors with actor_id != 1, the pipeline should fail and migrate 0 rows
