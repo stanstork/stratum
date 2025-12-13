@@ -126,7 +126,6 @@ impl TransformRetryExecutor {
         failed_row
     }
 
-    /// Check if failed rows should be tracked based on configuration
     pub fn should_track_failed_rows(&self) -> bool {
         self.error_handling
             .as_ref()

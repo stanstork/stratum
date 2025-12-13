@@ -1,4 +1,10 @@
-use crate::core::value::Value;
+use crate::{
+    core::{
+        data_type::DataType,
+        value::{FieldValue, Value},
+    },
+    records::row::RowData,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -119,6 +125,24 @@ impl FailedRow {
         }
     }
 
+    pub fn to_row_data(&self, entity: &str) -> RowData {
+        let storage_map = self.to_storage_map();
+
+        let field_values: Vec<FieldValue> = storage_map
+            .into_iter()
+            .map(|(name, value)| {
+                let data_type = Self::infer_data_type(&value);
+                FieldValue {
+                    name,
+                    value: Some(value),
+                    data_type,
+                }
+            })
+            .collect();
+
+        RowData::new(entity, field_values)
+    }
+
     /// Add execution context to the failed row
     pub fn with_execution_context(
         mut self,
@@ -236,6 +260,20 @@ impl FailedRow {
         }
 
         map
+    }
+
+    fn infer_data_type(value: &Value) -> DataType {
+        match value {
+            Value::SmallInt(_) => DataType::Short,
+            Value::Int32(_) => DataType::Int,
+            Value::Uint(_) => DataType::LongLong,
+            Value::Float(_) => DataType::Float,
+            Value::String(_) => DataType::VarChar,
+            Value::Boolean(_) => DataType::Boolean,
+            Value::Timestamp(_) => DataType::Timestamp,
+            Value::Null => DataType::Null,
+            _ => DataType::VarChar, // Default to VarChar for unknown types
+        }
     }
 }
 

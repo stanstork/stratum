@@ -44,13 +44,14 @@ pub struct LiveProducer {
 
 impl LiveProducer {
     pub async fn new(
-        ctx: &Arc<Mutex<ItemContext>>,
+        item_ctx: &Arc<Mutex<ItemContext>>,
         batch_tx: mpsc::Sender<Batch>,
         settings: &ValidatedSettings,
     ) -> Self {
-        let (run_id, item_id, part_id, source, pipeline, mapping, state_store, cursor) = {
-            let c = ctx.lock().await;
+        let (exec_ctx, run_id, item_id, part_id, source, pipeline, mapping, state_store, cursor) = {
+            let c = item_ctx.lock().await;
             (
+                c.exec_ctx.clone(),
                 c.run_id.clone(),
                 c.item_id.clone(),
                 "part-0".to_string(),
@@ -69,7 +70,12 @@ impl LiveProducer {
         let reader = SnapshotReader::new(source, RetryPolicy::for_database(), config.batch_size);
 
         let transform_pipeline = build_transform_pipeline(&pipeline, &mapping, settings);
-        let transformer = TransformService::new(transform_pipeline, config.transform_concurrency);
+        let transformer = TransformService::new(
+            exec_ctx,
+            transform_pipeline,
+            pipeline.name,
+            pipeline.error_handling.clone(),
+        );
 
         let state_manager = StateManager::new(ids.clone(), state_store);
         let coordinator = BatchCoordinator::new(batch_tx, state_manager);

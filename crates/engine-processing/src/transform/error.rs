@@ -24,6 +24,9 @@ pub enum TransformError {
 
     #[error("Validation failed: {rule} - {message}")]
     ValidationFailed { rule: String, message: String },
+
+    #[error("Row was filtered out")]
+    FilteredOut,
 }
 
 impl TransformError {
@@ -34,6 +37,7 @@ impl TransformError {
             TransformError::TemporaryUnavailable(_) => ErrorType::Transient,
             TransformError::Transformation(_) => ErrorType::Permanent,
             TransformError::ValidationFailed { .. } => ErrorType::Permanent,
+            TransformError::FilteredOut => ErrorType::Permanent,
         }
     }
 }

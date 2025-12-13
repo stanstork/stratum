@@ -85,24 +85,24 @@ pub trait DataProducer {
 }
 
 pub async fn create_producer(
-    ctx: &Arc<Mutex<ItemContext>>,
+    item_ctx: &Arc<Mutex<ItemContext>>,
     batch_tx: mpsc::Sender<Batch>,
     settings: &ValidatedSettings,
     report: &Arc<Mutex<DryRunReport>>,
 ) -> Box<dyn DataProducer + Send + 'static> {
-    let (source, destination, pipeline, mapping, offset_strategy, cursor) = {
-        let guard = ctx.lock().await;
-        (
-            guard.source.clone(),
-            guard.destination.clone(),
-            guard.pipeline.clone(),
-            guard.mapping.clone(),
-            guard.offset_strategy.clone(),
-            guard.cursor.clone(),
-        )
-    };
-
     if settings.is_dry_run() {
+        let (source, destination, pipeline, mapping, offset_strategy, cursor) = {
+            let guard = item_ctx.lock().await;
+            (
+                guard.source.clone(),
+                guard.destination.clone(),
+                guard.pipeline.clone(),
+                guard.mapping.clone(),
+                guard.offset_strategy.clone(),
+                guard.cursor.clone(),
+            )
+        };
+
         let transform_pipeline = build_transform_pipeline(&pipeline, &mapping, settings);
         let validation_prod = ValidationProducer::new(ValidationProducerParams {
             source,
@@ -117,6 +117,6 @@ pub async fn create_producer(
         return Box::new(validation_prod);
     }
 
-    let live_prod = LiveProducer::new(ctx, batch_tx, settings).await;
+    let live_prod = LiveProducer::new(item_ctx, batch_tx, settings).await;
     Box::new(live_prod)
 }

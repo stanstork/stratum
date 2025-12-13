@@ -1,4 +1,7 @@
-use connectors::{adapter::Adapter, sql::base::error::DbError};
+use connectors::{
+    adapter::Adapter,
+    sql::base::{error::DbError, metadata::table::TableMetadata},
+};
 use engine_core::{
     connectors::{
         destination::{DataDestination, Destination},
@@ -7,10 +10,6 @@ use engine_core::{
     context::exec::ExecutionContext,
 };
 use model::{
-    core::{
-        data_type::DataType,
-        value::{FieldValue, Value},
-    },
     execution::{
         connection::Connection,
         failed_row::FailedRow,
@@ -20,6 +19,7 @@ use model::{
 };
 use std::{fs::OpenOptions, io::Write, path::Path, sync::Arc};
 use thiserror::Error;
+use tokio::sync::OnceCell;
 use tracing::{debug, error, info};
 
 #[derive(Error, Debug)]
@@ -46,10 +46,19 @@ pub enum FailedRowWriterError {
     ConnectionNotFound(String),
 }
 
+/// Cached database destination with metadata
+struct CachedDbDestination {
+    destination: Destination,
+    table_name: String,
+    metadata: TableMetadata,
+}
+
 /// Writer for failed rows to various destinations
 pub struct FailedRowWriter {
     destination: FailedRowsDestination,
     context: Arc<ExecutionContext>,
+    /// Cached database destination (lazy-initialized on first write)
+    cached_db_dest: OnceCell<CachedDbDestination>,
 }
 
 impl FailedRowWriter {
@@ -57,11 +66,11 @@ impl FailedRowWriter {
         Self {
             destination,
             context,
+            cached_db_dest: OnceCell::new(),
         }
     }
 
     pub async fn write(&self, failed_row: &FailedRow) -> Result<(), FailedRowWriterError> {
-        // Use write_batch internally to avoid duplicating adapter/destination creation
         self.write_batch(std::slice::from_ref(failed_row)).await
     }
 
@@ -76,7 +85,7 @@ impl FailedRowWriter {
                 table,
                 schema,
             } => {
-                self.write_batch_to_table(failed_rows, connection, table, schema.as_deref())
+                self.write_to_table(failed_rows, connection, table, schema.as_deref())
                     .await
             }
             FailedRowsDestination::File { path, format } => {
@@ -88,7 +97,7 @@ impl FailedRowWriter {
         }
     }
 
-    async fn write_batch_to_table(
+    async fn write_to_table(
         &self,
         failed_rows: &[FailedRow],
         connection: &Connection,
@@ -99,74 +108,48 @@ impl FailedRowWriter {
             return Ok(());
         }
 
-        // Get adapter from execution context using the provided connection
-        let adapter = self.context.get_adapter(connection).await?;
-        let format = data_format(&adapter);
-
-        let data_dest = DataDestination::from_adapter(format, &adapter)?;
-        let destination = Destination::new(connection.name.clone(), format, data_dest);
-
-        // Get table metadata
-        let full_table_name = if let Some(schema) = schema {
+        let table_name = if let Some(schema) = schema {
             format!("{}.{}", schema, table)
         } else {
             table.to_string()
         };
 
-        let meta = destination
-            .data_dest
-            .fetch_meta(full_table_name.clone())
+        // Get or initialize cached destination
+        let data_dest = self
+            .cached_db_dest
+            .get_or_try_init(|| async {
+                // Initialize on first use
+                let adapter = self.context.get_adapter(connection).await?;
+                let format = data_format(&adapter);
+
+                let data_dest = DataDestination::from_adapter(format, &adapter)?;
+                let destination = Destination::new(connection.name.clone(), format, data_dest);
+                let metadata = destination.data_dest.fetch_meta(table_name.clone()).await?;
+
+                Ok::<CachedDbDestination, FailedRowWriterError>(CachedDbDestination {
+                    destination,
+                    table_name: table_name.clone(),
+                    metadata,
+                })
+            })
             .await?;
 
-        // Convert all FailedRows to RowData
         let rows: Vec<RowData> = failed_rows
             .iter()
-            .map(|fr| self.failed_row_to_row_data(fr, &full_table_name))
+            .map(|fr| fr.to_row_data(&data_dest.table_name))
             .collect();
 
-        // Write batch to database
-        destination.write_batch(&meta, &rows).await?;
+        data_dest
+            .destination
+            .write_batch(&data_dest.metadata, &rows)
+            .await?;
 
         info!(
             "Wrote {} failed rows to table {}",
             failed_rows.len(),
-            full_table_name
+            data_dest.table_name
         );
         Ok(())
-    }
-
-    /// Convert FailedRow to RowData for database insertion
-    fn failed_row_to_row_data(&self, failed_row: &FailedRow, entity: &str) -> RowData {
-        let storage_map = failed_row.to_storage_map();
-
-        let field_values: Vec<FieldValue> = storage_map
-            .into_iter()
-            .map(|(name, value)| {
-                let data_type = Self::infer_data_type(&value);
-                FieldValue {
-                    name,
-                    value: Some(value),
-                    data_type,
-                }
-            })
-            .collect();
-
-        RowData::new(entity, field_values)
-    }
-
-    /// Infer DataType from Value
-    fn infer_data_type(value: &Value) -> DataType {
-        match value {
-            Value::SmallInt(_) => DataType::Short,
-            Value::Int32(_) => DataType::Int,
-            Value::Uint(_) => DataType::LongLong,
-            Value::Float(_) => DataType::Float,
-            Value::String(_) => DataType::VarChar,
-            Value::Boolean(_) => DataType::Boolean,
-            Value::Timestamp(_) => DataType::Timestamp,
-            Value::Null => DataType::Null,
-            _ => DataType::VarChar, // Default to VarChar for unknown types
-        }
     }
 
     fn write_to_file(
@@ -176,7 +159,7 @@ impl FailedRowWriter {
         format: &FileFormat,
     ) -> Result<(), FailedRowWriterError> {
         match format {
-            FileFormat::Json => self.write_to_json_file(failed_row, path),
+            FileFormat::Json => self.write_to_json(failed_row, path),
             FileFormat::Csv => {
                 error!("CSV format not yet implemented for failed rows");
                 Err(FailedRowWriterError::UnsupportedFormat(FileFormat::Csv))
@@ -188,7 +171,7 @@ impl FailedRowWriter {
         }
     }
 
-    fn write_to_json_file(
+    fn write_to_json(
         &self,
         failed_row: &FailedRow,
         path: &str,

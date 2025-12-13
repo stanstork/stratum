@@ -15,10 +15,7 @@ use engine_config::{
 };
 use engine_core::{
     connectors::{destination::Destination, source::Source},
-    context::{
-        exec::ExecutionContext,
-        item::{ItemContext, ItemContextParams},
-    },
+    context::{exec::ExecutionContext, item::ItemContext},
     plan::execution::ExecutionPlan,
     state::{StateStore, models::WalEntry, sled_store::SledStateStore},
 };
@@ -103,7 +100,8 @@ impl MigrationExecutor {
                 p.destination.table
             );
 
-            let summary = self.run_pipeline(idx, p).await?;
+            let exec_ctx = Arc::new(self.exec_ctx.clone());
+            let summary = self.run_pipeline(idx, exec_ctx, p).await?;
             report.insert(p.destination.table.clone(), summary);
         }
 
@@ -114,6 +112,7 @@ impl MigrationExecutor {
     async fn run_pipeline(
         &self,
         idx: usize,
+        exec_ctx: Arc<ExecutionContext>,
         pipeline: &Pipeline,
     ) -> Result<SummaryReport, MigrationError> {
         let start_time = std::time::Instant::now();
@@ -131,17 +130,17 @@ impl MigrationExecutor {
         let destination = factory::create_destination(&self.exec_ctx, pipeline).await?;
 
         let state = self.exec_ctx.state.clone();
-        let mut item_ctx = ItemContext::new(ItemContextParams {
-            run_id: run_id.clone(),
-            item_id: item_id.clone(),
-            source: source.clone(),
-            destination: destination.clone(),
-            pipeline: pipeline.clone(),
-            mapping: mapping.clone(),
-            state: state.clone(),
-            offset_strategy: offset_strategy.clone(),
-            cursor,
-        });
+        let mut item_ctx = ItemContext::builder(exec_ctx.clone())
+            .run_id(run_id.clone())
+            .item_id(item_id.clone())
+            .source(source.clone())
+            .destination(destination.clone())
+            .pipeline(pipeline.clone())
+            .mapping(mapping.clone())
+            .state(state.clone())
+            .offset_strategy(offset_strategy.clone())
+            .cursor(cursor)
+            .build();
 
         item_ctx
             .state
@@ -159,8 +158,8 @@ impl MigrationExecutor {
         .await?;
         metadata::load(&mut item_ctx).await?;
 
-        let ctx = Arc::new(Mutex::new(item_ctx));
-        workers::spawn(ctx, &settings, self.cancel.clone(), &dry_run_report).await?;
+        let item_ctx = Arc::new(Mutex::new(item_ctx));
+        workers::spawn(item_ctx, &settings, self.cancel.clone(), &dry_run_report).await?;
 
         let duration = start_time.elapsed();
         info!(
