@@ -1,19 +1,20 @@
-use crate::transform::{
-    error::TransformError, failed_row_writer::FailedRowWriter, pipeline::TransformPipeline,
-    retry::TransformRetryExecutor,
-};
+use crate::transform::{failed_row_writer::FailedRowWriter, pipeline::TransformPipeline};
 use engine_core::context::exec::ExecutionContext;
 use model::{
-    execution::{failed_row::FailedRow, pipeline::ErrorHandling},
+    execution::{
+        failed_row::{FailedRow, ProcessingStage},
+        pipeline::ErrorHandling,
+    },
     records::row::RowData,
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tracing::warn;
 
-/// Handles transformation of rows with batch processing and retry logic.
+/// Handles transformation of rows with batch processing and failed row tracking.
+/// Transforms fail fast - no retry at this level. Retry happens at load/write level.
 pub struct TransformService {
     pipeline: TransformPipeline,
-    retry_executor: Option<TransformRetryExecutor>,
+    pipeline_name: String,
     failed_row_writer: Option<FailedRowWriter>,
 }
 
@@ -24,86 +25,109 @@ impl TransformService {
         pipeline_name: String,
         error_handling: Option<ErrorHandling>,
     ) -> Self {
-        let (retry_executor, failed_row_writer) = if let Some(ref eh) = error_handling {
-            let retry_exec =
-                TransformRetryExecutor::new(pipeline_name.clone(), error_handling.clone());
-
-            let writer = eh.failed_rows.as_ref().and_then(|fr_config| {
+        let failed_row_writer = error_handling.as_ref().and_then(|eh| {
+            eh.failed_rows.as_ref().and_then(|fr_config| {
                 fr_config
                     .destination
                     .as_ref()
                     .map(|dest| FailedRowWriter::new(dest.clone(), ctx.clone()))
-            });
-
-            (Some(retry_exec), writer)
-        } else {
-            (None, None)
-        };
+            })
+        });
 
         Self {
             pipeline,
-            retry_executor,
+            pipeline_name,
             failed_row_writer,
         }
     }
 
-    /// Apply transformations to a batch of rows with retry logic.
-    /// Returns only successfully transformed rows.
-    pub async fn transform(&self, rows: Vec<RowData>) -> Vec<RowData> {
-        let (successful, _filtered, _failed) = self.transform_with_retry(rows).await;
-        successful
+    /// Apply transformations to a batch of rows.
+    /// Transforms fail fast - failures are sent to DLQ immediately.
+    /// Returns successfully transformed rows, or error if any rows failed.
+    /// Batch processing continues even if individual rows fail, but returns error after batch completes.
+    pub async fn transform(
+        &self,
+        rows: Vec<RowData>,
+    ) -> Result<Vec<RowData>, crate::transform::error::TransformError> {
+        let (successful, _filtered, failed) = self.transform_batch(rows).await;
+
+        if !failed.is_empty() {
+            // Batch had failures - return error to stop migration
+            return Err(crate::transform::error::TransformError::Transformation(
+                format!("{} rows failed transformation in batch", failed.len()),
+            ));
+        }
+
+        Ok(successful)
     }
 
-    /// Transform rows with retry and failed row tracking.
+    /// Transform a batch of rows with fail-fast semantics.
     /// Returns (successful_rows, filtered_rows, failed_rows).
-    async fn transform_with_retry(
+    async fn transform_batch(
         &self,
         rows: Vec<RowData>,
     ) -> (Vec<RowData>, Vec<RowData>, Vec<FailedRow>) {
         let mut successful = Vec::new();
         let mut filtered = Vec::new();
         let mut failed_rows = Vec::new();
+        let mut fatal = false;
 
         for mut row in rows {
-            if let Some(retry_exec) = &self.retry_executor {
-                let result = retry_exec
-                    .execute(&mut row, |r| {
-                        let apply_result = self.pipeline.apply(r);
-                        async move {
-                            match apply_result {
-                                Ok(true) => Ok(()),
-                                Ok(false) => Err(TransformError::FilteredOut),
-                                Err(e) => Err(e),
-                            }
-                        }
-                    })
-                    .await;
-
-                match result {
-                    Ok(()) => successful.push(row),
-                    Err(failed_row) => {
-                        // Write failed row if writer is configured
-                        if let Some(writer) = &self.failed_row_writer {
-                            if let Err(e) = writer.write(&failed_row).await {
-                                warn!("Failed to write failed row: {}", e);
-                            }
-                        }
-                        failed_rows.push(failed_row);
-                    }
+            // Apply pipeline - fail fast, no retry
+            match self.pipeline.apply(&mut row) {
+                Ok(true) => {
+                    // Row transformed successfully
+                    successful.push(row);
                 }
-            } else {
-                // No retry configured - use standard pipeline behavior
-                match self.pipeline.apply(&mut row) {
-                    Ok(true) => successful.push(row),
-                    Ok(false) => filtered.push(row),
-                    Err(_) => {
-                        filtered.push(row);
-                    }
+                Ok(false) => {
+                    // Row filtered out (not an error)
+                    filtered.push(row);
+                }
+                Err(e) => {
+                    // Transformation failed - create FailedRow for DLQ
+                    let failed_row = self.create_failed_row(&row, e);
+                    failed_rows.push(failed_row);
+                    // Continue processing remaining rows in batch
+                }
+            }
+        }
+
+        // Write all failed rows to DLQ as a batch (more efficient)
+        if !failed_rows.is_empty() {
+            if let Some(writer) = &self.failed_row_writer {
+                if let Err(write_err) = writer.write_batch(&failed_rows).await {
+                    warn!(
+                        "Failed to write {} failed rows to DLQ: {}",
+                        failed_rows.len(),
+                        write_err
+                    );
                 }
             }
         }
 
         (successful, filtered, failed_rows)
+    }
+
+    /// Create a FailedRow from a transformation error
+    fn create_failed_row(
+        &self,
+        row: &RowData,
+        error: crate::transform::error::TransformError,
+    ) -> FailedRow {
+        // Extract original data from row
+        let original_data: HashMap<String, model::core::value::Value> = row
+            .field_values
+            .iter()
+            .filter_map(|fv| fv.value.as_ref().map(|v| (fv.name.clone(), v.clone())))
+            .collect();
+
+        FailedRow::new(
+            self.pipeline_name.clone(),
+            ProcessingStage::Transform,
+            original_data,
+            format!("{:?}", error), // Error type
+            error.to_string(),      // Error message
+        )
     }
 
     /// Transform rows and collect errors and filtered rows separately.
@@ -117,7 +141,7 @@ impl TransformService {
         } else {
             String::new()
         };
-        let (successful, filtered, failed_rows) = self.transform_with_retry(rows).await;
+        let (successful, filtered, failed_rows) = self.transform_batch(rows).await;
 
         let failed_with_strings: Vec<(RowData, String)> = failed_rows
             .into_iter()

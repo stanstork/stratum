@@ -74,8 +74,8 @@ pub enum ProducerError {
     #[error("Failed to store offset in the buffer: {0}")]
     StoreOffset(String),
 
-    #[error("The consumer channel was closed unexpectedly.")]
-    ShutdownSignal,
+    #[error("The consumer channel was closed.")]
+    ChannelClosed,
 
     #[error("Other error: {0}")]
     Other(String),
@@ -83,17 +83,35 @@ pub enum ProducerError {
     #[error("Unexpected error: {0}")]
     Unexpected(#[from] Box<dyn std::error::Error + Send + Sync>),
 
-    #[error("Failed to send batch: {0}")]
-    ChannelSend(String),
-
     #[error("Retry attempts exhausted: {0}")]
     RetriesExhausted(String),
 
     #[error("Circuit breaker opened for stage '{stage}': {last_error}")]
     CircuitBreakerOpen { stage: String, last_error: String },
 
+    #[error("Transformation failed: {0}")]
+    Transform(#[from] crate::transform::error::TransformError),
+
     #[error("Producer finished work.")]
     Finished,
+}
+
+impl ProducerError {
+    /// Returns true if this error should bypass the circuit breaker and stop immediately.
+    /// Circuit breakers are for external system failures (transient), not business logic errors (permanent).
+    pub fn is_fatal(&self) -> bool {
+        match self {
+            // Transformation errors are permanent business logic errors - stop immediately
+            ProducerError::Transform(_) => true,
+            // All other errors go through circuit breaker (transient external system failures)
+            _ => false,
+        }
+    }
+
+    /// Returns true if this is a graceful shutdown signal (not an error, just cleanup).
+    pub fn is_shutdown(&self) -> bool {
+        matches!(self, ProducerError::ChannelClosed)
+    }
 }
 
 #[derive(Debug, Error)]

@@ -5,5 +5,4 @@ pub mod filter;
 pub mod mapping;
 pub mod pipeline;
 pub mod pruner;
-pub mod retry;
 pub mod validation;

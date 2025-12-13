@@ -66,8 +66,15 @@ impl LiveProducer {
         let config = ProducerConfig::from_settings(settings);
         let ids = ItemId::new(run_id, item_id, part_id);
 
+        // Create retry policy from pipeline config, fallback to database defaults
+        let retry_config = pipeline
+            .error_handling
+            .as_ref()
+            .and_then(|eh| eh.retry.as_ref());
+        let retry_policy = RetryPolicy::from_config(retry_config);
+
         // Create components
-        let reader = SnapshotReader::new(source, RetryPolicy::for_database(), config.batch_size);
+        let reader = SnapshotReader::new(source, retry_policy, config.batch_size);
 
         let transform_pipeline = build_transform_pipeline(&pipeline, &mapping, settings);
         let transformer = TransformService::new(
@@ -119,8 +126,8 @@ impl LiveProducer {
             return Ok(ProducerStatus::Finished);
         }
 
-        // Transform data
-        let transformed_rows = self.transformer.transform(fetch_result.rows).await;
+        // Transform data - will process entire batch even if some rows fail
+        let transformed_rows = self.transformer.transform(fetch_result.rows).await?;
 
         // Coordinate batch delivery
         let batch_id = self.batch_id(&self.cursor);
