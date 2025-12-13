@@ -101,8 +101,8 @@ impl ProducerError {
     /// Circuit breakers are for external system failures (transient), not business logic errors (permanent).
     pub fn is_fatal(&self) -> bool {
         match self {
-            // Transformation errors are permanent business logic errors - stop immediately
-            ProducerError::Transform(_) => true,
+            // Non-fatal transformation errors (bad data) should NOT stop migration
+            ProducerError::Transform(transform_err) => transform_err.is_fatal(),
             // All other errors go through circuit breaker (transient external system failures)
             _ => false,
         }

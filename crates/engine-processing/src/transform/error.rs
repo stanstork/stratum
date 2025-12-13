@@ -40,4 +40,11 @@ impl TransformError {
             TransformError::FilteredOut => ErrorType::Permanent,
         }
     }
+
+    /// Returns true if this error should stop the entire migration.
+    /// Validation failures are fatal - they indicate the pipeline configuration is wrong.
+    /// Data/transformation errors are not fatal - send to DLQ and continue.
+    pub fn is_fatal(&self) -> bool {
+        matches!(self, TransformError::ValidationFailed { .. })
+    }
 }

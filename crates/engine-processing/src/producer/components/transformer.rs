@@ -42,35 +42,37 @@ impl TransformService {
     }
 
     /// Apply transformations to a batch of rows.
-    /// Transforms fail fast - failures are sent to DLQ immediately.
-    /// Returns successfully transformed rows, or error if any rows failed.
-    /// Batch processing continues even if individual rows fail, but returns error after batch completes.
+    /// - Data/transformation errors: sent to DLQ, migration continues
+    /// - Validation failures: sent to DLQ, migration stops (indicates bad pipeline config)
+    /// Batch processing continues even if individual rows fail.
     pub async fn transform(
         &self,
         rows: Vec<RowData>,
     ) -> Result<Vec<RowData>, crate::transform::error::TransformError> {
-        let (successful, _filtered, failed) = self.transform_batch(rows).await;
+        let (successful, _filtered, _failed_rows, has_fatal) = self.transform_batch(rows).await;
 
-        if !failed.is_empty() {
-            // Batch had failures - return error to stop migration
-            return Err(crate::transform::error::TransformError::Transformation(
-                format!("{} rows failed transformation in batch", failed.len()),
-            ));
+        if has_fatal {
+            // Validation failure detected - stop migration
+            return Err(crate::transform::error::TransformError::ValidationFailed {
+                rule: "pipeline_validation".to_string(),
+                message: format!("Validation failures detected in batch (see DLQ for details)"),
+            });
         }
 
+        // Regular transformation errors were sent to DLQ - continue migration
         Ok(successful)
     }
 
     /// Transform a batch of rows with fail-fast semantics.
-    /// Returns (successful_rows, filtered_rows, failed_rows).
+    /// Returns (successful_rows, filtered_rows, failed_rows, has_fatal_error).
     async fn transform_batch(
         &self,
         rows: Vec<RowData>,
-    ) -> (Vec<RowData>, Vec<RowData>, Vec<FailedRow>) {
+    ) -> (Vec<RowData>, Vec<RowData>, Vec<FailedRow>, bool) {
         let mut successful = Vec::new();
         let mut filtered = Vec::new();
         let mut failed_rows = Vec::new();
-        let mut fatal = false;
+        let mut has_fatal = false;
 
         for mut row in rows {
             // Apply pipeline - fail fast, no retry
@@ -84,6 +86,11 @@ impl TransformService {
                     filtered.push(row);
                 }
                 Err(e) => {
+                    // Check if this is a fatal error (validation failure)
+                    if e.is_fatal() {
+                        has_fatal = true;
+                    }
+
                     // Transformation failed - create FailedRow for DLQ
                     let failed_row = self.create_failed_row(&row, e);
                     failed_rows.push(failed_row);
@@ -105,7 +112,7 @@ impl TransformService {
             }
         }
 
-        (successful, filtered, failed_rows)
+        (successful, filtered, failed_rows, has_fatal)
     }
 
     /// Create a FailedRow from a transformation error
@@ -141,7 +148,7 @@ impl TransformService {
         } else {
             String::new()
         };
-        let (successful, filtered, failed_rows) = self.transform_batch(rows).await;
+        let (successful, filtered, failed_rows, _has_fatal) = self.transform_batch(rows).await;
 
         let failed_with_strings: Vec<(RowData, String)> = failed_rows
             .into_iter()
