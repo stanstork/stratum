@@ -57,12 +57,13 @@ impl LiveConsumer {
         cancel: CancellationToken,
         metrics: Metrics,
     ) -> Self {
-        let (run_id, item_id, destination, state_store) = {
+        let (run_id, item_id, destination, pipeline, state_store) = {
             let c = ctx.lock().await;
             (
                 c.run_id.clone(),
                 c.item_id.clone(),
                 c.destination.clone(),
+                c.pipeline.clone(),
                 c.state.clone(),
             )
         };
@@ -75,7 +76,11 @@ impl LiveConsumer {
             DataDestination::Database(db) => db.data.lock().await.tables(),
         };
 
-        let writer = BatchWriter::new(destination.clone(), RetryPolicy::for_database(), &meta)
+        // Create retry policy from pipeline config, fallback to database defaults
+        let retry_config = pipeline.error_handling.as_ref().and_then(|eh| eh.retry.as_ref());
+        let retry_policy = RetryPolicy::from_config(retry_config);
+
+        let writer = BatchWriter::new(destination.clone(), retry_policy, &meta)
             .auto_detect_strategy() // Detects fast path (COPY/MERGE) availability
             .await;
         let state_manager = StateManager::new(ids.clone(), state_store);

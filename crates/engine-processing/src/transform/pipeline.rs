@@ -1,6 +1,6 @@
-use crate::{
+use crate::transform::{
     error::TransformError,
-    transform::validation::{ValidationAction, ValidationResult},
+    validation::{ValidationAction, ValidationResult},
 };
 use model::records::row::RowData;
 use std::sync::Arc;
@@ -84,6 +84,7 @@ impl TransformPipeline {
                             }
                             ValidationAction::Warn => {
                                 warn!("Validation '{}' failed: {} (continuing)", rule, message);
+                                // return Err(TransformError::FilteredOut);
                             }
                         },
                     },
@@ -102,16 +103,13 @@ impl TransformPipeline {
         let mut filtered = Vec::new();
         let mut failed = Vec::new();
 
+        // Process entire batch - collect all failures
         for mut row in rows.drain(..) {
             match self.apply(&mut row) {
                 Ok(true) => successful.push(row),
                 Ok(false) => filtered.push(row),
                 Err(e) => {
-                    if matches!(e, TransformError::ValidationFailed { .. }) {
-                        failed.push((row, e));
-                        // Stop processing remaining rows - validation failure should halt pipeline
-                        break;
-                    }
+                    // Collect failed row but continue processing batch
                     failed.push((row, e));
                 }
             }

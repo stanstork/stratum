@@ -44,10 +44,10 @@ impl BatchCoordinator {
 
         self.batch_tx
             .as_ref()
-            .ok_or_else(|| ProducerError::ChannelSend("Channel already closed".to_string()))?
+            .ok_or(ProducerError::ChannelClosed)?
             .send(batch)
             .await
-            .map_err(|e| ProducerError::ChannelSend(e.to_string()))
+            .map_err(|_| ProducerError::ChannelClosed)
     }
 
     /// Close the batch channel to signal consumers that no more batches will be sent.

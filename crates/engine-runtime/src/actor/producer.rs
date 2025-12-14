@@ -236,14 +236,11 @@ impl Actor<ProducerMsg> for ProducerActor {
                         self.next_action(status)
                     }
                     Err(e) => {
-                        // Check if error is due to channel being closed (consumer finished)
-                        let error_msg = e.to_string();
-                        if error_msg.contains("channel closed")
-                            || error_msg.contains("Channel already closed")
-                        {
+                        // Check if this is a graceful shutdown (channel closed)
+                        if e.is_shutdown() {
                             info!(
                                 actor = ctx.name(),
-                                "Consumer channel closed, producer stopping"
+                                "Consumer channel closed, producer stopping gracefully"
                             );
                             self.running = false;
                             let _ = self.producer.stop().await;
@@ -251,6 +248,22 @@ impl Actor<ProducerMsg> for ProducerActor {
                             return Ok(());
                         }
 
+                        // Check if this is a fatal error that should bypass circuit breaker
+                        // Fatal errors are permanent (business logic) - stop immediately
+                        // Non-fatal errors are transient (external systems) - use circuit breaker
+                        if e.is_fatal() {
+                            error!(
+                                actor = ctx.name(),
+                                error = %e,
+                                "Fatal error - stopping migration immediately"
+                            );
+                            self.running = false;
+                            let _ = self.producer.stop().await;
+                            self.actor_ref = None;
+                            return Err(ActorError::Internal(e.to_string()));
+                        }
+
+                        // For transient errors, use circuit breaker
                         self.handle_tick_error(e).await?
                     }
                 };

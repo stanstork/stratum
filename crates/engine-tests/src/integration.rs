@@ -4,9 +4,10 @@ mod tests {
         reset_postgres_schema,
         utils::{
             ACTORS_TABLE_DDL, CUSTOMERS_TABLE_DDL, DbType, ORDERS_FLAT_FILTER_QUERY,
-            ORDERS_FLAT_JOIN_QUERY, assert_column_exists, assert_row_count, assert_table_exists,
-            execute, fetch_rows, file_row_count, get_cell_as_f64, get_cell_as_string,
-            get_cell_as_usize, get_column_names, get_row_count, get_table_names, run_smql,
+            ORDERS_FLAT_JOIN_QUERY, PIPELINE_FAILURES_TABLE_DDL, assert_column_exists,
+            assert_row_count, assert_table_exists, execute, fetch_rows, file_row_count,
+            get_cell_as_f64, get_cell_as_string, get_cell_as_usize, get_column_names,
+            get_row_count, get_table_names, run_smql,
         },
     };
     use tracing_test::traced_test;
@@ -1632,5 +1633,267 @@ mod tests {
             failing_rows,
             total_source_count
         );
+    }
+
+    // Test Validation: Validation failures (FAIL action) go to DLQ and stop migration.
+    // Scenario:
+    // - Pipeline has strict validation requiring all actors to have first_name = "PENELOPE".
+    // - Only some actors match this condition.
+    // - When validation fails (first actor that isn't PENELOPE), migration should stop.
+    // - Failed validation rows should be written to DLQ.
+    // Expected Outcome:
+    // - DLQ table created with failed validation rows and metadata.
+    // - Migration stops after first batch with validation failure.
+    // - Destination table has fewer rows than source (partial migration).
+    #[traced_test]
+    #[tokio::test]
+    async fn tc25() {
+        reset_postgres_schema().await;
+
+        // Create the DLQ table before running the migration
+        execute(PIPELINE_FAILURES_TABLE_DDL).await;
+
+        let tmpl = r#"
+            connection "mysql_source" {
+                driver = "mysql"
+                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+
+            pipeline "migrate_actors_strict_validation" {
+                from {
+                    connection = connection.mysql_source
+                    table = "actor"
+                }
+
+                to {
+                    connection = connection.pg_destination
+                    table = "actors_validated_strict"
+                }
+
+                settings {
+                    create_missing_tables = true
+                    batch_size = 10
+                    copy_columns = "MAP_ONLY"
+                }
+
+                validate {
+                    // FAIL: Strict validation - only allow specific actor
+                    assert "only_penelope" {
+                        check   = actor.first_name == "PENELOPE"
+                        message = "Only PENELOPE actors allowed - validation will fail on others"
+                        action  = fail
+                    }
+                }
+
+                select {
+                    actor_id = actor.actor_id
+                    first_name = actor.first_name
+                    last_name = actor.last_name
+                }
+
+                on_error {
+                    failed_rows {
+                        action = "save_to_table"
+                        table {
+                            connection = connection.pg_destination
+                            table = "pipeline_failures"
+                        }
+                    }
+                }
+            }
+        "#;
+
+        run_smql(tmpl).await;
+
+        // Verify destination table was created
+        assert_table_exists("actors_validated_strict", true).await;
+
+        // Verify DLQ table was created
+        assert_table_exists("pipeline_failures", true).await;
+
+        // Check how many rows were migrated (should be 0 due to FAIL action stopping pipeline)
+        let migrated_count =
+            get_row_count("actors_validated_strict", "sakila", DbType::Postgres).await;
+
+        // With FAIL action, pipeline should stop on first validation failure
+        assert_eq!(
+            migrated_count, 0,
+            "Expected 0 rows migrated (FAIL action stops pipeline immediately)"
+        );
+
+        let total_source_count = get_row_count("actor", "sakila", DbType::MySql).await;
+        let expected_query = "SELECT COUNT(*) as cnt FROM actor WHERE first_name = 'PENELOPE'";
+        let expected_count =
+            get_cell_as_usize(expected_query, "sakila", DbType::MySql, "cnt").await;
+
+        // Verify DLQ has failed validation rows
+        let dlq_count = get_row_count("pipeline_failures", "sakila", DbType::Postgres).await;
+        assert_eq!(
+            dlq_count,
+            (total_source_count - expected_count as i64),
+            "DLQ should contain all failed validation rows"
+        );
+
+        // Verify source has more rows (only some actors are PENELOPE)
+        let source_count = get_row_count("actor", "sakila", DbType::MySql).await;
+        assert!(
+            source_count > dlq_count,
+            "Source should have more rows than DLQ (expected {} > {})",
+            source_count,
+            dlq_count
+        );
+    }
+
+    // Test Validation: File-based DLQ (JSONL format).
+    // Scenario:
+    // - Pipeline with validation that fails for some rows.
+    // - DLQ configured to write to file instead of database table.
+    // - Failed rows should be written in JSONL format (one JSON object per line).
+    // Expected Outcome:
+    // - DLQ file created with failed rows in JSONL format.
+    // - Each line is a valid JSON object with failed row metadata.
+    // - Migration continues for valid rows.
+    #[traced_test]
+    #[tokio::test]
+    async fn tc26() {
+        reset_postgres_schema().await;
+
+        let dlq_path = "/tmp/failed_payments.jsonl";
+
+        // Clean up previous test file if exists
+        let _ = std::fs::remove_file(dlq_path);
+
+        let tmpl = r#"
+            connection "mysql_source" {
+                driver = "mysql"
+                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+
+            pipeline "migrate_payments_file_dlq" {
+                from {
+                    connection = connection.mysql_source
+                    table = "payment"
+                }
+
+                to {
+                    connection = connection.pg_destination
+                    table = "payments_file_dlq"
+                }
+
+                settings {
+                    create_missing_tables = true
+                    batch_size = 50
+                    copy_columns = "MAP_ONLY"
+                }
+
+                select {
+                    payment_id = payment.payment_id
+                    customer_id = payment.customer_id
+                    amount = payment.amount
+                    payment_date = payment.payment_date
+                }
+
+                validate {
+                    // SKIP: Filter high-value payments to DLQ file
+                    assert "reasonable_amount" {
+                        check   = payment.amount <= 5.00
+                        message = "Payment amount exceeds limit - sent to DLQ file"
+                        action  = skip
+                    }
+                }
+
+                on_error {
+                    failed_rows {
+                        file {
+                            path = "/tmp/failed_payments.jsonl"
+                            format = "Json"
+                        }
+                    }
+                }
+            }
+        "#;
+
+        run_smql(tmpl).await;
+
+        // Verify destination table has data
+        assert_table_exists("payments_file_dlq", true).await;
+        let migrated_count = get_row_count("payments_file_dlq", "sakila", DbType::Postgres).await;
+
+        // Query source to see how many should be filtered
+        let filtered_query = "SELECT COUNT(*) as cnt FROM payment WHERE amount > 5.00";
+        let expected_filtered =
+            get_cell_as_usize(filtered_query, "sakila", DbType::MySql, "cnt").await;
+
+        // Verify some rows were filtered (if any payments > 5.00 exist)
+        if expected_filtered > 0 {
+            // DLQ file should exist and contain JSONL data
+            assert!(
+                std::path::Path::new(dlq_path).exists(),
+                "Expected DLQ file to be created at {}",
+                dlq_path
+            );
+
+            // Read and verify JSONL format
+            let file_content =
+                std::fs::read_to_string(dlq_path).expect("Should be able to read DLQ file");
+
+            let lines: Vec<&str> = file_content.lines().collect();
+            assert!(
+                !lines.is_empty(),
+                "Expected at least one failed row in DLQ file"
+            );
+
+            // Verify each line is valid JSON
+            for line in lines.iter() {
+                let json: serde_json::Value =
+                    serde_json::from_str(line).expect("Each line should be valid JSON");
+
+                // Verify required fields exist
+                assert!(
+                    json.get("id").is_some(),
+                    "Failed row should have 'id' field"
+                );
+                assert!(
+                    json.get("pipeline_name").is_some(),
+                    "Failed row should have 'pipeline_name' field"
+                );
+                assert!(
+                    json.get("error").is_some(),
+                    "Failed row should have 'error_type' field"
+                );
+                let error = json.get("error").unwrap();
+                assert!(
+                    error.get("message").is_some(),
+                    "Failed row error should have 'message' field"
+                );
+                assert!(
+                    error.get("error_type").is_some(),
+                    "Failed row error should have 'type' field"
+                );
+                assert!(
+                    json.get("original_data").is_some(),
+                    "Failed row should have 'original_data' field"
+                );
+            }
+
+            // Verify row counts
+            let source_count = get_row_count("payment", "sakila", DbType::MySql).await;
+            assert_eq!(
+                migrated_count + (lines.len() as i64),
+                source_count,
+                "Migrated + DLQ should equal source count"
+            );
+        }
+
+        // Clean up test file
+        let _ = std::fs::remove_file(dlq_path);
     }
 }

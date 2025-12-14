@@ -53,9 +53,10 @@ impl DbDataDestination for PgDestination {
         let (sql, params) = generator.insert_batch(meta, rows);
 
         info!("Inserting {} rows into {}", num_rows, meta.name);
-        self.adapter.exec_params(&sql, params).await?;
+        let res = self.adapter.exec_params(&sql, params).await;
+        println!("Insert result: {:?}", res);
 
-        Ok(())
+        res
     }
 
     async fn toggle_trigger(&self, table: &str, enable: bool) -> Result<(), DbError> {

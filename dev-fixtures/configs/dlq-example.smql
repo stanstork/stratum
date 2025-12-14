@@ -1,0 +1,51 @@
+connection "mysql_source" {
+    driver = "mysql"
+    url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
+}
+connection "pg_destination" {
+    driver = "postgres"
+    url    = "postgres://user:password@localhost:5432/testdb"
+}
+
+pipeline "migrate_actors_strict_validation" {
+    from {
+        connection = connection.mysql_source
+        table = "actor"
+    }
+
+    to {
+        connection = connection.pg_destination
+        table = "actors_validated_strict"
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size = 10
+        copy_columns = "MAP_ONLY"
+    }
+
+    validate {
+        // FAIL: Strict validation - only allow specific actor
+        assert "only_penelope" {
+            check   = actor.first_name == "PENELOPE"
+            message = "Only PENELOPE actors allowed - validation will fail on others"
+            action  = fail
+        }
+    }
+
+    select {
+        actor_id = actor.actor_id
+        first_name = actor.first_name
+        last_name = actor.last_name
+    }
+
+    on_error {
+        failed_rows {
+            action = "save_to_table"
+            table {
+                connection = connection.pg_destination
+                table = "pipeline_failures"
+            }
+        }
+    }
+}

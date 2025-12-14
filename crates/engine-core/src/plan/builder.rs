@@ -7,8 +7,9 @@ use model::{
         expr::{BinaryOp, CompiledExpression},
         pipeline::{
             BackoffStrategy, DataDestination, DataSource, ErrorHandling, FailedRowsAction,
-            FailedRowsPolicy, Filter, Join, LifecycleHooks, Pagination, Pipeline, RetryPolicy,
-            Transformation, ValidationAction, ValidationRule, ValidationSeverity, WriteMode,
+            FailedRowsConfig, FailedRowsDestination, FileFormat, Filter, Join, LifecycleHooks,
+            Pagination, Pipeline, RetryConfig, Transformation, ValidationAction, ValidationRule,
+            ValidationSeverity, WriteMode,
         },
         properties::Properties,
     },
@@ -342,16 +343,193 @@ impl PlanBuilder {
                     })
                     .unwrap_or(3);
 
-                RetryPolicy {
+                RetryConfig {
                     max_attempts,
                     delay_ms: 1000,
                     backoff: BackoffStrategy::Exponential,
                 }
             });
 
-            let failed_rows = on_error.failed_rows.as_ref().map(|_fr| FailedRowsPolicy {
-                action: FailedRowsAction::Log,
-                output_table: None,
+            let failed_rows = on_error.failed_rows.as_ref().map(|fr| {
+                // Extract action from attributes (optional, defaults to Log)
+                let action = fr
+                    .attributes
+                    .iter()
+                    .find(|a| a.key.name == "action")
+                    .and_then(|a| Self::eval_expression(&a.value).ok())
+                    .and_then(|v| match v {
+                        Value::String(s) => match s.as_str() {
+                            "skip" => Some(FailedRowsAction::Skip),
+                            "log" => Some(FailedRowsAction::Log),
+                            "save_to_table" => Some(FailedRowsAction::SaveToTable),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                    .unwrap_or(FailedRowsAction::Log);
+
+                // Extract destination from nested blocks or attributes
+                let destination = if let Some(table_block) = fr.nested_blocks.iter().find(|b| b.kind == "table") {
+                    // Parse table block
+                    let connection_name = table_block
+                        .attributes
+                        .iter()
+                        .find(|a| a.key.name == "connection")
+                        .and_then(|a| {
+                            if let ExpressionKind::DotNotation(path) = &a.value.kind {
+                                // connection.name format
+                                if path.segments.len() == 2 && path.segments[0] == "connection" {
+                                    Some(path.segments[1].clone())
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        });
+
+                    let schema = table_block
+                        .attributes
+                        .iter()
+                        .find(|a| a.key.name == "schema")
+                        .and_then(|a| Self::eval_expression(&a.value).ok())
+                        .and_then(|v| match v {
+                            Value::String(s) => Some(s),
+                            _ => None,
+                        });
+
+                    let table = table_block
+                        .attributes
+                        .iter()
+                        .find(|a| a.key.name == "table")
+                        .and_then(|a| Self::eval_expression(&a.value).ok())
+                        .and_then(|v| match v {
+                            Value::String(s) => Some(s),
+                            _ => None,
+                        });
+
+                    if let (Some(conn_name), Some(tbl)) = (connection_name, table) {
+                        // Look up the connection from the connections map
+                        if let Some(connection) = self.connections.get(&conn_name) {
+                            Some(FailedRowsDestination::Table {
+                                connection: connection.clone(),
+                                table: tbl,
+                                schema,
+                            })
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else if let Some(file_block) = fr.nested_blocks.iter().find(|b| b.kind == "file") {
+                    // Parse file block
+                    let path = file_block
+                        .attributes
+                        .iter()
+                        .find(|a| a.key.name == "path")
+                        .and_then(|a| Self::eval_expression(&a.value).ok())
+                        .and_then(|v| match v {
+                            Value::String(s) => Some(s),
+                            _ => None,
+                        });
+
+                    let format = file_block
+                        .attributes
+                        .iter()
+                        .find(|a| a.key.name == "format")
+                        .and_then(|a| Self::eval_expression(&a.value).ok())
+                        .and_then(|v| match v {
+                            Value::String(s) => match s.as_str() {
+                                "json" => Some(FileFormat::Json),
+                                "csv" => Some(FileFormat::Csv),
+                                "parquet" => Some(FileFormat::Parquet),
+                                _ => None,
+                            },
+                            _ => None,
+                        });
+
+                    if let Some(p) = path {
+                        Some(FailedRowsDestination::File {
+                            path: p.clone(),
+                            format: format.unwrap_or_else(|| {
+                                // Auto-detect format from extension if not specified
+                                if p.ends_with(".json") {
+                                    FileFormat::Json
+                                } else if p.ends_with(".csv") {
+                                    FileFormat::Csv
+                                } else if p.ends_with(".parquet") {
+                                    FileFormat::Parquet
+                                } else {
+                                    FileFormat::Json
+                                }
+                            }),
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    // Fallback: check for old-style attribute-based destination
+                    fr.attributes.iter().find_map(|a| {
+                        if a.key.name == "destination" {
+                            if let ExpressionKind::DotNotation(path) = &a.value.kind {
+                                // Parse table destination: connection.table or connection.schema.table
+                                if path.segments.len() == 2 {
+                                    // Look up the connection
+                                    if let Some(connection) = self.connections.get(&path.segments[0]) {
+                                        Some(FailedRowsDestination::Table {
+                                            connection: connection.clone(),
+                                            table: path.segments[1].clone(),
+                                            schema: None,
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                } else if path.segments.len() == 3 {
+                                    // Look up the connection
+                                    if let Some(connection) = self.connections.get(&path.segments[0]) {
+                                        Some(FailedRowsDestination::Table {
+                                            connection: connection.clone(),
+                                            table: path.segments[2].clone(),
+                                            schema: Some(path.segments[1].clone()),
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            } else if let ExpressionKind::Literal(Literal::String(path_str)) =
+                                &a.value.kind
+                            {
+                                // Parse file destination
+                                let format = if path_str.ends_with(".json") {
+                                    FileFormat::Json
+                                } else if path_str.ends_with(".csv") {
+                                    FileFormat::Csv
+                                } else if path_str.ends_with(".parquet") {
+                                    FileFormat::Parquet
+                                } else {
+                                    FileFormat::Json
+                                };
+
+                                Some(FailedRowsDestination::File {
+                                    path: path_str.clone(),
+                                    format,
+                                })
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                };
+
+                FailedRowsConfig {
+                    action,
+                    destination,
+                }
             });
 
             Ok(ErrorHandling { retry, failed_rows })
@@ -525,9 +703,9 @@ mod tests {
         attribute::Attribute,
         dotpath::DotPath,
         ident::Identifier,
-        pipeline::{AfterBlock, BeforeBlock, PaginateBlock, SettingsBlock},
+        pipeline::{AfterBlock, BeforeBlock, NestedBlock, PaginateBlock, SettingsBlock},
         span::Span,
-        validation::{OnErrorBlock, RetryBlock, ValidateBlock, ValidationBody, ValidationCheck},
+        validation::{FailedRowsBlock, OnErrorBlock, RetryBlock, ValidateBlock, ValidationBody, ValidationCheck},
     };
     use std::sync::Mutex;
 
@@ -569,6 +747,14 @@ mod tests {
         Attribute {
             key: Identifier::new(key, test_span()),
             value,
+            span: test_span(),
+        }
+    }
+
+    fn make_nested_block(kind: &str, attributes: Vec<Attribute>) -> NestedBlock {
+        NestedBlock {
+            kind: kind.to_string(),
+            attributes,
             span: test_span(),
         }
     }
@@ -1010,6 +1196,356 @@ mod tests {
         assert_eq!(retry.max_attempts, 5);
         assert_eq!(retry.delay_ms, 1000);
         assert!(matches!(retry.backoff, BackoffStrategy::Exponential));
+    }
+
+    #[test]
+    fn test_failed_rows_with_table_block_with_schema() {
+        let mut builder = PlanBuilder::new();
+
+        // Add a test connection to the builder's connections map
+        builder.connections.insert(
+            "warehouse".to_string(),
+            Connection {
+                name: "warehouse".to_string(),
+                driver: "postgres".to_string(),
+                properties: Properties::new(),
+                nested_configs: HashMap::new(),
+            },
+        );
+
+        let pipeline = PipelineBlock {
+            name: "test".to_string(),
+            description: None,
+            after: None,
+            from: None,
+            to: None,
+            where_clauses: vec![],
+            with_block: None,
+            select_block: None,
+            validate_block: None,
+            on_error_block: Some(OnErrorBlock {
+                retry: None,
+                failed_rows: Some(FailedRowsBlock {
+                    attributes: vec![make_attribute("action", make_string_expr("save_to_table"))],
+                    nested_blocks: vec![make_nested_block(
+                        "table",
+                        vec![
+                            make_attribute(
+                                "connection",
+                                make_dotpath_expr(vec!["connection", "warehouse"]),
+                            ),
+                            make_attribute("schema", make_string_expr("dlq")),
+                            make_attribute("table", make_string_expr("failed_orders")),
+                        ],
+                    )],
+                    span: test_span(),
+                }),
+                span: test_span(),
+            }),
+            paginate_block: None,
+            before_block: None,
+            after_block: None,
+            settings_block: None,
+            span: test_span(),
+        };
+
+        let error_handling = builder.build_error_handling(&pipeline).unwrap();
+        let failed_rows = error_handling.failed_rows.unwrap();
+
+        assert!(matches!(failed_rows.action, FailedRowsAction::SaveToTable));
+
+        match failed_rows.destination.unwrap() {
+            FailedRowsDestination::Table {
+                connection,
+                table,
+                schema,
+            } => {
+                assert_eq!(connection.name, "warehouse");
+                assert_eq!(connection.driver, "postgres");
+                assert_eq!(table, "failed_orders");
+                assert_eq!(schema, Some("dlq".to_string()));
+            }
+            _ => panic!("Expected Table destination"),
+        }
+    }
+
+    #[test]
+    fn test_failed_rows_with_table_block_without_schema() {
+        let mut builder = PlanBuilder::new();
+
+        // Add a test connection to the builder's connections map
+        builder.connections.insert(
+            "error_db".to_string(),
+            Connection {
+                name: "error_db".to_string(),
+                driver: "mysql".to_string(),
+                properties: Properties::new(),
+                nested_configs: HashMap::new(),
+            },
+        );
+
+        let pipeline = PipelineBlock {
+            name: "test".to_string(),
+            description: None,
+            after: None,
+            from: None,
+            to: None,
+            where_clauses: vec![],
+            with_block: None,
+            select_block: None,
+            validate_block: None,
+            on_error_block: Some(OnErrorBlock {
+                retry: None,
+                failed_rows: Some(FailedRowsBlock {
+                    attributes: vec![],
+                    nested_blocks: vec![make_nested_block(
+                        "table",
+                        vec![
+                            make_attribute(
+                                "connection",
+                                make_dotpath_expr(vec!["connection", "error_db"]),
+                            ),
+                            make_attribute("table", make_string_expr("failed_rows")),
+                        ],
+                    )],
+                    span: test_span(),
+                }),
+                span: test_span(),
+            }),
+            paginate_block: None,
+            before_block: None,
+            after_block: None,
+            settings_block: None,
+            span: test_span(),
+        };
+
+        let error_handling = builder.build_error_handling(&pipeline).unwrap();
+        let failed_rows = error_handling.failed_rows.unwrap();
+
+        // Should default to Log when no action specified
+        assert!(matches!(failed_rows.action, FailedRowsAction::Log));
+
+        match failed_rows.destination.unwrap() {
+            FailedRowsDestination::Table {
+                connection,
+                table,
+                schema,
+            } => {
+                assert_eq!(connection.name, "error_db");
+                assert_eq!(connection.driver, "mysql");
+                assert_eq!(table, "failed_rows");
+                assert_eq!(schema, None);
+            }
+            _ => panic!("Expected Table destination"),
+        }
+    }
+
+    #[test]
+    fn test_failed_rows_with_file_block_explicit_format() {
+        let builder = PlanBuilder::new();
+        let pipeline = PipelineBlock {
+            name: "test".to_string(),
+            description: None,
+            after: None,
+            from: None,
+            to: None,
+            where_clauses: vec![],
+            with_block: None,
+            select_block: None,
+            validate_block: None,
+            on_error_block: Some(OnErrorBlock {
+                retry: None,
+                failed_rows: Some(FailedRowsBlock {
+                    attributes: vec![make_attribute("action", make_string_expr("log"))],
+                    nested_blocks: vec![make_nested_block(
+                        "file",
+                        vec![
+                            make_attribute("path", make_string_expr("/data/errors.csv")),
+                            make_attribute("format", make_string_expr("csv")),
+                        ],
+                    )],
+                    span: test_span(),
+                }),
+                span: test_span(),
+            }),
+            paginate_block: None,
+            before_block: None,
+            after_block: None,
+            settings_block: None,
+            span: test_span(),
+        };
+
+        let error_handling = builder.build_error_handling(&pipeline).unwrap();
+        let failed_rows = error_handling.failed_rows.unwrap();
+
+        assert!(matches!(failed_rows.action, FailedRowsAction::Log));
+
+        match failed_rows.destination.unwrap() {
+            FailedRowsDestination::File { path, format } => {
+                assert_eq!(path, "/data/errors.csv");
+                assert!(matches!(format, FileFormat::Csv));
+            }
+            _ => panic!("Expected File destination"),
+        }
+    }
+
+    #[test]
+    fn test_failed_rows_with_file_block_auto_detect_format() {
+        let builder = PlanBuilder::new();
+        let pipeline = PipelineBlock {
+            name: "test".to_string(),
+            description: None,
+            after: None,
+            from: None,
+            to: None,
+            where_clauses: vec![],
+            with_block: None,
+            select_block: None,
+            validate_block: None,
+            on_error_block: Some(OnErrorBlock {
+                retry: None,
+                failed_rows: Some(FailedRowsBlock {
+                    attributes: vec![],
+                    nested_blocks: vec![make_nested_block(
+                        "file",
+                        vec![make_attribute(
+                            "path",
+                            make_string_expr("/logs/failed_rows.parquet"),
+                        )],
+                    )],
+                    span: test_span(),
+                }),
+                span: test_span(),
+            }),
+            paginate_block: None,
+            before_block: None,
+            after_block: None,
+            settings_block: None,
+            span: test_span(),
+        };
+
+        let error_handling = builder.build_error_handling(&pipeline).unwrap();
+        let failed_rows = error_handling.failed_rows.unwrap();
+
+        match failed_rows.destination.unwrap() {
+            FailedRowsDestination::File { path, format } => {
+                assert_eq!(path, "/logs/failed_rows.parquet");
+                // Should auto-detect parquet from extension
+                assert!(matches!(format, FileFormat::Parquet));
+            }
+            _ => panic!("Expected File destination"),
+        }
+    }
+
+    #[test]
+    fn test_failed_rows_with_old_style_attribute_table() {
+        let mut builder = PlanBuilder::new();
+
+        // Add a test connection to the builder's connections map
+        builder.connections.insert(
+            "myconn".to_string(),
+            Connection {
+                name: "myconn".to_string(),
+                driver: "postgres".to_string(),
+                properties: Properties::new(),
+                nested_configs: HashMap::new(),
+            },
+        );
+
+        let pipeline = PipelineBlock {
+            name: "test".to_string(),
+            description: None,
+            after: None,
+            from: None,
+            to: None,
+            where_clauses: vec![],
+            with_block: None,
+            select_block: None,
+            validate_block: None,
+            on_error_block: Some(OnErrorBlock {
+                retry: None,
+                failed_rows: Some(FailedRowsBlock {
+                    attributes: vec![
+                        make_attribute("action", make_string_expr("skip")),
+                        make_attribute(
+                            "destination",
+                            make_dotpath_expr(vec!["myconn", "public", "failed_users"]),
+                        ),
+                    ],
+                    nested_blocks: vec![],
+                    span: test_span(),
+                }),
+                span: test_span(),
+            }),
+            paginate_block: None,
+            before_block: None,
+            after_block: None,
+            settings_block: None,
+            span: test_span(),
+        };
+
+        let error_handling = builder.build_error_handling(&pipeline).unwrap();
+        let failed_rows = error_handling.failed_rows.unwrap();
+
+        assert!(matches!(failed_rows.action, FailedRowsAction::Skip));
+
+        match failed_rows.destination.unwrap() {
+            FailedRowsDestination::Table {
+                connection,
+                table,
+                schema,
+            } => {
+                assert_eq!(connection.name, "myconn");
+                assert_eq!(connection.driver, "postgres");
+                assert_eq!(table, "failed_users");
+                assert_eq!(schema, Some("public".to_string()));
+            }
+            _ => panic!("Expected Table destination"),
+        }
+    }
+
+    #[test]
+    fn test_failed_rows_with_old_style_attribute_file() {
+        let builder = PlanBuilder::new();
+        let pipeline = PipelineBlock {
+            name: "test".to_string(),
+            description: None,
+            after: None,
+            from: None,
+            to: None,
+            where_clauses: vec![],
+            with_block: None,
+            select_block: None,
+            validate_block: None,
+            on_error_block: Some(OnErrorBlock {
+                retry: None,
+                failed_rows: Some(FailedRowsBlock {
+                    attributes: vec![make_attribute(
+                        "destination",
+                        make_string_expr("/var/log/errors.json"),
+                    )],
+                    nested_blocks: vec![],
+                    span: test_span(),
+                }),
+                span: test_span(),
+            }),
+            paginate_block: None,
+            before_block: None,
+            after_block: None,
+            settings_block: None,
+            span: test_span(),
+        };
+
+        let error_handling = builder.build_error_handling(&pipeline).unwrap();
+        let failed_rows = error_handling.failed_rows.unwrap();
+
+        match failed_rows.destination.unwrap() {
+            FailedRowsDestination::File { path, format } => {
+                assert_eq!(path, "/var/log/errors.json");
+                assert!(matches!(format, FileFormat::Json));
+            }
+            _ => panic!("Expected File destination"),
+        }
     }
 
     #[test]
