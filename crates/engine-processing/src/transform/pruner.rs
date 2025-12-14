@@ -34,13 +34,8 @@ impl Transform for FieldPruner {
         }
 
         // Filter the row to only keep the allowed fields
-        row.field_values.retain(|field| {
-            let keep = keep_fields.contains(&field.name.to_ascii_lowercase());
-            if !keep {
-                eprintln!("=== Pruning field: {}", field.name);
-            }
-            keep
-        });
+        row.field_values
+            .retain(|field| keep_fields.contains(&field.name.to_ascii_lowercase()));
 
         Ok(())
     }

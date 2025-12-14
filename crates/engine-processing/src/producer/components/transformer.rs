@@ -102,6 +102,7 @@ impl TransformService {
         // Write all failed rows to DLQ as a batch (more efficient)
         if !failed_rows.is_empty() {
             if let Some(writer) = &self.failed_row_writer {
+                tracing::info!("Writing {} failed rows to DLQ", failed_rows.len());
                 if let Err(write_err) = writer.write_batch(&failed_rows).await {
                     warn!(
                         "Failed to write {} failed rows to DLQ: {}",
@@ -109,6 +110,11 @@ impl TransformService {
                         write_err
                     );
                 }
+            } else {
+                tracing::warn!(
+                    "No DLQ writer configured, {} failed rows will not be written",
+                    failed_rows.len()
+                );
             }
         }
 
@@ -128,13 +134,24 @@ impl TransformService {
             .filter_map(|fv| fv.value.as_ref().map(|v| (fv.name.clone(), v.clone())))
             .collect();
 
-        FailedRow::new(
+        // Determine the processing stage based on error type
+        let stage = match &error {
+            crate::transform::error::TransformError::ValidationFailed { .. } => {
+                ProcessingStage::Validation
+            }
+            _ => ProcessingStage::Transform,
+        };
+
+        let mut failed_row = FailedRow::new(
             self.pipeline_name.clone(),
-            ProcessingStage::Transform,
+            stage,
             original_data,
             format!("{:?}", error), // Error type
             error.to_string(),      // Error message
-        )
+        );
+        failed_row.table_name = Some(row.entity.clone());
+
+        failed_row
     }
 
     /// Transform rows and collect errors and filtered rows separately.

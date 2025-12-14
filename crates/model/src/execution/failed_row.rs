@@ -20,7 +20,6 @@ pub struct FailedRow {
     pub metadata: FailureMetadata,
     pub failed_at: DateTime<Utc>,
     pub table_name: Option<String>,
-    pub attempt_number: Option<u32>,
 }
 
 /// The stage of pipeline processing where the failure occurred
@@ -90,7 +89,6 @@ impl FailedRow {
             },
             failed_at: Utc::now(),
             table_name: None,
-            attempt_number: None,
         }
     }
 
@@ -121,7 +119,6 @@ impl FailedRow {
             },
             failed_at: Utc::now(),
             table_name: None,
-            attempt_number: None,
         }
     }
 
@@ -159,12 +156,6 @@ impl FailedRow {
     /// Add table name
     pub fn with_table(mut self, table_name: String) -> Self {
         self.table_name = Some(table_name);
-        self
-    }
-
-    /// Add attempt number for retry tracking
-    pub fn with_attempt(mut self, attempt: u32) -> Self {
-        self.attempt_number = Some(attempt);
         self
     }
 
@@ -241,10 +232,6 @@ impl FailedRow {
 
         if let Some(source) = &self.metadata.source {
             map.insert("source".to_string(), Value::String(source.clone()));
-        }
-
-        if let Some(attempt) = self.attempt_number {
-            map.insert("attempt_number".to_string(), Value::Uint(attempt as u64));
         }
 
         // Original data as JSON string for easy storage
@@ -355,7 +342,6 @@ mod tests {
             Some(10),
         )
         .with_table("users".to_string())
-        .with_attempt(2)
         .with_retryable(true)
         .with_error_details("Stack trace...".to_string())
         .with_metadata(
@@ -367,7 +353,6 @@ mod tests {
         assert_eq!(failed_row.metadata.batch_id, Some("batch_456".to_string()));
         assert_eq!(failed_row.metadata.row_index, Some(10));
         assert_eq!(failed_row.table_name, Some("users".to_string()));
-        assert_eq!(failed_row.attempt_number, Some(2));
         assert!(failed_row.error.is_retryable);
         assert_eq!(failed_row.error.details, Some("Stack trace...".to_string()));
         assert_eq!(

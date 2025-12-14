@@ -76,14 +76,14 @@ impl TransformPipeline {
                             action,
                         } => match action {
                             ValidationAction::Skip => {
-                                warn!("Validation '{}' failed: {} (skipping row)", rule, message);
-                                return Ok(false);
+                                return Err(TransformError::FilteredOut);
                             }
                             ValidationAction::Fail => {
                                 return Err(TransformError::ValidationFailed { rule, message });
                             }
                             ValidationAction::Warn => {
                                 warn!("Validation '{}' failed: {} (continuing)", rule, message);
+                                return Err(TransformError::FilteredOut);
                             }
                         },
                     },

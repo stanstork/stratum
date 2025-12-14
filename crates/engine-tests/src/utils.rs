@@ -72,6 +72,28 @@ pub const CUSTOMERS_TABLE_DDL: &str = r#"
     );
 "#;
 
+/// DDL statement to precreate the `pipeline_failures` table in Postgres.
+/// This table is used to store failed rows during migration tests.
+pub const PIPELINE_FAILURES_TABLE_DDL: &str = r#"
+    CREATE TABLE pipeline_failures (
+        id UUID PRIMARY KEY,
+        pipeline_name TEXT NOT NULL,
+        stage TEXT NOT null,
+        error_type TEXT NOT NULL,
+        error_message TEXT NOT NULL,
+        is_retryable BOOLEAN NOT NULL,
+        failed_at TIMESTAMPTZ NOT NULL,
+        execution_id UUID NOT NULL,
+        error_details TEXT,
+        table_name TEXT,
+        batch_id TEXT,
+        row_index BIGINT,
+        source TEXT,
+        original_data TEXT,
+        custom_metadata TEXT
+    );
+"#;
+
 /// The type of database to use for the test
 pub enum DbType {
     MySql,
