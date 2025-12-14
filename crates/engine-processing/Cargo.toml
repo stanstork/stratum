@@ -25,3 +25,6 @@ tokio-util = "0.7.17"
 bigdecimal = { version = "0.4.7", features = ["serde"] }
 mysql_async = "0.36.1"
 tokio-postgres = "0.7.15"
+
+[dev-dependencies]
+tempfile = "3.15.0"

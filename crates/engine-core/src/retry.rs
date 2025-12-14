@@ -1,3 +1,4 @@
+use model::execution::pipeline::{BackoffStrategy, RetryConfig};
 use std::future::Future;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -54,6 +55,30 @@ impl RetryPolicy {
             max_attempts: 5,
             base_delay: Duration::from_millis(250),
             max_delay: Duration::from_secs(5),
+        }
+    }
+
+    /// Create a RetryPolicy from a RetryConfig, with optional fallback to database defaults.
+    pub fn from_config(config: Option<&RetryConfig>) -> Self {
+        match config {
+            Some(cfg) => {
+                let base_delay = Duration::from_millis(cfg.delay_ms);
+                // Calculate max_delay based on backoff strategy
+                let max_delay = match cfg.backoff {
+                    BackoffStrategy::Fixed => base_delay,
+                    BackoffStrategy::Linear => {
+                        // Linear: max_delay = base * max_attempts
+                        base_delay.saturating_mul(cfg.max_attempts)
+                    }
+                    BackoffStrategy::Exponential => {
+                        // Exponential: cap at 5 seconds for safety
+                        Duration::from_secs(5)
+                    }
+                };
+
+                Self::new(cfg.max_attempts as usize, base_delay, max_delay)
+            }
+            None => Self::for_database(),
         }
     }
 

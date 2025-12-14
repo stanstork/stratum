@@ -46,7 +46,7 @@ pub trait DataConsumer {
 }
 
 pub async fn create_consumer(
-    ctx: &Arc<Mutex<ItemContext>>,
+    item_ctx: &Arc<Mutex<ItemContext>>,
     batch_rx: mpsc::Receiver<Batch>,
     settings: &ValidatedSettings,
     cancel: CancellationToken,
@@ -55,6 +55,6 @@ pub async fn create_consumer(
     if settings.is_dry_run() {
         Box::new(ValidationConsumer::new(batch_rx))
     } else {
-        Box::new(LiveConsumer::new(ctx, batch_rx, cancel, metrics).await)
+        Box::new(LiveConsumer::new(item_ctx, batch_rx, cancel, metrics).await)
     }
 }

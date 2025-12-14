@@ -196,3 +196,184 @@ connection "db" {
     let result = SmqlParser::parse(Rule::program, input);
     assert!(result.is_ok());
 }
+
+#[test]
+fn test_failed_rows_with_table_nested_block_with_schema() {
+    let input = r#"
+pipeline "test" {
+  on_error {
+    failed_rows {
+      table {
+        connection = connection.warehouse
+        schema     = "dlq"
+        table      = "failed_orders"
+      }
+    }
+  }
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_failed_rows_with_table_nested_block_without_schema() {
+    let input = r#"
+pipeline "test" {
+  on_error {
+    failed_rows {
+      table {
+        connection = connection.error_db
+        table      = "failed_rows"
+      }
+    }
+  }
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_failed_rows_with_file_nested_block_explicit_format() {
+    let input = r#"
+pipeline "test" {
+  on_error {
+    failed_rows {
+      file {
+        path   = "/data/errors/failed_rows.csv"
+        format = "csv"
+      }
+    }
+  }
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_failed_rows_with_file_nested_block_json() {
+    let input = r#"
+pipeline "test" {
+  on_error {
+    failed_rows {
+      file {
+        path   = "/var/log/stratum/errors.json"
+        format = "json"
+      }
+    }
+  }
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_failed_rows_with_file_nested_block_parquet() {
+    let input = r#"
+pipeline "test" {
+  on_error {
+    failed_rows {
+      file {
+        path   = "/data/dlq/failed.parquet"
+        format = "parquet"
+      }
+    }
+  }
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_failed_rows_with_action_and_nested_block() {
+    let input = r#"
+pipeline "test" {
+  on_error {
+    failed_rows {
+      action = "save_to_table"
+
+      table {
+        connection = connection.warehouse
+        schema     = "errors"
+        table      = "pipeline_failures"
+      }
+    }
+  }
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_failed_rows_with_old_style_attributes() {
+    let input = r#"
+pipeline "test" {
+  on_error {
+    failed_rows {
+      action = "skip"
+      destination = connection.error_db.failed_rows
+    }
+  }
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_failed_rows_multiple_formats_in_different_pipelines() {
+    let input = r#"
+pipeline "pipeline1" {
+  on_error {
+    failed_rows {
+      table {
+        connection = connection.db1
+        table      = "errors"
+      }
+    }
+  }
+}
+
+pipeline "pipeline2" {
+  on_error {
+    failed_rows {
+      file {
+        path = "/logs/pipeline2_errors.json"
+      }
+    }
+  }
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_on_error_with_retry_and_failed_rows() {
+    let input = r#"
+pipeline "test" {
+  on_error {
+    retry {
+      max_attempts = 5
+      delay_ms     = 1000
+    }
+
+    failed_rows {
+      action = "log"
+
+      file {
+        path   = "/data/errors/{pipeline_name}_{date}.parquet"
+        format = "parquet"
+      }
+    }
+  }
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok());
+}

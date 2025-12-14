@@ -3,6 +3,7 @@ use crate::{
     records::record::DataRecord,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RowData {
@@ -44,6 +45,13 @@ impl RowData {
             };
         }
         size
+    }
+
+    pub fn to_map(&self) -> HashMap<String, Value> {
+        self.field_values
+            .iter()
+            .filter_map(|fv| fv.value.as_ref().map(|v| (fv.name.clone(), v.clone())))
+            .collect()
     }
 }
 

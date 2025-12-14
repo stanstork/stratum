@@ -1,4 +1,4 @@
-use crate::ast::{attribute::Attribute, expr::Expression, span::Span};
+use crate::ast::{attribute::Attribute, expr::Expression, pipeline::NestedBlock, span::Span};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -45,5 +45,6 @@ pub struct RetryBlock {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FailedRowsBlock {
     pub attributes: Vec<Attribute>,
+    pub nested_blocks: Vec<NestedBlock>,
     pub span: Span,
 }

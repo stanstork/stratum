@@ -1,4 +1,6 @@
 pub mod computed;
+pub mod error;
+pub mod failed_row_writer;
 pub mod filter;
 pub mod mapping;
 pub mod pipeline;
