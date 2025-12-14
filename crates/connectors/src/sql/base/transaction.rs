@@ -18,4 +18,17 @@ impl<'a> Transaction<'a> {
             }
         }
     }
+
+    pub async fn rollback(self) -> Result<(), DbError> {
+        match self {
+            Transaction::PgTransaction(tx) => {
+                tx.rollback().await?;
+                Ok(())
+            }
+            Transaction::MySqlTransaction(tx) => {
+                tx.rollback().await?;
+                Ok(())
+            }
+        }
+    }
 }

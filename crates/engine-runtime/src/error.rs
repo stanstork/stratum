@@ -43,6 +43,14 @@ pub enum MigrationError {
     /// Graceful shutdown was requested.
     #[error("Shutdown requested")]
     ShutdownRequested,
+
+    /// Hook execution failed.
+    #[error("Hook execution failed: {0}")]
+    HookExecutionFailed(String),
+
+    /// Pipeline execution failed.
+    #[error("Pipeline failed: {0}")]
+    PipelineFailed(String),
 }
 
 /// Common error type for all actors in the engine.

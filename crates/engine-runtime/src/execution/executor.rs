@@ -3,7 +3,7 @@ use crate::{
     execution::{
         factory,
         metadata::{self},
-        workers,
+        orchestrator::PipelineOrchestrator,
     },
 };
 use engine_config::{
@@ -117,12 +117,14 @@ impl MigrationExecutor {
     ) -> Result<SummaryReport, MigrationError> {
         let start_time = std::time::Instant::now();
         info!("Starting migration pipeline {}", pipeline.destination.table);
+
+        // Prepare context
         let run_id = self.exec_ctx.run_id();
         let item_id = Self::make_item_id(&self.plan.hash(), pipeline, idx);
-
         let offset_strategy = OffsetStrategyFactory::from_pagination(&pipeline.source.pagination);
         let cursor = Cursor::None;
 
+        // Create sources, destinations, and mapping
         let mapping = TransformationMetadata::new(pipeline);
         let source =
             factory::create_source(&self.exec_ctx, pipeline, &mapping, offset_strategy.clone())
@@ -149,6 +151,7 @@ impl MigrationExecutor {
 
         let dry_run_report = self.dry_run_report(&source, &destination, &mapping);
 
+        // Validate and apply settings
         let settings = settings::validate_and_apply(
             &mut item_ctx,
             &pipeline.settings,
@@ -159,7 +162,18 @@ impl MigrationExecutor {
         metadata::load(&mut item_ctx).await?;
 
         let item_ctx = Arc::new(Mutex::new(item_ctx));
-        workers::spawn(item_ctx, &settings, self.cancel.clone(), &dry_run_report).await?;
+
+        // Create and execute the pipeline orchestrator
+        // This handles: before hooks -> pipeline execution -> after hooks
+        let orchestrator = PipelineOrchestrator::new(
+            pipeline.clone(),
+            item_ctx,
+            settings,
+            self.cancel.clone(),
+            dry_run_report.clone(),
+        );
+
+        orchestrator.execute().await?;
 
         let duration = start_time.elapsed();
         info!(

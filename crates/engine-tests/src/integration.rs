@@ -1883,4 +1883,202 @@ mod tests {
         // Clean up test file
         let _ = std::fs::remove_file(dlq_path);
     }
+
+    // Test Settings: BEFORE HOOKS.
+    // Scenario: Before hooks create temp table and index before migration starts.
+    // Expected Outcome:
+    // - Before hooks execute successfully.
+    // - Migration completes successfully.
+    // - Index created by before hook exists in the destination table.
+    #[traced_test]
+    #[tokio::test]
+    async fn tc26() {
+        reset_postgres_schema().await;
+
+        execute(ACTORS_TABLE_DDL).await;
+
+        let tmpl = r#"
+            connection "mysql_source" {
+                driver = "mysql"
+                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_actor_with_before_hooks" {
+                from {
+                    connection = connection.mysql_source
+                    table      = "actor"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "actor"
+                }
+
+                before {
+                    sql = [
+                        "CREATE TEMP TABLE staging_actor (actor_id INT, first_name TEXT, last_name TEXT)",
+                        "CREATE INDEX IF NOT EXISTS idx_actor_last_name ON actor(last_name)"
+                    ]
+                }
+
+                select {
+                    actor_id   = actor.actor_id
+                    first_name = actor.first_name
+                    last_name  = actor.last_name
+                }
+            }
+        "#;
+
+        run_smql(tmpl).await;
+
+        assert_table_exists("actor", true).await;
+        assert_row_count("actor", "sakila", "actor").await;
+
+        let index_query = "SELECT indexname FROM pg_indexes WHERE tablename = 'actor' AND indexname = 'idx_actor_last_name'";
+        let rows = fetch_rows(index_query, "testdb", DbType::Postgres)
+            .await
+            .unwrap();
+        assert_eq!(
+            rows.len(),
+            1,
+            "Index should have been created by before hook"
+        );
+    }
+
+    // Test Settings: AFTER HOOKS.
+    // Scenario: After hooks create multiple indexes and analyze table after migration.
+    // Expected Outcome:
+    // - Migration completes successfully.
+    // - After hooks execute after migration completes.
+    // - All indexes created by after hooks exist.
+    #[traced_test]
+    #[tokio::test]
+    async fn tc27() {
+        reset_postgres_schema().await;
+
+        execute(ACTORS_TABLE_DDL).await;
+
+        let tmpl = r#"
+            connection "mysql_source" {
+                driver = "mysql"
+                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_actor_with_after_hooks" {
+                from {
+                    connection = connection.mysql_source
+                    table      = "actor"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "actor"
+                }
+
+                after {
+                    sql = [
+                        "CREATE INDEX IF NOT EXISTS idx_actor_first_name ON actor(first_name)",
+                        "CREATE INDEX IF NOT EXISTS idx_actor_full_name ON actor(first_name, last_name)",
+                        "ANALYZE actor"
+                    ]
+                }
+
+                select {
+                    actor_id   = actor.actor_id
+                    first_name = actor.first_name
+                    last_name  = actor.last_name
+                }
+            }
+        "#;
+
+        run_smql(tmpl).await;
+
+        assert_table_exists("actor", true).await;
+        assert_row_count("actor", "sakila", "actor").await;
+
+        let index_query = "SELECT indexname FROM pg_indexes WHERE tablename = 'actor' AND indexname IN ('idx_actor_first_name', 'idx_actor_full_name') ORDER BY indexname";
+        let rows = fetch_rows(index_query, "testdb", DbType::Postgres)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            rows.len(),
+            2,
+            "Both indexes should have been created by after hooks"
+        );
+    }
+
+    // Test Settings: BEFORE AND AFTER HOOKS.
+    // Scenario:
+    // - Before hooks disable triggers and drop indexes.
+    // - Migration proceeds.
+    // - After hooks re-enable triggers and create indexes.
+    // Expected Outcome:
+    // - All hooks execute in correct order (before -> migration -> after).
+    // - Migration completes successfully.
+    // - Index created by after hook exists.
+    #[traced_test]
+    #[tokio::test]
+    async fn tc28() {
+        reset_postgres_schema().await;
+
+        execute(ACTORS_TABLE_DDL).await;
+
+        let tmpl = r#"
+            connection "mysql_source" {
+                driver = "mysql"
+                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
+            }
+            connection "pg_destination" {
+                driver = "postgres"
+                url    = "postgres://user:password@localhost:5432/testdb"
+            }
+            pipeline "migrate_actor_full_lifecycle" {
+                from {
+                    connection = connection.mysql_source
+                    table      = "actor"
+                }
+                to {
+                    connection = connection.pg_destination
+                    table      = "actor"
+                }
+
+                before {
+                    sql = [
+                        "DROP INDEX IF EXISTS idx_actor_search",
+                        "ALTER TABLE actor DISABLE TRIGGER ALL"
+                    ]
+                }
+
+                after {
+                    sql = [
+                        "ALTER TABLE actor ENABLE TRIGGER ALL",
+                        "CREATE INDEX IF NOT EXISTS idx_actor_search ON actor(first_name, last_name)",
+                        "ANALYZE actor"
+                    ]
+                }
+
+                select {
+                    actor_id   = actor.actor_id
+                    first_name = actor.first_name
+                    last_name  = actor.last_name
+                }
+            }
+        "#;
+
+        run_smql(tmpl).await;
+
+        assert_table_exists("actor", true).await;
+        assert_row_count("actor", "sakila", "actor").await;
+
+        let index_query = "SELECT indexname FROM pg_indexes WHERE tablename = 'actor' AND indexname = 'idx_actor_search'";
+        let rows = fetch_rows(index_query, "testdb", DbType::Postgres)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1, "Index should exist after migration");
+    }
 }
