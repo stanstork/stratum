@@ -82,8 +82,11 @@ impl TransformService {
                     successful.push(row);
                 }
                 Ok(false) => {
-                    // Row filtered out (not an error)
-                    filtered.push(row);
+                    let failed_row = self.create_failed_row(
+                        &row,
+                        crate::transform::error::TransformError::FilteredOut,
+                    );
+                    failed_rows.push(failed_row);
                 }
                 Err(e) => {
                     // Check if this is a fatal error (validation failure)
