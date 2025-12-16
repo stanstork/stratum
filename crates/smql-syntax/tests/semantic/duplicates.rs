@@ -15,6 +15,7 @@ use super::helpers::*;
 fn test_duplicate_connection_names() {
     let doc = SmqlDocument {
         define_block: None,
+        execution_block: None,
         connections: vec![
             ConnectionBlock {
                 name: "db1".to_string(),
@@ -47,6 +48,7 @@ fn test_duplicate_connection_names() {
 fn test_duplicate_pipeline_names() {
     let doc = SmqlDocument {
         define_block: None,
+        execution_block: None,
         connections: vec![],
         pipelines: vec![
             PipelineBlock {
@@ -114,6 +116,7 @@ fn test_duplicate_define_attributes() {
             ],
             span: span(1, 1),
         }),
+        execution_block: None,
         connections: vec![],
         pipelines: vec![],
         span: span(1, 1),

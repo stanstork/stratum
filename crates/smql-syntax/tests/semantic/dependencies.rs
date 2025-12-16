@@ -56,6 +56,7 @@ fn test_circular_define_dependency() {
             ],
             span: s,
         }),
+        execution_block: None,
         connections: vec![],
         pipelines: vec![],
         span: s,
@@ -80,6 +81,7 @@ fn test_circular_pipeline_dependency() {
     // pipeline2 depends on pipeline1
     let doc = SmqlDocument {
         define_block: None,
+        execution_block: None,
         connections: vec![],
         pipelines: vec![
             PipelineBlock {

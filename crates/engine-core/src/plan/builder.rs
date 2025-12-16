@@ -4,6 +4,7 @@ use model::{
     execution::{
         connection::Connection,
         errors::ConvertError,
+        execution_config::{ExecutionConfig, ExecutionStrategy, FailureStrategy},
         expr::{BinaryOp, CompiledExpression},
         pipeline::{
             BackoffStrategy, DataDestination, DataSource, ErrorHandling, FailedRowsAction,
@@ -15,14 +16,103 @@ use model::{
     },
 };
 use smql_syntax::ast::{
-    block::{ConnectionBlock, DefineBlock},
+    block::{ConnectionBlock, DefineBlock, ExecutionBlock},
     expr::{Expression, ExpressionKind},
     literal::Literal,
     operator::BinaryOperator,
     pipeline::{FromBlock, PipelineBlock, ToBlock},
     validation::ValidationKind,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
+
+// ============================================================
+// Attribute Name Constants
+// ============================================================
+
+// Connection attributes
+const ATTR_DRIVER: &str = "driver";
+
+// Execution config attributes
+const ATTR_STRATEGY: &str = "strategy";
+const ATTR_MAX_CONCURRENCY: &str = "max_concurrency";
+const ATTR_ON_FAILURE: &str = "on_failure";
+const ATTR_PIPELINE_TIMEOUT: &str = "pipeline_timeout";
+const ATTR_TOTAL_TIMEOUT: &str = "total_timeout";
+
+// Pipeline attributes
+const ATTR_CONNECTION: &str = "connection";
+const ATTR_TABLE: &str = "table";
+const ATTR_MODE: &str = "mode";
+const ATTR_STRATEGY_PAGINATION: &str = "strategy";
+const ATTR_CURSOR: &str = "cursor";
+const ATTR_TIEBREAKER: &str = "tiebreaker";
+const ATTR_TIMEZONE: &str = "timezone";
+const ATTR_MAX_ATTEMPTS: &str = "max_attempts";
+const ATTR_ACTION: &str = "action";
+const ATTR_PATH: &str = "path";
+const ATTR_FORMAT: &str = "format";
+const ATTR_SCHEMA: &str = "schema";
+
+// Nested block names
+const BLOCK_TABLE: &str = "table";
+const BLOCK_FILE: &str = "file";
+const BLOCK_PIPELINE: &str = "pipeline";
+
+// Keywords
+const KEYWORD_CONNECTION: &str = "connection";
+const KEYWORD_DEFINE: &str = "define";
+
+// Default values
+const DEFAULT_PAGINATION_STRATEGY: &str = "default";
+const DEFAULT_CURSOR: &str = "id";
+
+// Write modes
+const MODE_INSERT: &str = "insert";
+const MODE_UPDATE: &str = "update";
+const MODE_UPSERT: &str = "upsert";
+const MODE_REPLACE: &str = "replace";
+
+// Validation actions
+const ACTION_SKIP: &str = "skip";
+const ACTION_FAIL: &str = "fail";
+const ACTION_WARN: &str = "warn";
+const ACTION_CONTINUE: &str = "continue";
+
+// Failed rows actions
+const FAILED_ACTION_LOG: &str = "log";
+const FAILED_ACTION_SAVE_TO_TABLE: &str = "save_to_table";
+
+// File formats
+const FORMAT_JSON: &str = "json";
+const FORMAT_CSV: &str = "csv";
+const FORMAT_PARQUET: &str = "parquet";
+
+// Error messages
+const ERR_MISSING_DRIVER: &str = "Connection missing driver";
+const ERR_MISSING_FROM: &str = "Pipeline missing 'from' block";
+const ERR_MISSING_TO: &str = "Pipeline missing 'to' block";
+const ERR_MISSING_TABLE: &str = "Missing 'table' attribute";
+const ERR_INVALID_STRATEGY: &str =
+    "Invalid execution strategy: '{}'. Must be 'sequential' or 'parallel'";
+const ERR_STRATEGY_NOT_STRING: &str = "strategy must be a string";
+const ERR_MAX_CONCURRENCY_NOT_NUMBER: &str = "max_concurrency must be a number";
+const ERR_MAX_CONCURRENCY_RANGE: &str = "max_concurrency must be between 1 and 100";
+const ERR_MAX_CONCURRENCY_REQUIRED: &str =
+    "max_concurrency is required when strategy is 'parallel'";
+const ERR_INVALID_FAILURE_STRATEGY: &str =
+    "Invalid failure strategy: '{}'. Must be 'fail_fast' or 'continue'";
+const ERR_ON_FAILURE_NOT_STRING: &str = "on_failure must be a string";
+const ERR_TIMEOUT_NOT_STRING: &str = "{} must be a string (e.g., '30s', '5m', '2h')";
+const ERR_MISSING_CONNECTION: &str = "From block missing connection attribute";
+const ERR_MISSING_TO_CONNECTION: &str = "To block missing connection attribute";
+const ERR_INVALID_PIPELINE_DEPENDENCY: &str =
+    "Invalid pipeline dependency reference: {}. Expected format: pipeline.name";
+const ERR_PIPELINE_DEPS_MUST_BE_STRINGS: &str =
+    "Pipeline dependencies must be string literals or pipeline references";
+
+// Validation constants
+const MAX_CONCURRENCY_MIN: u32 = 1;
+const MAX_CONCURRENCY_MAX: u32 = 100;
 
 /// Convert validated AST to execution plan
 pub struct PlanBuilder {
@@ -63,10 +153,98 @@ impl PlanBuilder {
         Ok(Connection {
             name: conn_block.name.clone(),
             driver: properties
-                .get_string("driver")
-                .ok_or_else(|| ConvertError::Connection("Connection missing driver".to_string()))?,
+                .get_string(ATTR_DRIVER)
+                .ok_or_else(|| ConvertError::Connection(ERR_MISSING_DRIVER.to_string()))?,
             properties,
             nested_configs,
+        })
+    }
+
+    pub fn build_execution_config(
+        &self,
+        exec_block: &ExecutionBlock,
+    ) -> Result<ExecutionConfig, ConvertError> {
+        let mut strategy = ExecutionStrategy::Sequential;
+        let mut max_concurrency = None;
+        let mut on_failure = FailureStrategy::FailFast;
+        let mut pipeline_timeout = None;
+        let mut total_timeout = None;
+
+        for attr in &exec_block.attributes {
+            let value = Self::eval_expression(&attr.value)?;
+
+            match attr.key.name.as_str() {
+                ATTR_STRATEGY => {
+                    if let Value::String(s) = value {
+                        strategy = ExecutionStrategy::from_str(&s).map_err(|_| {
+                            ConvertError::Plan(ERR_INVALID_STRATEGY.replace("{}", &s))
+                        })?;
+                    } else {
+                        return Err(ConvertError::Plan(ERR_STRATEGY_NOT_STRING.to_string()));
+                    }
+                }
+                ATTR_MAX_CONCURRENCY => {
+                    let concurrency = match value {
+                        Value::Int32(n) => n as u32,
+                        Value::Int(n) => n as u32,
+                        Value::Uint(n) => n as u32,
+                        Value::Float(f) => f as u32,
+                        _ => {
+                            return Err(ConvertError::Plan(
+                                ERR_MAX_CONCURRENCY_NOT_NUMBER.to_string(),
+                            ));
+                        }
+                    };
+
+                    if !(MAX_CONCURRENCY_MIN..=MAX_CONCURRENCY_MAX).contains(&concurrency) {
+                        return Err(ConvertError::Plan(ERR_MAX_CONCURRENCY_RANGE.to_string()));
+                    }
+                    max_concurrency = Some(concurrency);
+                }
+                ATTR_ON_FAILURE => {
+                    if let Value::String(s) = value {
+                        on_failure = FailureStrategy::from_str(&s).map_err(|_| {
+                            ConvertError::Plan(ERR_INVALID_FAILURE_STRATEGY.replace("{}", &s))
+                        })?;
+                    } else {
+                        return Err(ConvertError::Plan(ERR_ON_FAILURE_NOT_STRING.to_string()));
+                    }
+                }
+                ATTR_PIPELINE_TIMEOUT => {
+                    if let Value::String(s) = value {
+                        pipeline_timeout = Some(parse_duration(&s)?);
+                    } else {
+                        return Err(ConvertError::Plan(
+                            ERR_TIMEOUT_NOT_STRING.replace("{}", ATTR_PIPELINE_TIMEOUT),
+                        ));
+                    }
+                }
+                ATTR_TOTAL_TIMEOUT => {
+                    if let Value::String(s) = value {
+                        total_timeout = Some(parse_duration(&s)?);
+                    } else {
+                        return Err(ConvertError::Plan(
+                            ERR_TIMEOUT_NOT_STRING.replace("{}", ATTR_TOTAL_TIMEOUT),
+                        ));
+                    }
+                }
+                _ => {
+                    // Ignore unknown attributes for forward compatibility
+                }
+            }
+        }
+
+        // Validate that parallel strategy has max_concurrency
+        if strategy == ExecutionStrategy::Parallel && max_concurrency.is_none() {
+            return Err(ConvertError::Plan(ERR_MAX_CONCURRENCY_REQUIRED.to_string()));
+        }
+
+        Ok(ExecutionConfig {
+            strategy,
+            max_concurrency,
+            on_failure,
+            pipeline_timeout,
+            total_timeout,
         })
     }
 
@@ -98,7 +276,7 @@ impl PlanBuilder {
         let from = pipeline_block
             .from
             .as_ref()
-            .ok_or_else(|| ConvertError::Plan("Pipeline missing from block".to_string()))?;
+            .ok_or_else(|| ConvertError::Plan(ERR_MISSING_FROM.to_string()))?;
 
         let connection = self.resolve_connection_from(from)?;
 
@@ -134,29 +312,29 @@ impl PlanBuilder {
             let strategy = p
                 .attributes
                 .iter()
-                .find(|a| a.key.name == "strategy")
+                .find(|a| a.key.name == ATTR_STRATEGY_PAGINATION)
                 .and_then(|a| Self::eval_expression(&a.value).ok())
                 .and_then(|v| match v {
                     Value::String(s) => Some(s),
                     _ => None,
                 })
-                .unwrap_or_else(|| "default".to_string());
+                .unwrap_or_else(|| DEFAULT_PAGINATION_STRATEGY.to_string());
 
             let cursor = p
                 .attributes
                 .iter()
-                .find(|a| a.key.name == "cursor")
+                .find(|a| a.key.name == ATTR_CURSOR)
                 .and_then(|a| Self::eval_expression(&a.value).ok())
                 .and_then(|v| match v {
                     Value::String(s) => Some(s),
                     _ => None,
                 })
-                .unwrap_or_else(|| "id".to_string());
+                .unwrap_or_else(|| DEFAULT_CURSOR.to_string());
 
             let tiebreaker = p
                 .attributes
                 .iter()
-                .find(|a| a.key.name == "tiebreaker")
+                .find(|a| a.key.name == ATTR_TIEBREAKER)
                 .and_then(|a| Self::eval_expression(&a.value).ok())
                 .and_then(|v| match v {
                     Value::String(s) => Some(s),
@@ -166,7 +344,7 @@ impl PlanBuilder {
             let timezone = p
                 .attributes
                 .iter()
-                .find(|a| a.key.name == "timezone")
+                .find(|a| a.key.name == ATTR_TIMEZONE)
                 .and_then(|a| Self::eval_expression(&a.value).ok())
                 .and_then(|v| match v {
                     Value::String(s) => Some(s),
@@ -185,13 +363,13 @@ impl PlanBuilder {
         let table = from
             .attributes
             .iter()
-            .find(|a| a.key.name == "table")
+            .find(|a| a.key.name == ATTR_TABLE)
             .and_then(|a| Self::eval_expression(&a.value).ok())
             .and_then(|v| match v {
                 Value::String(s) => Some(s),
                 _ => None,
             })
-            .ok_or_else(|| ConvertError::Plan("From block missing table attribute".to_string()))?;
+            .ok_or_else(|| ConvertError::Plan(ERR_MISSING_TABLE.to_string()))?;
 
         Ok(DataSource {
             connection: self.connections.get(&connection).cloned().ok_or_else(|| {
@@ -211,7 +389,7 @@ impl PlanBuilder {
         let to = pipeline_block
             .to
             .as_ref()
-            .ok_or_else(|| ConvertError::Plan("Pipeline missing to block".to_string()))?;
+            .ok_or_else(|| ConvertError::Plan(ERR_MISSING_TO.to_string()))?;
 
         let connection = self.resolve_connection_to(to)?;
 
@@ -219,25 +397,25 @@ impl PlanBuilder {
         let table = to
             .attributes
             .iter()
-            .find(|a| a.key.name == "table")
+            .find(|a| a.key.name == ATTR_TABLE)
             .and_then(|a| Self::eval_expression(&a.value).ok())
             .and_then(|v| match v {
                 Value::String(s) => Some(s),
                 _ => None,
             })
-            .ok_or_else(|| ConvertError::Plan("To block missing table attribute".to_string()))?;
+            .ok_or_else(|| ConvertError::Plan(ERR_MISSING_TABLE.to_string()))?;
 
         let mode = to
             .attributes
             .iter()
-            .find(|a| a.key.name == "mode")
+            .find(|a| a.key.name == ATTR_MODE)
             .and_then(|a| Self::eval_expression(&a.value).ok())
             .and_then(|v| match v {
                 Value::String(s) => match s.as_str() {
-                    "insert" => Some(WriteMode::Insert),
-                    "update" => Some(WriteMode::Update),
-                    "upsert" => Some(WriteMode::Upsert),
-                    "replace" => Some(WriteMode::Replace),
+                    MODE_INSERT => Some(WriteMode::Insert),
+                    MODE_UPDATE => Some(WriteMode::Update),
+                    MODE_UPSERT => Some(WriteMode::Upsert),
+                    MODE_REPLACE => Some(WriteMode::Replace),
                     _ => None,
                 },
                 _ => None,
@@ -258,11 +436,60 @@ impl PlanBuilder {
         pipeline_block: &PipelineBlock,
     ) -> Result<Vec<String>, ConvertError> {
         // Extract dependencies from the 'after' field which contains pipeline names
+        // The 'after' field is Vec<Expression>, where each expression is typically an array
         if let Some(after) = &pipeline_block.after {
             let mut deps = Vec::new();
             for expr in after {
-                if let ExpressionKind::Literal(Literal::String(s)) = &expr.kind {
-                    deps.push(s.clone());
+                match &expr.kind {
+                    // Handle array of dependencies: after = [pipeline.name1, pipeline.name2]
+                    ExpressionKind::Array(items) => {
+                        for item in items {
+                            match &item.kind {
+                                // String literal in array: after = ["pipeline1"]
+                                ExpressionKind::Literal(Literal::String(s)) => {
+                                    deps.push(s.clone());
+                                }
+                                // Dot notation in array: after = [pipeline.copy_actors]
+                                ExpressionKind::DotNotation(dot_path) => {
+                                    if dot_path.segments.len() == 2
+                                        && dot_path.segments[0] == BLOCK_PIPELINE
+                                    {
+                                        deps.push(dot_path.segments[1].clone());
+                                    } else {
+                                        return Err(ConvertError::Plan(
+                                            ERR_INVALID_PIPELINE_DEPENDENCY
+                                                .replace("{}", &dot_path.segments.join(".")),
+                                        ));
+                                    }
+                                }
+                                _ => {
+                                    return Err(ConvertError::Plan(
+                                        ERR_PIPELINE_DEPS_MUST_BE_STRINGS.to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    // Handle single string literal: after = "pipeline1" (legacy/edge case)
+                    ExpressionKind::Literal(Literal::String(s)) => {
+                        deps.push(s.clone());
+                    }
+                    // Handle single dot notation: after = pipeline.name (legacy/edge case)
+                    ExpressionKind::DotNotation(dot_path) => {
+                        if dot_path.segments.len() == 2 && dot_path.segments[0] == BLOCK_PIPELINE {
+                            deps.push(dot_path.segments[1].clone());
+                        } else {
+                            return Err(ConvertError::Plan(
+                                ERR_INVALID_PIPELINE_DEPENDENCY
+                                    .replace("{}", &dot_path.segments.join(".")),
+                            ));
+                        }
+                    }
+                    _ => {
+                        return Err(ConvertError::Plan(
+                            ERR_PIPELINE_DEPS_MUST_BE_STRINGS.to_string(),
+                        ));
+                    }
                 }
             }
             Ok(deps)
@@ -310,10 +537,10 @@ impl PlanBuilder {
                         .action
                         .as_ref()
                         .and_then(|a| match a.as_str() {
-                            "skip" => Some(ValidationAction::Skip),
-                            "fail" => Some(ValidationAction::Fail),
-                            "warn" => Some(ValidationAction::Warn),
-                            "continue" => Some(ValidationAction::Continue),
+                            ACTION_SKIP => Some(ValidationAction::Skip),
+                            ACTION_FAIL => Some(ValidationAction::Fail),
+                            ACTION_WARN => Some(ValidationAction::Warn),
+                            ACTION_CONTINUE => Some(ValidationAction::Continue),
                             _ => None,
                         })
                         .unwrap_or(ValidationAction::Warn),
@@ -334,7 +561,7 @@ impl PlanBuilder {
                 let max_attempts = r
                     .attributes
                     .iter()
-                    .find(|a| a.key.name == "max_attempts")
+                    .find(|a| a.key.name == ATTR_MAX_ATTEMPTS)
                     .and_then(|a| Self::eval_expression(&a.value).ok())
                     .and_then(|v| match v {
                         Value::Int32(n) => Some(n as u32),
@@ -355,13 +582,13 @@ impl PlanBuilder {
                 let action = fr
                     .attributes
                     .iter()
-                    .find(|a| a.key.name == "action")
+                    .find(|a| a.key.name == ATTR_ACTION)
                     .and_then(|a| Self::eval_expression(&a.value).ok())
                     .and_then(|v| match v {
                         Value::String(s) => match s.as_str() {
-                            "skip" => Some(FailedRowsAction::Skip),
-                            "log" => Some(FailedRowsAction::Log),
-                            "save_to_table" => Some(FailedRowsAction::SaveToTable),
+                            ACTION_SKIP => Some(FailedRowsAction::Skip),
+                            FAILED_ACTION_LOG => Some(FailedRowsAction::Log),
+                            FAILED_ACTION_SAVE_TO_TABLE => Some(FailedRowsAction::SaveToTable),
                             _ => None,
                         },
                         _ => None,
@@ -370,17 +597,19 @@ impl PlanBuilder {
 
                 // Extract destination from nested blocks or attributes
                 let destination = if let Some(table_block) =
-                    fr.nested_blocks.iter().find(|b| b.kind == "table")
+                    fr.nested_blocks.iter().find(|b| b.kind == BLOCK_TABLE)
                 {
                     // Parse table block
                     let connection_name = table_block
                         .attributes
                         .iter()
-                        .find(|a| a.key.name == "connection")
+                        .find(|a| a.key.name == ATTR_CONNECTION)
                         .and_then(|a| {
                             if let ExpressionKind::DotNotation(path) = &a.value.kind {
                                 // connection.name format
-                                if path.segments.len() == 2 && path.segments[0] == "connection" {
+                                if path.segments.len() == 2
+                                    && path.segments[0] == KEYWORD_CONNECTION
+                                {
                                     Some(path.segments[1].clone())
                                 } else {
                                     None
@@ -393,7 +622,7 @@ impl PlanBuilder {
                     let schema = table_block
                         .attributes
                         .iter()
-                        .find(|a| a.key.name == "schema")
+                        .find(|a| a.key.name == ATTR_SCHEMA)
                         .and_then(|a| Self::eval_expression(&a.value).ok())
                         .and_then(|v| match v {
                             Value::String(s) => Some(s),
@@ -403,7 +632,7 @@ impl PlanBuilder {
                     let table = table_block
                         .attributes
                         .iter()
-                        .find(|a| a.key.name == "table")
+                        .find(|a| a.key.name == ATTR_TABLE)
                         .and_then(|a| Self::eval_expression(&a.value).ok())
                         .and_then(|v| match v {
                             Value::String(s) => Some(s),
@@ -422,13 +651,14 @@ impl PlanBuilder {
                     } else {
                         None
                     }
-                } else if let Some(file_block) = fr.nested_blocks.iter().find(|b| b.kind == "file")
+                } else if let Some(file_block) =
+                    fr.nested_blocks.iter().find(|b| b.kind == BLOCK_FILE)
                 {
                     // Parse file block
                     let path = file_block
                         .attributes
                         .iter()
-                        .find(|a| a.key.name == "path")
+                        .find(|a| a.key.name == ATTR_PATH)
                         .and_then(|a| Self::eval_expression(&a.value).ok())
                         .and_then(|v| match v {
                             Value::String(s) => Some(s),
@@ -438,13 +668,13 @@ impl PlanBuilder {
                     let format = file_block
                         .attributes
                         .iter()
-                        .find(|a| a.key.name == "format")
+                        .find(|a| a.key.name == ATTR_FORMAT)
                         .and_then(|a| Self::eval_expression(&a.value).ok())
                         .and_then(|v| match v {
                             Value::String(s) => match s.as_str() {
-                                "json" => Some(FileFormat::Json),
-                                "csv" => Some(FileFormat::Csv),
-                                "parquet" => Some(FileFormat::Parquet),
+                                FORMAT_JSON => Some(FileFormat::Json),
+                                FORMAT_CSV => Some(FileFormat::Csv),
+                                FORMAT_PARQUET => Some(FileFormat::Parquet),
                                 _ => None,
                             },
                             _ => None,
@@ -454,11 +684,15 @@ impl PlanBuilder {
                         path: p.clone(),
                         format: format.unwrap_or_else(|| {
                             // Auto-detect format from extension if not specified
-                            if p.ends_with(".json") {
+                            let ext_json = format!(".{}", FORMAT_JSON);
+                            let ext_csv = format!(".{}", FORMAT_CSV);
+                            let ext_parquet = format!(".{}", FORMAT_PARQUET);
+
+                            if p.ends_with(&ext_json) {
                                 FileFormat::Json
-                            } else if p.ends_with(".csv") {
+                            } else if p.ends_with(&ext_csv) {
                                 FileFormat::Csv
-                            } else if p.ends_with(".parquet") {
+                            } else if p.ends_with(&ext_parquet) {
                                 FileFormat::Parquet
                             } else {
                                 FileFormat::Json
@@ -522,33 +756,29 @@ impl PlanBuilder {
     fn resolve_connection_from(&self, from: &FromBlock) -> Result<String, ConvertError> {
         // Look for connection = connection.name attribute
         for attr in &from.attributes {
-            if attr.key.name == "connection"
+            if attr.key.name == ATTR_CONNECTION
                 && let ExpressionKind::DotNotation(path) = &attr.value.kind
                 && path.segments.len() == 2
-                && path.segments[0] == "connection"
+                && path.segments[0] == KEYWORD_CONNECTION
             {
                 return Ok(path.segments[1].clone());
             }
         }
-        Err(ConvertError::Plan(
-            "From block missing connection attribute".to_string(),
-        ))
+        Err(ConvertError::Plan(ERR_MISSING_CONNECTION.to_string()))
     }
 
     fn resolve_connection_to(&self, to: &ToBlock) -> Result<String, ConvertError> {
         // Look for connection = connection.name attribute
         for attr in &to.attributes {
-            if attr.key.name == "connection"
+            if attr.key.name == ATTR_CONNECTION
                 && let ExpressionKind::DotNotation(path) = &attr.value.kind
                 && path.segments.len() == 2
-                && path.segments[0] == "connection"
+                && path.segments[0] == KEYWORD_CONNECTION
             {
                 return Ok(path.segments[1].clone());
             }
         }
-        Err(ConvertError::Plan(
-            "To block missing connection attribute".to_string(),
-        ))
+        Err(ConvertError::Plan(ERR_MISSING_TO_CONNECTION.to_string()))
     }
 
     fn compile_expression(&self, expr: &Expression) -> Result<CompiledExpression, ConvertError> {
@@ -562,7 +792,7 @@ impl PlanBuilder {
             ExpressionKind::Identifier(id) => Ok(CompiledExpression::Identifier(id.clone())),
             ExpressionKind::DotNotation(path) => {
                 // Resolve define.X references
-                if path.segments[0] == "define"
+                if path.segments[0] == KEYWORD_DEFINE
                     && path.segments.len() == 2
                     && let Some(value) = self.global_definitions.get(&path.segments[1])
                 {
@@ -637,6 +867,48 @@ impl Default for PlanBuilder {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Parse duration string (e.g., "30s", "5m", "2h") to seconds
+fn parse_duration(s: &str) -> Result<u64, ConvertError> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err(ConvertError::Plan("Empty duration string".to_string()));
+    }
+
+    let (num_str, unit) = if let Some(num_str) = s.strip_suffix("ms") {
+        (num_str, "ms")
+    } else if s.len() > 1 {
+        (&s[..s.len() - 1], &s[s.len() - 1..])
+    } else {
+        return Err(ConvertError::Plan(format!(
+            "Invalid duration format: '{}'. Expected format like '30s', '5m', '2h'",
+            s
+        )));
+    };
+
+    let num: u64 = num_str.parse().map_err(|_| {
+        ConvertError::Plan(format!(
+            "Invalid number in duration: '{}'. Expected format like '30s', '5m', '2h'",
+            s
+        ))
+    })?;
+
+    let seconds = match unit {
+        "ms" => num / 1000, // milliseconds to seconds
+        "s" => num,
+        "m" => num * 60,
+        "h" => num * 3600,
+        "d" => num * 86400,
+        _ => {
+            return Err(ConvertError::Plan(format!(
+                "Invalid duration unit: '{}'. Supported units: ms, s, m, h, d",
+                unit
+            )));
+        }
+    };
+
+    Ok(seconds)
 }
 
 #[cfg(test)]
@@ -754,13 +1026,20 @@ mod tests {
     #[test]
     fn test_build_dependencies() {
         let builder = PlanBuilder::new();
+
+        // Test with array of DotPath (modern syntax: after = [pipeline.name1, pipeline.name2])
+        let array_expr = Expression::new(
+            ExpressionKind::Array(vec![
+                make_dotpath_expr(vec!["pipeline", "pipeline1"]),
+                make_dotpath_expr(vec!["pipeline", "pipeline0"]),
+            ]),
+            test_span(),
+        );
+
         let pipeline = PipelineBlock {
             name: "pipeline2".to_string(),
             description: None,
-            after: Some(vec![
-                make_string_expr("pipeline1"),
-                make_string_expr("pipeline0"),
-            ]),
+            after: Some(vec![array_expr]),
             from: None,
             to: None,
             where_clauses: vec![],

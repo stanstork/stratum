@@ -17,6 +17,7 @@ use super::helpers::*;
 fn test_undefined_connection_reference() {
     let doc = SmqlDocument {
         define_block: None,
+        execution_block: None,
         connections: vec![ConnectionBlock {
             name: "db1".to_string(),
             attributes: vec![
@@ -85,6 +86,7 @@ fn test_undefined_connection_reference() {
 fn test_undefined_pipeline_reference() {
     let doc = SmqlDocument {
         define_block: None,
+        execution_block: None,
         connections: vec![],
         pipelines: vec![PipelineBlock {
             description: None,
@@ -131,6 +133,7 @@ fn test_undefined_define_constant() {
             }],
             span: span(1, 1),
         }),
+        execution_block: None,
         connections: vec![],
         pipelines: vec![PipelineBlock {
             description: None,

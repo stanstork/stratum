@@ -1,5 +1,6 @@
 use model::execution::{
-    connection::Connection, define::GlobalDefinitions, errors::ConvertError, pipeline::Pipeline,
+    connection::Connection, define::GlobalDefinitions, errors::ConvertError,
+    execution_config::ExecutionConfig, pipeline::Pipeline,
 };
 use serde::{Deserialize, Serialize};
 use smql_syntax::ast::doc::SmqlDocument;
@@ -10,6 +11,7 @@ use crate::plan::builder::PlanBuilder;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionPlan {
     pub definitions: GlobalDefinitions,
+    pub execution_config: ExecutionConfig,
     pub connections: Vec<Connection>,
     pub pipelines: Vec<Pipeline>,
 }
@@ -22,6 +24,12 @@ impl ExecutionPlan {
         if let Some(def_block) = &doc.define_block {
             builder.global_definitions = builder.extract_definitions(def_block)?;
         }
+
+        let execution_config = if let Some(exec_block) = &doc.execution_block {
+            builder.build_execution_config(exec_block)?
+        } else {
+            ExecutionConfig::default()
+        };
 
         for conn_block in &doc.connections {
             let connection = builder.build_connection(conn_block)?;
@@ -40,6 +48,7 @@ impl ExecutionPlan {
             definitions: GlobalDefinitions {
                 variables: builder.global_definitions,
             },
+            execution_config,
             connections: builder.connections.values().cloned().collect(),
             pipelines,
         })

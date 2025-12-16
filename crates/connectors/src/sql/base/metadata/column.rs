@@ -49,7 +49,7 @@ impl ColumnMetadata {
             is_nullable: row.try_get_string(COL_IS_NULLABLE).unwrap_or_default() == "YES",
             has_default: row.try_get_string(COL_COLUMN_DEFAULT).is_some(),
             default_value: row.get_value(&data_type, COL_COLUMN_DEFAULT),
-            char_max_length: row.try_get_i64(COL_CHAR_MAX_LENGTH).map(|v| v as usize),
+            char_max_length: row.try_get_i32(COL_CHAR_MAX_LENGTH).map(|v| v as usize),
             num_precision: row.try_get_i32(COL_NUMERIC_PRECISION).map(|v| v as u32),
             num_scale: row.try_get_i32(COL_NUMERIC_SCALE).map(|v| v as u32),
             is_primary_key: row.try_get_bool(COL_IS_PRIMARY_KEY).unwrap_or(false),

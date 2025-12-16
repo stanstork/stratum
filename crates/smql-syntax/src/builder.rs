@@ -1,7 +1,7 @@
 use crate::{
     ast::{
         attribute::Attribute,
-        block::{ConnectionBlock, DefineBlock},
+        block::{ConnectionBlock, DefineBlock, ExecutionBlock},
         doc::SmqlDocument,
         dotpath::DotPath,
         expr::{Expression, ExpressionKind, WhenBranch},
@@ -49,6 +49,7 @@ fn build_document(mut pairs: Pairs<Rule>) -> BuildResult<SmqlDocument> {
 
     let span = pair_to_span(&program);
     let mut define_block = None;
+    let mut execution_block = None;
     let mut connections = Vec::new();
     let mut pipelines = Vec::new();
 
@@ -56,6 +57,9 @@ fn build_document(mut pairs: Pairs<Rule>) -> BuildResult<SmqlDocument> {
         match pair.as_rule() {
             Rule::define_block => {
                 define_block = Some(build_define_block(pair)?);
+            }
+            Rule::execution_block => {
+                execution_block = Some(build_execution_block(pair)?);
             }
             Rule::connection_block => {
                 connections.push(build_connection_block(pair)?);
@@ -70,6 +74,7 @@ fn build_document(mut pairs: Pairs<Rule>) -> BuildResult<SmqlDocument> {
 
     Ok(SmqlDocument {
         define_block,
+        execution_block,
         connections,
         pipelines,
         span,
@@ -93,6 +98,19 @@ fn build_define_block(pair: Pair<Rule>) -> BuildResult<DefineBlock> {
     }
 
     Ok(DefineBlock { attributes, span })
+}
+
+fn build_execution_block(pair: Pair<Rule>) -> BuildResult<ExecutionBlock> {
+    let span = pair_to_span(&pair);
+    let mut attributes = Vec::new();
+
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::attribute {
+            attributes.push(build_attribute(inner)?);
+        }
+    }
+
+    Ok(ExecutionBlock { attributes, span })
 }
 
 fn build_connection_block(pair: Pair<Rule>) -> BuildResult<ConnectionBlock> {

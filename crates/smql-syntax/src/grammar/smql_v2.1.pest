@@ -10,6 +10,7 @@ COMMENT    = _{ ("//" ~ (!"\n" ~ ANY)*) | ("/*" ~ (!"*/" ~ ANY)* ~ "*/") }
 // ============================================================
 
 kw_define      = @{ "define" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_execution   = @{ "execution" ~ !(ASCII_ALPHANUMERIC | "_") }
 kw_connection  = @{ "connection" ~ !(ASCII_ALPHANUMERIC | "_") }
 kw_pipeline    = @{ "pipeline" ~ !(ASCII_ALPHANUMERIC | "_") }
 kw_from        = @{ "from" ~ !(ASCII_ALPHANUMERIC | "_") }
@@ -87,6 +88,9 @@ comma    = { "," }
 
 // Define block (singleton, no name)
 define_block = { kw_define ~ lbrace ~ attribute* ~ rbrace }
+
+// Execution block (singleton, no name) - configures DAG execution strategy
+execution_block = { kw_execution ~ lbrace ~ attribute* ~ rbrace }
 
 // Connection block (with string name)
 connection_block = { kw_connection ~ lit_string ~ lbrace ~ (attribute | nested_block)* ~ rbrace }
@@ -179,4 +183,4 @@ array_literal = { lbracket ~ (expression ~ (comma ~ expression)*)? ~ comma? ~ rb
 // Program Entry Point
 // ============================================================
 
-program = { SOI ~ (define_block | connection_block | pipeline_block)* ~ EOI }
+program = { SOI ~ (define_block | execution_block | connection_block | pipeline_block)* ~ EOI }

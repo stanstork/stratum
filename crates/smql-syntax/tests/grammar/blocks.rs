@@ -23,6 +23,45 @@ define {
 }
 
 #[test]
+fn test_parse_execution_block_simple() {
+    let input = r#"
+execution {
+  strategy = "sequential"
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_parse_execution_block_parallel() {
+    let input = r#"
+execution {
+  strategy = "parallel"
+  max_concurrency = 8
+  on_failure = "continue"
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_parse_execution_block_with_timeouts() {
+    let input = r#"
+execution {
+  strategy = "parallel"
+  max_concurrency = 4
+  on_failure = "fail_fast"
+  pipeline_timeout = "30m"
+  total_timeout = "4h"
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok());
+}
+
+#[test]
 fn test_parse_connection_block() {
     let input = r#"
 connection "mysql_prod" {

@@ -5,6 +5,7 @@ use mysql_async::Pool;
 use std::sync::Arc;
 use tokio_postgres::Client;
 
+pub mod dag_integration;
 pub mod integration;
 pub mod utils;
 
@@ -27,6 +28,7 @@ async fn pg_pool() -> Arc<Client> {
 }
 
 /// Drop & recreate the public schema in Postgres so it's empty.
+/// Also clears the state store to ensure tests start with clean state.
 async fn reset_postgres_schema() {
     let pool = pg_pool().await;
     // This will drop all tables, types, etc. in `public` and re-create it.
@@ -38,4 +40,16 @@ async fn reset_postgres_schema() {
     )
     .await
     .expect("reset postgres schema");
+
+    // Clear the state store to prevent test pollution
+    let home_dir = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok();
+
+    if let Some(home) = home_dir {
+        let state_path = std::path::PathBuf::from(home).join(".stratum/state");
+        if state_path.exists() {
+            let _ = std::fs::remove_dir_all(&state_path);
+        }
+    }
 }

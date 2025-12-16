@@ -22,6 +22,51 @@ fn test_parse_simple_define() {
 }
 
 #[test]
+fn test_parse_execution_block() {
+    let input = r#"
+        execution {
+            strategy = "parallel"
+            max_concurrency = 8
+            on_failure = "continue"
+        }
+    "#;
+
+    let result = parse(input);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    let doc = result.unwrap();
+    assert!(doc.execution_block.is_some());
+
+    let execution = doc.execution_block.unwrap();
+    assert_eq!(execution.attributes.len(), 3);
+    assert_eq!(execution.attributes[0].key.name, "strategy");
+    assert_eq!(execution.attributes[1].key.name, "max_concurrency");
+    assert_eq!(execution.attributes[2].key.name, "on_failure");
+}
+
+#[test]
+fn test_parse_execution_block_with_timeouts() {
+    let input = r#"
+        execution {
+            strategy = "parallel"
+            max_concurrency = 4
+            on_failure = "fail_fast"
+            pipeline_timeout = "30m"
+            total_timeout = "4h"
+        }
+    "#;
+
+    let result = parse(input);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    let doc = result.unwrap();
+    assert!(doc.execution_block.is_some());
+
+    let execution = doc.execution_block.unwrap();
+    assert_eq!(execution.attributes.len(), 5);
+}
+
+#[test]
 fn test_parse_connection() {
     let input = r#"
         connection "mysql_prod" {

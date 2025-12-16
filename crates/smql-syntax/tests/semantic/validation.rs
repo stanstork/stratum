@@ -18,6 +18,7 @@ use super::helpers::*;
 fn test_missing_required_fields_connection() {
     let doc = SmqlDocument {
         define_block: None,
+        execution_block: None,
         connections: vec![ConnectionBlock {
             name: "db1".to_string(),
             attributes: vec![
@@ -40,6 +41,7 @@ fn test_missing_required_fields_connection() {
 fn test_missing_required_fields_pipeline() {
     let doc = SmqlDocument {
         define_block: None,
+        execution_block: None,
         connections: vec![],
         pipelines: vec![PipelineBlock {
             description: None,
@@ -71,6 +73,7 @@ fn test_missing_required_fields_pipeline() {
 fn test_unused_connection_warning() {
     let doc = SmqlDocument {
         define_block: None,
+        execution_block: None,
         connections: vec![ConnectionBlock {
             name: "unused_db".to_string(),
             attributes: vec![
@@ -113,6 +116,7 @@ fn test_unused_define_constant_warning() {
             }],
             span: span(1, 1),
         }),
+        execution_block: None,
         connections: vec![],
         pipelines: vec![],
         span: span(1, 1),
@@ -135,6 +139,7 @@ fn test_empty_define_block_warning() {
             attributes: vec![],
             span: span(1, 1),
         }),
+        execution_block: None,
         connections: vec![],
         pipelines: vec![],
         span: span(1, 1),
@@ -163,6 +168,7 @@ fn test_valid_document_no_errors() {
             }],
             span: s,
         }),
+        execution_block: None,
         connections: vec![ConnectionBlock {
             name: "db1".to_string(),
             attributes: vec![
@@ -241,6 +247,7 @@ fn test_valid_document_no_errors() {
 fn test_multiple_errors_collected() {
     let doc = SmqlDocument {
         define_block: None,
+        execution_block: None,
         connections: vec![
             ConnectionBlock {
                 name: "db1".to_string(),

@@ -1,4 +1,5 @@
 use crate::actor::{Actor, ActorContext, ActorRef};
+use crate::error::ActorError;
 use std::fmt::Debug;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::error;
@@ -8,7 +9,7 @@ pub fn spawn_actor<M, A>(
     name: impl Into<String>,
     mailbox_capacity: usize,
     mut actor: A,
-) -> (ActorRef<M>, JoinHandle<()>)
+) -> (ActorRef<M>, JoinHandle<Result<(), ActorError>>)
 where
     A: Actor<M>,
     M: Send + Debug + 'static,
@@ -21,18 +22,23 @@ where
     let handle = tokio::spawn(async move {
         if let Err(e) = actor.on_start(&ctx).await {
             tracing::error!(actor = %ctx.name(), ?e, "actor on_start failed");
-            return;
+            return Err(e);
         }
 
         while let Some(msg) = rx.recv().await {
             if let Err(e) = actor.handle(msg, &ctx).await {
                 error!(actor = %ctx.name(), ?e, "actor handle failed");
+                // Fatal error - stop the actor and return error
+                return Err(e);
             }
         }
 
         if let Err(e) = actor.on_stop(&ctx).await {
             error!(actor = %ctx.name(), ?e, "actor on_stop failed");
+            return Err(e);
         }
+
+        Ok(())
     });
 
     (actor_ref, handle)

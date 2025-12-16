@@ -17,8 +17,8 @@ use tracing::{error, info};
 pub struct PipelineCoordinator {
     producer_ref: ActorRef<ProducerMsg>,
     consumer_ref: ActorRef<ConsumerMsg>,
-    producer_handle: JoinHandle<()>,
-    consumer_handle: JoinHandle<()>,
+    producer_handle: JoinHandle<Result<(), ActorError>>,
+    consumer_handle: JoinHandle<Result<(), ActorError>>,
     cancel_token: CancellationToken,
 }
 
@@ -163,7 +163,11 @@ impl PipelineCoordinator {
         Ok(())
     }
 
-    /// Waits for both actors to complete.
+    /// Waits for both actors to complete and returns any errors.
+    ///
+    /// This method will return an error if:
+    /// - Either actor task panicked (JoinError)
+    /// - Either actor returned an error during execution (ActorError)
     pub async fn wait(self) -> Result<(), ActorError> {
         // Drop actor references to allow mailboxes to close when actors finish
         // This is necessary because actors hold self-references that they drop when done,
@@ -172,7 +176,24 @@ impl PipelineCoordinator {
         drop(self.consumer_ref);
 
         // Wait for both actors to finish
-        let _ = tokio::join!(self.producer_handle, self.consumer_handle);
+        let (producer_join_result, consumer_join_result) =
+            tokio::join!(self.producer_handle, self.consumer_handle);
+
+        // Handle producer: JoinError (task panic) -> ActorError
+        let producer_result = producer_join_result.map_err(|e| {
+            error!("Producer task panicked: {}", e);
+            ActorError::Internal(format!("Producer task panicked: {}", e))
+        })?;
+
+        // Handle consumer: JoinError (task panic) -> ActorError
+        let consumer_result = consumer_join_result.map_err(|e| {
+            error!("Consumer task panicked: {}", e);
+            ActorError::Internal(format!("Consumer task panicked: {}", e))
+        })?;
+
+        // Propagate actor execution errors
+        producer_result?;
+        consumer_result?;
 
         Ok(())
     }

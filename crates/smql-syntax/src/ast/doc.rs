@@ -1,5 +1,5 @@
 use crate::ast::{
-    block::{ConnectionBlock, DefineBlock},
+    block::{ConnectionBlock, DefineBlock, ExecutionBlock},
     pipeline::PipelineBlock,
     span::Span,
 };
@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SmqlDocument {
     pub define_block: Option<DefineBlock>,
+    pub execution_block: Option<ExecutionBlock>,
     pub connections: Vec<ConnectionBlock>,
     pub pipelines: Vec<PipelineBlock>,
     pub span: Span,
@@ -23,12 +24,14 @@ mod tests {
         let span = Span::new(0, 100, 1, 1);
         let doc = SmqlDocument {
             define_block: None,
+            execution_block: None,
             connections: vec![],
             pipelines: vec![],
             span,
         };
 
         assert!(doc.define_block.is_none());
+        assert!(doc.execution_block.is_none());
         assert_eq!(doc.connections.len(), 0);
         assert_eq!(doc.pipelines.len(), 0);
     }

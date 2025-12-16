@@ -202,6 +202,7 @@ mod tests {
 
         let doc = SmqlDocument {
             define_block: None,
+            execution_block: None,
             connections: vec![],
             pipelines: vec![],
             span: Span::new(0, 0, 0, 0),

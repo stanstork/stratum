@@ -9,6 +9,14 @@ pub struct DefineBlock {
     pub span: Span,
 }
 
+/// Execution block for DAG execution configuration
+/// Syntax: execution { strategy = "parallel", max_concurrency = 8, on_failure = "continue" }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExecutionBlock {
+    pub attributes: Vec<Attribute>,
+    pub span: Span,
+}
+
 /// Connection block for data sources
 /// Syntax: connection "mysql_prod" { driver = "mysql", ... }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

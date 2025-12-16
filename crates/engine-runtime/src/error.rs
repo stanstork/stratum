@@ -1,3 +1,4 @@
+use crate::dag::error::DagError;
 use connectors::{error::AdapterError, sql::base::error::DbError};
 use engine_config::settings::error::SettingsError;
 use thiserror::Error;
@@ -51,6 +52,14 @@ pub enum MigrationError {
     /// Pipeline execution failed.
     #[error("Pipeline failed: {0}")]
     PipelineFailed(String),
+
+    /// Parallel pipelines failed.
+    #[error("Parallel pipelines failed: {0:?}")]
+    PipelinesFailed(Vec<String>),
+
+    /// DAG error.
+    #[error("DAG error: {0}")]
+    Dag(#[from] DagError),
 }
 
 /// Common error type for all actors in the engine.
