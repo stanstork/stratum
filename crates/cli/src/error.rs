@@ -17,9 +17,6 @@ pub enum CliError {
     #[error("Failed to run the migration plan: {0}")]
     Runner(#[from] MigrationError),
 
-    #[error("Failed to serialize data to JSON: {0}")]
-    JsonSerialize(serde_json::Error),
-
     #[error("Invalid connection format provided: {0}")]
     InvalidConnectionFormat(String),
 
@@ -51,4 +48,9 @@ pub enum CliError {
 
     #[error("Configuration error: {0}")]
     Config(String),
+
+    #[error(
+        "Config file not found. Searched in the following locations:\n{0}\nPlease specify a config file with --config or create one in a standard location."
+    )]
+    ConfigNotFound(String),
 }

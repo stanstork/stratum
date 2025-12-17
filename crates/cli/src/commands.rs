@@ -2,84 +2,61 @@ use clap::Subcommand;
 
 #[derive(Subcommand)]
 pub enum Commands {
-    Migrate {
-        #[arg(long, help = "Config file path")]
-        config: String,
-
+    /// Run dry-run migration and show results without making changes
+    Plan {
         #[arg(
+            short = 'c',
             long,
-            help = "Treat the config file as already parsed AST, skipping parsing step"
+            help = "Path to SMQL config file (auto-discovered if not specified)"
         )]
-        from_ast: bool,
-
-        #[arg(long, help = "Load environment variables from .env file")]
-        env_file: Option<String>,
-    },
-    Source {
-        #[command(subcommand)]
-        command: SourceCommand,
-    },
-    Validate {
-        #[arg(long, help = "Config file path")]
-        config: String,
+        config: Option<String>,
 
         #[arg(
             long,
-            help = "Treat the config file as already parsed AST, skipping parsing step"
-        )]
-        from_ast: bool,
-
-        #[arg(
-            long,
-            help = "If specified, writes the JSON report to this file instead of stdout"
+            short = 'o',
+            help = "If specified, writes the report to this file instead of stdout"
         )]
         output: Option<String>,
+    },
+    /// Execute the migration
+    Apply {
+        #[arg(
+            short = 'c',
+            long,
+            help = "Path to SMQL config file (auto-discovered if not specified)"
+        )]
+        config: Option<String>,
+    },
+    /// Verify migrated data matches source data
+    Verify {
+        #[arg(
+            short = 'c',
+            long,
+            help = "Path to SMQL config file (auto-discovered if not specified)"
+        )]
+        config: Option<String>,
 
-        #[arg(long, help = "Load environment variables from .env file")]
-        env_file: Option<String>,
+        #[arg(
+            long,
+            short = 'o',
+            help = "If specified, writes the verification report to this file instead of stdout"
+        )]
+        output: Option<String>,
     },
-    Ast {
-        #[arg(long, help = "Config file path")]
-        config: String,
-    },
-    /// Test a connection string against a given format
+    /// Test database connection
     TestConn {
-        /// Data format: "mysql", "pg", "ftp", …
-        #[arg(long)]
-        format: String,
-
-        /// Connection string or address
-        #[arg(long)]
-        conn_str: String,
-    },
-    Progress {
-        #[arg(long, help = "Run ID to inspect")]
-        run: String,
-
-        #[arg(long, help = "Item ID within the run")]
-        item: String,
+        #[arg(
+            long,
+            help = "Connection URL (e.g., mysql://user:pass@host:3306/db or postgresql://user:pass@host:5432/db)"
+        )]
+        url: String,
 
         #[arg(
             long,
-            help = "If set, prints the progress information as JSON instead of a table"
+            help = "Database format (mysql, postgres). Auto-detected from URL if not specified"
         )]
-        json: bool,
+        format: Option<String>,
     },
-}
-
-#[derive(Subcommand)]
-pub enum SourceCommand {
-    Info {
-        #[arg(short, long, help = "Connection string")]
-        conn_str: String,
-
-        #[arg(short, long, help = "Data format")]
-        format: String,
-
-        #[arg(
-            long,
-            help = "If specified, writes metadata to this file instead of stdout"
-        )]
-        output: Option<String>,
-    },
+    /// Show version information
+    Version,
 }

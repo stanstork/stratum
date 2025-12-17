@@ -1,6 +1,5 @@
 use crate::error::CliError;
 use async_trait::async_trait;
-use connectors::driver::SqlDriver;
 use mysql_async::prelude::*;
 use std::str::FromStr;
 use tokio_postgres::NoTls;
@@ -28,11 +27,19 @@ impl FromStr for ConnectionKind {
 }
 
 impl ConnectionKind {
-    pub fn driver(&self) -> SqlDriver {
-        match self {
-            ConnectionKind::MySql => SqlDriver::MySql,
-            ConnectionKind::Postgres => SqlDriver::Postgres,
-            _ => panic!("No SQL driver for connection kind {:?}", self),
+    /// Detect connection kind from URL scheme
+    pub fn from_url(url: &str) -> Result<Self, String> {
+        if url.starts_with("mysql://") || url.starts_with("mariadb://") {
+            Ok(ConnectionKind::MySql)
+        } else if url.starts_with("postgresql://")
+            || url.starts_with("postgres://")
+            || url.starts_with("pg://")
+        {
+            Ok(ConnectionKind::Postgres)
+        } else if url.starts_with("ftp://") || url.starts_with("ftps://") {
+            Ok(ConnectionKind::Ftp)
+        } else {
+            Err("Cannot detect connection type from URL. Supported schemes: mysql://, postgresql://, postgres://, ftp://".to_string())
         }
     }
 }
