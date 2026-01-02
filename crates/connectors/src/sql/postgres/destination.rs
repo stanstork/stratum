@@ -12,7 +12,7 @@ use crate::sql::{
 };
 use async_trait::async_trait;
 use model::records::row::RowData;
-use planner::query::dialect;
+use query_builder::dialect;
 use std::{collections::HashMap, sync::Arc};
 use tracing::info;
 

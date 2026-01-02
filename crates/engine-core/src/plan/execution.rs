@@ -1,11 +1,14 @@
+use crate::plan::{builder::PlanBuilder, env::EnvVarCollector};
 use model::execution::{
-    connection::Connection, define::GlobalDefinitions, errors::ConvertError,
-    execution_config::ExecutionConfig, pipeline::Pipeline,
+    connection::Connection,
+    define::{EnvVar, GlobalDefinitions},
+    errors::ConvertError,
+    execution_config::ExecutionConfig,
+    pipeline::Pipeline,
 };
 use serde::{Deserialize, Serialize};
 use smql_syntax::ast::doc::SmqlDocument;
-
-use crate::plan::builder::PlanBuilder;
+use std::collections::HashMap;
 
 /// Top-level execution plan compiled from SMQL AST
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,6 +17,10 @@ pub struct ExecutionPlan {
     pub execution_config: ExecutionConfig,
     pub connections: Vec<Connection>,
     pub pipelines: Vec<Pipeline>,
+
+    /// Environment variables used throughout the configuration
+    #[serde(default)]
+    pub env_vars: HashMap<String, EnvVar>,
 }
 
 impl ExecutionPlan {
@@ -44,6 +51,10 @@ impl ExecutionPlan {
             pipelines.push(pipeline);
         }
 
+        // Collect all environment variable usage throughout the document
+        let mut env_collector = EnvVarCollector::new();
+        env_collector.collect_document(doc, |expr| PlanBuilder::eval_expression(expr).ok());
+
         Ok(ExecutionPlan {
             definitions: GlobalDefinitions {
                 variables: builder.global_definitions,
@@ -51,6 +62,7 @@ impl ExecutionPlan {
             execution_config,
             connections: builder.connections.values().cloned().collect(),
             pipelines,
+            env_vars: env_collector.env_vars,
         })
     }
 
@@ -112,7 +124,10 @@ pipeline "copy_customers" {
         // Check definitions
         assert_eq!(plan.definitions.variables.len(), 1);
         assert_eq!(
-            plan.definitions.variables.get("tax_rate"),
+            plan.definitions
+                .variables
+                .get("tax_rate")
+                .map(|def| &def.value),
             Some(&Value::Float(1.4))
         );
 

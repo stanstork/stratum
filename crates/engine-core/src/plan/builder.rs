@@ -3,6 +3,7 @@ use model::{
     core::value::Value,
     execution::{
         connection::Connection,
+        define::DefinitionInfo,
         errors::ConvertError,
         execution_config::{ExecutionConfig, ExecutionStrategy, FailureStrategy},
         expr::{BinaryOp, CompiledExpression},
@@ -117,7 +118,7 @@ const MAX_CONCURRENCY_MAX: u32 = 100;
 /// Convert validated AST to execution plan
 pub struct PlanBuilder {
     // For resolving references
-    pub global_definitions: HashMap<String, Value>,
+    pub global_definitions: HashMap<String, DefinitionInfo>,
     pub connections: HashMap<String, Connection>,
 }
 
@@ -137,14 +138,14 @@ impl PlanBuilder {
         let mut nested_configs = HashMap::new();
 
         for attr in &conn_block.attributes {
-            let value = Self::eval_expression(&attr.value)?;
+            let value = self.eval_with_definitions(&attr.value)?;
             properties.insert(attr.key.name.clone(), value);
         }
 
         for nested in &conn_block.nested_blocks {
             let mut nested_props = HashMap::new();
             for attr in &nested.attributes {
-                let value = Self::eval_expression(&attr.value)?;
+                let value = self.eval_with_definitions(&attr.value)?;
                 nested_props.insert(attr.key.name.clone(), value);
             }
             nested_configs.insert(nested.kind.clone(), nested_props);
@@ -171,7 +172,7 @@ impl PlanBuilder {
         let mut total_timeout = None;
 
         for attr in &exec_block.attributes {
-            let value = Self::eval_expression(&attr.value)?;
+            let value = self.eval_with_definitions(&attr.value)?;
 
             match attr.key.name.as_str() {
                 ATTR_STRATEGY => {
@@ -313,7 +314,7 @@ impl PlanBuilder {
                 .attributes
                 .iter()
                 .find(|a| a.key.name == ATTR_STRATEGY_PAGINATION)
-                .and_then(|a| Self::eval_expression(&a.value).ok())
+                .and_then(|a| self.eval_with_definitions(&a.value).ok())
                 .and_then(|v| match v {
                     Value::String(s) => Some(s),
                     _ => None,
@@ -324,7 +325,7 @@ impl PlanBuilder {
                 .attributes
                 .iter()
                 .find(|a| a.key.name == ATTR_CURSOR)
-                .and_then(|a| Self::eval_expression(&a.value).ok())
+                .and_then(|a| self.eval_with_definitions(&a.value).ok())
                 .and_then(|v| match v {
                     Value::String(s) => Some(s),
                     _ => None,
@@ -335,7 +336,7 @@ impl PlanBuilder {
                 .attributes
                 .iter()
                 .find(|a| a.key.name == ATTR_TIEBREAKER)
-                .and_then(|a| Self::eval_expression(&a.value).ok())
+                .and_then(|a| self.eval_with_definitions(&a.value).ok())
                 .and_then(|v| match v {
                     Value::String(s) => Some(s),
                     _ => None,
@@ -345,7 +346,7 @@ impl PlanBuilder {
                 .attributes
                 .iter()
                 .find(|a| a.key.name == ATTR_TIMEZONE)
-                .and_then(|a| Self::eval_expression(&a.value).ok())
+                .and_then(|a| self.eval_with_definitions(&a.value).ok())
                 .and_then(|v| match v {
                     Value::String(s) => Some(s),
                     _ => None,
@@ -353,7 +354,7 @@ impl PlanBuilder {
 
             Pagination {
                 strategy,
-                cursor,
+                column: cursor,
                 tiebreaker,
                 timezone,
             }
@@ -364,7 +365,7 @@ impl PlanBuilder {
             .attributes
             .iter()
             .find(|a| a.key.name == ATTR_TABLE)
-            .and_then(|a| Self::eval_expression(&a.value).ok())
+            .and_then(|a| self.eval_with_definitions(&a.value).ok())
             .and_then(|v| match v {
                 Value::String(s) => Some(s),
                 _ => None,
@@ -398,7 +399,7 @@ impl PlanBuilder {
             .attributes
             .iter()
             .find(|a| a.key.name == ATTR_TABLE)
-            .and_then(|a| Self::eval_expression(&a.value).ok())
+            .and_then(|a| self.eval_with_definitions(&a.value).ok())
             .and_then(|v| match v {
                 Value::String(s) => Some(s),
                 _ => None,
@@ -409,7 +410,7 @@ impl PlanBuilder {
             .attributes
             .iter()
             .find(|a| a.key.name == ATTR_MODE)
-            .and_then(|a| Self::eval_expression(&a.value).ok())
+            .and_then(|a| self.eval_with_definitions(&a.value).ok())
             .and_then(|v| match v {
                 Value::String(s) => match s.as_str() {
                     MODE_INSERT => Some(WriteMode::Insert),
@@ -562,7 +563,7 @@ impl PlanBuilder {
                     .attributes
                     .iter()
                     .find(|a| a.key.name == ATTR_MAX_ATTEMPTS)
-                    .and_then(|a| Self::eval_expression(&a.value).ok())
+                    .and_then(|a| self.eval_with_definitions(&a.value).ok())
                     .and_then(|v| match v {
                         Value::Int32(n) => Some(n as u32),
                         Value::Float(f) => Some(f as u32),
@@ -583,7 +584,7 @@ impl PlanBuilder {
                     .attributes
                     .iter()
                     .find(|a| a.key.name == ATTR_ACTION)
-                    .and_then(|a| Self::eval_expression(&a.value).ok())
+                    .and_then(|a| self.eval_with_definitions(&a.value).ok())
                     .and_then(|v| match v {
                         Value::String(s) => match s.as_str() {
                             ACTION_SKIP => Some(FailedRowsAction::Skip),
@@ -623,7 +624,7 @@ impl PlanBuilder {
                         .attributes
                         .iter()
                         .find(|a| a.key.name == ATTR_SCHEMA)
-                        .and_then(|a| Self::eval_expression(&a.value).ok())
+                        .and_then(|a| self.eval_with_definitions(&a.value).ok())
                         .and_then(|v| match v {
                             Value::String(s) => Some(s),
                             _ => None,
@@ -633,7 +634,7 @@ impl PlanBuilder {
                         .attributes
                         .iter()
                         .find(|a| a.key.name == ATTR_TABLE)
-                        .and_then(|a| Self::eval_expression(&a.value).ok())
+                        .and_then(|a| self.eval_with_definitions(&a.value).ok())
                         .and_then(|v| match v {
                             Value::String(s) => Some(s),
                             _ => None,
@@ -659,7 +660,7 @@ impl PlanBuilder {
                         .attributes
                         .iter()
                         .find(|a| a.key.name == ATTR_PATH)
-                        .and_then(|a| Self::eval_expression(&a.value).ok())
+                        .and_then(|a| self.eval_with_definitions(&a.value).ok())
                         .and_then(|v| match v {
                             Value::String(s) => Some(s),
                             _ => None,
@@ -669,7 +670,7 @@ impl PlanBuilder {
                         .attributes
                         .iter()
                         .find(|a| a.key.name == ATTR_FORMAT)
-                        .and_then(|a| Self::eval_expression(&a.value).ok())
+                        .and_then(|a| self.eval_with_definitions(&a.value).ok())
                         .and_then(|v| match v {
                             Value::String(s) => match s.as_str() {
                                 FORMAT_JSON => Some(FileFormat::Json),
@@ -744,7 +745,7 @@ impl PlanBuilder {
         if let Some(settings) = &pipeline_block.settings_block {
             let mut settings_map = HashMap::new();
             for attr in &settings.attributes {
-                let value = Self::eval_expression(&attr.value)?;
+                let value = self.eval_with_definitions(&attr.value)?;
                 settings_map.insert(attr.key.name.clone(), value);
             }
             Ok(settings_map)
@@ -785,6 +786,7 @@ impl PlanBuilder {
         match &expr.kind {
             ExpressionKind::Literal(lit) => match lit {
                 Literal::String(s) => Ok(CompiledExpression::Literal(Value::String(s.clone()))),
+                Literal::Int(i) => Ok(CompiledExpression::Literal(Value::Int(*i))),
                 Literal::Number(n) => Ok(CompiledExpression::Literal(Value::Float(*n))),
                 Literal::Boolean(b) => Ok(CompiledExpression::Literal(Value::Boolean(*b))),
                 Literal::Null => Ok(CompiledExpression::Literal(Value::Null)),
@@ -796,7 +798,7 @@ impl PlanBuilder {
                     && path.segments.len() == 2
                     && let Some(value) = self.global_definitions.get(&path.segments[1])
                 {
-                    return Ok(CompiledExpression::Literal(value.clone()));
+                    return Ok(CompiledExpression::Literal(value.value.clone()));
                 }
 
                 Ok(CompiledExpression::DotPath(path.segments.clone()))
@@ -826,20 +828,31 @@ impl PlanBuilder {
     }
 
     // Used for simple expressions only during plan building
-    fn eval_expression(expr: &Expression) -> Result<Value, ConvertError> {
+    pub fn eval_expression(expr: &Expression) -> Result<Value, ConvertError> {
         let definitions = HashMap::new();
         expression_engine::eval_ast_expression(expr, &definitions, get_env)
             .map_err(|e| ConvertError::Expression(e.to_string()))
     }
 
+    // Evaluate expression with access to global definitions (for define.X references)
+    fn eval_with_definitions(&self, expr: &Expression) -> Result<Value, ConvertError> {
+        expression_engine::eval_ast_expression(expr, &self.global_definitions, get_env)
+            .map_err(|e| ConvertError::Expression(e.to_string()))
+    }
+
+    /// Extract definitions with source information
     pub fn extract_definitions(
-        &self,
+        &mut self,
         def_block: &DefineBlock,
-    ) -> Result<HashMap<String, Value>, ConvertError> {
+    ) -> Result<HashMap<String, DefinitionInfo>, ConvertError> {
+        use crate::plan::env::EnvVarCollector;
+
         let mut definitions = HashMap::new();
         for attr in &def_block.attributes {
             let value = Self::eval_expression(&attr.value)?;
-            definitions.insert(attr.key.name.clone(), value);
+            let source = EnvVarCollector::analyze_value_source(&attr.value);
+
+            definitions.insert(attr.key.name.clone(), DefinitionInfo { value, source });
         }
         Ok(definitions)
     }
@@ -914,6 +927,7 @@ fn parse_duration(s: &str) -> Result<u64, ConvertError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use model::execution::define::DefinitionSource;
     use smql_syntax::ast::{
         attribute::Attribute,
         dotpath::DotPath,
@@ -979,7 +993,7 @@ mod tests {
 
     #[test]
     fn test_extract_definitions() {
-        let builder = PlanBuilder::new();
+        let mut builder = PlanBuilder::new();
         let def_block = DefineBlock {
             attributes: vec![
                 make_attribute("tax_rate", make_number_expr(1.4)),
@@ -991,12 +1005,15 @@ mod tests {
 
         let result = builder.extract_definitions(&def_block).unwrap();
         assert_eq!(result.len(), 3);
-        assert_eq!(result.get("tax_rate"), Some(&Value::Float(1.4)));
-        assert_eq!(
-            result.get("country"),
-            Some(&Value::String("US".to_string()))
-        );
-        assert_eq!(result.get("enabled"), Some(&Value::Boolean(true)));
+
+        let definition_info = result.get("tax_rate").unwrap();
+        assert_eq!(definition_info.value, Value::Float(1.4));
+
+        let definition_info = result.get("country").unwrap();
+        assert_eq!(definition_info.value, Value::String("US".to_string()));
+
+        let definition_info = result.get("enabled").unwrap();
+        assert_eq!(definition_info.value, Value::Boolean(true));
     }
 
     #[test]
@@ -1206,9 +1223,13 @@ mod tests {
     #[test]
     fn test_compile_expression_with_define_reference() {
         let mut builder = PlanBuilder::new();
-        builder
-            .global_definitions
-            .insert("tax_rate".to_string(), Value::Float(1.4));
+        builder.global_definitions.insert(
+            "tax_rate".to_string(),
+            DefinitionInfo {
+                value: Value::Float(1.4),
+                source: DefinitionSource::Literal,
+            },
+        );
 
         let expr = make_dotpath_expr(vec!["define", "tax_rate"]);
         let compiled = builder.compile_expression(&expr).unwrap();
@@ -1314,7 +1335,7 @@ mod tests {
         let source = builder.build_source(&pipeline).unwrap();
         let pagination = source.pagination.unwrap();
         assert_eq!(pagination.strategy, "pk");
-        assert_eq!(pagination.cursor, "id");
+        assert_eq!(pagination.column, "id");
     }
 
     #[test]

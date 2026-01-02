@@ -1,7 +1,8 @@
 use crate::settings::CopyColumns;
+use serde::Serialize;
 
 /// Immutable, validated configuration used throughout the migration.
-#[derive(Debug, Clone)]
+#[derive(Serialize, Debug, Clone)]
 pub struct ValidatedSettings {
     /// Batch size for reading and writing data
     pub batch_size: usize,

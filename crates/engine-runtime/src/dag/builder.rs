@@ -189,8 +189,6 @@ mod tests {
 
         let dag = builder.build().unwrap();
 
-        println!("Execution order: {:?}", dag.execution_order);
-
         // Should have 3 levels for sequential dependencies
         assert_eq!(
             dag.execution_order.len(),
@@ -201,5 +199,150 @@ mod tests {
         assert_eq!(dag.execution_order[0], vec!["copy_actors"]);
         assert_eq!(dag.execution_order[1], vec!["copy_customers"]);
         assert_eq!(dag.execution_order[2], vec!["copy_film"]);
+    }
+
+    #[test]
+    fn test_get_dependencies_sequential() {
+        // A → B → C
+        let mut builder = DagBuilder::new();
+        builder.add_pipeline("A".to_string(), vec![]).unwrap();
+        builder
+            .add_pipeline("B".to_string(), vec!["A".to_string()])
+            .unwrap();
+        builder
+            .add_pipeline("C".to_string(), vec!["B".to_string()])
+            .unwrap();
+
+        let dag = builder.build().unwrap();
+
+        // C should depend on B and A (in execution order: A first, then B)
+        assert_eq!(
+            dag.get_dependencies("C"),
+            Some(vec!["A".to_string(), "B".to_string()])
+        );
+
+        // B should only depend on A
+        assert_eq!(dag.get_dependencies("B"), Some(vec!["A".to_string()]));
+
+        // A has no dependencies
+        assert_eq!(dag.get_dependencies("A"), Some(vec![]));
+
+        // Non-existent pipeline
+        assert_eq!(dag.get_dependencies("D"), None);
+    }
+
+    #[test]
+    fn test_get_dependencies_diamond() {
+        // Diamond dependency:
+        //     A
+        //    / \
+        //   B   C
+        //    \ /
+        //     D
+        let mut builder = DagBuilder::new();
+        builder.add_pipeline("A".to_string(), vec![]).unwrap();
+        builder
+            .add_pipeline("B".to_string(), vec!["A".to_string()])
+            .unwrap();
+        builder
+            .add_pipeline("C".to_string(), vec!["A".to_string()])
+            .unwrap();
+        builder
+            .add_pipeline("D".to_string(), vec!["B".to_string(), "C".to_string()])
+            .unwrap();
+
+        let dag = builder.build().unwrap();
+
+        // D depends on A, B, and C (A should appear only once)
+        let deps = dag.get_dependencies("D").unwrap();
+        assert_eq!(deps.len(), 3);
+        assert!(deps.contains(&"A".to_string()));
+        assert!(deps.contains(&"B".to_string()));
+        assert!(deps.contains(&"C".to_string()));
+
+        // A must come before B and C
+        let a_pos = deps.iter().position(|x| x == "A").unwrap();
+        let b_pos = deps.iter().position(|x| x == "B").unwrap();
+        let c_pos = deps.iter().position(|x| x == "C").unwrap();
+        assert!(a_pos < b_pos);
+        assert!(a_pos < c_pos);
+    }
+
+    #[test]
+    fn test_get_dependencies_complex() {
+        // Complex dependency tree:
+        //     A     E
+        //    / \   /
+        //   B   C /
+        //    \ / /
+        //     D
+        let mut builder = DagBuilder::new();
+        builder.add_pipeline("A".to_string(), vec![]).unwrap();
+        builder.add_pipeline("E".to_string(), vec![]).unwrap();
+        builder
+            .add_pipeline("B".to_string(), vec!["A".to_string()])
+            .unwrap();
+        builder
+            .add_pipeline("C".to_string(), vec!["A".to_string()])
+            .unwrap();
+        builder
+            .add_pipeline(
+                "D".to_string(),
+                vec!["B".to_string(), "C".to_string(), "E".to_string()],
+            )
+            .unwrap();
+
+        let dag = builder.build().unwrap();
+
+        // D depends on all: A, B, C, E
+        let deps = dag.get_dependencies("D").unwrap();
+        assert_eq!(deps.len(), 4);
+        assert!(deps.contains(&"A".to_string()));
+        assert!(deps.contains(&"B".to_string()));
+        assert!(deps.contains(&"C".to_string()));
+        assert!(deps.contains(&"E".to_string()));
+
+        // C only depends on A
+        assert_eq!(dag.get_dependencies("C"), Some(vec!["A".to_string()]));
+
+        // E has no dependencies
+        assert_eq!(dag.get_dependencies("E"), Some(vec![]));
+    }
+
+    #[test]
+    fn test_get_dependencies_multiple_paths() {
+        // Multiple paths to the same dependency:
+        //     A
+        //    /|\
+        //   B C D
+        //    \|/
+        //     E
+        let mut builder = DagBuilder::new();
+        builder.add_pipeline("A".to_string(), vec![]).unwrap();
+        builder
+            .add_pipeline("B".to_string(), vec!["A".to_string()])
+            .unwrap();
+        builder
+            .add_pipeline("C".to_string(), vec!["A".to_string()])
+            .unwrap();
+        builder
+            .add_pipeline("D".to_string(), vec!["A".to_string()])
+            .unwrap();
+        builder
+            .add_pipeline(
+                "E".to_string(),
+                vec!["B".to_string(), "C".to_string(), "D".to_string()],
+            )
+            .unwrap();
+
+        let dag = builder.build().unwrap();
+
+        // E depends on A (only once), B, C, D
+        let deps = dag.get_dependencies("E").unwrap();
+        assert_eq!(deps.len(), 4);
+
+        // Count occurrences of A (should be exactly 1)
+        let a_count = deps.iter().filter(|&x| x == "A").count();
+        assert_eq!(a_count, 1, "A should appear exactly once in dependencies");
     }
 }

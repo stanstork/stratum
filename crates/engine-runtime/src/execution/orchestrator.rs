@@ -1,10 +1,8 @@
 use crate::{actor::coordinator::PipelineCoordinator, error::MigrationError};
 use connectors::adapter::Adapter;
-use engine_config::{report::dry_run::DryRunReport, settings::validated::ValidatedSettings};
+use engine_config::settings::validated::ValidatedSettings;
 use engine_core::{context::item::ItemContext, event_bus::bus::EventBus, metrics::Metrics};
-use engine_processing::{
-    consumer::create_consumer, hooks::executor::HookExecutor, producer::create_producer,
-};
+use engine_processing::{consumer::Consumer, hooks::executor::HookExecutor, producer::Producer};
 use futures::lock::Mutex;
 use model::{
     events::migration::MigrationEvent, execution::pipeline::Pipeline, records::batch::Batch,
@@ -21,7 +19,6 @@ pub struct PipelineOrchestrator {
     ctx: Arc<Mutex<ItemContext>>,
     settings: ValidatedSettings,
     cancel: CancellationToken,
-    report: Arc<Mutex<DryRunReport>>,
 }
 
 impl PipelineOrchestrator {
@@ -30,14 +27,12 @@ impl PipelineOrchestrator {
         ctx: Arc<Mutex<ItemContext>>,
         settings: ValidatedSettings,
         cancel: CancellationToken,
-        report: Arc<Mutex<DryRunReport>>,
     ) -> Self {
         Self {
             pipeline,
             ctx,
             settings,
             cancel,
-            report,
         }
     }
 
@@ -77,15 +72,9 @@ impl PipelineOrchestrator {
         let metrics = Metrics::new();
 
         // Create producer and consumer
-        let producer = create_producer(&self.ctx, batch_tx, &self.settings, &self.report).await;
-        let consumer = create_consumer(
-            &self.ctx,
-            batch_rx,
-            &self.settings,
-            self.cancel.clone(),
-            metrics.clone(),
-        )
-        .await;
+        let producer = Producer::new(&self.ctx, batch_tx, &self.settings).await;
+        let consumer =
+            Consumer::new(&self.ctx, batch_rx, self.cancel.clone(), metrics.clone()).await;
 
         let coordinator =
             PipelineCoordinator::new(producer, consumer, metrics.clone(), self.cancel.clone());

@@ -21,7 +21,7 @@ impl Transform for FieldPruner {
 
         // Add all target fields from field renames (mapped fields)
         if let Some(field_renames) = self.metadata.field_mappings.field_renames.get(&table) {
-            for target_field in field_renames.source_to_target.keys() {
+            for target_field in field_renames.target_to_source.keys() {
                 keep_fields.insert(target_field.to_ascii_lowercase());
             }
         }

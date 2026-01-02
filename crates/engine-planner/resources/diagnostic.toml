@@ -1,0 +1,90 @@
+# Diagnostic messages for plan analysis
+# These messages are loaded at compile-time using include_str!
+
+[connections]
+failed = "Connection '{}' failed: {}"
+failed_suggestion = "Check connection URL, credentials, and network access"
+untested = "Connection '{}' was not tested (--no-connect mode)"
+untested_suggestion = "Run without --no-connect to verify connections"
+high_latency = "Connection '{}' has high latency: {}ms"
+high_latency_suggestion = "Check network connectivity or use a closer region"
+
+[source]
+no_primary_key = "Source table '{}' has no primary key"
+no_primary_key_suggestion = "Add a primary key or specify unique columns for reliable upsert"
+large_dataset = "Large dataset: {} rows"
+large_dataset_suggestion = "Consider using pagination for better memory management"
+very_large_dataset = "Very large dataset: {} rows. This will take significant time."
+very_large_dataset_suggestion = "Plan for maintenance window; consider incremental migration"
+empty_after_filter = "Source has rows but filter returns 0 results"
+empty_after_filter_suggestion = "Check filter conditions; may be too restrictive"
+empty_source = "Pipeline '{}' source table is empty"
+
+[destination]
+destructive_mode = "Mode 'replace' will delete {} existing rows in '{}'"
+destructive_mode_suggestion = "Consider using 'upsert' mode to preserve existing data"
+large_truncate = "Truncating large table ({} rows) may take time and lock the table"
+large_truncate_suggestion = "Consider dropping and recreating the table if schema allows"
+table_will_be_created = "Destination table '{}' will be created"
+missing_conflict_keys = "Upsert mode requires conflict keys but none specified"
+missing_conflict_keys_suggestion = "Add primary key or unique columns to destination"
+
+[filters]
+unindexed_filter = "Filter '{}' does not use an index"
+unindexed_filter_suggestion = "Consider creating index on: {}"
+highly_selective_filter = "Filter '{}' is very selective (<1% of rows pass)"
+highly_selective_filter_suggestion = "Verify this is intentional; filter may be too restrictive"
+
+[joins]
+unindexed_join = "Join on '{}' is not indexed"
+unindexed_join_suggestion = "Add index on {}.{}"
+large_lookup_table = "Join table '{}' has {} rows; will require significant memory"
+large_lookup_table_suggestion = "Consider filtering the lookup table or using streaming join"
+low_join_match_rate = "Join '{}' has low match rate (~{}%)"
+low_join_match_rate_suggestion = "Many rows may have NULL lookup values; use LEFT join if intentional"
+many_joins = "Pipeline has {} joins; this may impact performance"
+many_joins_suggestion = "Consider denormalizing or splitting into multiple pipelines"
+
+[mappings]
+unsafe_type_conversion = "Column '{}': {} -> {} may lose data"
+unsafe_type_conversion_suggestion = "Review data for potential overflow/truncation"
+many_computed_columns = "{} computed columns may slow down processing"
+many_computed_columns_suggestion = "Consider pre-computing some values in source or using views"
+
+[pagination]
+missing_pagination = "Large table without pagination may cause memory issues"
+missing_pagination_suggestion = "Add 'paginate { strategy = \"timestamp\", column = ... }'"
+unindexed_cursor = "Pagination column '{}.{}' is not indexed"
+unindexed_cursor_suggestion = "Add index for efficient cursor-based pagination"
+offset_pagination = "Offset-based pagination is slow for large tables"
+offset_pagination_suggestion = "Use timestamp or cursor-based pagination instead"
+
+[resources]
+high_memory_usage = "Estimated peak memory usage: {} MB"
+high_memory_usage_suggestion = "Consider reducing batch sizes, worker counts, or using sequential execution"
+long_migration = "Estimated total time: ~{} hours"
+long_migration_suggestion = "Plan for maintenance window; consider running during off-peak hours"
+very_long_migration = "Migration may take more than 24 hours"
+very_long_migration_suggestion = "Consider splitting into smaller incremental migrations"
+
+[integrity]
+no_validations = "Pipeline '{}' has no validations; data quality issues may go undetected"
+no_validations_suggestion = "Add validate { } block with data quality assertions"
+no_error_handling = "Pipeline '{}' has no error handling; failures will stop the pipeline"
+no_error_handling_suggestion = "Add on_error { } block for retry logic and failed row handling"
+
+[thresholds]
+high_latency_ms = "1000"
+large_dataset_rows = "10000000"
+very_large_dataset_rows = "100000000"
+large_truncate_rows = "10000000"
+large_lookup_rows = "10000000"
+many_joins_count = "5"
+many_computed_count = "20"
+pagination_threshold_rows = "1000000"
+validation_threshold_rows = "100000"
+high_memory_mb = "8192"
+long_migration_seconds = "3600"
+very_long_migration_seconds = "86400"
+selective_filter_threshold = "0.01"
+low_match_rate_threshold = "0.5"

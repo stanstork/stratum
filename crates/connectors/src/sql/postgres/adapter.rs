@@ -4,8 +4,10 @@ use crate::sql::{
         capabilities::DbCapabilities,
         encoder::CopyValueEncoder,
         error::{ConnectorError, DbError},
+        filter::SqlFilter,
         metadata::{
             column::{COL_REFERENCING_TABLE, ColumnMetadata},
+            index::IndexMetadata,
             provider::MetadataProvider,
             table::TableMetadata,
         },
@@ -31,7 +33,7 @@ use model::{
     core::{data_type::DataType, value::Value},
     records::row::RowData,
 };
-use planner::query::dialect::{self};
+use query_builder::dialect::{self};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 use tokio_postgres::Client;
@@ -47,6 +49,9 @@ const QUERY_TABLE_EXISTS_SQL: &str = include_str!("sql/table_exists.sql");
 const QUERY_TRUNCATE_TABLE_SQL: &str = include_str!("sql/table_truncate.sql");
 const QUERY_TABLE_METADATA_SQL: &str = include_str!("sql/table_metadata.sql");
 const QUERY_TABLE_REFERENCING_SQL: &str = include_str!("sql/table_referencing.sql");
+const QUERY_INDEX_METADATA_SQL: &str = include_str!("sql/index_metadata.sql");
+const QUERY_COUNT_ROWS_FAST_SQL: &str = include_str!("sql/count_rows_fast.sql");
+const QUERY_COUNT_APPROXIMATE_SQL: &str = include_str!("sql/count_approximate.sql");
 
 impl PgAdapter {
     pub async fn lock_client(&self) -> RwLockWriteGuard<'_, Client> {
@@ -117,6 +122,21 @@ impl SqlAdapter for PgAdapter {
         Ok(result)
     }
 
+    async fn query_rows_params(
+        &self,
+        sql: &str,
+        params: Vec<Value>,
+    ) -> Result<Vec<RowData>, DbError> {
+        let bindings = PgParamStore::from_values(params);
+        let client = self.client.read().await;
+        let rows = client.query(sql, &bindings.as_refs()).await?;
+        let result = rows
+            .iter()
+            .map(|row| DbRow::PostgresRow(row).to_row_data(""))
+            .collect();
+        Ok(result)
+    }
+
     async fn fetch_rows(&self, _request: FetchRowsRequest) -> Result<Vec<RowData>, DbError> {
         todo!("Implement fetch_all for Postgres")
     }
@@ -170,6 +190,20 @@ impl SqlAdapter for PgAdapter {
         MetadataProvider::construct_table_metadata(table, columns)
     }
 
+    async fn index_metadata(&self, table: &str) -> Result<Vec<IndexMetadata>, DbError> {
+        let query = QUERY_INDEX_METADATA_SQL.replace("{table}", table);
+        let client = self.client.read().await;
+        let rows = client.query(&query, &[]).await?;
+        let indexes = rows
+            .iter()
+            .map(|row| {
+                let index_metadata = IndexMetadata::from_row(&DbRow::PostgresRow(row));
+                Ok(index_metadata)
+            })
+            .collect::<Result<Vec<_>, DbError>>()?;
+        Ok(indexes)
+    }
+
     async fn referencing_tables(&self, table: &str) -> Result<Vec<String>, DbError> {
         let client = self.client.read().await;
         let rows = client.query(QUERY_TABLE_REFERENCING_SQL, &[&table]).await?;
@@ -190,6 +224,77 @@ impl SqlAdapter for PgAdapter {
         let client = self.client.read().await;
         client.execute(QUERY_TRUNCATE_TABLE_SQL, &[&table]).await?;
         Ok(())
+    }
+
+    async fn count_rows(
+        &self,
+        table: &str,
+        schema: Option<&str>,
+        filter: Option<&SqlFilter>,
+    ) -> Result<u64, DbError> {
+        let fqn = schema
+            .map(|s| format!("{}.{}", s, table))
+            .unwrap_or_else(|| table.to_string());
+
+        let query = match filter {
+            Some(f) => format!("SELECT COUNT(*) AS cnt FROM {} {}", fqn, f.to_sql()),
+            None => format!("SELECT COUNT(*) AS cnt FROM {}", fqn),
+        };
+
+        let client = self.client.read().await;
+        let row = client.query_one(&query, &[]).await?;
+        let count: i64 = row.get("cnt");
+        Ok(count as u64)
+    }
+
+    async fn count_rows_fast(&self, table: &str, _schema: Option<&str>) -> Result<u64, DbError> {
+        let client = self.client.read().await;
+        let row = client
+            .query_one(QUERY_COUNT_ROWS_FAST_SQL, &[&table])
+            .await?;
+        let estimate: i64 = row.get("estimate");
+        match estimate {
+            n if n >= 0 => Ok(n as u64),
+            _ => Err(DbError::Unknown(
+                "Negative row count estimate received".to_string(),
+            )),
+        }
+    }
+
+    async fn count_approximate(
+        &self,
+        table: &str,
+        schema: Option<&str>,
+    ) -> Result<(u64, u64), DbError> {
+        let fqn = schema
+            .map(|s| format!("{}.{}", s, table))
+            .unwrap_or_else(|| table.to_string());
+        let row = {
+            let client = self.client.read().await;
+            client
+                .query_one(&QUERY_COUNT_APPROXIMATE_SQL.replace("{table}", &fqn), &[])
+                .await?
+        };
+
+        let sampled_estimate: i64 = row.get("sampled_estimate");
+        let stats_estimate: f32 = row.get("stats_estimate");
+
+        match stats_estimate {
+            n if n < 0.0 => {
+                return Err(DbError::Unknown(
+                    "Negative approximate row count estimate received".to_string(),
+                ));
+            }
+            _ => Ok((sampled_estimate as u64, stats_estimate as u64)),
+        }
+    }
+
+    async fn table_size_bytes(&self, table: &str) -> Result<u64, DbError> {
+        let query = format!("SELECT pg_total_relation_size('{}') AS size_bytes;", table);
+        let client = self.client.read().await;
+        let row = client.query_one(&query, &[]).await?;
+        let size_bytes: i64 = row.get("size_bytes");
+        Ok(size_bytes as u64)
     }
 
     fn kind(&self) -> DatabaseKind {

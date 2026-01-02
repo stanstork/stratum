@@ -1,17 +1,20 @@
 use crate::{
-    config_discovery::discover_config,
-    conn::{ConnectionKind, ConnectionPinger, MySqlConnectionPinger, PostgresConnectionPinger},
-    env::EnvManager,
-    error::CliError,
-    shutdown::ShutdownCoordinator,
+    commands::SampleMethod, config_discovery::discover_config, conn::ConnectionKind,
+    env::EnvManager, error::CliError, shutdown::ShutdownCoordinator,
 };
 use clap::Parser;
 use commands::Commands;
 use engine_core::plan::execution::ExecutionPlan;
+use engine_planner::{
+    builder::{PlanBuilder, PlanBuilderConfig},
+    connection::{ConnectionTester, MySqlConnectionTester, PostgresConnectionTester},
+    plan::sample::method::SamplingMethod,
+};
 use engine_processing::env_context::{EnvContext, init_env_context};
-use engine_runtime::{error::MigrationError, execution::executor};
+use engine_runtime::{dag::builder::DagBuilder, error::MigrationError, execution::executor};
+use model::core::value::Value;
 use smql_syntax::ast::doc::SmqlDocument;
-use std::{process, str::FromStr};
+use std::{path::Path, process, str::FromStr};
 use tokio_util::sync::CancellationToken;
 use tracing::{Level, info};
 
@@ -113,19 +116,68 @@ async fn run_cli(cli: Cli) -> Result<(), CliError> {
     init_env(cli.env_file.as_deref())?;
 
     match cli.command {
-        Commands::Plan { config, output } => {
+        Commands::Plan {
+            config,
+            output,
+            sample,
+            sample_size,
+            sample_method,
+            id_column,
+            sample_ids,
+            exact_where,
+        } => {
             let config_path = resolve_config_path(config)?;
             info!("Running dry-run migration: {}", config_path);
 
-            let plan = load_migration_plan(&config_path, false).await?;
-            // Run in dry-run mode
-            let states = executor::run(plan, true, cancel).await?;
+            let core_plan = load_migration_plan(&config_path, false).await?;
+
+            let mut dag_builder = DagBuilder::new();
+            for pipeline in &core_plan.pipelines {
+                dag_builder.add_pipeline(pipeline.name.clone(), pipeline.dependencies.clone())?;
+            }
+
+            let dag = dag_builder.build()?;
+            let path = Path::new(&config_path);
+
+            // Convert CLI sample method to engine SamplingMethod
+            let sampling_method = match sample_method {
+                SampleMethod::First => SamplingMethod::First,
+                SampleMethod::Random => SamplingMethod::Random,
+                SampleMethod::Id => SamplingMethod::ById,
+            };
+
+            // Convert sample_ids from Vec<String> to Vec<Value>
+            let sample_ids_values = sample_ids.map(|ids| {
+                ids.into_iter()
+                    .map(|id| {
+                        // Try to parse as integer first, otherwise use as string
+                        if let Ok(num) = id.parse::<i64>() {
+                            Value::Int(num)
+                        } else {
+                            Value::String(id)
+                        }
+                    })
+                    .collect()
+            });
+
+            let plan_config = PlanBuilderConfig {
+                enable_sampling: sample,
+                sample_size,
+                sample_method: sampling_method,
+                id_column,
+                sample_ids: sample_ids_values,
+                exact_where,
+                ..Default::default()
+            };
+
+            let plan_builder = PlanBuilder::new(plan_config);
+            let plan = plan_builder.build(&core_plan, &dag, path).await?;
 
             match output {
-                Some(path) => output::write_report(states, path).await?,
+                Some(path) => output::write_report(plan, path).await?,
                 None => {
                     if !cli.quiet {
-                        output::print_report(states).await?;
+                        output::print_report(plan).await?;
                     }
                 }
             }
@@ -180,15 +232,27 @@ async fn run_cli(cli: Cli) -> Result<(), CliError> {
             // Test the connection based on the kind
             match kind {
                 ConnectionKind::MySql => {
-                    MySqlConnectionPinger { conn_str: url }.ping().await?;
+                    let result = MySqlConnectionTester {
+                        name: "test".to_string(),
+                        conn_str: url,
+                    }
+                    .test()
+                    .await?;
                     if !cli.quiet {
                         println!("✓ MySQL connection successful");
+                        println!("  Version: {}", result.version);
                     }
                 }
                 ConnectionKind::Postgres => {
-                    PostgresConnectionPinger { conn_str: url }.ping().await?;
+                    let result = PostgresConnectionTester {
+                        name: "test".to_string(),
+                        conn_str: url,
+                    }
+                    .test()
+                    .await?;
                     if !cli.quiet {
                         println!("✓ PostgreSQL connection successful");
+                        println!("  Version: {}", result.version);
                     }
                 }
                 _ => return Err(CliError::UnsupportedConnectionKind),

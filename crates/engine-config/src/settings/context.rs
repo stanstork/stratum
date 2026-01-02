@@ -1,12 +1,6 @@
 use super::error::SettingsError;
 use crate::settings::CopyColumns;
-use crate::{
-    report::dry_run::DryRunReport,
-    settings::{
-        schema_manager::{LiveSchemaManager, SchemaManager, ValidationSchemaManager},
-        validated::ValidatedSettings,
-    },
-};
+use crate::settings::{schema_manager::SchemaManager, validated::ValidatedSettings};
 use connectors::{
     metadata::field::FieldMetadata,
     sql::base::{
@@ -14,6 +8,7 @@ use connectors::{
         metadata::{column::ColumnMetadata, table::TableMetadata},
     },
 };
+use engine_core::schema::planner::SchemaPlanner;
 use engine_core::{
     connectors::{
         destination::{DataDestination, Destination},
@@ -30,8 +25,7 @@ pub struct SchemaSettingContext {
     pub destination: Destination,
     pub mapping: TransformationMetadata,
     pub settings: ValidatedSettings,
-    pub dry_run_report: Arc<Mutex<DryRunReport>>,
-    pub schema_manager: Box<dyn SchemaManager>,
+    pub schema_manager: SchemaManager,
 }
 
 impl SchemaSettingContext {
@@ -40,28 +34,15 @@ impl SchemaSettingContext {
         dest: &Destination,
         mapping: &TransformationMetadata,
         settings: &ValidatedSettings,
-        dry_run_report: &Arc<Mutex<DryRunReport>>,
     ) -> Self {
-        let is_dry_run = settings.is_dry_run();
-        let schema_manager: Box<dyn SchemaManager + Send> = if is_dry_run {
-            Box::new(ValidationSchemaManager {
-                report: dry_run_report.clone(),
-                settings: settings.clone(),
-            })
-        } else {
-            // Create live manager for real migration
-            Box::new(LiveSchemaManager {
-                destination: Arc::new(Mutex::new(dest.clone())),
-            })
-        };
-
         Self {
             source: src.clone(),
             destination: dest.clone(),
             mapping: mapping.clone(),
             settings: settings.clone(),
-            dry_run_report: dry_run_report.clone(),
-            schema_manager,
+            schema_manager: SchemaManager {
+                destination: Arc::new(Mutex::new(dest.clone())),
+            },
         }
     }
 
@@ -99,6 +80,17 @@ impl SchemaSettingContext {
     ) -> Result<(), SettingsError> {
         self.schema_manager.infer_schema(&schema_plan).await?;
         Ok(())
+    }
+
+    pub async fn init_schema_planner(&self) -> Result<SchemaPlanner, SettingsError> {
+        let ignore_constraints = self.settings.ignore_constraints();
+        let mapped_columns_only = *self.settings.copy_columns() == CopyColumns::MapOnly;
+        Ok(SchemaPlanner::new(
+            self.source.clone(),
+            self.mapping.clone(),
+            ignore_constraints,
+            mapped_columns_only,
+        ))
     }
 
     pub async fn build_schema_plan(&self) -> Result<SchemaPlan, SettingsError> {

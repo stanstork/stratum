@@ -2,7 +2,7 @@ use super::{
     MigrationSetting, context::SchemaSettingContext, error::SettingsError,
     phase::MigrationSettingsPhase,
 };
-use crate::{report::dry_run::DryRunReport, settings::validated::ValidatedSettings};
+use crate::settings::validated::ValidatedSettings;
 use async_trait::async_trait;
 use connectors::{
     metadata::entity::EntityMetadata, sql::base::metadata::provider::MetadataProvider,
@@ -12,9 +12,8 @@ use engine_core::{
     context::item::ItemContext,
     schema::plan::SchemaPlan,
 };
-use futures::lock::Mutex;
 use model::transform::mapping::TransformationMetadata;
-use std::{slice, sync::Arc};
+use std::slice;
 use tracing::info;
 
 pub struct InferSchemaSetting {
@@ -48,10 +47,9 @@ impl InferSchemaSetting {
         dest: &Destination,
         mapping: &TransformationMetadata,
         settings: &ValidatedSettings,
-        dry_run_report: &Arc<Mutex<DryRunReport>>,
     ) -> Self {
         Self {
-            context: SchemaSettingContext::new(src, dest, mapping, settings, dry_run_report).await,
+            context: SchemaSettingContext::new(src, dest, mapping, settings).await,
         }
     }
 

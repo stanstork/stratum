@@ -2,9 +2,7 @@ use crate::{
     dag::{builder::DagBuilder, executor::DagExecutor},
     error::MigrationError,
 };
-use engine_config::report::summary::SummaryReport;
 use engine_core::plan::execution::ExecutionPlan;
-use std::collections::HashMap;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -12,7 +10,7 @@ pub async fn run(
     plan: ExecutionPlan,
     dry_run: bool,
     cancel: CancellationToken,
-) -> Result<HashMap<String, SummaryReport>, MigrationError> {
+) -> Result<(), MigrationError> {
     // Build DAG from the execution plan
     let mut builder = DagBuilder::new();
 

@@ -1,23 +1,19 @@
 use crate::error::CliError;
-use engine_config::report::summary::SummaryReport;
-use std::collections::HashMap;
+use engine_planner::plan::execution::execution_plan::ExecutionPlan;
 
-async fn generate_report_json(states: HashMap<String, SummaryReport>) -> Result<String, CliError> {
-    let json = serde_json::to_string_pretty(&states)?;
+async fn generate_report_json(plan: ExecutionPlan) -> Result<String, CliError> {
+    let json = serde_json::to_string_pretty(&plan)?;
     Ok(json)
 }
 
-pub async fn write_report(
-    states: HashMap<String, SummaryReport>,
-    path: String,
-) -> Result<(), CliError> {
-    let report_json = generate_report_json(states).await?;
+pub async fn write_report(plan: ExecutionPlan, path: String) -> Result<(), CliError> {
+    let report_json = generate_report_json(plan).await?;
     tokio::fs::write(path, report_json).await?;
     Ok(())
 }
 
-pub async fn print_report(states: HashMap<String, SummaryReport>) -> Result<(), CliError> {
-    let report_json = generate_report_json(states).await?;
+pub async fn print_report(plan: ExecutionPlan) -> Result<(), CliError> {
+    let report_json = generate_report_json(plan).await?;
     println!("{report_json}");
     Ok(())
 }

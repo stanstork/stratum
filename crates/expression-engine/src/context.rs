@@ -1,5 +1,6 @@
 use model::{
-    core::value::Value, records::row::RowData, transform::mapping::TransformationMetadata,
+    core::value::Value, execution::define::DefinitionInfo, records::row::RowData,
+    transform::mapping::TransformationMetadata,
 };
 use std::collections::HashMap;
 
@@ -11,7 +12,7 @@ pub type EnvGetter = fn(&str) -> Option<String>;
 pub enum EvalContext<'a> {
     /// Build-time evaluation: has access to global definitions and env getter
     BuildTime {
-        definitions: &'a HashMap<String, Value>,
+        definitions: &'a HashMap<String, DefinitionInfo>,
         env_getter: EnvGetter,
     },
     /// Runtime evaluation: has access to row data, mappings, and env getter
@@ -37,7 +38,9 @@ impl<'a> EvalContext<'a> {
     /// Get global definition (build-time only)
     pub fn get_definition(&self, key: &str) -> Option<&Value> {
         match self {
-            EvalContext::BuildTime { definitions, .. } => definitions.get(key),
+            EvalContext::BuildTime { definitions, .. } => {
+                definitions.get(key).map(|def| &def.value)
+            }
             EvalContext::Runtime { .. } => None,
         }
     }

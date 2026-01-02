@@ -1,12 +1,6 @@
 use crate::transform::error::FailedRowWriterError;
-use connectors::{adapter::Adapter, sql::base::metadata::table::TableMetadata};
-use engine_core::{
-    connectors::{
-        destination::{DataDestination, Destination},
-        format::DataFormat,
-    },
-    context::exec::ExecutionContext,
-};
+use connectors::sql::base::metadata::table::TableMetadata;
+use engine_core::{connectors::destination::Destination, context::exec::ExecutionContext};
 use model::{
     execution::{
         connection::Connection,
@@ -93,10 +87,7 @@ impl FailedRowWriter {
             .get_or_try_init(|| async {
                 // Initialize on first use
                 let adapter = self.context.get_adapter(connection).await?;
-                let format = data_format(&adapter);
-
-                let data_dest = DataDestination::from_adapter(format, &adapter)?;
-                let destination = Destination::new(connection.name.clone(), format, data_dest);
+                let destination = Destination::new(adapter, &table_name, connection).await?;
                 let metadata = destination.data_dest.fetch_meta(table_name.clone()).await?;
 
                 Ok::<CachedDbDestination, FailedRowWriterError>(CachedDbDestination {
@@ -161,14 +152,6 @@ impl FailedRowWriter {
 
         debug!("Wrote failed row {} to {}", failed_row.id, path);
         Ok(())
-    }
-}
-
-fn data_format(adapter: &Adapter) -> DataFormat {
-    match adapter {
-        Adapter::MySql(_) => DataFormat::MySql,
-        Adapter::Postgres(_) => DataFormat::Postgres,
-        Adapter::Csv(_) => DataFormat::Csv,
     }
 }
 

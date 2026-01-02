@@ -5,6 +5,7 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Literal {
     String(String),
+    Int(i64),
     Number(f64),
     Boolean(bool),
     Null,
@@ -14,6 +15,7 @@ impl fmt::Display for Literal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Literal::String(s) => write!(f, "\"{}\"", s),
+            Literal::Int(i) => write!(f, "{}", i),
             Literal::Number(n) => write!(f, "{}", n),
             Literal::Boolean(b) => write!(f, "{}", b),
             Literal::Null => write!(f, "null"),

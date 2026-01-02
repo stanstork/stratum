@@ -1,0 +1,720 @@
+use crate::{
+    builder::{
+        analysis::{
+            AnalysisContext, AnalysisContextConfig, AnalysisReport, AnalyzerError,
+            AnalyzerRegistry, PipelineAnalysisInput,
+        },
+        analyzers::{connection::ConnectionAnalyzer, sample::SampleConfig},
+        data_flow::DataFlowAnalyzer,
+        diagnostics::diagnostic_generator::DiagnosticGenerator,
+        errors::{ConnectionError, PlanBuilderError, PlanBuilderResult, SourceAnalyzerError},
+        estimator::{DurationEstimator, ResourceEstimator},
+        infra::{
+            pipeline_analysis::{PipelineAnalysisResources, PipelineSettingsView},
+            plan_metadata::MetadataGenerator,
+        },
+        summary::SummaryCalculator,
+        utils::{MaskingPolicy, format_duration},
+    },
+    plan::{
+        connection::{
+            plan::ConnectionPlan,
+            status::{ConnectionRole, ConnectionStatus},
+        },
+        define::{
+            env_vars::{EnvVarUsage, ValueSource},
+            resolved::{ResolvedConstant, ResolvedDefines},
+        },
+        diagnostics::{diagnostic::Diagnostic, level::DiagnosticLevel},
+        error_handling::{
+            failed_rows::{FailedRowsConfig, FailedRowsFormat},
+            plan::{AfterMaxRetries, ErrorHandlingPlan},
+            retry::{BackoffConfig, RetryConfig},
+        },
+        execution::{
+            execution_plan::ExecutionPlan,
+            execution_settings::{ExecutionSettings, ExecutionStrategy, FailureStrategy},
+            execution_stage::ExecutionStage,
+        },
+        pipeline::{plan::PipelinePlan, settings::PipelineSettings},
+        sample::method::SamplingMethod,
+    },
+};
+use connectors::metadata::entity::EntityMetadata;
+use engine_config::settings::{
+    Settings, validated::ValidatedSettings, validator::SettingsValidator,
+};
+use engine_core::{
+    connectors::{destination::Destination, source::Source},
+    context::exec::ConnectionPool,
+    plan::execution::ExecutionPlan as CoreExecutionPlan,
+    retry::RetryPolicy,
+    schema::{plan::SchemaPlan, planner::SchemaPlanner},
+};
+use engine_runtime::dag::Dag;
+use model::execution::pipeline::RetryConfig as CoreRetryConfig;
+use model::{
+    core::value::Value,
+    execution::{
+        execution_config::FailureStrategy as CoreFailureStrategy,
+        pipeline::{BackoffStrategy, ErrorHandling, FailedRowsDestination, FileFormat, Pipeline},
+    },
+};
+use model::{
+    execution::{
+        define::DefinitionSource, execution_config::ExecutionStrategy as CoreExecutionStrategy,
+    },
+    transform::mapping::TransformationMetadata,
+};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+    sync::Arc,
+    time::Duration,
+};
+use tracing::info;
+
+pub mod analysis;
+pub mod analyzers;
+pub mod data_flow;
+pub mod diagnostics;
+pub mod errors;
+pub mod estimator;
+pub mod explain;
+pub mod infra;
+pub mod summary;
+pub mod utils;
+
+/// Configuration for plan building
+pub struct PlanBuilderConfig {
+    /// Enable sample data collection (--sample flag)
+    pub enable_sampling: bool,
+
+    /// Number of rows to sample per pipeline (--sample-size)
+    pub sample_size: usize,
+
+    /// Sampling method
+    pub sample_method: SamplingMethod,
+
+    /// Name of the ID column for sampling (--id-column)
+    pub id_column: String,
+
+    /// Specific IDs to sample (--sample-ids)
+    pub sample_ids: Option<Vec<Value>>,
+
+    /// Timeout for metadata queries
+    pub metadata_timeout: Duration,
+
+    /// Timeout for connection testing
+    pub connection_timeout: Duration,
+
+    /// Columns to mask in output
+    pub mask_columns: Vec<String>,
+
+    /// Auto-detect and mask sensitive columns
+    pub auto_mask_sensitive: bool,
+
+    /// Use exact COUNT for filtered rows (slower but accurate) vs EXPLAIN estimates (faster)
+    pub exact_where: bool,
+
+    /// Verbosity level (0 = quiet, 1 = normal, 2+ = verbose)
+    pub verbosity: u8,
+}
+
+impl Default for PlanBuilderConfig {
+    fn default() -> Self {
+        Self {
+            enable_sampling: false,
+            sample_size: 5,
+            sample_method: SamplingMethod::Random,
+            id_column: "id".to_string(),
+            sample_ids: None,
+            metadata_timeout: Duration::from_secs(30),
+            connection_timeout: Duration::from_secs(10),
+            mask_columns: Vec::new(),
+            auto_mask_sensitive: true,
+            exact_where: false, // Use EXPLAIN by default (faster)
+            verbosity: 1,
+        }
+    }
+}
+
+/// Main plan builder that orchestrates all analysis
+#[derive(Default)]
+pub struct PlanBuilder {
+    config: PlanBuilderConfig,
+}
+
+impl PlanBuilder {
+    pub fn new(config: PlanBuilderConfig) -> Self {
+        Self { config }
+    }
+
+    pub async fn build(
+        &self,
+        core_plan: &CoreExecutionPlan,
+        dag: &Dag,
+        config_path: &Path,
+    ) -> Result<ExecutionPlan, PlanBuilderError> {
+        info!("Orchestrating execution plan build for {:?}", config_path);
+
+        // Preparation & Metadata
+        let metadata = MetadataGenerator::generate(core_plan, config_path);
+        let execution_settings = self.map_execution_settings(core_plan);
+        let defines = self.resolve_defines(core_plan);
+
+        // Connectivity
+        let connections = self.collect_connections(core_plan).await?;
+        let mut connection_pool = self.build_connection_pool(&connections, core_plan).await?;
+
+        // Pipeline Analysis
+        let pipelines = self
+            .build_pipelines(core_plan, dag, &mut connection_pool)
+            .await?;
+
+        // Post-Analysis Processing
+        let execution_order = self.build_execution_stages(dag, &pipelines)?;
+        let summary = SummaryCalculator::calculate(&pipelines, &connections);
+
+        let diagnostics =
+            DiagnosticGenerator::generate(&pipelines, &connections, &execution_settings);
+        let estimations =
+            ResourceEstimator::estimate(&pipelines, &execution_order, &execution_settings);
+        let (is_executable, blocking_reason) = self.check_executability(&diagnostics);
+
+        Ok(ExecutionPlan {
+            plan_id: metadata.plan_id,
+            generated_at: metadata.generated_at,
+            engine_version: metadata.engine_version,
+            config_hash: metadata.config_hash,
+            config_path: metadata.config_path,
+            execution_settings,
+            defines,
+            connections,
+            pipelines,
+            execution_order,
+            summary,
+            diagnostics,
+            estimations,
+            is_executable,
+            blocking_reason,
+        })
+    }
+
+    /// Iterates through core pipelines and runs the full analysis suite for each.
+    async fn build_pipelines(
+        &self,
+        core_plan: &CoreExecutionPlan,
+        dag: &Dag,
+        connections: &mut ConnectionPool,
+    ) -> PlanBuilderResult<Vec<PipelinePlan>> {
+        let mut pipelines = Vec::with_capacity(core_plan.pipelines.len());
+        for pipeline in &core_plan.pipelines {
+            pipelines.push(self.analyze_pipeline(pipeline, dag, connections).await?);
+        }
+        Ok(pipelines)
+    }
+
+    /// Conducts resource preparation and analytical reporting for a single pipeline.
+    async fn analyze_pipeline(
+        &self,
+        pipeline: &Pipeline,
+        dag: &Dag,
+        connections: &mut ConnectionPool,
+    ) -> PlanBuilderResult<PipelinePlan> {
+        info!("Analyzing pipeline: {}", pipeline.name);
+
+        // Prepare physical adapters and metadata caches via specialized resource container
+        let resources = PipelineAnalysisResources::create(pipeline, connections, self).await?;
+
+        // Run specific analysis (schema validation, sampling, join analysis)
+        let analysis_report = self
+            .run_pipeline_analysis(pipeline, &resources)
+            .await
+            .map_err(|e| {
+                PlanBuilderError::SourceAnalyzer(SourceAnalyzerError::QueryFailed(format!(
+                    "Analysis failed for {}: {}",
+                    pipeline.name, e.message
+                )))
+            })?;
+
+        // Final assembly of the plan
+        self.assemble_pipeline_plan(pipeline, dag, resources, analysis_report)
+            .await
+    }
+
+    /// Final step for a pipeline: calculates summaries, execution positions, and resource estimations.
+    async fn assemble_pipeline_plan(
+        &self,
+        pipeline: &Pipeline,
+        dag: &Dag,
+        resources: PipelineAnalysisResources,
+        report: analysis::AnalysisReport,
+    ) -> PlanBuilderResult<PipelinePlan> {
+        let settings = PipelineSettingsView::new(&resources.validated_settings);
+
+        // Determine if we can use high-performance streaming (fast path)
+        let is_fast_path = self
+            .determine_fast_path(&resources, settings.create_missing_tables())
+            .await;
+
+        let settings = self.map_pipeline_settings(&resources.validated_settings);
+        let estimations = DurationEstimator::new(is_fast_path).estimate_pipeline(
+            &report.source,
+            &report.destination,
+            &report.mappings,
+            &report.joins,
+            &settings,
+            is_fast_path,
+        );
+
+        let data_flow_summary = DataFlowAnalyzer::analyze(
+            &report.mappings,
+            &report.joins,
+            &report.validations,
+            &report.source,
+            &settings,
+        );
+        let (order, stage) = self
+            .calculate_execution_positions(dag, &pipeline.name)
+            .unwrap_or((0, 0));
+
+        let diagnostics = DiagnosticGenerator::for_pipeline(
+            &pipeline.name,
+            &report.source,
+            &report.destination,
+            &None,
+            &report.joins,
+            &report.mappings,
+            &report.pagination,
+        );
+
+        Ok(PipelinePlan {
+            name: pipeline.name.clone(),
+            description: pipeline.description.clone(),
+            execution_order: order,
+            execution_stage: stage,
+            depends_on: dag.get_dependencies(&pipeline.name).unwrap_or_default(),
+            source: report.source,
+            destination: report.destination,
+            filters: report.filters.into_iter().collect(),
+            joins: report.joins,
+            mappings: report.mappings,
+            validations: report.validations,
+            error_handling: self.map_error_handling(&pipeline.error_handling),
+            pagination: report.pagination.unwrap_or_default(),
+            hooks: report.hooks,
+            settings,
+            data_flow_summary,
+            schema_changes: report.schema_changes,
+            diagnostics,
+            estimations,
+            sample: Some(report.sample),
+        })
+    }
+
+    /// Orchestrates the actual analysis calls via the Registry.
+    async fn run_pipeline_analysis(
+        &self,
+        pipeline: &Pipeline,
+        resources: &PipelineAnalysisResources,
+    ) -> Result<AnalysisReport, AnalyzerError> {
+        let analysis_context = AnalysisContext::new(
+            resources.source_adapter.clone(),
+            resources.dest_adapter.clone(),
+            resources.schema_plan.clone(),
+            Arc::new(resources.mapping.clone()),
+            AnalysisContextConfig {
+                metadata_timeout: self.config.metadata_timeout,
+                enable_sampling: self.config.enable_sampling,
+                sample_size: self.config.sample_size,
+                sample_method: self.config.sample_method.clone(),
+                sample_ids: self.config.sample_ids.clone(),
+                id_column: self.config.id_column.clone(),
+                auto_mask_sensitive: self.config.auto_mask_sensitive,
+                mask_columns: self.config.mask_columns.clone(),
+                use_exact_where: self.config.exact_where,
+            },
+        );
+
+        let registry = AnalyzerRegistry::new(
+            resources.source_cache.clone(),
+            resources.schema_plan.clone(),
+            &resources.mapping,
+            resources.dest_adapter.clone(),
+            self.config.metadata_timeout,
+        );
+
+        let analysis_input = PipelineAnalysisInput::new(
+            Arc::new(pipeline.clone()),
+            resources.core_data_source.clone(),
+            self.sample_config(),
+            PipelineSettingsView::new(&resources.validated_settings).mapped_columns_only(),
+        );
+
+        registry
+            .analyze_pipeline(&analysis_input, &analysis_context)
+            .await
+    }
+
+    async fn collect_connections(
+        &self,
+        core_plan: &CoreExecutionPlan,
+    ) -> PlanBuilderResult<Vec<ConnectionPlan>> {
+        // Determine connection roles based on pipeline usage
+        let roles = Self::determine_connection_roles(core_plan);
+
+        let analyzer = ConnectionAnalyzer::new(self.config.connection_timeout);
+        let mut results = Vec::new();
+        for core_conn in &core_plan.connections {
+            let mut plan = analyzer.analyze(core_conn).await.map_err(|e| {
+                PlanBuilderError::Connection(ConnectionError::Failed {
+                    name: core_conn.name.clone(),
+                    reason: e.to_string(),
+                })
+            })?;
+
+            // Update role based on actual usage
+            if let Some(role) = roles.get(&core_conn.name) {
+                plan.role = role.clone();
+            }
+
+            results.push(plan);
+        }
+        Ok(results)
+    }
+
+    /// Determine connection roles by analyzing which pipelines use them as source vs destination
+    fn determine_connection_roles(
+        core_plan: &CoreExecutionPlan,
+    ) -> std::collections::HashMap<String, ConnectionRole> {
+        let mut source_connections = HashSet::new();
+        let mut dest_connections = HashSet::new();
+
+        for pipeline in &core_plan.pipelines {
+            source_connections.insert(pipeline.source.connection.name.clone());
+            dest_connections.insert(pipeline.destination.connection.name.clone());
+        }
+
+        let mut roles = HashMap::new();
+        for conn in &core_plan.connections {
+            let is_source = source_connections.contains(&conn.name);
+            let is_dest = dest_connections.contains(&conn.name);
+
+            let role = match (is_source, is_dest) {
+                (true, true) => ConnectionRole::Both,
+                (true, false) => ConnectionRole::Source,
+                (false, true) => ConnectionRole::Destination,
+                (false, false) => ConnectionRole::Both, // Unused, default to Both
+            };
+            roles.insert(conn.name.clone(), role);
+        }
+
+        roles
+    }
+
+    async fn build_connection_pool(
+        &self,
+        connection_plans: &[ConnectionPlan],
+        core_plan: &CoreExecutionPlan,
+    ) -> PlanBuilderResult<ConnectionPool> {
+        let mut pool = ConnectionPool::new();
+        for (plan, core_conn) in connection_plans.iter().zip(&core_plan.connections) {
+            if let ConnectionStatus::Connected { .. } = &plan.status {
+                pool.get_or_create(core_conn).await.map_err(|e| {
+                    PlanBuilderError::Connection(ConnectionError::Failed {
+                        name: core_conn.name.clone(),
+                        reason: e.to_string(),
+                    })
+                })?;
+            }
+        }
+        Ok(pool)
+    }
+
+    fn build_execution_stages(
+        &self,
+        dag: &Dag,
+        pipelines: &[PipelinePlan],
+    ) -> PlanBuilderResult<Vec<ExecutionStage>> {
+        let stages = dag.execution_order();
+        Ok(stages
+            .iter()
+            .enumerate()
+            .map(|(idx, pipeline_names)| {
+                let stage_pipelines: Vec<_> = pipelines
+                    .iter()
+                    .filter(|p| pipeline_names.contains(&p.name))
+                    .collect();
+                ExecutionStage {
+                    stage: idx,
+                    pipelines: pipeline_names.to_vec(),
+                    estimated_duration: DurationEstimator::estimate_stage(&stage_pipelines),
+                }
+            })
+            .collect())
+    }
+
+    fn calculate_execution_positions(
+        &self,
+        dag: &Dag,
+        pipeline_name: &str,
+    ) -> Option<(usize, usize)> {
+        let execution_order = dag.execution_order();
+        let mut cumulative_order = 0;
+
+        for (stage_idx, stage_pipelines) in execution_order.iter().enumerate() {
+            if let Some(pos) = stage_pipelines.iter().position(|p| p == pipeline_name) {
+                return Some((cumulative_order + pos, stage_idx));
+            }
+            cumulative_order += stage_pipelines.len();
+        }
+        None
+    }
+
+    async fn validate_settings(
+        &self,
+        pipeline: &Pipeline,
+        source: &Source,
+        dest: &Destination,
+    ) -> PlanBuilderResult<ValidatedSettings> {
+        let settings = Settings::from_map(&pipeline.settings);
+        let validator = SettingsValidator::new(source, dest, true);
+        validator.validate(&settings).await.map_err(|e| {
+            PlanBuilderError::Config(format!("Validation failed for {}: {}", pipeline.name, e))
+        })
+    }
+
+    async fn build_schema_plan(
+        &self,
+        pipeline: &Pipeline,
+        source: &Source,
+        mapping: &TransformationMetadata,
+        settings: &ValidatedSettings,
+    ) -> PlanBuilderResult<SchemaPlan> {
+        let view = PipelineSettingsView::new(settings);
+        let planner = SchemaPlanner::new(
+            source.clone(),
+            mapping.clone(),
+            view.ignore_constraints(),
+            view.mapped_columns_only(),
+        );
+        Ok(planner.plan_schema(&pipeline.source.table).await?)
+    }
+
+    fn check_executability(&self, diagnostics: &[Diagnostic]) -> (bool, Option<String>) {
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.level == DiagnosticLevel::Error)
+            .map(|e| e.message.clone())
+            .collect();
+        if errors.is_empty() {
+            (true, None)
+        } else {
+            (false, Some(errors.join("; ")))
+        }
+    }
+
+    fn map_execution_settings(&self, core: &CoreExecutionPlan) -> ExecutionSettings {
+        ExecutionSettings {
+            strategy: match core.execution_config.strategy {
+                CoreExecutionStrategy::Sequential => ExecutionStrategy::Sequential,
+                CoreExecutionStrategy::Parallel => ExecutionStrategy::Parallel,
+            },
+            max_concurrency: core.execution_config.max_concurrency.unwrap_or(1) as usize,
+            on_failure: match core.execution_config.on_failure {
+                CoreFailureStrategy::FailFast => FailureStrategy::FailFast,
+                CoreFailureStrategy::Continue => FailureStrategy::Continue,
+            },
+        }
+    }
+
+    fn map_error_handling(&self, core: &Option<ErrorHandling>) -> ErrorHandlingPlan {
+        core.as_ref().map_or(ErrorHandlingPlan::default(), |eh| {
+            let retry_policy = RetryPolicy::from_config(eh.retry.as_ref());
+
+            ErrorHandlingPlan {
+                retry: Some(RetryConfig {
+                    max_attempts: retry_policy.max_attempts,
+                    backoff: self.map_backoff(&eh.retry, &retry_policy),
+                }),
+                failed_rows: self.map_failed_rows(eh),
+                after_max_retries: AfterMaxRetries::Fail,
+            }
+        })
+    }
+
+    fn map_backoff(&self, r: &Option<CoreRetryConfig>, p: &RetryPolicy) -> BackoffConfig {
+        if let Some(r) = r {
+            let delay = Duration::from_millis(r.delay_ms);
+            match r.backoff {
+                BackoffStrategy::Fixed => BackoffConfig::Fixed {
+                    delay: format_duration(&delay),
+                },
+                BackoffStrategy::Exponential => BackoffConfig::Exponential {
+                    initial_delay: format_duration(&delay),
+                    max_delay: Some(format_duration(&Duration::from_secs(5))),
+                },
+                BackoffStrategy::Linear => BackoffConfig::Linear {
+                    delay: format_duration(&Duration::from_millis(
+                        r.delay_ms * r.max_attempts as u64,
+                    )),
+                },
+            }
+        } else {
+            BackoffConfig::Exponential {
+                initial_delay: format_duration(&p.base_delay),
+                max_delay: Some(format_duration(&p.max_delay)),
+            }
+        }
+    }
+
+    fn map_failed_rows(&self, eh: &ErrorHandling) -> Option<FailedRowsConfig> {
+        eh.failed_rows
+            .as_ref()?
+            .destination
+            .as_ref()
+            .map(|dest| match dest {
+                FailedRowsDestination::Table {
+                    connection,
+                    table,
+                    schema,
+                } => FailedRowsConfig::Table {
+                    connection: connection.name.clone(),
+                    table: table.clone(),
+                    schema: schema.clone(),
+                },
+                FailedRowsDestination::File { path, format } => FailedRowsConfig::File {
+                    path: path.clone(),
+                    format: match format {
+                        FileFormat::Json => FailedRowsFormat::Jsonl,
+                        FileFormat::Csv => FailedRowsFormat::Csv,
+                        FileFormat::Parquet => FailedRowsFormat::Parquet,
+                    },
+                },
+            })
+    }
+
+    fn map_pipeline_settings(&self, validated: &ValidatedSettings) -> PipelineSettings {
+        PipelineSettings::from_validated(validated.clone())
+    }
+
+    fn resolve_defines(&self, core: &CoreExecutionPlan) -> ResolvedDefines {
+        let constants = core
+            .definitions
+            .variables
+            .iter()
+            .map(|(name, def)| ResolvedConstant {
+                name: name.clone(),
+                value: Self::mask_value(&def.value),
+                source: match &def.source {
+                    DefinitionSource::Literal => ValueSource::Literal,
+                    DefinitionSource::Environment { var_name } => ValueSource::Environment {
+                        var_name: var_name.clone(),
+                    },
+                    DefinitionSource::EnvironmentWithDefault {
+                        var_name,
+                        default_value,
+                    } => ValueSource::EnvironmentWithDefault {
+                        var_name: var_name.clone(),
+                        default: MaskingPolicy::mask_url(default_value),
+                    },
+                },
+            })
+            .collect();
+
+        let masking = MaskingPolicy::new(
+            self.config.auto_mask_sensitive,
+            self.config.mask_columns.clone(),
+        );
+        let env_vars_used = core
+            .env_vars
+            .iter()
+            .map(|(name, var)| EnvVarUsage {
+                var_name: name.clone(),
+                was_set: var.was_set,
+                used_default: var.used_default,
+                value: masking.mask_env_var_value(name, &var.value),
+            })
+            .collect();
+
+        ResolvedDefines {
+            constants,
+            env_vars_used,
+        }
+    }
+
+    fn mask_value(value: &Value) -> Value {
+        if let Some(s) = value.as_string()
+            && MaskingPolicy::is_db_url(&s)
+        {
+            return Value::String(MaskingPolicy::mask_url(&s));
+        }
+        value.clone()
+    }
+
+    fn sample_config(&self) -> SampleConfig {
+        SampleConfig {
+            enabled: self.config.enable_sampling,
+            size: self.config.sample_size,
+            method: self.config.sample_method.clone(),
+            mask_columns: self.config.mask_columns.clone(),
+            auto_mask_sensitive: self.config.auto_mask_sensitive,
+            sample_ids: self.config.sample_ids.clone(),
+            id_column: self.config.id_column.clone(),
+        }
+    }
+
+    async fn determine_fast_path(
+        &self,
+        resources: &PipelineAnalysisResources,
+        create_missing: bool,
+    ) -> bool {
+        let has_capability = resources
+            .dest_adapter
+            .get_sql()
+            .capabilities()
+            .await
+            .is_ok_and(|c| c.copy_streaming);
+        has_capability
+            && Self::eval_fast_path(
+                &resources.core_data_source,
+                &resources.core_data_destination,
+                create_missing,
+                &resources.mapping,
+            )
+            .await
+    }
+
+    pub async fn eval_fast_path(
+        source: &Source,
+        destination: &Destination,
+        create_missing: bool,
+        mapping: &TransformationMetadata,
+    ) -> bool {
+        let sink = destination.sink();
+        let adapter = destination.data_dest.adapter().await;
+
+        match sink.support_fast_path().await {
+            Ok(true) => match adapter.table_exists(&destination.name).await {
+                Ok(true) => match destination
+                    .data_dest
+                    .fetch_meta(destination.name.clone())
+                    .await
+                {
+                    Ok(meta) => !meta.primary_keys.is_empty(),
+                    Err(_) => false,
+                },
+                Ok(false) if create_missing => {
+                    let src_table = mapping.entities.reverse_resolve(&destination.name);
+                    match source.primary.fetch_meta(src_table.clone()).await {
+                        Ok(EntityMetadata::Table(m)) => !m.primary_keys.is_empty(),
+                        _ => false,
+                    }
+                }
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+}

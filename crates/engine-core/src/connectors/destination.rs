@@ -4,6 +4,7 @@ use crate::connectors::{
 };
 use connectors::{
     adapter::Adapter,
+    error::AdapterError,
     sql::{
         base::{
             adapter::SqlAdapter, destination::DbDataDestination, error::DbError,
@@ -13,8 +14,8 @@ use connectors::{
     },
 };
 use futures::lock::Mutex;
-use model::records::row::RowData;
-use planner::query::dialect;
+use model::{execution::connection::Connection, records::row::RowData};
+use query_builder::dialect;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -77,12 +78,21 @@ impl DataDestination {
 }
 
 impl Destination {
-    pub fn new(name: String, format: DataFormat, data_dest: DataDestination) -> Self {
-        Destination {
+    pub async fn new(
+        adapter: Adapter,
+        table: &str,
+        conn: &Connection,
+    ) -> Result<Self, AdapterError> {
+        let name = table.to_string();
+        let format = DataFormat::parse(&conn.driver)
+            .ok_or_else(|| AdapterError::UnsupportedFormat(conn.driver.clone()))?;
+        let data_dest = DataDestination::from_adapter(format, &adapter)?;
+
+        Ok(Destination {
             name,
             format,
             data_dest,
-        }
+        })
     }
 
     pub async fn write_batch(&self, meta: &TableMetadata, rows: &[RowData]) -> Result<(), DbError> {

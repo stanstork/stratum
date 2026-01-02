@@ -1,8 +1,9 @@
 use crate::sql::base::{filter::SqlFilter, join::clause::JoinClause, query::select::SelectField};
-use model::pagination::cursor::Cursor;
-use planner::query::offsets::{DefaultOffset, OffsetStrategy};
+use model::{core::value::Value, pagination::cursor::Cursor};
+use query_builder::offsets::{DefaultOffset, OffsetStrategy};
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct FetchRowsRequest {
     pub table: String,
     pub alias: Option<String>,
@@ -12,6 +13,11 @@ pub struct FetchRowsRequest {
     pub limit: usize,
     pub cursor: Cursor,
     pub strategy: Arc<dyn OffsetStrategy>,
+    /// Optional IN clause: column name and list of values
+    /// e.g., ("id", vec![Value::Int(1), Value::Int(2)])
+    pub in_clause: Option<(String, Vec<Value>)>,
+    /// Whether to order results randomly (ORDER BY RANDOM()/RAND())
+    pub order_random: bool,
 }
 
 pub struct FetchRowsRequestBuilder {
@@ -23,6 +29,8 @@ pub struct FetchRowsRequestBuilder {
     limit: usize,
     cursor: Cursor,
     strategy: Arc<dyn OffsetStrategy>,
+    in_clause: Option<(String, Vec<Value>)>,
+    order_random: bool,
 }
 
 impl FetchRowsRequestBuilder {
@@ -36,6 +44,8 @@ impl FetchRowsRequestBuilder {
             limit: 0,
             cursor: Cursor::Default { offset: 0 },
             strategy: Arc::new(DefaultOffset { offset: 0 }),
+            in_clause: None,
+            order_random: false,
         }
     }
 
@@ -74,6 +84,19 @@ impl FetchRowsRequestBuilder {
         self
     }
 
+    /// Adds an IN clause for filtering by a list of values
+    /// e.g., `WHERE id IN (1, 2, 3)`
+    pub fn in_clause(mut self, column: String, values: Vec<Value>) -> Self {
+        self.in_clause = Some((column, values));
+        self
+    }
+
+    /// Enables random ordering (ORDER BY RANDOM() for PostgreSQL, ORDER BY RAND() for MySQL)
+    pub fn order_random(mut self, enable: bool) -> Self {
+        self.order_random = enable;
+        self
+    }
+
     pub fn build(self) -> FetchRowsRequest {
         FetchRowsRequest {
             table: self.table,
@@ -84,6 +107,8 @@ impl FetchRowsRequestBuilder {
             limit: self.limit,
             cursor: self.cursor,
             strategy: self.strategy,
+            in_clause: self.in_clause,
+            order_random: self.order_random,
         }
     }
 }

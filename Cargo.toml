@@ -2,7 +2,7 @@
 members = [
     "crates/model",
     "crates/smql-syntax",
-    "crates/planner",
+    "crates/query-builder",
     "crates/connectors",
     "crates/engine-core",
     "crates/engine-config",
@@ -11,6 +11,7 @@ members = [
     "crates/engine-tests",
     "crates/expression-engine",
     "crates/cli",
+    "crates/engine-planner",
 ]
 
 resolver = "2"

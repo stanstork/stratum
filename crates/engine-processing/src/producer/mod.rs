@@ -1,9 +1,13 @@
 use crate::{
     error::ProducerError,
+    item::ItemId,
     producer::{
-        live::LiveProducer,
-        validation::{ValidationProducer, ValidationProducerParams},
+        components::{
+            coordinator::BatchCoordinator, reader::SnapshotReader, transformer::TransformService,
+        },
+        config::ProducerConfig,
     },
+    state_manager::StateManager,
     transform::{
         computed::ComputedTransform,
         mapping::{FieldMapper, TableMapper},
@@ -12,26 +16,24 @@ use crate::{
         validation::PipelineValidator,
     },
 };
-use async_trait::async_trait;
-use engine_config::{report::dry_run::DryRunReport, settings::validated::ValidatedSettings};
-use engine_core::context::item::ItemContext;
+use engine_config::settings::validated::ValidatedSettings;
+use engine_core::{context::item::ItemContext, retry::RetryPolicy};
 use futures::lock::Mutex;
 use model::{
-    execution::pipeline::Pipeline, records::batch::Batch,
+    execution::pipeline::Pipeline, pagination::cursor::Cursor, records::batch::Batch,
     transform::mapping::TransformationMetadata,
 };
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tracing::info;
 
 pub mod components;
 pub mod config;
-pub mod live;
-pub mod validation;
 
-fn build_transform_pipeline(
+pub fn build_transform_pipeline(
     pipeline: &Pipeline,
     mapping: &TransformationMetadata,
-    settings: &ValidatedSettings,
+    mapped_columns_only: bool,
 ) -> TransformPipeline {
     let mut transform_pipeline = TransformPipeline::new();
 
@@ -46,9 +48,7 @@ fn build_transform_pipeline(
         .add_if(!mapping.field_mappings.computed_fields.is_empty(), || {
             ComputedTransform::new(mapping.clone())
         })
-        .add_if(settings.mapped_columns_only(), || {
-            FieldPruner::new(mapping.clone())
-        })
+        .add_if(mapped_columns_only, || FieldPruner::new(mapping.clone()))
         .add_validator_if(!pipeline.validations.is_empty(), || {
             PipelineValidator::new(pipeline.validations.clone(), mapping.clone())
         });
@@ -66,57 +66,192 @@ pub enum ProducerStatus {
     Finished,
 }
 
-#[async_trait]
-pub trait DataProducer {
-    async fn start_snapshot(&mut self) -> Result<(), ProducerError>;
-    async fn start_cdc(&mut self) -> Result<(), ProducerError>;
+#[derive(Clone, Debug, PartialEq)]
+enum ProducerMode {
+    Idle,
+    Snapshot,
+    Cdc,
+    Finished,
+}
 
-    async fn resume(
+pub struct Producer {
+    // Components
+    reader: SnapshotReader,
+    transformer: TransformService,
+    coordinator: BatchCoordinator,
+
+    // State
+    cursor: Cursor,
+    mode: ProducerMode,
+    ids: ItemId,
+
+    // Config
+    config: ProducerConfig,
+}
+
+impl Producer {
+    pub async fn new(
+        item_ctx: &Arc<Mutex<ItemContext>>,
+        batch_tx: mpsc::Sender<Batch>,
+        settings: &ValidatedSettings,
+    ) -> Self {
+        let (exec_ctx, run_id, item_id, part_id, source, pipeline, mapping, state_store, cursor) = {
+            let c = item_ctx.lock().await;
+            (
+                c.exec_ctx.clone(),
+                c.run_id.clone(),
+                c.item_id.clone(),
+                "part-0".to_string(),
+                c.source.clone(),
+                c.pipeline.clone(),
+                c.mapping.clone(),
+                c.state.clone(),
+                c.cursor.clone(),
+            )
+        };
+
+        let config = ProducerConfig::from_settings(settings);
+        let ids = ItemId::new(run_id, item_id, part_id);
+
+        // Create retry policy from pipeline config, fallback to database defaults
+        let retry_config = pipeline
+            .error_handling
+            .as_ref()
+            .and_then(|eh| eh.retry.as_ref());
+        let retry_policy = RetryPolicy::from_config(retry_config);
+
+        // Create components
+        let reader = SnapshotReader::new(source, retry_policy, config.batch_size);
+
+        let transform_pipeline =
+            build_transform_pipeline(&pipeline, &mapping, settings.mapped_columns_only());
+        let transformer = TransformService::new(
+            exec_ctx,
+            transform_pipeline,
+            pipeline.name,
+            pipeline.error_handling.clone(),
+        );
+
+        let state_manager = StateManager::new(ids.clone(), state_store);
+        let coordinator = BatchCoordinator::new(batch_tx, state_manager);
+
+        Self {
+            reader,
+            transformer,
+            coordinator,
+            cursor,
+            mode: ProducerMode::Idle,
+            ids,
+            config,
+        }
+    }
+
+    pub async fn start_snapshot(&mut self) -> Result<(), ProducerError> {
+        self.mode = ProducerMode::Snapshot;
+        Ok(())
+    }
+
+    pub async fn start_cdc(&mut self) -> Result<(), ProducerError> {
+        self.mode = ProducerMode::Cdc;
+        Ok(())
+    }
+
+    pub async fn resume(
         &mut self,
         run_id: &str,
         item_id: &str,
         part_id: &str,
-    ) -> Result<(), ProducerError>;
-
-    async fn tick(&mut self) -> Result<ProducerStatus, ProducerError>;
-    async fn stop(&mut self) -> Result<(), ProducerError>;
-
-    fn rows_produced(&self) -> u64;
-}
-
-pub async fn create_producer(
-    item_ctx: &Arc<Mutex<ItemContext>>,
-    batch_tx: mpsc::Sender<Batch>,
-    settings: &ValidatedSettings,
-    report: &Arc<Mutex<DryRunReport>>,
-) -> Box<dyn DataProducer + Send + 'static> {
-    if settings.is_dry_run() {
-        let (source, destination, pipeline, mapping, offset_strategy, cursor) = {
-            let guard = item_ctx.lock().await;
-            (
-                guard.source.clone(),
-                guard.destination.clone(),
-                guard.pipeline.clone(),
-                guard.mapping.clone(),
-                guard.offset_strategy.clone(),
-                guard.cursor.clone(),
-            )
-        };
-
-        let transform_pipeline = build_transform_pipeline(&pipeline, &mapping, settings);
-        let validation_prod = ValidationProducer::new(ValidationProducerParams {
-            source,
-            destination,
-            pipeline: transform_pipeline,
-            mapping,
-            settings: settings.clone(),
-            offset_strategy,
-            cursor,
-            report: report.clone(),
-        });
-        return Box::new(validation_prod);
+    ) -> Result<(), ProducerError> {
+        self.cursor = self.coordinator.state_manager().resume_cursor().await?;
+        info!(
+            run_id = run_id,
+            item_id = item_id,
+            part_id = part_id,
+            "Resuming producer from cursor: {:?}",
+            self.cursor
+        );
+        Ok(())
     }
 
-    let live_prod = LiveProducer::new(item_ctx, batch_tx, settings).await;
-    Box::new(live_prod)
+    pub async fn tick(&mut self) -> Result<ProducerStatus, ProducerError> {
+        match self.mode {
+            ProducerMode::Idle => Ok(ProducerStatus::Idle),
+            ProducerMode::Finished => Ok(ProducerStatus::Finished),
+            ProducerMode::Snapshot => self.process_snapshot_batch().await,
+            ProducerMode::Cdc => {
+                // CDC logic here
+                tokio::time::sleep(self.config.idle_poll_interval).await;
+                Ok(ProducerStatus::Working)
+            }
+        }
+    }
+
+    pub async fn stop(&mut self) -> Result<(), ProducerError> {
+        self.mode = ProducerMode::Finished;
+        Ok(())
+    }
+
+    pub fn rows_produced(&self) -> u64 {
+        self.coordinator.rows_produced()
+    }
+
+    fn batch_id(&self, next: &Cursor) -> String {
+        let mut h = blake3::Hasher::new();
+        h.update(self.ids.run_id().as_bytes());
+        h.update(self.ids.item_id().as_bytes());
+        h.update(self.ids.part_id().as_bytes());
+        h.update(format!("{next:?}").as_bytes());
+        h.finalize().to_hex().to_string()
+    }
+
+    async fn process_snapshot_batch(&mut self) -> Result<ProducerStatus, ProducerError> {
+        let fetch_result = self.reader.fetch(self.cursor.clone()).await?;
+
+        // Handle empty/end cases
+        if SnapshotReader::is_complete(&fetch_result) {
+            self.mode = ProducerMode::Finished;
+            return Ok(ProducerStatus::Finished);
+        }
+
+        if SnapshotReader::should_advance(&fetch_result) {
+            self.cursor = fetch_result.next_cursor.unwrap();
+            return Ok(ProducerStatus::Working);
+        }
+
+        if fetch_result.row_count == 0 {
+            self.mode = ProducerMode::Finished;
+            return Ok(ProducerStatus::Finished);
+        }
+
+        // Coordinate batch delivery
+        let batch_id = self.batch_id(&self.cursor);
+        let next = fetch_result.next_cursor.unwrap_or(Cursor::None);
+
+        // Transform data - will process entire batch even if some rows fail
+        let transformed_rows = self
+            .transformer
+            .transform(&self.ids.run_id(), &batch_id, fetch_result.rows)
+            .await?;
+
+        self.coordinator
+            .process_batch(
+                batch_id,
+                self.cursor.clone(),
+                transformed_rows,
+                next.clone(),
+            )
+            .await?;
+
+        // Advance cursor
+        self.cursor = next;
+
+        if self.cursor == Cursor::None {
+            self.mode = ProducerMode::Finished;
+            // Close the batch channel to signal consumers we're done
+            self.coordinator.close_channel();
+            return Ok(ProducerStatus::Finished);
+        }
+
+        Ok(ProducerStatus::Working)
+    }
 }

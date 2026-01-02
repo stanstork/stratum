@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod tests {
+    use std::{fs, path::PathBuf};
+
     use crate::{
         reset_postgres_schema,
         utils::{
@@ -10,6 +12,13 @@ mod tests {
             get_row_count, get_table_names, run_smql,
         },
     };
+    use engine_core::plan::execution::ExecutionPlan as CoreExecutionPlan;
+    use engine_planner::{
+        builder::{PlanBuilder, PlanBuilderConfig},
+        plan::{diagnostics::level::DiagnosticLevel, validation::types::ValidationAction},
+    };
+    use engine_runtime::dag::builder::DagBuilder;
+    use smql_syntax::builder::parse;
     use tracing_test::traced_test;
 
     // Test Settings: Default (no special flags).
@@ -1675,7 +1684,7 @@ mod tests {
 
                 settings {
                     create_missing_tables = true
-                    batch_size = 10
+                    batch_size = 1000
                     copy_columns = "MAP_ONLY"
                 }
 
@@ -2080,5 +2089,361 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows.len(), 1, "Index should exist after migration");
+    }
+
+    // Test Settings: COMPREHENSIVE PLAN GENERATION TEST (DRY RUN).
+    // Scenario:
+    // - Tests all SMQL v2.1 features using the Sakila database.
+    // - Configuration includes 14 pipelines covering:
+    //   * Execution settings (parallel, max_concurrency, on_failure)
+    //   * Define block with constants and environment variables
+    //   * Simple migrations with dependencies
+    //   * Computed columns and transformations (concat, arithmetic)
+    //   * WHERE filters with comparison operators
+    //   * Single and multiple JOINs with lookups
+    //   * Validation blocks (SKIP, WARN, FAIL actions)
+    //   * Mixed validation scenarios
+    //   * Error handling with file-based DLQ (JSONL format)
+    //   * Before/after SQL hooks for DDL operations
+    //   * Complex multi-table denormalization
+    //   * Diamond dependency patterns
+    // Expected Outcome:
+    // - Plan generation succeeds without errors (no actual migration).
+    // - All 14 pipelines are analyzed and planned.
+    // - Dependencies are correctly resolved into execution stages.
+    // - Plan is marked as executable.
+    // - Pipeline metadata includes:
+    //   * Source/destination table information
+    //   * Computed column mappings
+    //   * Filter conditions
+    //   * Join specifications
+    //   * Validation rules
+    //   * Before/after hooks
+    // - Row count estimates are calculated from source databases.
+    // - No actual data is migrated (dry run only).
+    #[traced_test]
+    #[tokio::test]
+    async fn tc29() {
+        // Load comprehensive test configuration
+        let path = "../../dev-fixtures/configs/plan-test.smql";
+        let config_path = PathBuf::from(path);
+        let config_content = fs::read_to_string(&config_path).expect("read config file");
+
+        // Parse SMQL configuration
+        let doc = parse(&config_content).expect("parse SMQL config");
+
+        // Build core execution plan
+        let core_plan = CoreExecutionPlan::build(&doc).expect("build core execution plan");
+
+        // Build DAG from pipeline dependencies
+        let mut dag_builder = DagBuilder::new();
+        for pipeline in &core_plan.pipelines {
+            dag_builder
+                .add_pipeline(pipeline.name.clone(), pipeline.dependencies.clone())
+                .expect("add pipeline to DAG");
+        }
+        let dag = dag_builder.build().expect("build DAG");
+
+        // Create plan builder configuration
+        let plan_config = PlanBuilderConfig::default();
+        let plan_builder = PlanBuilder::new(plan_config);
+
+        // Generate the detailed execution plan (this is what `stratum plan` does)
+        let plan = plan_builder
+            .build(&core_plan, &dag, config_path.as_ref())
+            .await
+            .expect("generate execution plan");
+
+        // ========================================================================
+        // VALIDATE PLAN STRUCTURE
+        // ========================================================================
+
+        // Plan should be executable
+        assert!(
+            plan.is_executable,
+            "Plan should be executable (no blocking errors)"
+        );
+        assert_eq!(
+            plan.blocking_reason, None,
+            "Plan should have no blocking reason"
+        );
+
+        // Should have 14 pipelines
+        assert_eq!(plan.pipelines.len(), 14, "Expected 14 pipelines in plan");
+
+        // Should have execution stages (parallelization)
+        assert!(
+            !plan.execution_order.is_empty(),
+            "Expected at least one execution stage"
+        );
+
+        // Verify summary statistics
+        assert_eq!(
+            plan.summary.total_pipelines, 14,
+            "Summary should show 14 pipelines"
+        );
+        assert!(
+            plan.summary.total_connections >= 2,
+            "Should have at least 2 connections (source + destination)"
+        );
+
+        // ========================================================================
+        // VALIDATE INDIVIDUAL PIPELINES
+        // ========================================================================
+
+        // Helper to find pipeline by name
+        let find_pipeline = |name: &str| {
+            plan.pipelines
+                .iter()
+                .find(|p| p.name == name)
+                .unwrap_or_else(|| panic!("Pipeline '{}' not found", name))
+        };
+
+        // PIPELINE 1: migrate_language (simple migration)
+        let lang_pipeline = find_pipeline("migrate_language");
+        assert_eq!(lang_pipeline.source.table, "language");
+        assert_eq!(lang_pipeline.destination.table, "language");
+        assert!(
+            lang_pipeline.settings.create_missing_tables,
+            "Should create missing tables"
+        );
+        assert_eq!(
+            lang_pipeline.mappings.len(),
+            3,
+            "Should have 3 column mappings"
+        );
+
+        // PIPELINE 2: migrate_category (with dependency)
+        let cat_pipeline = find_pipeline("migrate_category");
+        assert_eq!(
+            cat_pipeline.depends_on.len(),
+            1,
+            "Should depend on migrate_language"
+        );
+        assert!(
+            cat_pipeline
+                .depends_on
+                .contains(&"migrate_language".to_string())
+        );
+
+        // PIPELINE 3: migrate_actors_enriched (computed columns)
+        let actors_pipeline = find_pipeline("migrate_actors_enriched");
+        assert_eq!(actors_pipeline.source.table, "actor");
+        assert_eq!(actors_pipeline.destination.table, "actors_enriched");
+
+        // Verify computed columns in mappings
+        let has_full_name = actors_pipeline
+            .mappings
+            .iter()
+            .any(|m| m.target == "full_name");
+        let has_search_name = actors_pipeline
+            .mappings
+            .iter()
+            .any(|m| m.target == "search_name");
+        assert!(has_full_name, "Should have full_name computed column");
+        assert!(has_search_name, "Should have search_name computed column");
+
+        // PIPELINE 4: migrate_films_affordable (WHERE filters)
+        let films_pipeline = find_pipeline("migrate_films_affordable");
+        assert_eq!(films_pipeline.filters.len(), 1, "Should have 1 filter");
+        assert_eq!(films_pipeline.filters[0].name, "affordable_films");
+        assert!(
+            films_pipeline.filters[0]
+                .columns_referenced
+                .contains(&"film.rental_rate".to_string())
+                || films_pipeline.filters[0]
+                    .columns_referenced
+                    .contains(&"rental_rate".to_string()),
+            "Filter should reference rental_rate"
+        );
+
+        // PIPELINE 5: migrate_customers_with_store (single JOIN)
+        let customers_pipeline = find_pipeline("migrate_customers_with_store");
+        assert_eq!(customers_pipeline.joins.len(), 1, "Should have 1 join");
+        assert_eq!(customers_pipeline.joins[0].alias, "store");
+
+        // Verify lookup column
+        let has_store_address = customers_pipeline
+            .mappings
+            .iter()
+            .any(|m| m.target == "store_address_id");
+        assert!(
+            has_store_address,
+            "Should have store_address_id lookup column"
+        );
+
+        // PIPELINE 6: migrate_film_details (multiple JOINs, arithmetic)
+        let film_details = find_pipeline("migrate_film_details");
+        assert_eq!(film_details.joins.len(), 1, "Should have 1 join");
+
+        // Verify arithmetic transformations
+        let has_weekly_cost = film_details
+            .mappings
+            .iter()
+            .any(|m| m.target == "weekly_rental_cost");
+        let has_cost_with_tax = film_details
+            .mappings
+            .iter()
+            .any(|m| m.target == "cost_with_tax");
+        assert!(has_weekly_cost, "Should have weekly_rental_cost computed");
+        assert!(has_cost_with_tax, "Should have cost_with_tax computed");
+
+        // PIPELINE 7: migrate_payments_validated (SKIP validation)
+        let payments_pipeline = find_pipeline("migrate_payments_validated");
+        assert!(
+            payments_pipeline.validations.len() >= 2,
+            "Should have at least 2 validations"
+        );
+
+        // Verify validations have correct actions
+        let has_skip_validation = payments_pipeline
+            .validations
+            .iter()
+            .any(|v| matches!(v.action, Some(ValidationAction::Skip)));
+        assert!(has_skip_validation, "Should have SKIP validation actions");
+
+        // PIPELINE 8: migrate_films_with_warnings (WARN validation)
+        let films_warn = find_pipeline("migrate_films_with_warnings");
+        assert!(
+            films_warn.validations.len() >= 3,
+            "Should have at least 3 warn validations"
+        );
+
+        // PIPELINE 9: migrate_addresses_filtered (mixed SKIP + WARN)
+        let addresses = find_pipeline("migrate_addresses_filtered");
+        assert!(
+            addresses.validations.len() >= 3,
+            "Should have mixed validations"
+        );
+
+        // PIPELINE 10: migrate_film_actors_enriched (complex joins + validation)
+        let film_actors = find_pipeline("migrate_film_actors_enriched");
+        assert_eq!(
+            film_actors.joins.len(),
+            2,
+            "Should have 2 joins (actor + film)"
+        );
+        assert!(
+            film_actors.validations.len() >= 2,
+            "Should have validations on joined data"
+        );
+
+        // PIPELINE 11: migrate_inventory_with_file_dlq (error handling)
+        let inventory = find_pipeline("migrate_inventory_with_file_dlq");
+        assert!(
+            inventory.error_handling.failed_rows.is_some(),
+            "Should have failed_rows DLQ configured"
+        );
+
+        // PIPELINE 12: migrate_staff_with_hooks (before/after hooks)
+        let staff = find_pipeline("migrate_staff_with_hooks");
+        assert!(!staff.hooks.before.is_empty(), "Should have before hooks");
+        assert!(!staff.hooks.after.is_empty(), "Should have after hooks");
+
+        // PIPELINE 13: create_customer_360_view (multi-table denormalization)
+        let customer_360 = find_pipeline("create_customer_360_view");
+        assert_eq!(customer_360.joins.len(), 3, "Should have 3 joins");
+        assert_eq!(
+            customer_360.filters.len(),
+            1,
+            "Should have 1 filter (active customers)"
+        );
+
+        // Verify denormalized columns
+        let has_full_address = customer_360
+            .mappings
+            .iter()
+            .any(|m| m.target == "full_address");
+        assert!(
+            has_full_address,
+            "Should have full_address denormalized column"
+        );
+
+        // PIPELINE 14: create_migration_summary (diamond dependency)
+        let summary_pipeline = find_pipeline("create_migration_summary");
+        assert!(
+            summary_pipeline.depends_on.len() >= 2,
+            "Should have multiple dependencies (diamond pattern)"
+        );
+
+        // ========================================================================
+        // VALIDATE EXECUTION ORDER (DAG RESOLUTION)
+        // ========================================================================
+
+        // Verify execution stages make sense
+        let total_pipelines_in_stages: usize = plan
+            .execution_order
+            .iter()
+            .map(|stage| stage.pipelines.len())
+            .sum();
+        assert_eq!(
+            total_pipelines_in_stages, 14,
+            "All 14 pipelines should be in execution stages"
+        );
+
+        // First stage should contain pipelines with no dependencies
+        let first_stage = &plan.execution_order[0];
+        for pipeline_name in &first_stage.pipelines {
+            let pipeline = find_pipeline(pipeline_name);
+            assert!(
+                pipeline.depends_on.is_empty()
+                    || pipeline
+                        .depends_on
+                        .iter()
+                        .all(|dep| !core_plan.pipelines.iter().any(|p| p.name == *dep)),
+                "First stage pipeline '{}' should have no unresolved dependencies",
+                pipeline_name
+            );
+        }
+
+        // ========================================================================
+        // VALIDATE METADATA
+        // ========================================================================
+
+        assert!(!plan.plan_id.is_empty(), "Plan should have an ID");
+        assert!(!plan.config_hash.is_empty(), "Plan should have config hash");
+        assert!(
+            plan.config_path.contains("plan-test.smql"),
+            "Config path should be correct"
+        );
+
+        // Verify defines are resolved
+        assert!(
+            plan.defines.constants.len() >= 4,
+            "Should have resolved define constants"
+        );
+
+        // Verify connections are present
+        assert!(
+            plan.connections.len() >= 2,
+            "Should have at least source and destination connections"
+        );
+
+        // ========================================================================
+        // VALIDATE DIAGNOSTICS (WARNINGS/ERRORS)
+        // ========================================================================
+
+        // Plan might have warnings but should not have blocking errors
+        if plan.summary.error_count > 0 {
+            // Print diagnostics for debugging
+            for diagnostic in &plan.diagnostics {
+                if diagnostic.level == DiagnosticLevel::Error {
+                    eprintln!(
+                        "Error diagnostic: {} - {}",
+                        diagnostic.code, diagnostic.message
+                    );
+                }
+            }
+            panic!(
+                "Plan has {} errors but should be executable",
+                plan.summary.error_count
+            );
+        }
+
+        println!("✓ Plan generation test passed!");
+        println!("  - {} pipelines planned", plan.pipelines.len());
+        println!("  - {} execution stages", plan.execution_order.len());
+        println!("  - {} warnings", plan.summary.warning_count);
+        println!("  - Plan is executable: {}", plan.is_executable);
     }
 }

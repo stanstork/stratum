@@ -1,3 +1,5 @@
+use crate::sql::base::filter::SqlFilter;
+use crate::sql::base::metadata::index::IndexMetadata;
 use crate::sql::base::probe::CapabilityProbe;
 use crate::sql::mysql::params::MySqlParamStore;
 use crate::sql::{
@@ -22,7 +24,7 @@ use model::{
     records::row::RowData,
 };
 use mysql_async::{Pool, Row as MySqlRow, prelude::Queryable};
-use planner::query::dialect;
+use query_builder::dialect;
 use std::collections::HashMap;
 use tracing::info;
 
@@ -37,6 +39,9 @@ const QUERY_TRUNCATE_TABLE_SQL: &str = include_str!("sql/table_truncate.sql");
 const QUERY_TABLE_METADATA_SQL: &str = include_str!("sql/table_metadata.sql");
 const QUERY_TABLE_REFERENCING_SQL: &str = include_str!("sql/table_referencing.sql");
 const QUERY_COLUMN_TYPE_SQL: &str = include_str!("sql/column_type.sql");
+const QUERY_INDEX_METADATA_SQL: &str = include_str!("sql/index_metadata.sql");
+const QUERY_COUNT_ROWS_FAST_SQL: &str = include_str!("sql/count_rows_fast.sql");
+const QUERY_TABLE_SIZE_SQL: &str = include_str!("sql/table_size.sql");
 
 #[async_trait]
 impl SqlAdapter for MySqlAdapter {
@@ -64,6 +69,20 @@ impl SqlAdapter for MySqlAdapter {
     async fn query_rows(&self, sql: &str) -> Result<Vec<RowData>, DbError> {
         let mut conn = self.pool.get_conn().await?;
         let rows: Vec<MySqlRow> = conn.query(sql).await?;
+        Ok(rows
+            .iter()
+            .map(|row| DbRow::MySqlRow(row).to_row_data(""))
+            .collect())
+    }
+
+    async fn query_rows_params(
+        &self,
+        sql: &str,
+        params: Vec<Value>,
+    ) -> Result<Vec<RowData>, DbError> {
+        let mut conn = self.pool.get_conn().await?;
+        let params = MySqlParamStore::from_values(&params).params();
+        let rows: Vec<MySqlRow> = conn.exec(sql, params).await?;
         Ok(rows
             .iter()
             .map(|row| DbRow::MySqlRow(row).to_row_data(""))
@@ -131,6 +150,21 @@ impl SqlAdapter for MySqlAdapter {
         MetadataProvider::construct_table_metadata(table, columns)
     }
 
+    async fn index_metadata(&self, table: &str) -> Result<Vec<IndexMetadata>, DbError> {
+        let mut conn = self.pool.get_conn().await?;
+        let rows: Vec<MySqlRow> = conn.exec(QUERY_INDEX_METADATA_SQL, (table,)).await?;
+
+        let indexes = rows
+            .iter()
+            .map(|row| {
+                let db_row = DbRow::MySqlRow(row);
+                Ok(IndexMetadata::from_row(&db_row))
+            })
+            .collect::<Result<Vec<IndexMetadata>, DbError>>()?;
+
+        Ok(indexes)
+    }
+
     async fn referencing_tables(&self, table: &str) -> Result<Vec<String>, DbError> {
         let mut conn = self.pool.get_conn().await?;
         let rows: Vec<MySqlRow> = conn.exec(QUERY_TABLE_REFERENCING_SQL, (table,)).await?;
@@ -165,6 +199,50 @@ impl SqlAdapter for MySqlAdapter {
         let mut conn = self.pool.get_conn().await?;
         conn.query_drop(sql).await?;
         Ok(())
+    }
+
+    async fn count_rows(
+        &self,
+        table: &str,
+        schema: Option<&str>,
+        filter: Option<&SqlFilter>,
+    ) -> Result<u64, DbError> {
+        let fqn = schema
+            .map(|s| format!("{}.{}", s, table))
+            .unwrap_or_else(|| table.to_string());
+
+        let query = match filter {
+            Some(f) => format!("SELECT COUNT(*) AS cnt FROM {} {}", fqn, f.to_sql()),
+            None => format!("SELECT COUNT(*) AS cnt FROM {}", fqn),
+        };
+
+        let mut conn = self.pool.get_conn().await?;
+        let row: Option<MySqlRow> = conn.query_first(query).await?;
+        let count: u64 = match row {
+            Some(row) => row.get("cnt").unwrap_or(0),
+            None => 0,
+        };
+        Ok(count)
+    }
+
+    async fn count_rows_fast(&self, table: &str, _schema: Option<&str>) -> Result<u64, DbError> {
+        let mut conn = self.pool.get_conn().await?;
+        let row: Option<MySqlRow> = conn.exec_first(QUERY_COUNT_ROWS_FAST_SQL, (table,)).await?;
+        let estimate: u64 = match row {
+            Some(row) => row.get("estimate").unwrap_or(0),
+            None => 0,
+        };
+        Ok(estimate)
+    }
+
+    async fn table_size_bytes(&self, table: &str) -> Result<u64, DbError> {
+        let mut conn = self.pool.get_conn().await?;
+        let row: Option<MySqlRow> = conn.exec_first(QUERY_TABLE_SIZE_SQL, (table,)).await?;
+        let size_bytes: u64 = match row {
+            Some(row) => row.get("size_bytes").unwrap_or(0),
+            None => 0,
+        };
+        Ok(size_bytes)
     }
 
     fn kind(&self) -> DatabaseKind {

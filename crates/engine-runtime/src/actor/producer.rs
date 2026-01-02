@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use engine_core::{event_bus::bus::EventBus, metrics::Metrics};
 use engine_processing::{
     cb::{CircuitBreaker, CircuitBreakerState},
-    producer::{DataProducer, ProducerStatus},
+    producer::{Producer, ProducerStatus},
 };
 use model::events::migration::{MigrationEvent, ProducerMode};
 use std::time::Duration;
@@ -26,7 +26,7 @@ pub enum TickResponse {
 }
 
 pub struct ProducerActor {
-    producer: Box<dyn DataProducer + Send + 'static>,
+    producer: Producer,
 
     // Control state
     running: bool,
@@ -48,11 +48,7 @@ pub struct ProducerActor {
 }
 
 impl ProducerActor {
-    pub fn new(
-        producer: Box<dyn DataProducer + Send + 'static>,
-        cancel_token: CancellationToken,
-        metrics: Metrics,
-    ) -> Self {
+    pub fn new(producer: Producer, cancel_token: CancellationToken, metrics: Metrics) -> Self {
         Self {
             producer,
             running: false,

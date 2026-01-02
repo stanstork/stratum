@@ -16,3 +16,14 @@ impl Display for DataFormat {
         }
     }
 }
+
+impl DataFormat {
+    pub fn parse(format: &str) -> Option<Self> {
+        match format.to_lowercase().as_str() {
+            "mysql" => Some(DataFormat::MySql),
+            "postgres" => Some(DataFormat::Postgres),
+            "csv" => Some(DataFormat::Csv),
+            _ => None,
+        }
+    }
+}

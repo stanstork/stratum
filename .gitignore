@@ -23,7 +23,9 @@ migration_buffer_*/
 /.idea
 .DS_Store
 
+# Generated engine test files
 meta.json
 rep.json
+res.json
 
 engine-tests/migration_buffer_*/

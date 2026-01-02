@@ -1,7 +1,8 @@
 use crate::sql::base::{
     capabilities::DbCapabilities,
     error::{ConnectorError, DbError},
-    metadata::{column::ColumnMetadata, table::TableMetadata},
+    filter::SqlFilter,
+    metadata::{column::ColumnMetadata, index::IndexMetadata, table::TableMetadata},
     requests::FetchRowsRequest,
     transaction::Transaction,
 };
@@ -44,6 +45,11 @@ pub trait SqlAdapter {
     }
 
     async fn query_rows(&self, sql: &str) -> Result<Vec<RowData>, DbError>;
+    async fn query_rows_params(
+        &self,
+        sql: &str,
+        params: Vec<Value>,
+    ) -> Result<Vec<RowData>, DbError>;
 
     async fn fetch_rows(&self, request: FetchRowsRequest) -> Result<Vec<RowData>, DbError>;
     async fn fetch_existing_keys(
@@ -57,9 +63,29 @@ pub trait SqlAdapter {
     async fn table_exists(&self, table: &str) -> Result<bool, DbError>;
     async fn list_tables(&self) -> Result<Vec<String>, DbError>;
     async fn table_metadata(&self, table: &str) -> Result<TableMetadata, DbError>;
+    async fn index_metadata(&self, table: &str) -> Result<Vec<IndexMetadata>, DbError>;
     async fn referencing_tables(&self, table: &str) -> Result<Vec<String>, DbError>;
     async fn column_db_type(&self, table: &str, column: &str) -> Result<String, DbError>;
     async fn truncate_table(&self, table: &str) -> Result<(), DbError>;
+    async fn table_size_bytes(&self, table: &str) -> Result<u64, DbError>;
+
+    // Counting
+    async fn count_rows(
+        &self,
+        table: &str,
+        schema: Option<&str>,
+        filter: Option<&SqlFilter>,
+    ) -> Result<u64, DbError>;
+    async fn count_rows_fast(&self, table: &str, schema: Option<&str>) -> Result<u64, DbError>;
+    async fn count_approximate(
+        &self,
+        _table: &str,
+        _schema: Option<&str>,
+    ) -> Result<(u64, u64), DbError> {
+        Err(DbError::Unknown(
+            "Approximate row counting not implemented for this adapter".to_string(),
+        ))
+    }
 
     // Dialect & capabilities
     fn kind(&self) -> DatabaseKind;

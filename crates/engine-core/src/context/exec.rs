@@ -43,18 +43,18 @@ impl ExecutionContext {
 }
 
 /// Connection pool for reusing adapters
-struct ConnectionPool {
+pub struct ConnectionPool {
     adapters: HashMap<String, Adapter>,
 }
 
 impl ConnectionPool {
-    fn new() -> Self {
+    pub fn new() -> Self {
         ConnectionPool {
             adapters: HashMap::new(),
         }
     }
 
-    async fn get_or_create(&mut self, conn: &Connection) -> Result<Adapter, AdapterError> {
+    pub async fn get_or_create(&mut self, conn: &Connection) -> Result<Adapter, AdapterError> {
         if let Some(adapter) = self.adapters.get(&conn.name) {
             return Ok(adapter.clone());
         }
@@ -103,5 +103,11 @@ impl ConnectionPool {
         // Cache the adapter
         self.adapters.insert(conn.name.clone(), adapter.clone());
         Ok(adapter)
+    }
+}
+
+impl Default for ConnectionPool {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -1,15 +1,9 @@
 use crate::{
     dag::Dag,
     error::MigrationError,
-    execution::{factory, metadata, orchestrator::PipelineOrchestrator},
+    execution::{metadata, orchestrator::PipelineOrchestrator},
 };
-use engine_config::{
-    report::{
-        dry_run::{DryRunParams, DryRunReport, dest_endpoint, source_endpoint},
-        summary::SummaryReport,
-    },
-    settings,
-};
+use engine_config::settings;
 use engine_core::{
     connectors::{destination::Destination, source::Source},
     context::{exec::ExecutionContext, item::ItemContext},
@@ -23,11 +17,8 @@ use model::execution::{
     pipeline::Pipeline,
 };
 use model::{pagination::cursor::Cursor, transform::mapping::TransformationMetadata};
-use planner::query::offsets::OffsetStrategyFactory;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use query_builder::offsets::OffsetStrategyFactory;
+use std::{collections::HashSet, sync::Arc};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
@@ -61,10 +52,9 @@ impl DagExecutor {
         })
     }
 
-    pub async fn execute(self, dag: Dag) -> Result<HashMap<String, SummaryReport>, MigrationError> {
+    pub async fn execute(self, dag: Dag) -> Result<(), MigrationError> {
         // Track failed pipelines to skip their dependents
         let mut failed_pipelines = HashSet::new();
-        let mut report = HashMap::new();
 
         self.exec_ctx
             .state
@@ -140,8 +130,8 @@ impl DagExecutor {
                 ExecutionStrategy::Sequential => {
                     for pipeline_name in &executable {
                         match self.execute_pipeline(pipeline_name).await {
-                            Ok(summary) => {
-                                report.insert(pipeline_name.clone(), summary);
+                            Ok(_) => {
+                                info!("Pipeline '{}' completed successfully", pipeline_name);
                             }
                             Err(e) => {
                                 error!("Pipeline '{}' failed: {}", pipeline_name, e);
@@ -163,8 +153,8 @@ impl DagExecutor {
 
                     for (name, result) in results {
                         match result {
-                            Ok(summary) => {
-                                report.insert(name.clone(), summary);
+                            Ok(_) => {
+                                info!("Pipeline '{}' completed successfully", name);
                             }
                             Err(e) => {
                                 error!("Pipeline '{}' failed: {}", name, e);
@@ -197,7 +187,7 @@ impl DagExecutor {
                         "Continue strategy: returning Ok despite {} failed/skipped pipelines",
                         failed_list.len()
                     );
-                    Ok(report)
+                    Ok(())
                 }
                 FailureStrategy::FailFast => {
                     // This shouldn't happen since fail_fast returns early, but handle it anyway
@@ -205,7 +195,8 @@ impl DagExecutor {
                 }
             }
         } else {
-            Ok(report)
+            info!("Migration completed successfully with all pipelines");
+            Ok(())
         }
     }
 
@@ -213,7 +204,7 @@ impl DagExecutor {
         &self,
         pipelines: &[String],
         max_concurrency: usize,
-    ) -> Vec<(String, Result<SummaryReport, MigrationError>)> {
+    ) -> Vec<(String, Result<(), MigrationError>)> {
         stream::iter(pipelines)
             .map(|pipeline_name| async move {
                 let name = pipeline_name.clone();
@@ -225,7 +216,7 @@ impl DagExecutor {
             .await
     }
 
-    async fn execute_pipeline(&self, pipeline_name: &str) -> Result<SummaryReport, MigrationError> {
+    async fn execute_pipeline(&self, pipeline_name: &str) -> Result<(), MigrationError> {
         let (idx, pipeline) = self
             .plan
             .pipelines
@@ -239,11 +230,7 @@ impl DagExecutor {
         self.run_pipeline(idx, pipeline).await
     }
 
-    async fn run_pipeline(
-        &self,
-        idx: usize,
-        pipeline: &Pipeline,
-    ) -> Result<SummaryReport, MigrationError> {
+    async fn run_pipeline(&self, idx: usize, pipeline: &Pipeline) -> Result<(), MigrationError> {
         let start_time = std::time::Instant::now();
         info!("Starting migration pipeline {}", pipeline.destination.table);
 
@@ -256,10 +243,23 @@ impl DagExecutor {
 
         // Create sources, destinations, and mapping
         let mapping = TransformationMetadata::new(pipeline);
+        let source_adapter = self
+            .exec_ctx
+            .get_adapter(&pipeline.source.connection)
+            .await?;
+        let dest_adapter = self
+            .exec_ctx
+            .get_adapter(&pipeline.destination.connection)
+            .await?;
+
         let source =
-            factory::create_source(&self.exec_ctx, pipeline, &mapping, offset_strategy.clone())
-                .await?;
-        let destination = factory::create_destination(&self.exec_ctx, pipeline).await?;
+            Source::new(source_adapter, pipeline, &mapping, offset_strategy.clone()).await?;
+        let destination = Destination::new(
+            dest_adapter,
+            &pipeline.destination.table,
+            &pipeline.destination.connection,
+        )
+        .await?;
 
         let state = self.exec_ctx.state.clone();
         let mut item_ctx = ItemContext::builder(exec_ctx.clone())
@@ -279,29 +279,17 @@ impl DagExecutor {
             .append_wal(&WalEntry::ItemStart { run_id, item_id })
             .await?;
 
-        let dry_run_report = self.dry_run_report(&source, &destination, &mapping);
-
         // Validate and apply settings
-        let settings = settings::validate_and_apply(
-            &mut item_ctx,
-            &pipeline.settings,
-            self.dry_run,
-            &dry_run_report,
-        )
-        .await?;
+        let settings =
+            settings::validate_and_apply(&mut item_ctx, &pipeline.settings, self.dry_run).await?;
         metadata::load(&mut item_ctx).await?;
 
         let item_ctx = Arc::new(Mutex::new(item_ctx));
 
         // Create and execute the pipeline orchestrator
         // This handles: before hooks -> pipeline execution -> after hooks
-        let orchestrator = PipelineOrchestrator::new(
-            pipeline.clone(),
-            item_ctx,
-            settings,
-            self.cancel.clone(),
-            dry_run_report.clone(),
-        );
+        let orchestrator =
+            PipelineOrchestrator::new(pipeline.clone(), item_ctx, settings, self.cancel.clone());
 
         orchestrator.execute().await?;
 
@@ -312,25 +300,7 @@ impl DagExecutor {
             duration.as_secs_f64()
         );
 
-        let final_report = dry_run_report.lock().await.clone();
-        Ok(SummaryReport {
-            dry_run_report: self.dry_run.then_some(final_report),
-        })
-    }
-
-    fn dry_run_report(
-        &self,
-        source: &Source,
-        destination: &Destination,
-        mapping: &TransformationMetadata,
-    ) -> Arc<Mutex<DryRunReport>> {
-        Arc::new(Mutex::new(DryRunReport::new(DryRunParams {
-            source: source_endpoint(source),
-            destination: dest_endpoint(destination),
-            mapping,
-            config_hash: &self.plan.hash(),
-            copy_columns: engine_config::settings::CopyColumns::All,
-        })))
+        Ok(())
     }
 
     fn make_item_id(plan_hash: &str, p: &Pipeline, idx: usize) -> String {

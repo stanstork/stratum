@@ -861,15 +861,25 @@ fn build_is_null_check(pair: Pair<Rule>, span: Span) -> BuildResult<Expression> 
 fn build_primary_inner(pair: Pair<Rule>, span: Span) -> BuildResult<Expression> {
     match pair.as_rule() {
         Rule::lit_number => {
-            let num = pair.as_str().parse::<f64>().map_err(|_| BuildError {
-                message: format!("Invalid number: {}", pair.as_str()),
-                line: span.line,
-                column: span.column,
-            })?;
-            Ok(Expression::new(
-                ExpressionKind::Literal(Literal::Number(num)),
-                span,
-            ))
+            let s = pair.as_str();
+            let literal = if s.contains('.') || s.contains('e') || s.contains('E') {
+                // Parse as float
+                let num = s.parse::<f64>().map_err(|_| BuildError {
+                    message: format!("Invalid number: {}", s),
+                    line: span.line,
+                    column: span.column,
+                })?;
+                Literal::Number(num)
+            } else {
+                // Parse as integer
+                let num = s.parse::<i64>().map_err(|_| BuildError {
+                    message: format!("Invalid integer: {}", s),
+                    line: span.line,
+                    column: span.column,
+                })?;
+                Literal::Int(num)
+            };
+            Ok(Expression::new(ExpressionKind::Literal(literal), span))
         }
         Rule::lit_string => {
             let s = parse_string_literal(pair.as_str());

@@ -6,6 +6,32 @@ use model::records::row::RowData;
 use std::sync::Arc;
 use tracing::warn;
 
+/// Outcome of applying a transformation pipeline to a row
+#[derive(Debug, Clone, PartialEq)]
+pub enum ApplyOutcome {
+    /// Row passed all transformations and validations
+    Success,
+    /// Row was filtered out (excluded from processing)
+    Skipped {
+        /// Optional reason why the row was filtered
+        reason: Option<String>,
+    },
+    /// Row passed with one or more validation warnings (continue processing)
+    Warning {
+        /// List of validation warnings that occurred
+        warnings: Vec<ValidationWarning>,
+    },
+}
+
+/// Details about a validation warning
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValidationWarning {
+    /// Validation rule that triggered the warning
+    pub rule: String,
+    /// Warning message
+    pub message: String,
+}
+
 pub trait Transform: Send + Sync {
     fn apply(&self, row: &mut RowData) -> Result<(), TransformError>;
 }
@@ -54,7 +80,9 @@ impl TransformPipeline {
     }
 
     /// Apply pipeline to a single row in-place.
-    pub fn apply(&self, row: &mut RowData) -> Result<bool, TransformError> {
+    pub fn apply(&self, row: &mut RowData) -> Result<ApplyOutcome, TransformError> {
+        let mut warnings = Vec::new();
+
         for stage in &self.stages {
             match stage {
                 PipelineStage::Transform(transform) => {
@@ -62,36 +90,22 @@ impl TransformPipeline {
                 }
                 PipelineStage::Filter(filter) => {
                     if !filter.should_keep(row) {
-                        return Ok(false);
+                        return Ok(ApplyOutcome::Skipped { reason: None });
                     }
                 }
-                PipelineStage::Validation(validator) => match validator.validate(row) {
-                    Ok(res) => match res {
-                        ValidationResult::Pass => {
-                            // Row is valid, continue processing
-                        }
-                        ValidationResult::Failed {
-                            rule,
-                            message,
-                            action,
-                        } => match action {
-                            ValidationAction::Skip => {
-                                warn!("Validation '{}' failed: {} (skipping row)", rule, message);
-                                return Ok(false);
-                            }
-                            ValidationAction::Fail => {
-                                return Err(TransformError::ValidationFailed { rule, message });
-                            }
-                            ValidationAction::Warn => {
-                                warn!("Validation '{}' failed: {} (continuing)", rule, message);
-                            }
-                        },
-                    },
-                    Err(e) => return Err(e),
-                },
+                PipelineStage::Validation(validator) => {
+                    if let Some(outcome) = self.validate(row, validator, &mut warnings)? {
+                        return Ok(outcome);
+                    }
+                }
             }
         }
-        Ok(true)
+
+        if warnings.is_empty() {
+            Ok(ApplyOutcome::Success)
+        } else {
+            Ok(ApplyOutcome::Warning { warnings })
+        }
     }
 
     pub fn apply_batch(
@@ -105,8 +119,10 @@ impl TransformPipeline {
         // Process entire batch - collect all failures
         for mut row in rows.drain(..) {
             match self.apply(&mut row) {
-                Ok(true) => successful.push(row),
-                Ok(false) => filtered.push(row),
+                Ok(ApplyOutcome::Success) | Ok(ApplyOutcome::Warning { .. }) => {
+                    successful.push(row)
+                }
+                Ok(ApplyOutcome::Skipped { .. }) => filtered.push(row),
                 Err(e) => {
                     // Collect failed row but continue processing batch
                     failed.push((row, e));
@@ -132,6 +148,43 @@ impl TransformPipeline {
         self.stages
             .push(PipelineStage::Validation(Arc::new(validator)));
         self
+    }
+
+    fn validate(
+        &self,
+        row: &mut RowData,
+        validator: &Arc<dyn Validator>,
+        warnings: &mut Vec<ValidationWarning>,
+    ) -> Result<Option<ApplyOutcome>, TransformError> {
+        let res = validator.validate(row)?;
+
+        if let ValidationResult::Failed {
+            rule,
+            message,
+            action,
+        } = res
+        {
+            match action {
+                ValidationAction::Skip => {
+                    warn!("Validation '{}' failed: {} (skipping row)", rule, message);
+                    return Ok(Some(ApplyOutcome::Skipped {
+                        reason: Some(format!("Validation '{}' failed: {}", rule, message)),
+                    }));
+                }
+                ValidationAction::Fail => {
+                    return Err(TransformError::ValidationFailed { rule, message });
+                }
+                ValidationAction::Warn => {
+                    warn!("Validation '{}' failed: {} (continuing)", rule, message);
+                    warnings.push(ValidationWarning {
+                        rule: rule.clone(),
+                        message: message.clone(),
+                    });
+                }
+            }
+        }
+
+        Ok(None)
     }
 }
 

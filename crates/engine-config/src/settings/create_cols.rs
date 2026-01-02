@@ -1,8 +1,9 @@
+use crate::settings::validated::ValidatedSettings;
+
 use super::{
     MigrationSetting, context::SchemaSettingContext, error::SettingsError,
     phase::MigrationSettingsPhase,
 };
-use crate::{report::dry_run::DryRunReport, settings::validated::ValidatedSettings};
 use async_trait::async_trait;
 use connectors::{
     metadata::{entity::EntityMetadata, field::FieldMetadata},
@@ -16,12 +17,10 @@ use engine_core::{
         utils::create_column_def,
     },
 };
-use futures::lock::Mutex;
 use model::{
     core::data_type::DataType, execution::expr::CompiledExpression,
     transform::mapping::TransformationMetadata,
 };
-use std::sync::Arc;
 
 pub struct CreateMissingColumnsSetting {
     context: SchemaSettingContext,
@@ -113,7 +112,7 @@ impl CreateMissingColumnsSetting {
                             comp.name
                         ))
                     })?;
-                    let def = ColumnDef::from_computed(&comp.name, &data_type);
+                    let def = ColumnDef::from_computed(&comp.name, &data_type.0);
                     self.context.schema_manager.add_column(table, &def).await?;
                 }
             }
@@ -128,10 +127,9 @@ impl CreateMissingColumnsSetting {
         dest: &Destination,
         mapping: &TransformationMetadata,
         settings: &ValidatedSettings,
-        dry_run_report: &Arc<Mutex<DryRunReport>>,
     ) -> Self {
         Self {
-            context: SchemaSettingContext::new(src, dest, mapping, settings, dry_run_report).await,
+            context: SchemaSettingContext::new(src, dest, mapping, settings).await,
         }
     }
 }

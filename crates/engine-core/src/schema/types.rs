@@ -46,7 +46,7 @@ pub trait TypeInferencer {
         columns: &[FieldMetadata],
         mapping: &TransformationMetadata,
         source: &DataSource,
-    ) -> Option<DataType>;
+    ) -> Option<(DataType, Option<usize>)>;
 }
 
 impl TypeEngine {
@@ -75,25 +75,10 @@ impl TypeEngine {
         computed: &ComputedField,
         columns: &[FieldMetadata],
         mapping: &TransformationMetadata,
-    ) -> Option<DataType> {
+    ) -> Option<(DataType, Option<usize>)> {
         // Clone the expression node into wrapper and run inference.
         let expr = ExpressionWrapper(computed.expression.clone());
-        let data_type = expr.infer_type(columns, mapping, &self.source).await;
-
-        if let Some(data_type) = data_type {
-            Some(data_type)
-        } else {
-            // DotPath with 2+ segments represents cross-entity references
-            match &computed.expression {
-                CompiledExpression::DotPath(segments) if segments.len() >= 2 => None,
-                _ => {
-                    panic!(
-                        "Failed to infer type for computed column `{}`.",
-                        computed.name
-                    );
-                }
-            }
-        }
+        expr.infer_type(columns, mapping, &self.source).await
     }
 }
 
@@ -105,20 +90,20 @@ impl TypeInferencer for ExpressionWrapper {
         columns: &[FieldMetadata],
         mapping: &TransformationMetadata,
         source: &DataSource,
-    ) -> Option<DataType> {
+    ) -> Option<(DataType, Option<usize>)> {
         match &self.0 {
             CompiledExpression::Identifier(identifier) => columns
                 .iter()
                 .find(|col| col.name().eq_ignore_ascii_case(identifier))
-                .map(|col| col.data_type()),
+                .map(|col| (col.data_type(), col.char_max_length())),
 
             CompiledExpression::Literal(value) => Some(match value {
-                Value::String(_) => DataType::String,
-                Value::Int(_) => DataType::Int,
-                Value::Float(_) => DataType::Float,
-                Value::Boolean(_) => DataType::Boolean,
-                Value::Null => DataType::String, // Default for null
-                _ => DataType::String,           // Fallback for other types
+                Value::String(_) => (DataType::String, None),
+                Value::Int(_) => (DataType::Int, None),
+                Value::Float(_) => (DataType::Float, None),
+                Value::Boolean(_) => (DataType::Boolean, None),
+                Value::Null => (DataType::String, None), // Default for null
+                _ => (DataType::String, None),           // Fallback for other types
             }),
 
             CompiledExpression::Binary { left, right, .. } => {
@@ -128,13 +113,13 @@ impl TypeInferencer for ExpressionWrapper {
                 let rt = ExpressionWrapper((**right).clone())
                     .infer_type(columns, mapping, source)
                     .await?;
-                Some(get_numeric_type(&lt, &rt))
+                Some(get_numeric_type(&lt.0, &rt.0))
             }
 
             CompiledExpression::FunctionCall { name, .. } => {
                 match name.to_ascii_lowercase().as_str() {
-                    "lower" | "upper" | "concat" => Some(DataType::VarChar),
-                    "env" => Some(DataType::VarChar), // env() always returns string
+                    "lower" | "upper" | "concat" => Some((DataType::VarChar, None)),
+                    "env" => Some((DataType::VarChar, None)), // env() always returns string
                     _ => None,
                 }
             }
@@ -143,19 +128,21 @@ impl TypeInferencer for ExpressionWrapper {
             CompiledExpression::DotPath(segments) if segments.len() >= 2 => {
                 let entity = &segments[0];
                 let key = &segments[1];
+                let table_name = mapping.entities.reverse_resolve(entity);
+
                 // For DotPath, the entity name IS the source table name, not a destination
-                let meta = source.fetch_meta(entity.clone()).await.ok()?;
+                let meta = source.fetch_meta(table_name).await.ok()?;
                 match meta {
                     EntityMetadata::Table(meta) => meta
                         .columns()
                         .iter()
                         .find(|col| col.name.eq_ignore_ascii_case(key))
-                        .map(|col| col.data_type.clone()),
+                        .map(|col| (col.data_type.clone(), col.char_max_length)),
                     EntityMetadata::Csv(meta) => meta
                         .columns
                         .iter()
                         .find(|col| col.name.eq_ignore_ascii_case(key))
-                        .map(|col| col.data_type.clone()),
+                        .map(|col| (col.data_type.clone(), None)),
                 }
             }
 
@@ -163,7 +150,7 @@ impl TypeInferencer for ExpressionWrapper {
             CompiledExpression::DotPath(segments) if segments.len() == 1 => columns
                 .iter()
                 .find(|col| col.name().eq_ignore_ascii_case(&segments[0]))
-                .map(|col| col.data_type()),
+                .map(|col| (col.data_type(), col.char_max_length())),
 
             // Handle other expression types
             CompiledExpression::Unary { operand, .. } => {
@@ -197,7 +184,7 @@ impl TypeInferencer for ExpressionWrapper {
             }
 
             CompiledExpression::IsNull(_) | CompiledExpression::IsNotNull(_) => {
-                Some(DataType::Boolean)
+                Some((DataType::Boolean, None))
             }
 
             CompiledExpression::Array(_) => None, // Arrays not yet supported
@@ -206,23 +193,23 @@ impl TypeInferencer for ExpressionWrapper {
     }
 }
 
-fn get_numeric_type(left: &DataType, right: &DataType) -> DataType {
+fn get_numeric_type(left: &DataType, right: &DataType) -> (DataType, Option<usize>) {
     match (left, right) {
-        (DataType::Int, DataType::Int) => DataType::Int,
-        (DataType::Float, DataType::Float) => DataType::Float,
-        (DataType::Int, DataType::Float) => DataType::Float,
-        (DataType::Float, DataType::Int) => DataType::Float,
-        (DataType::Decimal, DataType::Decimal) => DataType::Decimal,
-        (DataType::Int, DataType::Decimal) => DataType::Decimal,
-        (DataType::Decimal, DataType::Int) => DataType::Decimal,
-        (DataType::Float, DataType::Decimal) => DataType::Decimal,
-        (DataType::Decimal, DataType::Float) => DataType::Decimal,
+        (DataType::Int, DataType::Int) => (DataType::Int, None),
+        (DataType::Float, DataType::Float) => (DataType::Float, None),
+        (DataType::Int, DataType::Float) => (DataType::Float, None),
+        (DataType::Float, DataType::Int) => (DataType::Float, None),
+        (DataType::Decimal, DataType::Decimal) => (DataType::Decimal, None),
+        (DataType::Int, DataType::Decimal) => (DataType::Decimal, None),
+        (DataType::Decimal, DataType::Int) => (DataType::Decimal, None),
+        (DataType::Float, DataType::Decimal) => (DataType::Decimal, None),
+        (DataType::Decimal, DataType::Float) => (DataType::Decimal, None),
         _ => {
             warn!(
                 "Incompatible types for arithmetic operation: {:?} and {:?}",
                 left, right
             );
-            DataType::String // Fallback to String for unsupported types
+            (DataType::String, None) // Fallback to String for unsupported types
         }
     }
 }

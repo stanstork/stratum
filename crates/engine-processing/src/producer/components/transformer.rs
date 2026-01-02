@@ -1,7 +1,7 @@
 use crate::transform::{
     error::{ErrorType, TransformError},
     failed_row_writer::FailedRowWriter,
-    pipeline::TransformPipeline,
+    pipeline::{ApplyOutcome, TransformPipeline},
 };
 use engine_core::context::exec::ExecutionContext;
 use model::{
@@ -86,11 +86,11 @@ impl TransformService {
         for mut row in rows {
             // Apply pipeline - fail fast, no retry
             match self.pipeline.apply(&mut row) {
-                Ok(true) => {
-                    // Row transformed successfully
+                Ok(ApplyOutcome::Success) | Ok(ApplyOutcome::Warning { .. }) => {
+                    // Row transformed successfully (warnings are non-fatal)
                     successful.push(row);
                 }
-                Ok(false) => {
+                Ok(ApplyOutcome::Skipped { .. }) => {
                     // Row filtered out (not an error)
                     filtered.push(row);
                 }

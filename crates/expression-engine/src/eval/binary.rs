@@ -19,12 +19,22 @@ impl<'a> BinaryOpEvaluator<'a> {
 
         match (self.left, self.right) {
             (Int(l), Int(r)) => self.eval_int(*l, *r),
-            (Int(_), Float(_)) | (Float(_), Int(_)) | (Float(_), Float(_)) => self.eval_float(),
-            (Decimal(_), Decimal(_))
-            | (Decimal(_), Int(_))
-            | (Int(_), Decimal(_))
-            | (Decimal(_), Float(_))
-            | (Float(_), Decimal(_)) => self.eval_decimal(),
+            // Handle combinations of integral types
+            (SmallInt(_), _) | (Int(_), _) | (Int32(_), _) | (Uint(_), _) | (Usize(_), _)
+                if self.right.as_i64().is_some() && self.left.as_i64().is_some() =>
+            {
+                self.eval_int(self.left.as_i64().unwrap(), self.right.as_i64().unwrap())
+            }
+
+            // Float interactions
+            (Float(_), _) | (_, Float(_)) => self.eval_float(),
+
+            // Decimal interactions (covers Decimal vs everything else not covered above)
+            (Decimal(_), _) | (_, Decimal(_)) => self.eval_decimal(),
+
+            // Uint and Usize interactions are handled as Decimal
+            (Uint(_), _) | (_, Uint(_)) | (Usize(_), _) | (_, Usize(_)) => self.eval_decimal(),
+
             (String(l), String(r)) => self.eval_string(l, r),
             (Boolean(l), Boolean(r)) => self.eval_boolean(*l, *r),
             (Null, Null) => self.eval_null_null(),
@@ -154,9 +164,93 @@ impl<'a> BinaryOpEvaluator<'a> {
     fn as_float(&self, v: &Value) -> Option<f64> {
         match v {
             Value::Int(i) => Some(*i as f64),
+            Value::SmallInt(i) => Some(*i as f64),
+            Value::Int32(i) => Some(*i as f64),
+            Value::Uint(i) => Some(*i as f64),
+            Value::Usize(i) => Some(*i as f64),
             Value::Float(f) => Some(*f),
             Value::Decimal(d) => d.to_f64(),
             _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use model::core::value::Value;
+    use model::execution::expr::BinaryOp;
+
+    #[test]
+    fn test_smallint_numeric_combinations() {
+        let cases = vec![
+            (
+                Value::SmallInt(6),
+                Value::Int(7),
+                BinaryOp::LessOrEqual,
+                Value::Boolean(true),
+            ),
+            (
+                Value::Int(7),
+                Value::SmallInt(6),
+                BinaryOp::GreaterOrEqual,
+                Value::Boolean(true),
+            ),
+            (
+                Value::SmallInt(6),
+                Value::SmallInt(6),
+                BinaryOp::Equal,
+                Value::Boolean(true),
+            ),
+        ];
+
+        for (left, right, op, expected) in cases {
+            let evaluator = BinaryOpEvaluator::new(&left, &right, &op);
+            let result = evaluator.evaluate();
+            assert_eq!(
+                result,
+                Some(expected),
+                "Failed for {:?} {:?} {:?}",
+                left,
+                op,
+                right
+            );
+        }
+    }
+
+    #[test]
+    fn test_numeric_combinations() {
+        let numeric_values = vec![
+            Value::SmallInt(1),
+            Value::Int32(1),
+            Value::Int(1),
+            Value::Uint(1),
+            Value::Usize(1),
+            Value::Float(1.0),
+            Value::Decimal(bigdecimal::BigDecimal::from(1)),
+        ];
+
+        let ops = vec![
+            BinaryOp::Equal,
+            BinaryOp::NotEqual,
+            BinaryOp::GreaterThan,
+            BinaryOp::LessThan,
+            BinaryOp::GreaterOrEqual,
+            BinaryOp::LessOrEqual,
+            BinaryOp::Add,
+            BinaryOp::Subtract,
+            BinaryOp::Multiply,
+            BinaryOp::Divide,
+        ];
+
+        for l in &numeric_values {
+            for r in &numeric_values {
+                for op in &ops {
+                    let evaluator = BinaryOpEvaluator::new(l, r, op);
+                    let result = evaluator.evaluate();
+                    assert!(result.is_some(), "Failed for {:?} {:?} {:?}", l, op, r);
+                }
+            }
         }
     }
 }

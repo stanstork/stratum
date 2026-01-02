@@ -1,35 +1,23 @@
-use crate::{
-    report::{
-        dry_run::DryRunReport,
-        schema::SchemaAction,
-        sql::{SqlKind, SqlStatement},
-    },
-    settings::{error::SettingsError, validated::ValidatedSettings},
-};
-use async_trait::async_trait;
-use connectors::sql::base::query::{column::ColumnDef, generator::QueryGenerator};
+use crate::settings::error::SettingsError;
+use connectors::sql::base::{error::DbError, query::column::ColumnDef};
 use engine_core::{
     connectors::destination::{DataDestination, Destination},
     schema::plan::SchemaPlan,
 };
 use futures::lock::Mutex;
-use planner::query::dialect::{self, Dialect};
 use std::sync::Arc;
 use tracing::{error, info};
 
-#[async_trait]
-pub trait SchemaManager: Send + Sync {
-    async fn add_column(&mut self, table: &str, column: &ColumnDef) -> Result<(), SettingsError>;
-    async fn infer_schema(&mut self, schema_plan: &SchemaPlan) -> Result<(), SettingsError>;
-}
-
-pub struct LiveSchemaManager {
+pub struct SchemaManager {
     pub destination: Arc<Mutex<Destination>>,
 }
 
-#[async_trait]
-impl SchemaManager for LiveSchemaManager {
-    async fn add_column(&mut self, table: &str, column: &ColumnDef) -> Result<(), SettingsError> {
+impl SchemaManager {
+    pub async fn add_column(
+        &mut self,
+        table: &str,
+        column: &ColumnDef,
+    ) -> Result<(), SettingsError> {
         let dest = self.destination.lock().await;
         let DataDestination::Database(db) = &dest.data_dest;
         let result = db.data.lock().await.add_column(table, column).await;
@@ -52,7 +40,7 @@ impl SchemaManager for LiveSchemaManager {
         }
     }
 
-    async fn infer_schema(&mut self, schema_plan: &SchemaPlan) -> Result<(), SettingsError> {
+    pub async fn infer_schema(&mut self, schema_plan: &SchemaPlan) -> Result<(), SettingsError> {
         let dest = self.destination.lock().await;
         info!("Applying inferred schema to destination: {}", dest.name);
 
@@ -69,6 +57,13 @@ impl SchemaManager for LiveSchemaManager {
         for query in all_queries {
             info!("Executing schema change: {}", query.0);
             if let Err(err) = dest.data_dest.adapter().await.exec(&query.0).await {
+                // Check if this is a "type already exists" error (SQL state 42710)
+                // This is safe to ignore as it means the enum type is already defined
+                if Self::is_type_already_exists_error(&err) {
+                    info!("Type '{}' already exists, skipping creation", query.1);
+                    continue;
+                }
+
                 error!(
                     "Failed to apply schema change: {}\nError: {:?}",
                     query.0, err
@@ -81,73 +76,20 @@ impl SchemaManager for LiveSchemaManager {
         info!("Schema inference completed and applied successfully.");
         Ok(())
     }
-}
 
-pub struct ValidationSchemaManager {
-    pub report: Arc<Mutex<DryRunReport>>,
-    pub settings: ValidatedSettings,
-}
-
-#[async_trait::async_trait]
-impl SchemaManager for ValidationSchemaManager {
-    async fn add_column(&mut self, table: &str, column: &ColumnDef) -> Result<(), SettingsError> {
-        if self.settings.infer_schema() {
-            info!(
-                "Skipping add_column for '{}' on table '{}' due to infer_schema being enabled.",
-                column.name, table
-            );
-            return Ok(());
+    /// Check if the error is a "type already exists" error (SQL state 42710)
+    /// This is safe to ignore when creating enum types.
+    fn is_type_already_exists_error(err: &DbError) -> bool {
+        match err {
+            DbError::PgError(pg_err) => {
+                if let Some(db_err) = pg_err.as_db_error() {
+                    // SQL state 42710 = duplicate_object (type already exists)
+                    db_err.code().code() == "42710"
+                } else {
+                    false
+                }
+            }
+            _ => false,
         }
-
-        let dialect = dialect::Postgres; // TODO: derive from destination connection
-        let (sql, params) = QueryGenerator::new(&dialect).add_column(table, column.clone());
-
-        {
-            let mut report = self.report.lock().await;
-            report
-                .generated_sql
-                .add_statement(&dialect.name(), SqlKind::Schema, &sql, params);
-            report
-                .schema
-                .actions
-                .push(SchemaAction::add_column(table, column.name()));
-        }
-
-        Ok(())
-    }
-
-    async fn infer_schema(&mut self, schema_plan: &SchemaPlan) -> Result<(), SettingsError> {
-        let dialect = dialect::Postgres; // TODO: Determine dialect from destination connection
-
-        let enum_queries = schema_plan.enum_queries().await?;
-        let table_queries = schema_plan.table_queries().await;
-        let fk_queries = schema_plan.fk_queries();
-
-        let enum_actions = enum_queries
-            .iter()
-            .map(|query| (SchemaAction::create_enum(&query.1), query));
-        let table_actions = table_queries
-            .iter()
-            .map(|query| (SchemaAction::create_table(&query.1), query));
-        let fk_actions = fk_queries
-            .iter()
-            .map(|query| (SchemaAction::add_foreign_key(&query.1), query));
-
-        let mut statements =
-            Vec::with_capacity(enum_queries.len() + table_queries.len() + fk_queries.len());
-        let mut actions = Vec::with_capacity(statements.capacity());
-
-        for (action, query) in enum_actions.chain(table_actions).chain(fk_actions) {
-            statements.push(SqlStatement::schema_action(&dialect.name(), &query.0));
-            actions.push(action);
-        }
-
-        {
-            let mut report = self.report.lock().await;
-            report.generated_sql.statements.extend(statements);
-            report.schema.actions.extend(actions);
-        }
-
-        Ok(())
     }
 }

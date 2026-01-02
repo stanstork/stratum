@@ -8,7 +8,7 @@ use crate::{
     error::ActorError,
 };
 use engine_core::{event_bus::bus::EventBus, metrics::Metrics};
-use engine_processing::{consumer::DataConsumer, producer::DataProducer};
+use engine_processing::{consumer::Consumer, producer::Producer};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
@@ -24,8 +24,8 @@ pub struct PipelineCoordinator {
 
 impl PipelineCoordinator {
     pub fn new(
-        producer: Box<dyn DataProducer + Send + 'static>,
-        consumer: Box<dyn DataConsumer + Send + 'static>,
+        producer: Producer,
+        consumer: Consumer,
         metrics: Metrics,
         cancel_token: CancellationToken,
     ) -> Self {

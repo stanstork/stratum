@@ -3,7 +3,6 @@
 use super::{TEST_MYSQL_URL_ORDERS, TEST_MYSQL_URL_SAKILA, TEST_PG_URL, mysql_pool};
 use crate::pg_pool;
 use connectors::{file::csv::error::FileError, sql::base::row::DbRow};
-use engine_config::report::summary::SummaryReport;
 use engine_core::plan::execution::ExecutionPlan;
 use engine_runtime::{error::MigrationError, execution::executor::run};
 use model::records::row::RowData;
@@ -11,7 +10,6 @@ use mysql_async::Row as MySqlRow;
 use mysql_async::prelude::Queryable;
 use smql_syntax::builder::parse;
 use std::{
-    collections::HashMap,
     fs::File,
     io::{BufRead, BufReader},
 };
@@ -103,7 +101,7 @@ pub enum DbType {
 }
 
 /// Parse & run the SMQL plan, panicking on any error
-pub async fn run_smql(smql: &str) -> Result<HashMap<String, SummaryReport>, MigrationError> {
+pub async fn run_smql(smql: &str) -> Result<(), MigrationError> {
     let doc = parse(smql).expect("parse smql");
     let plan = ExecutionPlan::build(&doc).expect("build execution plan");
     let cancel = CancellationToken::new();
@@ -344,7 +342,6 @@ pub async fn get_cell_as_usize(query: &str, schema: &str, db: DbType, column: &s
         .await
         .expect("fetch_rows failed");
 
-    println!("rows: {rows:?}");
     let row = rows
         .first()
         .unwrap_or_else(|| panic!("no rows returned for query `{query}`"));

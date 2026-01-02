@@ -21,7 +21,6 @@ impl ComputedTransform {
 impl Transform for ComputedTransform {
     fn apply(&self, row: &mut RowData) -> Result<(), TransformError> {
         let table = row.entity.clone();
-
         if let Some(computed_fields) = self.mapping.field_mappings.computed_fields.get(&table) {
             for computed in computed_fields {
                 if let Some(value) = computed.expression.evaluate(row, &self.mapping, get_env) {

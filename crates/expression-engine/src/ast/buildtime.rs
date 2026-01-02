@@ -1,5 +1,5 @@
 use crate::{context::EvalContext, error::ExpressionError, functions::FunctionRegistry};
-use model::core::value::Value;
+use model::{core::value::Value, execution::define::DefinitionInfo};
 use smql_syntax::ast::{
     expr::{Expression, ExpressionKind},
     literal::Literal,
@@ -10,16 +10,33 @@ use std::collections::HashMap;
 /// This is used during plan building for simple expressions (literals + function calls)
 pub fn eval_ast_expression(
     expr: &Expression,
-    definitions: &HashMap<String, Value>,
+    definitions: &HashMap<String, DefinitionInfo>,
     env_getter: fn(&str) -> Option<String>,
 ) -> Result<Value, ExpressionError> {
     match &expr.kind {
         ExpressionKind::Literal(lit) => Ok(match lit {
             Literal::String(s) => Value::String(s.clone()),
+            Literal::Int(i) => Value::Int(*i),
             Literal::Number(n) => Value::Float(*n),
             Literal::Boolean(b) => Value::Boolean(*b),
             Literal::Null => Value::Null,
         }),
+        ExpressionKind::DotNotation(path) => {
+            // Handle define.X references
+            if path.segments.len() == 2 && path.segments[0] == "define" {
+                definitions
+                    .get(&path.segments[1])
+                    .cloned()
+                    .map(|def_info| def_info.value)
+                    .ok_or_else(|| ExpressionError::InvalidFunctionArgs {
+                        function: "eval_ast_expression".to_string(),
+                        message: format!("undefined define variable: {}", path.segments[1]),
+                    })
+            } else {
+                // For non-define dot notation, return as string (e.g., "table.column")
+                Ok(Value::String(path.segments.join(".")))
+            }
+        }
         ExpressionKind::FunctionCall { name, arguments } => {
             // Evaluate arguments to values
             let args: Vec<Value> = arguments

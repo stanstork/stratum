@@ -1,4 +1,16 @@
-use clap::Subcommand;
+use clap::{Subcommand, ValueEnum};
+
+/// Sampling method for data preview
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+pub enum SampleMethod {
+    /// Take first N rows (fastest, deterministic)
+    #[default]
+    First,
+    /// Take random N rows (varied sample)
+    Random,
+    /// By specific IDs
+    Id,
+}
 
 #[derive(Subcommand)]
 pub enum Commands {
@@ -17,6 +29,30 @@ pub enum Commands {
             help = "If specified, writes the report to this file instead of stdout"
         )]
         output: Option<String>,
+
+        /// Enable sample data collection in the plan output
+        #[arg(long, short = 's')]
+        sample: bool,
+
+        /// Number of rows to sample per pipeline (default: 5)
+        #[arg(long, default_value = "5")]
+        sample_size: usize,
+
+        /// Sampling method: first (default) or random
+        #[arg(long, value_enum, default_value = "first")]
+        sample_method: SampleMethod,
+
+        /// Name of the ID column for sampling
+        #[arg(long, default_value = "id")]
+        id_column: String,
+
+        /// Specific IDs to sample (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        sample_ids: Option<Vec<String>>,
+
+        /// Use exact COUNT for filtered rows (slower but accurate). By default uses EXPLAIN estimates (faster)
+        #[arg(long)]
+        exact_where: bool,
     },
     /// Execute the migration
     Apply {

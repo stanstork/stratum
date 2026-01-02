@@ -1,21 +1,26 @@
 use crate::{
-    consumer::{live::LiveConsumer, validation::ValidationConsumer},
+    consumer::{
+        components::{coordinator::BatchCoordinator, writer::BatchWriter},
+        config::ConsumerConfig,
+    },
     error::ConsumerError,
+    item::ItemId,
+    state_manager::StateManager,
 };
-use async_trait::async_trait;
-use engine_config::settings::validated::ValidatedSettings;
-use engine_core::{context::item::ItemContext, metrics::Metrics};
+use engine_core::{
+    connectors::destination::DataDestination, context::item::ItemContext, metrics::Metrics,
+    retry::RetryPolicy,
+};
 use futures::lock::Mutex;
 use model::records::batch::Batch;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use tracing::{error, info, warn};
 
 pub mod components;
 pub mod config;
-pub mod live;
 pub mod trigger;
-pub mod validation;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConsumerStatus {
@@ -27,34 +32,227 @@ pub enum ConsumerStatus {
     Finished,
 }
 
-#[async_trait]
-pub trait DataConsumer {
-    async fn start(&mut self) -> Result<(), ConsumerError>;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConsumerMode {
+    /// Consumer is idle, waiting to start.
+    Idle,
 
-    async fn resume(
+    /// Consumer is actively processing batches.
+    Running,
+
+    /// Consumer is flushing pending writes before shutdown.
+    Flushing,
+
+    /// Consumer has finished all work.
+    Finished,
+}
+
+pub struct Consumer {
+    // Components
+    coordinator: BatchCoordinator,
+
+    // Communication
+    cancel: CancellationToken,
+
+    // State
+    mode: ConsumerMode,
+    ids: ItemId,
+
+    // Config
+    config: ConsumerConfig,
+}
+
+impl Consumer {
+    pub async fn new(
+        ctx: &Arc<Mutex<ItemContext>>,
+        batch_rx: mpsc::Receiver<Batch>,
+        cancel: CancellationToken,
+        metrics: Metrics,
+    ) -> Self {
+        let (run_id, item_id, destination, pipeline, state_store) = {
+            let c = ctx.lock().await;
+            (
+                c.run_id.clone(),
+                c.item_id.clone(),
+                c.destination.clone(),
+                c.pipeline.clone(),
+                c.state.clone(),
+            )
+        };
+
+        let config = ConsumerConfig::default();
+        let part_id = "part-0".to_string();
+        let ids = ItemId::new(run_id, item_id, part_id);
+
+        let meta = match &destination.data_dest {
+            DataDestination::Database(db) => db.data.lock().await.tables(),
+        };
+
+        // Create retry policy from pipeline config, fallback to database defaults
+        let retry_config = pipeline
+            .error_handling
+            .as_ref()
+            .and_then(|eh| eh.retry.as_ref());
+        let retry_policy = RetryPolicy::from_config(retry_config);
+
+        let writer = BatchWriter::new(destination.clone(), retry_policy, &meta)
+            .auto_detect_strategy() // Detects fast path (COPY/MERGE) availability
+            .await;
+        let state_manager = StateManager::new(ids.clone(), state_store);
+        let coordinator = BatchCoordinator::new(writer, state_manager, metrics.clone(), batch_rx);
+
+        Self {
+            coordinator,
+            cancel,
+            mode: ConsumerMode::Idle,
+            ids,
+            config,
+        }
+    }
+
+    pub async fn start(&mut self) -> Result<(), ConsumerError> {
+        info!(
+            run_id = %self.ids.run_id(),
+            item_id = %self.ids.item_id(),
+            "Starting LiveConsumer"
+        );
+
+        if self.config.disable_triggers {
+            info!("Consumer configured to disable triggers on start");
+            // TODO: Disable triggers if applicable
+        }
+
+        self.mode = ConsumerMode::Running;
+        info!("LiveConsumer started successfully");
+        Ok(())
+    }
+
+    pub async fn resume(
         &mut self,
         run_id: &str,
         item_id: &str,
         part_id: &str,
-    ) -> Result<(), ConsumerError>;
+    ) -> Result<(), ConsumerError> {
+        info!(
+            run_id = run_id,
+            item_id = item_id,
+            part_id = part_id,
+            "Resuming consumer from checkpoint"
+        );
 
-    async fn tick(&mut self) -> Result<ConsumerStatus, ConsumerError>;
-    async fn stop(&mut self) -> Result<(), ConsumerError>;
+        // Load last checkpoint to verify state
+        match self.coordinator.load_last_checkpoint().await? {
+            Some(checkpoint) => {
+                info!(
+                    stage = %checkpoint.stage,
+                    rows_done = checkpoint.rows_done,
+                    cursor = ?checkpoint.src_offset,
+                    "Loaded checkpoint, consumer will continue from last position"
+                );
 
-    /// Returns the total number of rows written to the destination.
-    fn rows_written(&self) -> u64;
-}
+                // If we crashed during "write" stage, the producer will re-send
+                // that batch based on its checkpoint recovery logic
+                if checkpoint.stage == "write" {
+                    warn!(
+                        batch_id = %checkpoint.batch_id,
+                        "Last batch was being written when crash occurred, \
+                         it may be re-sent by producer"
+                    );
+                }
+            }
+            None => {
+                info!("No checkpoint found, consumer starting fresh");
+            }
+        }
 
-pub async fn create_consumer(
-    item_ctx: &Arc<Mutex<ItemContext>>,
-    batch_rx: mpsc::Receiver<Batch>,
-    settings: &ValidatedSettings,
-    cancel: CancellationToken,
-    metrics: Metrics,
-) -> Box<dyn DataConsumer + Send + 'static> {
-    if settings.is_dry_run() {
-        Box::new(ValidationConsumer::new(batch_rx))
-    } else {
-        Box::new(LiveConsumer::new(item_ctx, batch_rx, cancel, metrics).await)
+        self.mode = ConsumerMode::Running;
+        Ok(())
+    }
+
+    pub async fn tick(&mut self) -> Result<ConsumerStatus, ConsumerError> {
+        match self.mode {
+            ConsumerMode::Idle => {
+                // Not yet started
+                Ok(ConsumerStatus::Idle)
+            }
+
+            ConsumerMode::Finished => {
+                // Already finished, nothing to do
+                Ok(ConsumerStatus::Finished)
+            }
+
+            ConsumerMode::Running => {
+                if self.should_stop() {
+                    info!("Consumer received stop signal, entering flush mode");
+                    self.mode = ConsumerMode::Flushing;
+                    return Ok(ConsumerStatus::Working); // Continue to flush
+                }
+
+                match self.coordinator.try_process_one().await {
+                    Ok(true) => {
+                        // Successfully processed a batch
+                        // More batches may be available, return Working
+                        Ok(ConsumerStatus::Working)
+                    }
+                    Ok(false) => {
+                        // No batch available right now
+                        // Check if channel is closed (producer finished)
+                        if self.coordinator.is_channel_closed() {
+                            info!(
+                                "Batch channel closed and all batches processed, consumer finished"
+                            );
+                            self.mode = ConsumerMode::Finished;
+                            return Ok(ConsumerStatus::Finished);
+                        }
+                        // Channel still open, just idle
+                        Ok(ConsumerStatus::Idle)
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to process batch");
+                        // On error, enter flushing mode to clean up
+                        self.mode = ConsumerMode::Flushing;
+                        Err(e)
+                    }
+                }
+            }
+
+            ConsumerMode::Flushing => {
+                // Flush any pending writes before finishing
+                info!("Flushing consumer writes");
+
+                if let Err(e) = self.coordinator.try_process_one().await {
+                    error!(error = %e, "Failed to flush on shutdown");
+                }
+
+                self.mode = ConsumerMode::Finished;
+                Ok(ConsumerStatus::Finished)
+            }
+        }
+    }
+
+    pub async fn stop(&mut self) -> Result<(), ConsumerError> {
+        info!(
+            run_id = %self.ids.run_id(),
+            item_id = %self.ids.item_id(),
+            "Stopping LiveConsumer"
+        );
+
+        if self.config.disable_triggers {
+            info!("Consumer configured to re-enable triggers on stop");
+            // TODO: Re-enable triggers if applicable
+        }
+
+        self.mode = ConsumerMode::Finished;
+        info!("LiveConsumer stopped successfully");
+        Ok(())
+    }
+
+    pub fn rows_written(&self) -> u64 {
+        self.coordinator.rows_processed()
+    }
+
+    /// Check if we should stop processing.
+    fn should_stop(&self) -> bool {
+        self.cancel.is_cancelled()
     }
 }

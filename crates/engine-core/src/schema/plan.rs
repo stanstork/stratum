@@ -7,8 +7,11 @@ use connectors::{
         query::{column::ColumnDef, fk::ForeignKeyDef, generator::QueryGenerator},
     },
 };
-use model::transform::mapping::TransformationMetadata;
-use planner::query::dialect;
+use model::{
+    core::data_type::DataType, execution::expr::CompiledExpression,
+    transform::mapping::TransformationMetadata,
+};
+use query_builder::dialect;
 use std::collections::{HashMap, HashSet};
 use tracing::warn;
 
@@ -83,7 +86,7 @@ impl SchemaPlan {
             }
 
             // Always append computed columns
-            resolved_columns.extend(self.computed_column_definitions(table).await);
+            resolved_columns.extend(self.computed_column_defs(table).await);
 
             let (sql, _) = QueryGenerator::new(&dialect::Postgres).create_table(
                 &resolved_table,
@@ -175,6 +178,20 @@ impl SchemaPlan {
         self.metadata_graph.insert(table_name.to_string(), metadata);
     }
 
+    pub fn get_table_metadata(&self, table_name: &str) -> Option<&TableMetadata> {
+        self.metadata_graph.get(table_name).and_then(|meta| {
+            if let EntityMetadata::Table(table_meta) = meta {
+                Some(table_meta)
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn metadata_graph(&self) -> &HashMap<String, EntityMetadata> {
+        &self.metadata_graph
+    }
+
     pub fn metadata_exists(&self, table_name: &str) -> bool {
         self.metadata_graph.contains_key(table_name)
     }
@@ -217,23 +234,7 @@ impl SchemaPlan {
             .collect()
     }
 
-    fn resolve_column_definitions(&self, table: &str, columns: &[ColumnDef]) -> Vec<ColumnDef> {
-        let resolved_table = self.mapping.entities.resolve(table);
-        columns
-            .iter()
-            .map(|col| ColumnDef {
-                // col.name is a source column name, we need to get the target column name
-                // reverse_resolve: source -> target
-                name: self
-                    .mapping
-                    .field_mappings
-                    .reverse_resolve(&resolved_table, &col.name),
-                ..col.clone()
-            })
-            .collect()
-    }
-
-    async fn computed_column_definitions(&self, table: &str) -> Vec<ColumnDef> {
+    pub async fn computed_column_defs(&self, table: &str) -> Vec<ColumnDef> {
         let mut defs = Vec::new();
 
         let resolved_table = self.mapping.entities.resolve(table);
@@ -242,10 +243,14 @@ impl SchemaPlan {
             None => return defs,
         };
 
+        // Use the source table name to look up metadata
         let metadata = match self.metadata_graph.get(table) {
             Some(m) => m,
             None => {
-                warn!("Missing metadata for table: {}", table);
+                warn!(
+                    "Missing metadata for source table: {} (resolved: {})",
+                    table, resolved_table
+                );
                 return defs;
             }
         };
@@ -253,23 +258,77 @@ impl SchemaPlan {
         for computed in computed_fields {
             let column_name = &computed.name;
 
-            if let Some(inferred_type) = self
+            // Try to infer type from the expression (TypeEngine now handles cross-entity references)
+            let inferred_type = self
                 .type_engine
                 .infer_computed_type(computed, &metadata.columns(), &self.mapping)
-                .await
-            {
+                .await;
+
+            if let Some((mut data_type, char_max_length)) = inferred_type {
+                // Handle enum types from cross-entity references
+                // If it's a DotPath expression referencing an enum column, convert to Custom type
+                if data_type == DataType::Enum
+                    && let CompiledExpression::DotPath(segments) = &computed.expression
+                    && segments.len() == 2
+                {
+                    let field = &segments[1];
+                    // Use the column name as the enum type name
+                    data_type = DataType::Custom(field.clone());
+                }
+
                 defs.push(ColumnDef {
                     name: (*column_name).clone(),
                     is_nullable: true, // Assuming computed fields are nullable
                     default: None,
-                    data_type: inferred_type,
+                    data_type,
                     is_primary_key: false,
-                    char_max_length: None,
+                    char_max_length,
                 });
+            } else {
+                warn!(
+                    "Failed to infer type for computed field '{}' in table '{}' (resolved: '{}')",
+                    column_name, table, resolved_table
+                );
             }
         }
 
         defs
+    }
+
+    pub async fn resolved_column_defs(&self) -> Vec<ColumnDef> {
+        let mut resolved_defs = Vec::new();
+        for (table, columns) in &self.column_definitions {
+            let resolved_table = self.mapping.entities.resolve(table);
+            let mut resolved_columns = self.resolve_column_definitions(table, columns);
+
+            // Optionally drop unmapped columns
+            if self.mapped_columns_only {
+                resolved_columns =
+                    self.filter_to_mapped_columns(&resolved_table, resolved_columns.clone());
+            }
+
+            // Always append computed columns
+            resolved_columns.extend(self.computed_column_defs(table).await);
+            resolved_defs.extend(resolved_columns);
+        }
+
+        resolved_defs
+    }
+
+    fn resolve_column_definitions(&self, table: &str, columns: &[ColumnDef]) -> Vec<ColumnDef> {
+        let resolved_table = self.mapping.entities.resolve(table);
+        columns
+            .iter()
+            .map(|col| ColumnDef {
+                // col.name is a source column name, we need to get the target column name
+                // resolve: source -> target
+                name: self
+                    .mapping
+                    .field_mappings
+                    .resolve(&resolved_table, &col.name),
+                ..col.clone()
+            })
+            .collect()
     }
 
     fn parse_enum(raw: &str) -> Vec<String> {
@@ -291,7 +350,7 @@ impl SchemaPlan {
             .expect("Mapping must exist for table");
         columns
             .into_iter()
-            .filter(|col| mapping.contains_target_key(&col.name))
+            .filter(|col| mapping.contains_target(&col.name))
             .collect()
     }
 

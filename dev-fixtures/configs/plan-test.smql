@@ -1,0 +1,749 @@
+// =============================================================================
+// SMQL Comprehensive Test Configuration for Plan Generation
+// =============================================================================
+// This configuration covers ALL implemented SMQL v2.1 features using the Sakila
+// database as source. It is designed for testing the `stratum plan` command.
+// =============================================================================
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXECUTION SETTINGS
+// ─────────────────────────────────────────────────────────────────────────────
+execution {
+    strategy        = "parallel"
+    max_concurrency = 4
+    on_failure      = "continue"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEFINE BLOCK - Constants and Environment Variables
+// ─────────────────────────────────────────────────────────────────────────────
+define {
+    // Literal constants
+    default_batch_size = 50000
+    max_rental_rate    = 4.99
+    min_payment_amount = 0.01
+    tax_multiplier     = 1.08
+
+    // Environment variables with defaults
+    mysql_url          = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url       = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+    batch_size         = env("BATCH_SIZE", 500)
+    dlq_path           = env("DLQ_PATH", "/tmp/stratum_dlq")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONNECTIONS
+// ─────────────────────────────────────────────────────────────────────────────
+connection "sakila_mysql" {
+    driver = "mysql"
+    url    = define.mysql_url
+}
+
+connection "target_postgres" {
+    driver = "postgres"
+    url    = define.postgres_url
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE 1: Simple Migration (Baseline)
+// Features: Basic from/to, simple select, create_missing_tables
+// ─────────────────────────────────────────────────────────────────────────────
+pipeline "migrate_language" {
+    from {
+        connection = connection.sakila_mysql
+        table      = "language"
+    }
+
+    to {
+        connection = connection.target_postgres
+        table      = "language"
+    }
+
+    select {
+        language_id = language.language_id
+        name        = language.name
+        last_update = language.last_update
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = define.default_batch_size
+        copy_columns          = "MAP_ONLY"
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE 2: Simple Migration with Dependency
+// Features: after dependency, category table
+// ─────────────────────────────────────────────────────────────────────────────
+pipeline "migrate_category" {
+    after = [pipeline.migrate_language]
+
+    from {
+        connection = connection.sakila_mysql
+        table      = "category"
+    }
+
+    to {
+        connection = connection.target_postgres
+        table      = "category"
+    }
+
+    select {
+        category_id = category.category_id
+        name        = category.name
+        last_update = category.last_update
+    }
+
+    settings {
+        create_missing_tables = true
+        copy_columns          = "MAP_ONLY"
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE 3: Computed Columns and Transformations
+// Features: concat(), arithmetic expressions, renamed columns
+// ─────────────────────────────────────────────────────────────────────────────
+pipeline "migrate_actors_enriched" {
+    after = [pipeline.migrate_language]
+
+    from {
+        connection = connection.sakila_mysql
+        table      = "actor"
+    }
+
+    to {
+        connection = connection.target_postgres
+        table      = "actors_enriched"
+    }
+
+    select {
+        // Direct mapping
+        actor_id    = actor.actor_id
+
+        // Renamed columns
+        given_name  = actor.first_name
+        family_name = actor.last_name
+
+        // Computed: concatenation
+        full_name   = concat(actor.first_name, " ", actor.last_name)
+        search_name = concat(actor.last_name, ", ", actor.first_name)
+
+        // Direct mapping of timestamp
+        last_update = actor.last_update
+    }
+
+    settings {
+        create_missing_tables  = true
+        batch_size             = define.batch_size
+        copy_columns           = "MAP_ONLY"
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE 4: WHERE Filters
+// Features: Single filter, comparison operators
+// ─────────────────────────────────────────────────────────────────────────────
+pipeline "migrate_films_affordable" {
+    after = [pipeline.migrate_language, pipeline.migrate_category]
+
+    from {
+        connection = connection.sakila_mysql
+        table      = "film"
+    }
+
+    to {
+        connection = connection.target_postgres
+        table      = "films_affordable"
+    }
+
+    where "affordable_films" {
+        film.rental_rate <= define.max_rental_rate
+        film.replacement_cost < 25.00
+    }
+
+    select {
+        film_id          = film.film_id
+        title            = film.title
+        description      = film.description
+        release_year     = film.release_year
+        language_id      = film.language_id
+        rental_duration  = film.rental_duration
+        rental_rate      = film.rental_rate
+        length           = film.length
+        replacement_cost = film.replacement_cost
+        rating           = film.rating
+        special_features = film.special_features
+        last_update      = film.last_update
+    }
+
+    settings {
+        create_missing_tables = true
+        ignore_constraints    = true
+        batch_size            = 200
+        copy_columns          = "MAP_ONLY"
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE 5: Single JOIN with Lookup
+// Features: with block, lookup columns from joined table
+// ─────────────────────────────────────────────────────────────────────────────
+pipeline "migrate_customers_with_store" {
+    after = [pipeline.migrate_actors_enriched]
+
+    from {
+        connection = connection.sakila_mysql
+        table      = "customer"
+    }
+
+    to {
+        connection = connection.target_postgres
+        table      = "customers_with_store"
+    }
+
+    with {
+        store from store where store.store_id == customer.store_id
+    }
+
+    select {
+        customer_id   = customer.customer_id
+        first_name    = customer.first_name
+        last_name     = customer.last_name
+        full_name     = concat(customer.first_name, " ", customer.last_name)
+        email         = customer.email
+        store_id      = customer.store_id
+        active        = customer.active
+        create_date   = customer.create_date
+
+        // Lookup from joined table
+        store_address_id = store.address_id
+    }
+
+    settings {
+        create_missing_tables = true
+        ignore_constraints    = true
+        copy_columns          = "MAP_ONLY"
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE 6: Multiple JOINs with Complex Lookups
+// Features: Multiple with joins, multiple lookup columns, arithmetic on lookups
+// ─────────────────────────────────────────────────────────────────────────────
+pipeline "migrate_film_details" {
+
+    from {
+        connection = connection.sakila_mysql
+        table      = "film"
+    }
+
+    to {
+        connection = connection.target_postgres
+        table      = "film_details"
+    }
+
+    with {
+        lang     from language where lang.language_id == film.language_id
+    }
+
+    where "has_language" {
+        film.language_id > 0
+    }
+
+    select {
+        film_id              = film.film_id
+        title                = film.title
+        release_year         = film.release_year
+        rental_rate          = film.rental_rate
+        rental_duration      = film.rental_duration
+        replacement_cost     = film.replacement_cost
+        rating               = film.rating
+
+        // Lookup columns
+        language_name        = lang.name
+
+        // Arithmetic expressions
+        weekly_rental_cost   = film.rental_rate * 7
+        cost_with_tax        = film.replacement_cost * define.tax_multiplier
+    }
+
+    settings {
+        create_missing_tables  = true
+        ignore_constraints     = true
+        batch_size             = 100
+        copy_columns           = "MAP_ONLY"
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE 7: Validation with SKIP Action
+// Features: validate block with assert/skip, multiple validations
+// ─────────────────────────────────────────────────────────────────────────────
+pipeline "migrate_payments_validated" {
+    after = [pipeline.migrate_customers_with_store]
+
+    from {
+        connection = connection.sakila_mysql
+        table      = "payment"
+    }
+
+    to {
+        connection = connection.target_postgres
+        table      = "payments_validated"
+    }
+
+    select {
+        payment_id   = payment.payment_id
+        customer_id  = payment.customer_id
+        staff_id     = payment.staff_id
+        rental_id    = payment.rental_id
+        amount       = payment.amount
+        payment_date = payment.payment_date
+    }
+
+    validate {
+        // SKIP: Filter out zero/negative amounts
+        assert "positive_amount" {
+            check   = payment.amount > define.min_payment_amount
+            message = "Payment amount must be positive"
+            action  = skip
+        }
+
+        // SKIP: Filter out unusually large payments
+        assert "reasonable_amount" {
+            check   = payment.amount <= 15.00
+            message = "Payment amount exceeds reasonable limit"
+            action  = skip
+        }
+    }
+
+    settings {
+        create_missing_tables = true
+        ignore_constraints    = true
+        batch_size            = define.batch_size
+        copy_columns          = "MAP_ONLY"
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE 8: Validation with WARN Action
+// Features: validate block with warn, data quality warnings
+// ─────────────────────────────────────────────────────────────────────────────
+pipeline "migrate_films_with_warnings" {
+    after = [pipeline.migrate_film_details]
+
+    from {
+        connection = connection.sakila_mysql
+        table      = "film"
+    }
+
+    to {
+        connection = connection.target_postgres
+        table      = "films_quality_checked"
+    }
+
+    select {
+        film_id          = film.film_id
+        title            = film.title
+        description      = film.description
+        release_year     = film.release_year
+        rental_duration  = film.rental_duration
+        rental_rate      = film.rental_rate
+        replacement_cost = film.replacement_cost
+        rating           = film.rating
+    }
+
+    validate {
+        // WARN: Flag long rental durations
+        warn "reasonable_rental_duration" {
+            check   = film.rental_duration <= 7
+            message = "Film rental duration exceeds recommended 7 days"
+        }
+
+        // WARN: Flag low rental rates
+        warn "minimum_rental_rate" {
+            check   = film.rental_rate >= 0.99
+            message = "Film rental rate is below minimum recommended price"
+        }
+
+        // WARN: Flag high replacement costs
+        warn "reasonable_replacement_cost" {
+            check   = film.replacement_cost <= 25.00
+            message = "Film replacement cost is unusually high"
+        }
+    }
+
+    settings {
+        create_missing_tables = true
+        ignore_constraints    = true
+        batch_size            = 500
+        copy_columns          = "MAP_ONLY"
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE 9: Mixed Validation (SKIP + WARN)
+// Features: Combined assert/skip and warn validations
+// ─────────────────────────────────────────────────────────────────────────────
+pipeline "migrate_addresses_filtered" {
+    after = [pipeline.migrate_customers_with_store]
+
+    from {
+        connection = connection.sakila_mysql
+        table      = "address"
+    }
+
+    to {
+        connection = connection.target_postgres
+        table      = "addresses_filtered"
+    }
+
+    select {
+        address_id  = address.address_id
+        address     = address.address
+        address2    = address.address2
+        district    = address.district
+        city_id     = address.city_id
+        postal_code = address.postal_code
+        phone       = address.phone
+        last_update = address.last_update
+    }
+
+    validate {
+        // SKIP: Must have postal code
+        assert "has_postal_code" {
+            check   = address.postal_code != ""
+            message = "Address must have a postal code"
+            action  = warn
+        }
+
+        // SKIP: Must have district
+        assert "has_district" {
+            check   = address.district != ""
+            message = "Address must have a district"
+            action  = skip
+        }
+
+        // WARN: Ideally should have phone
+        warn "has_phone" {
+            check   = address.phone != ""
+            message = "Address is missing phone number"
+        }
+    }
+
+    settings {
+        create_missing_tables = true
+        ignore_constraints    = true
+        batch_size            = 500
+        copy_columns          = "MAP_ONLY"
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE 10: Complex Join + Validation on Transformed Fields
+// Features: Multiple joins, validation on lookup/computed columns
+// ─────────────────────────────────────────────────────────────────────────────
+pipeline "migrate_film_actors_enriched" {
+    after = [pipeline.migrate_actors_enriched, pipeline.migrate_films_affordable]
+
+    from {
+        connection = connection.sakila_mysql
+        table      = "film_actor"
+    }
+
+    to {
+        connection = connection.target_postgres
+        table      = "film_actor_details"
+    }
+
+    with {
+        actor from actor where actor.actor_id == film_actor.actor_id
+        film  from film  where film.film_id == film_actor.film_id
+    }
+
+    select {
+        actor_id             = film_actor.actor_id
+        film_id              = film_actor.film_id
+        last_update          = film_actor.last_update
+
+        // Lookup columns
+        actor_first_name     = actor.first_name
+        actor_last_name      = actor.last_name
+        actor_full_name      = concat(actor.first_name, " ", actor.last_name)
+        film_title           = film.title
+        film_rating          = film.rating
+        film_rental_rate     = film.rental_rate
+
+        // Computed from joined data
+        estimated_weekly_cost = film.rental_rate * 7
+    }
+
+    validate {
+        // SKIP: Only include reasonably priced films
+        assert "affordable_film" {
+            check   = film.rental_rate <= 2.99
+            message = "Film rental rate is too high"
+            action  = skip
+        }
+
+        // WARN: Check actor name completeness
+        warn "complete_actor_name" {
+            check   = actor.first_name != "" && actor.last_name != ""
+            message = "Actor should have complete name"
+        }
+    }
+
+    settings {
+        create_missing_tables  = true
+        ignore_constraints     = true
+        batch_size             = 500
+        copy_columns           = "MAP_ONLY"
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE 11: Error Handling with File DLQ (JSONL)
+// Features: on_error block with file destination
+// ─────────────────────────────────────────────────────────────────────────────
+pipeline "migrate_inventory_with_file_dlq" {
+    from {
+        connection = connection.sakila_mysql
+        table      = "inventory"
+    }
+
+    to {
+        connection = connection.target_postgres
+        table      = "inventory_processed"
+    }
+
+    select {
+        inventory_id = inventory.inventory_id
+        film_id      = inventory.film_id
+        store_id     = inventory.store_id
+        last_update  = inventory.last_update
+    }
+
+    validate {
+        // SKIP: Only process inventory for store 1
+        assert "store_one_only" {
+            check   = inventory.store_id == 1
+            message = "Only processing store 1 inventory"
+            action  = fail
+        }
+    }
+
+    on_error {
+        failed_rows {
+            file {
+                path   = "/tmp/inventory_failures.jsonl"
+                format = "Json"
+            }
+        }
+    }
+
+    settings {
+        create_missing_tables = true
+        ignore_constraints    = true
+        batch_size            = 200
+        copy_columns          = "MAP_ONLY"
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE 12: Before/After Hooks
+// Features: before and after SQL hooks for DDL operations
+// ─────────────────────────────────────────────────────────────────────────────
+pipeline "migrate_staff_with_hooks" {
+    after = [pipeline.migrate_addresses_filtered]
+
+    from {
+        connection = connection.sakila_mysql
+        table      = "staff"
+    }
+
+    to {
+        connection = connection.target_postgres
+        table      = "staff"
+    }
+
+    before {
+        sql = [
+            "DROP INDEX IF EXISTS idx_staff_email",
+            "DROP INDEX IF EXISTS idx_staff_store"
+        ]
+    }
+
+    after {
+        sql = [
+            "CREATE INDEX IF NOT EXISTS idx_staff_email ON staff(email)",
+            "CREATE INDEX IF NOT EXISTS idx_staff_store ON staff(store_id)",
+            "CREATE INDEX IF NOT EXISTS idx_staff_name ON staff(first_name, last_name)",
+            "ANALYZE staff"
+        ]
+    }
+
+    select {
+        staff_id    = staff.staff_id
+        first_name  = staff.first_name
+        last_name   = staff.last_name
+        full_name   = concat(staff.first_name, " ", staff.last_name)
+        address_id  = staff.address_id
+        email       = staff.email
+        store_id    = staff.store_id
+        active      = staff.active
+        username    = staff.username
+        last_update = staff.last_update
+    }
+
+    settings {
+        create_missing_tables  = true
+        ignore_constraints     = true
+        copy_columns           = "MAP_ONLY"
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE 13: Complex Multi-Table Denormalization
+// Features: 3+ joins, extensive transformations, full validation suite
+// ─────────────────────────────────────────────────────────────────────────────
+pipeline "create_customer_360_view" {
+    after = [
+        pipeline.migrate_customers_with_store,
+        pipeline.migrate_addresses_filtered,
+        pipeline.migrate_staff_with_hooks
+    ]
+
+    from {
+        connection = connection.sakila_mysql
+        table      = "customer"
+    }
+
+    to {
+        connection = connection.target_postgres
+        table      = "customer_360"
+    }
+
+    with {
+        addr  from address where addr.address_id == customer.address_id
+        city  from city    where city.city_id == addr.city_id
+        store from store   where store.store_id == customer.store_id
+    }
+
+    where "active_customers" {
+        customer.active == 1
+    }
+
+    select {
+        // Customer core data
+        customer_id       = customer.customer_id
+        first_name        = customer.first_name
+        last_name         = customer.last_name
+        full_name         = concat(customer.first_name, " ", customer.last_name)
+        email             = customer.email
+        active            = customer.active
+        create_date       = customer.create_date
+
+        // Address data (lookup)
+        address           = addr.address
+        address2          = addr.address2
+        district          = addr.district
+        postal_code       = addr.postal_code
+        phone             = addr.phone
+
+        // City data (lookup)
+        city_name         = city.city
+
+        // Store data (lookup)
+        store_id          = store.store_id
+        store_address_id  = store.address_id
+
+        // Computed: full address
+        full_address      = concat(addr.address, ", ", addr.district, " ", addr.postal_code)
+    }
+
+    validate {
+        // SKIP: Must have valid email
+        assert "valid_email" {
+            check   = customer.email != ""
+            message = "Customer must have email address"
+            action  = skip
+        }
+
+        // WARN: Ideally has phone
+        warn "has_phone" {
+            check   = addr.phone != ""
+            message = "Customer address missing phone number"
+        }
+
+        // WARN: Has postal code
+        warn "has_postal" {
+            check   = addr.postal_code != ""
+            message = "Customer address missing postal code"
+        }
+    }
+
+    settings {
+        create_missing_tables  = true
+        ignore_constraints     = true
+        batch_size             = 250
+        copy_columns           = "MAP_ONLY"
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE 14: Final Aggregation Pipeline (Depends on Everything)
+// Features: Diamond dependency pattern, final summary table
+// ─────────────────────────────────────────────────────────────────────────────
+pipeline "create_migration_summary" {
+    after = [
+        pipeline.create_customer_360_view,
+        pipeline.migrate_film_actors_enriched
+    ]
+
+    from {
+        connection = connection.sakila_mysql
+        table      = "store"
+    }
+
+    to {
+        connection = connection.target_postgres
+        table      = "migration_summary"
+    }
+
+    with {
+        mgr from staff where mgr.staff_id == store.manager_staff_id
+        addr from address where addr.address_id == store.address_id
+    }
+
+    select {
+        store_id         = store.store_id
+        manager_id       = store.manager_staff_id
+        manager_name     = concat(mgr.first_name, " ", mgr.last_name)
+        store_address    = addr.address
+        store_district   = addr.district
+        last_update      = store.last_update
+    }
+
+    // TODO: Before hook executed after settings - fix order of operations
+    // before {
+    //    sql = [
+    //        "DROP TABLE IF EXISTS migration_summary CASCADE"
+    //    ]
+    // }
+
+    after {
+        sql = [
+            "CREATE INDEX IF NOT EXISTS idx_summary_store ON migration_summary(store_id)",
+            "ANALYZE migration_summary"
+        ]
+    }
+
+    settings {
+        create_missing_tables = true
+        ignore_constraints    = true
+        batch_size            = 10
+        copy_columns          = "MAP_ONLY"
+    }
+}

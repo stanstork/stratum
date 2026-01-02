@@ -1,3 +1,4 @@
+pub mod analyzer;
 pub mod ast;
 pub mod context;
 pub mod error;
@@ -6,6 +7,7 @@ pub mod functions;
 pub mod inference;
 pub mod types;
 
+pub use analyzer::ExpressionAnalyzer;
 pub use ast::eval_ast_expression;
 pub use context::EvalContext;
 pub use error::{ExpressionError, Result};

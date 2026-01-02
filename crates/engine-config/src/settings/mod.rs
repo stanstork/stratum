@@ -1,6 +1,5 @@
-use crate::{
-    report::dry_run::DryRunReport,
-    settings::{error::SettingsError, validated::ValidatedSettings, validator::SettingsValidator},
+use crate::settings::{
+    error::SettingsError, validated::ValidatedSettings, validator::SettingsValidator,
 };
 use async_trait::async_trait;
 use batch_size::BatchSizeSetting;
@@ -9,12 +8,11 @@ use copy_cols::CopyColumnsSetting;
 use create_cols::CreateMissingColumnsSetting;
 use create_tables::CreateMissingTablesSetting;
 use engine_core::context::item::ItemContext;
-use futures::lock::Mutex;
 use infer_schema::InferSchemaSetting;
 use model::core::value::Value;
 use phase::MigrationSettingsPhase;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt, sync::Arc};
+use std::{collections::HashMap, fmt};
 use tracing::info;
 
 pub mod batch_size;
@@ -93,6 +91,7 @@ impl Settings {
                 .and_then(|v| match v {
                     Value::Int(i) => Some(*i as usize),
                     Value::Uint(u) => Some(*u as usize),
+                    Value::Float(f) => Some(*f as usize),
                     _ => None,
                 })
                 .unwrap_or(0),
@@ -161,14 +160,13 @@ pub async fn validate_and_apply(
     ctx: &mut ItemContext,
     settings: &HashMap<String, Value>,
     is_dry_run: bool,
-    dry_run_report: &Arc<Mutex<DryRunReport>>,
 ) -> Result<ValidatedSettings, SettingsError> {
     let settings_struct = Settings::from_map(settings);
 
     let validator = SettingsValidator::new(&ctx.source, &ctx.destination, is_dry_run);
     let validated_settings = validator.validate(&settings_struct).await?;
 
-    let mut all_settings = collect_settings(ctx, dry_run_report, &validated_settings).await;
+    let mut all_settings = collect_settings(ctx, &validated_settings).await;
     for setting in all_settings.iter_mut() {
         if setting.can_apply(ctx) {
             let phase = setting.phase();
@@ -182,7 +180,6 @@ pub async fn validate_and_apply(
 
 pub async fn collect_settings(
     ctx: &ItemContext,
-    dry_run_report: &Arc<Mutex<DryRunReport>>,
     validated: &ValidatedSettings,
 ) -> Vec<Box<dyn MigrationSetting>> {
     let src = ctx.source.clone();
@@ -202,21 +199,19 @@ pub async fn collect_settings(
     }
 
     if validated.infer_schema() {
-        let infer_schema_setting =
-            InferSchemaSetting::new(&src, &dest, &mapping, validated, dry_run_report).await;
+        let infer_schema_setting = InferSchemaSetting::new(&src, &dest, &mapping, validated).await;
         all_settings.push(Box::new(infer_schema_setting));
     }
 
     if validated.create_missing_tables() {
         let missing_tables_setting =
-            CreateMissingTablesSetting::new(&src, &dest, &mapping, validated, dry_run_report).await;
+            CreateMissingTablesSetting::new(&src, &dest, &mapping, validated).await;
         all_settings.push(Box::new(missing_tables_setting));
     }
 
     if validated.create_missing_columns() {
         let missing_cols_setting =
-            CreateMissingColumnsSetting::new(&src, &dest, &mapping, validated, dry_run_report)
-                .await;
+            CreateMissingColumnsSetting::new(&src, &dest, &mapping, validated).await;
         all_settings.push(Box::new(missing_cols_setting));
     }
 

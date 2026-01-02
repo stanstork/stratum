@@ -101,6 +101,23 @@ impl SqlFilterExpr {
         tables.dedup();
         tables
     }
+
+    pub fn columns(&self) -> Vec<String> {
+        let mut columns: Vec<String> = match self {
+            SqlFilterExpr::Leaf(cond) => {
+                // Single‐column leaf
+                vec![format!("{}.{}", cond.table, cond.column)]
+            }
+            SqlFilterExpr::And(exprs) | SqlFilterExpr::Or(exprs) => {
+                // Recursively collect from children
+                exprs.iter().flat_map(|e| e.columns()).collect()
+            }
+        };
+        // Remove duplicates in‐place
+        columns.sort_unstable();
+        columns.dedup();
+        columns
+    }
 }
 
 impl fmt::Display for SqlFilterExpr {

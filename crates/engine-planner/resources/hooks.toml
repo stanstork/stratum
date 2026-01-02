@@ -1,0 +1,24 @@
+# Warning messages for lifecycle hooks analysis
+
+[warnings]
+schema_change = "Schema changes in hooks may affect concurrent pipelines or lock metadata."
+non_concurrent_index = "Non-concurrent index operation will lock the table for the duration of the build."
+bulk_operation = "Bulk data operation detected (estimated {rows} rows). This may cause replication lag."
+dml_no_where = "DANGER: DML operation without a WHERE clause will affect all rows in the table."
+truncate_destructive = "TRUNCATE is destructive and irreversible."
+maintenance_slow = "Maintenance operations may take significant time and resources on large tables."
+destructive_drop = "Destructive DROP operation detected. This action is irreversible."
+
+[hints]
+index_create_slow = "May take significant time on large tables"
+index_drop_locks = "Usually fast, but may wait for locks"
+
+[operations]
+create_trigger = "Create trigger"
+disable_trigger = "Disable trigger"
+modify_trigger = "Modify trigger"
+ddl_fallback = "DDL"
+dml_fallback = "DML"
+sql_fallback = "SQL"
+maintenance_fallback = "MAINTENANCE"
+unknown_target = "unknown"

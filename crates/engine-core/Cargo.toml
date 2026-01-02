@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 connectors = { path = "../connectors" }
-planner = { path = "../planner" }
+query-builder = { path = "../query-builder" }
 model = { path = "../model" }
 smql-syntax = { path = "../smql-syntax" }
 expression-engine = { path = "../expression-engine" }

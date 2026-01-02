@@ -66,4 +66,11 @@ impl FieldMetadata {
             FieldMetadata::Csv(col) => !col.name.is_empty(),
         }
     }
+
+    pub fn char_max_length(&self) -> Option<usize> {
+        match self {
+            FieldMetadata::Sql(col) => col.char_max_length,
+            FieldMetadata::Csv(_) => None,
+        }
+    }
 }

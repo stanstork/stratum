@@ -15,7 +15,7 @@ use model::{
     core::{data_type::DataType, value::Value},
     records::batch::Batch,
 };
-use planner::query::dialect;
+use query_builder::dialect;
 use tokio::sync::OnceCell;
 use tracing::debug;
 use uuid::Uuid;

@@ -40,4 +40,8 @@ impl SqlFilter {
     pub fn tables(&self) -> Vec<String> {
         self.expr.as_ref().map(|e| e.tables()).unwrap_or_default()
     }
+
+    pub fn columns(&self) -> Vec<String> {
+        self.expr.as_ref().map(|e| e.columns()).unwrap_or_default()
+    }
 }

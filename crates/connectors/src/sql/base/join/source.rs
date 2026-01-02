@@ -30,15 +30,15 @@ impl JoinSource {
         self.clauses
             .iter()
             .flat_map(|clause| {
-                let left_alias = clause.left.alias.clone();
+                let right_alias = clause.right.alias.clone();
 
                 // fetch the map of table -> fields, then get table's Vec<SelectField>
                 let source_fields = self
                     .meta
-                    .get(&clause.left.table)
+                    .get(&clause.right.table)
                     .map(|m| m.select_fields_rec())
                     .unwrap_or_default()
-                    .get(&clause.left.table)
+                    .get(&clause.right.table)
                     .cloned()
                     .unwrap_or_default();
 
@@ -46,7 +46,7 @@ impl JoinSource {
                     .into_iter()
                     .map(|mut field| {
                         // override the field's table with alias
-                        field.table = left_alias.clone();
+                        field.table = right_alias.clone();
 
                         // apply any lookup aliases
                         if let Some(alias) = self
@@ -66,7 +66,7 @@ impl JoinSource {
                     // filter out anything not explicitly projected
                     .filter(|field| {
                         self.projection
-                            .get(&clause.left.table)
+                            .get(&clause.right.table)
                             .is_some_and(|fields| {
                                 fields
                                     .iter()

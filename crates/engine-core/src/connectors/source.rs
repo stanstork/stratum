@@ -1,4 +1,8 @@
-use crate::connectors::{filter::Filter, format::DataFormat, linked::LinkedSource};
+use crate::{
+    connectors::{filter::Filter, format::DataFormat, linked::LinkedSource},
+    filter::{compiler::FilterCompiler, csv::CsvFilterCompiler, sql::SqlFilterCompiler},
+    utils::combine_filters,
+};
 use connectors::{
     adapter::Adapter,
     error::AdapterError,
@@ -12,8 +16,12 @@ use connectors::{
         mysql::source::MySqlDataSource,
     },
 };
-use model::pagination::{cursor::Cursor, page::FetchResult};
-use planner::query::{
+use model::{
+    execution::pipeline::Pipeline,
+    pagination::{cursor::Cursor, page::FetchResult},
+    transform::mapping::TransformationMetadata,
+};
+use query_builder::{
     dialect::{self, Dialect},
     offsets::OffsetStrategy,
 };
@@ -105,20 +113,28 @@ impl DataSource {
 }
 
 impl Source {
-    pub fn new(
-        name: String,
-        format: DataFormat,
-        primary: DataSource,
-        linked: Option<LinkedSource>,
-        filter: Option<Filter>,
-    ) -> Self {
-        Source {
+    pub async fn new(
+        adapter: Adapter,
+        pipeline: &Pipeline,
+        mapping: &TransformationMetadata,
+        offset_strategy: Arc<dyn OffsetStrategy>,
+    ) -> Result<Self, AdapterError> {
+        let name = pipeline.source.table.clone();
+        let format = DataFormat::parse(&pipeline.source.connection.driver).ok_or_else(|| {
+            AdapterError::UnsupportedFormat(pipeline.source.connection.driver.clone())
+        })?;
+        let linked = LinkedSource::new(&adapter, &format, &pipeline.source.joins, mapping).await?;
+        let filter = Self::create_filter(pipeline, &format)?;
+        let primary =
+            DataSource::from_adapter(format, &adapter, &linked, &filter, offset_strategy)?;
+
+        Ok(Source {
             name,
             format,
             primary,
             linked,
             filter,
-        }
+        })
     }
 
     pub async fn fetch_data(
@@ -157,6 +173,25 @@ impl Source {
             DataFormat::MySql => Box::new(dialect::MySql),
             DataFormat::Postgres => Box::new(dialect::Postgres),
             _ => panic!("Unsupported dialect for source"),
+        }
+    }
+
+    fn create_filter(
+        pipeline: &Pipeline,
+        format: &DataFormat,
+    ) -> Result<Option<Filter>, AdapterError> {
+        let combined_condition = match combine_filters(&pipeline.source.filters) {
+            Some(cond) => cond,
+            None => return Ok(None),
+        };
+
+        match format {
+            DataFormat::MySql | DataFormat::Postgres => Ok(Some(Filter::Sql(
+                SqlFilterCompiler::compile(&combined_condition),
+            ))),
+            DataFormat::Csv => Ok(Some(Filter::Csv(CsvFilterCompiler::compile(
+                &combined_condition,
+            )))),
         }
     }
 }

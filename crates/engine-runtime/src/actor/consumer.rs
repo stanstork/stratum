@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use engine_core::{event_bus::bus::EventBus, metrics::Metrics};
 use engine_processing::{
     cb::{CircuitBreaker, CircuitBreakerState},
-    consumer::{ConsumerStatus, DataConsumer},
+    consumer::{Consumer, ConsumerStatus},
 };
 use model::events::migration::MigrationEvent;
 use std::time::Duration;
@@ -26,7 +26,7 @@ pub enum TickResponse {
 }
 
 pub struct ConsumerActor {
-    consumer: Box<dyn DataConsumer + Send + 'static>,
+    consumer: Consumer,
 
     // Control state
     running: bool,
@@ -47,11 +47,7 @@ pub struct ConsumerActor {
 }
 
 impl ConsumerActor {
-    pub fn new(
-        consumer: Box<dyn DataConsumer + Send + 'static>,
-        cancel_token: CancellationToken,
-        metrics: Metrics,
-    ) -> Self {
+    pub fn new(consumer: Consumer, cancel_token: CancellationToken, metrics: Metrics) -> Self {
         Self {
             consumer,
             running: false,

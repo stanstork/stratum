@@ -1,4 +1,5 @@
-use engine_runtime::error::MigrationError;
+use engine_planner::builder::errors::{ConnectionError, PlanBuilderError};
+use engine_runtime::{dag::error::DagError, error::MigrationError};
 use model::execution::errors::ConvertError;
 use smql_syntax::errors::{BuildError, SmqlError};
 use thiserror::Error;
@@ -31,9 +32,6 @@ pub enum CliError {
     #[error("PostgreSQL error: {0}")]
     Postgres(#[from] tokio_postgres::Error),
 
-    #[error("Unexpected error: {0}")]
-    Unexpected(String),
-
     #[error("Migration error: {0}")]
     Migration(MigrationError),
 
@@ -53,4 +51,13 @@ pub enum CliError {
         "Config file not found. Searched in the following locations:\n{0}\nPlease specify a config file with --config or create one in a standard location."
     )]
     ConfigNotFound(String),
+
+    #[error("DAG error: {0}")]
+    Dag(#[from] DagError),
+
+    #[error("Plan builder error: {0}")]
+    PlanBuilder(#[from] PlanBuilderError),
+
+    #[error("Connection test failed: {0}")]
+    Connection(#[from] ConnectionError),
 }

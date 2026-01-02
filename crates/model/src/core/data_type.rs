@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, collections::HashMap, fmt};
+use std::{borrow::Cow, collections::HashMap};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum DataType {
@@ -117,37 +117,51 @@ impl DataType {
 
     pub fn postgres_name(&self) -> Cow<'_, str> {
         match self {
-            DataType::Decimal | DataType::NewDecimal => Cow::Borrowed("DECIMAL"),
-            DataType::Short | DataType::ShortUnsigned => Cow::Borrowed("SMALLINT"),
-            DataType::Long | DataType::LongLong => Cow::Borrowed("BIGINT"),
-            DataType::Int | DataType::Int4 | DataType::IntUnsigned => Cow::Borrowed("INTEGER"),
-            DataType::Float => Cow::Borrowed("REAL"),
-            DataType::Double => Cow::Borrowed("DOUBLE PRECISION"),
-            DataType::Boolean => Cow::Borrowed("BOOLEAN"),
-            DataType::Null => Cow::Borrowed("NULL"),
-            DataType::Timestamp => Cow::Borrowed("TIMESTAMP"),
-            DataType::TimestampTz => Cow::Borrowed("TIMESTAMPTZ"),
-            DataType::Date => Cow::Borrowed("DATE"),
-            DataType::Time => Cow::Borrowed("TIME"),
-            DataType::Year => Cow::Borrowed("INTEGER"),
-            DataType::VarChar => Cow::Borrowed("VARCHAR"),
-            DataType::Char => Cow::Borrowed("CHAR"),
-            DataType::String => Cow::Borrowed("TEXT"),
-            DataType::Bit => Cow::Borrowed("BIT"),
-            DataType::Json => Cow::Borrowed("JSONB"),
-            DataType::Enum => Cow::Borrowed("ENUM"),
-            DataType::Set => Cow::Borrowed("TEXT[]"),
-            DataType::Array(Some(name)) => Cow::Owned(name.clone()),
-            DataType::Array(None) => Cow::Borrowed("TEXT[]"),
-            DataType::TinyBlob
+            // Numeric Types
+            DataType::Decimal | DataType::NewDecimal => Cow::Borrowed("numeric"),
+            DataType::Short | DataType::ShortUnsigned => Cow::Borrowed("int2"), // Alias for smallint
+            DataType::Int | DataType::Int4 | DataType::IntUnsigned => Cow::Borrowed("int4"), // Alias for integer
+            DataType::Long | DataType::LongLong => Cow::Borrowed("int8"), // Alias for bigint
+            DataType::Float => Cow::Borrowed("float4"),                   // Alias for real
+            DataType::Double => Cow::Borrowed("float8"), // Alias for double precision
+            DataType::Boolean => Cow::Borrowed("bool"),  // Alias for boolean
+
+            // Temporal Types
+            DataType::Timestamp => Cow::Borrowed("timestamp"), // Default is "without time zone"
+            DataType::TimestampTz => Cow::Borrowed("timestamptz"), // Alias for timestamp with time zone
+            DataType::Date => Cow::Borrowed("date"),
+            DataType::Time => Cow::Borrowed("time"), // Default is "without time zone"
+            DataType::Year => Cow::Borrowed("int4"), // PostgreSQL doesn't have a YEAR type, mapping to integer
+
+            // String & Binary Types
+            DataType::VarChar => Cow::Borrowed("varchar"), // Alias for character varying
+            DataType::Char => Cow::Borrowed("char"),       // Alias for character
+            DataType::String => Cow::Borrowed("text"),
+            DataType::Bit => Cow::Borrowed("bit"),
+            DataType::Bytea
+            | DataType::TinyBlob
             | DataType::MediumBlob
             | DataType::LongBlob
             | DataType::Blob
             | DataType::Binary
             | DataType::VarBinary
-            | DataType::Bytea
-            | DataType::Geometry => Cow::Borrowed("BYTEA"),
+            | DataType::Geometry => Cow::Borrowed("bytea"),
+
+            // Special Types
+            DataType::Json => Cow::Borrowed("jsonb"),
+            DataType::Enum => Cow::Borrowed("text"), // Fallback as PG enums are user-defined
+            DataType::Set => Cow::Borrowed("text[]"),
+            DataType::Array(Some(name)) => Cow::Owned(format!("{}[]", name.to_lowercase())),
+            DataType::Array(None) => Cow::Borrowed("text[]"),
+            DataType::Null => Cow::Borrowed("NULL"),
             DataType::Custom(name) => Cow::Borrowed(name),
+        }
+    }
+
+    pub fn name(&self, dialect: SqlDialect) -> Cow<'_, str> {
+        match dialect {
+            SqlDialect::MySql => self.mysql_name(),
+            SqlDialect::Postgres => self.postgres_name(),
         }
     }
 
@@ -241,12 +255,6 @@ impl TryFrom<&str> for DataType {
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         DataType::from_known_type(s).ok_or_else(|| format!("Unknown column type: {s}"))
-    }
-}
-
-impl fmt::Display for DataType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.mysql_name())
     }
 }
 

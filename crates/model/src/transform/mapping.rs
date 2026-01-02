@@ -15,10 +15,16 @@ pub struct FieldTransformations {
 }
 
 /// Bidirectional case-insensitive name mapping.
+/// Maps between target (destination/new) names and source (origin/old) names.
 #[derive(Clone, Debug, Default)]
 pub struct NameResolver {
-    pub source_to_target: HashMap<String, String>, // old_name -> new_name
-    pub target_to_source: HashMap<String, String>, // new_name -> old_name
+    /// Maps from target/destination column name to source/origin column name
+    /// Example: "given_name" -> "first_name"
+    pub target_to_source: HashMap<String, String>,
+
+    /// Maps from source/origin column name to target/destination column name
+    /// Example: "first_name" -> "given_name"
+    pub source_to_target: HashMap<String, String>,
 }
 
 /// Represents a field reference from a foreign entity (joined table).
@@ -60,17 +66,33 @@ impl FieldTransformations {
         let mut entity_map = Self::new();
         let entity = pipeline.destination.table.to_ascii_lowercase();
 
+        let source_table = pipeline.source.table.to_ascii_lowercase();
+
         let mut field_map = HashMap::new();
         let mut computed_fields = Vec::new();
 
         for transform in &pipeline.transformations {
             match &transform.expression {
+                // Simple identifier: field_name
                 CompiledExpression::Identifier(field) => {
                     field_map.insert(
                         transform.target_field.to_ascii_lowercase(),
                         field.to_ascii_lowercase(),
                     );
                 }
+                // Simple dot path reference to source table ONLY: source_table.column
+                // References to joined tables are cross-entity lookups and should be computed fields
+                CompiledExpression::DotPath(segments)
+                    if segments.len() == 2 && segments[0].to_ascii_lowercase() == source_table =>
+                {
+                    // This is a simple reference to a column from the source table
+                    // Treat it as a rename, not a computed field
+                    field_map.insert(
+                        transform.target_field.to_ascii_lowercase(),
+                        segments[1].to_ascii_lowercase(),
+                    );
+                }
+                // Everything else is a computed field (including joined table references)
                 other_expr => {
                     computed_fields.push(ComputedField::new(&transform.target_field, other_expr));
                 }
@@ -126,25 +148,29 @@ impl FieldTransformations {
 }
 
 impl NameResolver {
-    pub fn new(map: HashMap<String, String>) -> Self {
-        let mut source_to_target = HashMap::new();
+    /// Creates a new NameResolver from a map where keys are target names and values are source names.
+    /// Example input: {"given_name": "first_name", "family_name": "last_name"}
+    pub fn new(target_to_source_map: HashMap<String, String>) -> Self {
         let mut target_to_source = HashMap::new();
+        let mut source_to_target = HashMap::new();
 
-        for (k, v) in map.into_iter() {
-            let k_lower = k.to_ascii_lowercase();
-            let v_lower = v.to_ascii_lowercase();
+        for (target_name, source_name) in target_to_source_map.into_iter() {
+            let target_lower = target_name.to_ascii_lowercase();
+            let source_lower = source_name.to_ascii_lowercase();
 
-            source_to_target.insert(k_lower.clone(), v_lower.clone());
-            target_to_source.insert(v_lower, k_lower);
+            // Store both directions
+            target_to_source.insert(target_lower.clone(), source_lower.clone());
+            source_to_target.insert(source_lower, target_lower);
         }
 
         Self {
-            source_to_target,
             target_to_source,
+            source_to_target,
         }
     }
 
-    /// Resolve old -> new (default direction)
+    /// Resolve source/origin name to target/destination name
+    /// Example: "first_name" -> "given_name"
     pub fn resolve(&self, name: &str) -> String {
         let lower = name.to_ascii_lowercase();
         self.source_to_target
@@ -153,7 +179,8 @@ impl NameResolver {
             .unwrap_or_else(|| name.to_string())
     }
 
-    /// Reverse resolve new -> old
+    /// Resolve target/destination name to source/origin name
+    /// Example: "given_name" -> "first_name"
     pub fn reverse_resolve(&self, name: &str) -> String {
         let lower = name.to_ascii_lowercase();
         self.target_to_source
@@ -167,34 +194,58 @@ impl NameResolver {
     }
 
     /// Extracts entity name mappings from a pipeline.
+    /// For entities, the source table maps to destination table.
     pub fn from_pipeline(pipeline: &Pipeline) -> Self {
-        let mut name_map = HashMap::new();
+        let mut target_to_source_map = HashMap::new();
 
         let src = pipeline.source.table.to_ascii_lowercase();
         let dst = pipeline.destination.table.to_ascii_lowercase();
 
-        name_map.insert(src, dst);
+        // For the main table: destination (target) -> source
+        target_to_source_map.insert(dst, src);
 
+        // For joined tables, alias maps to the actual table name
         for join in &pipeline.source.joins {
-            name_map.insert(
-                join.alias.to_ascii_lowercase(),
-                join.table.to_ascii_lowercase(),
-            );
+            let alias = join.alias.to_ascii_lowercase();
+            let table = join.table.to_ascii_lowercase();
+            target_to_source_map.insert(alias, table);
         }
 
-        Self::new(name_map)
+        Self::new(target_to_source_map)
     }
 
     pub fn forward_map(&self) -> HashMap<String, String> {
         self.source_to_target.clone()
     }
 
-    pub fn contains_key(&self, key: &str) -> bool {
-        self.source_to_target.contains_key(key)
+    /// Check if a source column name exists in the mapping
+    pub fn contains_source(&self, name: &str) -> bool {
+        self.source_to_target
+            .contains_key(&name.to_ascii_lowercase())
     }
 
+    /// Check if a target column name exists in the mapping
+    pub fn contains_target(&self, name: &str) -> bool {
+        self.target_to_source
+            .contains_key(&name.to_ascii_lowercase())
+    }
+
+    // Legacy method for backwards compatibility
+    #[deprecated(note = "Use contains_source instead")]
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.contains_source(key)
+    }
+
+    // Legacy method for backwards compatibility
+    #[deprecated(note = "Use contains_target instead")]
     pub fn contains_target_key(&self, key: &str) -> bool {
-        self.target_to_source.contains_key(key)
+        self.contains_target(key)
+    }
+
+    // Legacy method for backwards compatibility
+    #[deprecated(note = "Use contains_target instead")]
+    pub fn has_target_column(&self, name: &str) -> bool {
+        self.contains_target(name)
     }
 }
 
@@ -460,26 +511,76 @@ mod tests {
 
         let entity = "customers_clean";
 
-        // Check simple field renames (source -> target direction in FieldTransformations::from_pipeline)
-        // The mapping is: target_field -> source_field (reversed from Transformation)
-        assert_eq!(
-            mapping
-                .field_mappings
-                .get_entity(entity)
-                .unwrap()
-                .resolve("id"),
-            "id"
-        );
-        // "customer_name" (target) maps from "name" (source)
-        // So resolve("customer_name") should return source field name
-        assert_eq!(
-            mapping
-                .field_mappings
-                .get_entity(entity)
-                .unwrap()
-                .resolve("customer_name"),
-            "name"
-        );
+        // Check simple field renames
+        // The mapping is: target_field -> source_field
+        // resolve() goes source -> target
+        // reverse_resolve() goes target -> source
+
+        let renames = mapping.field_mappings.get_entity(entity).unwrap();
+
+        // resolve: source -> target
+        assert_eq!(renames.resolve("name"), "customer_name");
+        assert_eq!(renames.resolve("id"), "id"); // same name in both
+
+        // reverse_resolve: target -> source
+        assert_eq!(renames.reverse_resolve("customer_name"), "name");
+        assert_eq!(renames.reverse_resolve("id"), "id"); // same name in both
+    }
+
+    #[test]
+    fn test_simple_dotpath_references_treated_as_renames() {
+        // Create a pipeline with simple table.column references
+        let mut pipeline = make_test_pipeline();
+        pipeline.transformations = vec![
+            // Simple dot path to source table: lang_id = customers.language_id
+            Transformation {
+                target_field: "lang_id".to_string(),
+                expression: CompiledExpression::DotPath(vec![
+                    "customers".to_string(), // source table
+                    "language_id".to_string(),
+                ]),
+            },
+            // Simple dot path to joined table: order_count = orders.count
+            // This should be a COMPUTED FIELD because it's a cross-entity reference
+            Transformation {
+                target_field: "order_count".to_string(),
+                expression: CompiledExpression::DotPath(vec![
+                    "orders".to_string(), // joined table alias
+                    "count".to_string(),
+                ]),
+            },
+            // Complex expression should still be computed: total = orders.amount * 2
+            Transformation {
+                target_field: "total".to_string(),
+                expression: CompiledExpression::Binary {
+                    left: Box::new(CompiledExpression::DotPath(vec![
+                        "orders".to_string(),
+                        "amount".to_string(),
+                    ])),
+                    op: BinaryOp::Multiply,
+                    right: Box::new(CompiledExpression::Literal(Value::Float(2.0))),
+                },
+            },
+        ];
+
+        let mapping = TransformationMetadata::new(&pipeline);
+        let entity = "customers_clean";
+
+        // Check that source table dotpath reference is treated as rename
+        // lang_id = customers.language_id means: target=lang_id, source=language_id
+        let renames = mapping.field_mappings.get_entity(entity).unwrap();
+        assert_eq!(renames.resolve("language_id"), "lang_id"); // source -> target
+
+        // Check that joined table references are computed fields
+        let computed = mapping
+            .field_mappings
+            .get_computed(entity)
+            .expect("Should have computed fields");
+        assert_eq!(computed.len(), 2); // order_count and total
+
+        let field_names: Vec<&str> = computed.iter().map(|f| f.name.as_str()).collect();
+        assert!(field_names.contains(&"order_count"));
+        assert!(field_names.contains(&"total"));
     }
 
     #[test]
@@ -488,12 +589,14 @@ mod tests {
         let mapping = TransformationMetadata::new(&pipeline);
 
         let entity = "customers_clean";
+
         let computed = mapping
             .field_mappings
             .get_computed(entity)
             .expect("Should have computed fields");
 
         // Should have 3 computed fields: total, discount, final_price
+        // discount = users.discount_rate is a cross-entity reference (joined table), so it's computed
         assert_eq!(computed.len(), 3);
 
         let field_names: Vec<&str> = computed.iter().map(|f| f.name.as_str()).collect();
@@ -507,7 +610,12 @@ mod tests {
         let pipeline = make_test_pipeline();
         let mapping = TransformationMetadata::new(&pipeline);
 
+        // Simple dot path references to JOINED tables (users.discount_rate) are treated as
+        // computed fields and will appear in cross_entity_refs.
+        // Only references to the SOURCE table are treated as renames.
+
         // Check cross-entity references for users table
+        // discount = users.discount_rate is a cross-entity reference (joined table)
         let users_refs = mapping.get_cross_entity_refs_for("users");
         assert_eq!(users_refs.len(), 1);
         assert_eq!(users_refs[0].entity, "users");
@@ -515,6 +623,7 @@ mod tests {
         assert_eq!(users_refs[0].target, Some("discount".to_string()));
 
         // Check cross-entity references for orders table
+        // final_price = amount * orders.quantity has a cross-entity ref
         let orders_refs = mapping.get_cross_entity_refs_for("orders");
         assert_eq!(orders_refs.len(), 1);
         assert_eq!(orders_refs[0].entity, "orders");
@@ -669,19 +778,21 @@ mod tests {
 
     #[test]
     fn test_name_resolver_case_insensitive() {
+        // Map: target -> source
         let mut map = HashMap::new();
-        map.insert("OldName".to_string(), "NewName".to_string());
+        map.insert("TargetName".to_string(), "SourceName".to_string());
         let name_resolver = NameResolver::new(map);
 
         // NameResolver converts to lowercase internally, so all case variations work
-        assert_eq!(name_resolver.resolve("oldname"), "newname");
-        assert_eq!(name_resolver.resolve("OLDNAME"), "newname");
-        assert_eq!(name_resolver.resolve("OldName"), "newname");
+        // resolve: source -> target
+        assert_eq!(name_resolver.resolve("sourcename"), "targetname");
+        assert_eq!(name_resolver.resolve("SOURCENAME"), "targetname");
+        assert_eq!(name_resolver.resolve("SourceName"), "targetname");
 
-        // Reverse resolve also works case-insensitively
-        assert_eq!(name_resolver.reverse_resolve("newname"), "oldname");
-        assert_eq!(name_resolver.reverse_resolve("NEWNAME"), "oldname");
-        assert_eq!(name_resolver.reverse_resolve("NewName"), "oldname");
+        // reverse_resolve: target -> source
+        assert_eq!(name_resolver.reverse_resolve("targetname"), "sourcename");
+        assert_eq!(name_resolver.reverse_resolve("TARGETNAME"), "sourcename");
+        assert_eq!(name_resolver.reverse_resolve("TargetName"), "sourcename");
 
         // Non-existent keys return the original input
         assert_eq!(name_resolver.resolve("UnknownField"), "UnknownField");
@@ -722,15 +833,47 @@ mod tests {
     #[test]
     fn test_field_mappings_resolve() {
         let mut mappings = FieldTransformations::new();
+        // Map: target_field -> source_field
         mappings.add_mapping(
             "entity",
-            vec![("old_field".to_string(), "new_field".to_string())]
+            vec![("target_field".to_string(), "source_field".to_string())]
                 .into_iter()
                 .collect(),
         );
 
-        assert_eq!(mappings.resolve("entity", "old_field"), "new_field");
+        // resolve: source -> target
+        assert_eq!(mappings.resolve("entity", "source_field"), "target_field");
         assert_eq!(mappings.resolve("entity", "unknown_field"), "unknown_field");
         assert_eq!(mappings.resolve("unknown_entity", "field"), "field");
+    }
+
+    #[test]
+    fn test_contains_target() {
+        // Create a map: target_field -> source_field
+        // Example: given_name = actor.first_name
+        let mut map = HashMap::new();
+        map.insert("given_name".to_string(), "first_name".to_string());
+        map.insert("family_name".to_string(), "last_name".to_string());
+
+        let resolver = NameResolver::new(map);
+
+        // After NameResolver.new():
+        // target_to_source: "given_name" -> "first_name", "family_name" -> "last_name"
+        // source_to_target: "first_name" -> "given_name", "last_name" -> "family_name"
+
+        // contains_target should return true for target column names
+        assert!(resolver.contains_target("given_name"));
+        assert!(resolver.contains_target("family_name"));
+        assert!(resolver.contains_target("GIVEN_NAME")); // case insensitive
+
+        // Should return false for source column names or unmapped names
+        assert!(!resolver.contains_target("first_name"));
+        assert!(!resolver.contains_target("last_name"));
+        assert!(!resolver.contains_target("unknown_column"));
+
+        // contains_source should return true for source column names
+        assert!(resolver.contains_source("first_name"));
+        assert!(resolver.contains_source("last_name"));
+        assert!(!resolver.contains_source("given_name")); // target name, not source
     }
 }

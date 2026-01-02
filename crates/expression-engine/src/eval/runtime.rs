@@ -70,19 +70,24 @@ impl Evaluator for CompiledExpression {
                         }
                     });
 
+                // For source table references, the column may be renamed in the row data.
+                // We need to resolve the source column name to the target column name.
+                let resolved_key = mapping.field_mappings.resolve(&row.entity, key);
+
                 let raw = row
                     .field_values
                     .iter()
-                    .find(|col| col.name.eq_ignore_ascii_case(key))
+                    .find(|col| col.name.eq_ignore_ascii_case(&resolved_key))
                     .and_then(|col| col.value.clone());
 
                 // If a mapped value is found, return it. Otherwise, return the raw value.
                 // Note: When the mapping contains lookups from joined tables, it generates a select with the mapped name.
                 // However, if there is no join, no additional fields are included in the select.
-                mapped.or(raw).or_else(|| {
+                let result = mapped.or(raw);
+                if result.is_none() {
                     warn!("Cross-entity reference failed for {}.{}", entity, key);
-                    None
-                })
+                }
+                result
             }
 
             // Single-segment DotPath is just a field reference

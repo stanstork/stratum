@@ -1,8 +1,5 @@
 use super::{MigrationSetting, context::SchemaSettingContext, phase::MigrationSettingsPhase};
-use crate::{
-    report::dry_run::DryRunReport,
-    settings::{error::SettingsError, validated::ValidatedSettings},
-};
+use crate::settings::{error::SettingsError, validated::ValidatedSettings};
 use async_trait::async_trait;
 use connectors::sql::base::{
     filter::SqlFilter,
@@ -21,9 +18,8 @@ use engine_core::{
     },
     context::item::ItemContext,
 };
-use futures::lock::Mutex;
 use model::transform::mapping::TransformationMetadata;
-use std::{collections::HashMap, slice, sync::Arc};
+use std::{collections::HashMap, slice};
 use tracing::info;
 
 pub struct CascadeSchemaSetting {
@@ -61,10 +57,9 @@ impl CascadeSchemaSetting {
         dest: &Destination,
         mapping: &TransformationMetadata,
         settings: &ValidatedSettings,
-        dry_run_report: &Arc<Mutex<DryRunReport>>,
     ) -> Self {
         Self {
-            context: SchemaSettingContext::new(src, dest, mapping, settings, dry_run_report).await,
+            context: SchemaSettingContext::new(src, dest, mapping, settings).await,
         }
     }
 

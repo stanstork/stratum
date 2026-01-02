@@ -20,7 +20,7 @@ use model::{
     pagination::{cursor::Cursor, page::FetchResult},
     records::row::RowData,
 };
-use planner::query::offsets::OffsetStrategy;
+use query_builder::offsets::OffsetStrategy;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,

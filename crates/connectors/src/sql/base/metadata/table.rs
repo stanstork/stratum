@@ -1,6 +1,5 @@
-use crate::sql::base::query::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField};
-
 use super::{column::ColumnMetadata, fk::ForeignKeyMetadata};
+use crate::sql::base::query::{column::ColumnDef, fk::ForeignKeyDef, select::SelectField};
 use model::core::data_type::DataType;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -24,7 +23,8 @@ impl TableMetadata {
                 table: self.name.clone(),
                 alias: Some(col_name.clone()),
                 column: col_name.clone(),
-                data_type: self.columns[col_name].data_type.to_string(),
+                // TODO: Extend for other dialects
+                data_type: self.columns[col_name].data_type.mysql_name().to_string(),
             })
             .collect()
     }
@@ -45,7 +45,8 @@ impl TableMetadata {
                     table: table.name.clone(),
                     alias: Some(col_name.clone()),
                     column: col_name.clone(),
-                    data_type: table.columns[col_name].data_type.to_string(),
+                    // TODO: Extend for other dialects
+                    data_type: table.columns[col_name].data_type.mysql_name().to_string(),
                 })
                 .collect();
 

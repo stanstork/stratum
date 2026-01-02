@@ -8,11 +8,11 @@ use model::{
     core::{data_type::DataType, value::Value},
     records::row::RowData,
 };
-use planner::query::{
+use query_builder::{
     ast::{
         common::TypeName,
         copy::{CopyDirection, CopyEndpoint},
-        expr::{BinaryOp, BinaryOperator, Expr, Ident},
+        expr::{BinaryOp, BinaryOperator, Expr, FunctionCall, Ident},
         insert::{ConflictAction, ConflictAssignment, Insert, OnConflict},
         merge::MergeAssignment,
     },
@@ -24,7 +24,7 @@ use planner::query::{
     dialect::{self, Dialect},
     renderer::{Render, Renderer},
 };
-use planner::{table_ref, value};
+use query_builder::{table_ref, value};
 use std::collections::{HashMap, HashSet};
 
 pub struct QueryGenerator<'a> {
@@ -56,11 +56,43 @@ impl<'a> QueryGenerator<'a> {
         select = add_joins!(select, &request.joins);
         select = add_where!(select, &request.filter);
 
+        // Apply IN clause if specified
+        if let Some((ref column, ref values)) = request.in_clause {
+            let in_expr = Expr::Identifier(Ident {
+                qualifier: Some(alias.to_string()),
+                name: column.clone(),
+            })
+            .in_list(values.iter().map(|v| Expr::Value(v.clone())).collect());
+
+            // Combine with existing filter using AND
+            select = match select.ast.where_clause.take() {
+                Some(existing) => select.where_clause(Expr::BinaryOp(Box::new(BinaryOp {
+                    left: existing,
+                    op: BinaryOperator::And,
+                    right: in_expr,
+                }))),
+                None => select.where_clause(in_expr),
+            };
+        }
+
+        // Apply random ordering if requested
+        if request.order_random {
+            select = select.order_by_random();
+        }
+
         // Build the final AST
-        let select_ast = select
-            .limit(value!(Value::Int(request.limit as i64)))
-            .paginate(request.strategy.clone(), &request.cursor, request.limit)
-            .build();
+        // Note: When using random ordering, we skip pagination to avoid adding ORDER BY clauses
+        // that would conflict with ORDER BY RANDOM()
+        let select_ast = if request.order_random {
+            select
+                .limit(value!(Value::Int(request.limit as i64)))
+                .build()
+        } else {
+            select
+                .limit(value!(Value::Int(request.limit as i64)))
+                .paginate(request.strategy.clone(), &request.cursor, request.limit)
+                .build()
+        };
 
         self.render_ast(select_ast)
     }
@@ -319,6 +351,95 @@ impl<'a> QueryGenerator<'a> {
             .build_key_existence_query(table_name, key_columns, keys_batch)
     }
 
+    /// Generates a validation estimation query that counts failures and total rows
+    ///
+    /// Returns a query that selects:
+    /// - `failures`: Count of rows that fail the validation (NOT validation_expr)
+    /// - `total`: Total count of rows sampled
+    ///
+    /// For PostgreSQL, uses: `COUNT(*) FILTER (WHERE NOT (validation_expr))`
+    /// For MySQL, uses: `SUM(CASE WHEN NOT (validation_expr) THEN 1 ELSE 0 END)`
+    ///
+    /// # Arguments
+    /// - `request`: FetchRowsRequest containing table, alias, and joins (filters are NOT applied)
+    /// - `validation_expr`: The validation expression to check
+    /// - `sample_size`: Maximum number of rows to sample for estimation
+    ///
+    /// # Note
+    /// This function applies joins but NOT filters from the request.
+    ///
+    /// **Why include joins?** Validation expressions can reference columns from joined tables
+    /// (e.g., `table_a.col1 == 1 && table_b.col2 == 2`). Without the joins, those columns
+    /// won't exist and the query will fail.
+    ///
+    /// **Why no filters?** Filters select a subset of data. We want to measure the quality of
+    /// the entire source table (with its joins), not just the filtered portion, to get an
+    /// unbiased estimate.
+    ///
+    /// # Example
+    /// ```sql
+    /// -- PostgreSQL output (with joins):
+    /// SELECT
+    ///   COUNT(*) FILTER (WHERE NOT ((table_a.age >= $1 AND table_b.verified = $2))) AS failures,
+    ///   COUNT(*) AS total
+    /// FROM users AS table_a
+    /// LEFT JOIN profiles AS table_b ON table_a.id = table_b.user_id
+    /// LIMIT $3
+    ///
+    /// -- MySQL output (without joins):
+    /// SELECT
+    ///   SUM(CASE WHEN NOT ((age >= ?)) THEN ? ELSE ? END) AS failures,
+    ///   COUNT(*) AS total
+    /// FROM users
+    /// LIMIT ?
+    /// ```
+    pub fn validation_estimation(
+        &self,
+        request: &FetchRowsRequest,
+        validation_expr: Expr,
+        sample_size: usize,
+    ) -> (String, Vec<Value>) {
+        let alias = request.alias.as_deref().unwrap_or(&request.table);
+        let table = table_ref!(&request.table);
+
+        // Build the NOT expression for failed validations
+        let not_validation = Expr::not(validation_expr);
+
+        let is_pg = self.dialect.name().contains("PostgreSQL");
+
+        // Build failure count expression based on database
+        let failures_expr = if is_pg {
+            // PostgreSQL: COUNT(*) FILTER (WHERE NOT (validation))
+            FunctionCall::count_all()
+                .with_filter(not_validation)
+                .alias("failures")
+        } else {
+            // MySQL: SUM(CASE WHEN NOT (validation) THEN 1 ELSE 0 END)
+            let case_expr = Expr::case_when(
+                not_validation,
+                Expr::Value(Value::Int(1)),
+                Some(Expr::Value(Value::Int(0))),
+            );
+            Expr::FunctionCall(FunctionCall::sum(case_expr)).alias("failures")
+        };
+
+        // Build total count expression
+        let total_expr = Expr::FunctionCall(FunctionCall::count_all()).alias("total");
+
+        // Build the SELECT query with joins but NO filters
+        let mut select = SelectBuilder::new()
+            .select(vec![failures_expr, total_expr])
+            .from(table, Some(alias));
+
+        // Apply joins so validation expressions can reference joined table columns
+        select = add_joins!(select, &request.joins);
+
+        // Add sample size limit
+        let select_ast = select.limit(value!(Value::Int(sample_size as i64))).build();
+
+        self.render_ast(select_ast)
+    }
+
     fn render_ast(&self, ast: impl Render) -> (String, Vec<Value>) {
         let mut renderer = Renderer::new(self.dialect);
         ast.render(&mut renderer);
@@ -449,4 +570,356 @@ fn build_pk_match_expr(meta: &TableMetadata, target_alias: &str, source_alias: &
             right: expr,
         }))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sql::base::requests::FetchRowsRequestBuilder;
+    use model::pagination::cursor::Cursor;
+    use query_builder::{
+        dialect::{MySql, Postgres},
+        offsets::DefaultOffset,
+    };
+    use std::sync::Arc;
+
+    #[test]
+    fn test_validation_estimation_postgres_simple() {
+        let generator = QueryGenerator::new(&Postgres);
+
+        let request = FetchRowsRequestBuilder::new("users".to_string())
+            .alias("users".to_string())
+            .limit(10000)
+            .cursor(Cursor::Default { offset: 0 })
+            .strategy(Arc::new(DefaultOffset { offset: 0 }))
+            .build();
+
+        // Validation: age >= 18
+        let validation_expr = Expr::BinaryOp(Box::new(BinaryOp {
+            left: Expr::Identifier(Ident {
+                qualifier: None,
+                name: "age".to_string(),
+            }),
+            op: BinaryOperator::GtEq,
+            right: Expr::Value(Value::Int(18)),
+        }));
+
+        let (sql, params) = generator.validation_estimation(&request, validation_expr, 10000);
+
+        assert_eq!(
+            sql,
+            "SELECT COUNT(*) FILTER (WHERE NOT ((\"age\" >= $1))) AS \"failures\", COUNT(*) AS \"total\" FROM \"users\" AS \"users\" LIMIT $2"
+        );
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0], Value::Int(18));
+        assert_eq!(params[1], Value::Int(10000));
+    }
+
+    #[test]
+    fn test_validation_estimation_mysql_simple() {
+        let generator = QueryGenerator::new(&MySql);
+
+        let request = FetchRowsRequestBuilder::new("users".to_string())
+            .alias("users".to_string())
+            .limit(10000)
+            .cursor(Cursor::Default { offset: 0 })
+            .strategy(Arc::new(DefaultOffset { offset: 0 }))
+            .build();
+
+        // Validation: age >= 18
+        let validation_expr = Expr::BinaryOp(Box::new(BinaryOp {
+            left: Expr::Identifier(Ident {
+                qualifier: None,
+                name: "age".to_string(),
+            }),
+            op: BinaryOperator::GtEq,
+            right: Expr::Value(Value::Int(18)),
+        }));
+
+        let (sql, params) = generator.validation_estimation(&request, validation_expr, 10000);
+
+        assert_eq!(
+            sql,
+            "SELECT SUM(CASE WHEN NOT ((`age` >= ?)) THEN ? ELSE ? END) AS `failures`, COUNT(*) AS `total` FROM `users` AS `users` LIMIT ?"
+        );
+        assert_eq!(params.len(), 4);
+        assert_eq!(params[0], Value::Int(18));
+        assert_eq!(params[1], Value::Int(1));
+        assert_eq!(params[2], Value::Int(0));
+        assert_eq!(params[3], Value::Int(10000));
+    }
+
+    #[test]
+    fn test_validation_estimation_postgres_complex() {
+        let generator = QueryGenerator::new(&Postgres);
+
+        let request = FetchRowsRequestBuilder::new("users".to_string())
+            .alias("users".to_string())
+            .limit(5000)
+            .cursor(Cursor::Default { offset: 0 })
+            .strategy(Arc::new(DefaultOffset { offset: 0 }))
+            .build();
+
+        // Validation: age >= 18 AND verified = true
+        let age_check = Expr::BinaryOp(Box::new(BinaryOp {
+            left: Expr::Identifier(Ident {
+                qualifier: None,
+                name: "age".to_string(),
+            }),
+            op: BinaryOperator::GtEq,
+            right: Expr::Value(Value::Int(18)),
+        }));
+
+        let verified_check = Expr::BinaryOp(Box::new(BinaryOp {
+            left: Expr::Identifier(Ident {
+                qualifier: None,
+                name: "verified".to_string(),
+            }),
+            op: BinaryOperator::Eq,
+            right: Expr::Value(Value::Boolean(true)),
+        }));
+
+        let validation_expr = Expr::BinaryOp(Box::new(BinaryOp {
+            left: age_check,
+            op: BinaryOperator::And,
+            right: verified_check,
+        }));
+
+        let (sql, params) = generator.validation_estimation(&request, validation_expr, 5000);
+
+        assert_eq!(
+            sql,
+            "SELECT COUNT(*) FILTER (WHERE NOT (((\"age\" >= $1) AND (\"verified\" = $2)))) AS \"failures\", COUNT(*) AS \"total\" FROM \"users\" AS \"users\" LIMIT $3"
+        );
+        assert_eq!(params.len(), 3);
+        assert_eq!(params[0], Value::Int(18));
+        assert_eq!(params[1], Value::Boolean(true));
+        assert_eq!(params[2], Value::Int(5000));
+    }
+
+    #[test]
+    fn test_validation_estimation_mysql_complex() {
+        let generator = QueryGenerator::new(&MySql);
+
+        let request = FetchRowsRequestBuilder::new("users".to_string())
+            .alias("users".to_string())
+            .limit(5000)
+            .cursor(Cursor::Default { offset: 0 })
+            .strategy(Arc::new(DefaultOffset { offset: 0 }))
+            .build();
+
+        // Validation: age >= 18 AND verified = true
+        let age_check = Expr::BinaryOp(Box::new(BinaryOp {
+            left: Expr::Identifier(Ident {
+                qualifier: None,
+                name: "age".to_string(),
+            }),
+            op: BinaryOperator::GtEq,
+            right: Expr::Value(Value::Int(18)),
+        }));
+
+        let verified_check = Expr::BinaryOp(Box::new(BinaryOp {
+            left: Expr::Identifier(Ident {
+                qualifier: None,
+                name: "verified".to_string(),
+            }),
+            op: BinaryOperator::Eq,
+            right: Expr::Value(Value::Boolean(true)),
+        }));
+
+        let validation_expr = Expr::BinaryOp(Box::new(BinaryOp {
+            left: age_check,
+            op: BinaryOperator::And,
+            right: verified_check,
+        }));
+
+        let (sql, params) = generator.validation_estimation(&request, validation_expr, 5000);
+
+        assert_eq!(
+            sql,
+            "SELECT SUM(CASE WHEN NOT (((`age` >= ?) AND (`verified` = ?))) THEN ? ELSE ? END) AS `failures`, COUNT(*) AS `total` FROM `users` AS `users` LIMIT ?"
+        );
+        assert_eq!(params.len(), 5);
+        assert_eq!(params[0], Value::Int(18));
+        assert_eq!(params[1], Value::Boolean(true));
+        assert_eq!(params[2], Value::Int(1));
+        assert_eq!(params[3], Value::Int(0));
+        assert_eq!(params[4], Value::Int(5000));
+    }
+
+    #[test]
+    fn test_select_with_in_clause_postgres() {
+        let generator = QueryGenerator::new(&Postgres);
+
+        let request = FetchRowsRequestBuilder::new("users".to_string())
+            .alias("u".to_string())
+            .limit(10)
+            .cursor(Cursor::Default { offset: 0 })
+            .strategy(Arc::new(DefaultOffset { offset: 0 }))
+            .in_clause(
+                "id".to_string(),
+                vec![Value::Int(1), Value::Int(5), Value::Int(10)],
+            )
+            .build();
+
+        let (sql, params) = generator.select(&request);
+
+        assert!(sql.contains(r#""u"."id" IN ($1, $2, $3)"#));
+        assert!(sql.contains("LIMIT $4"));
+        assert_eq!(params[0], Value::Int(1));
+        assert_eq!(params[1], Value::Int(5));
+        assert_eq!(params[2], Value::Int(10));
+        assert_eq!(params[3], Value::Uint(10));
+    }
+
+    #[test]
+    fn test_select_with_in_clause_mysql() {
+        let generator = QueryGenerator::new(&MySql);
+
+        let request = FetchRowsRequestBuilder::new("products".to_string())
+            .alias("p".to_string())
+            .limit(20)
+            .cursor(Cursor::Default { offset: 0 })
+            .strategy(Arc::new(DefaultOffset { offset: 0 }))
+            .in_clause(
+                "status".to_string(),
+                vec![
+                    Value::String("active".to_string()),
+                    Value::String("pending".to_string()),
+                ],
+            )
+            .build();
+
+        let (sql, params) = generator.select(&request);
+
+        assert!(sql.contains("`p`.`status` IN (?, ?)"));
+        assert!(sql.contains("LIMIT ?"));
+        assert_eq!(params[0], Value::String("active".to_string()));
+        assert_eq!(params[1], Value::String("pending".to_string()));
+        assert_eq!(params[2], Value::Uint(20));
+    }
+
+    #[test]
+    fn test_select_with_random_order_postgres() {
+        let generator = QueryGenerator::new(&Postgres);
+
+        let request = FetchRowsRequestBuilder::new("users".to_string())
+            .alias("users".to_string())
+            .limit(5)
+            .cursor(Cursor::Default { offset: 0 })
+            .strategy(Arc::new(DefaultOffset { offset: 0 }))
+            .order_random(true)
+            .build();
+
+        let (sql, params) = generator.select(&request);
+
+        assert!(sql.contains("ORDER BY RANDOM()"));
+        assert!(sql.contains("LIMIT"));
+        // Should not have additional ORDER BY for pagination (only RANDOM)
+        assert!(!sql.contains("ASC"));
+        assert!(!sql.contains("DESC"));
+        // When using random ordering, pagination is skipped, so only LIMIT param (as Int)
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0], Value::Int(5));
+    }
+
+    #[test]
+    fn test_select_with_random_order_mysql() {
+        let generator = QueryGenerator::new(&MySql);
+
+        let request = FetchRowsRequestBuilder::new("posts".to_string())
+            .alias("posts".to_string())
+            .limit(10)
+            .cursor(Cursor::Default { offset: 0 })
+            .strategy(Arc::new(DefaultOffset { offset: 0 }))
+            .order_random(true)
+            .build();
+
+        let (sql, params) = generator.select(&request);
+
+        assert!(sql.contains("ORDER BY RAND()"));
+        assert!(sql.contains("LIMIT"));
+        // Should not have additional ORDER BY for pagination (only RAND)
+        assert!(!sql.contains("ASC"));
+        assert!(!sql.contains("DESC"));
+        // When using random ordering, pagination is skipped, so only LIMIT param (as Int)
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0], Value::Int(10));
+    }
+
+    #[test]
+    fn test_select_with_in_clause_and_random_order_postgres() {
+        let generator = QueryGenerator::new(&Postgres);
+
+        let request = FetchRowsRequestBuilder::new("users".to_string())
+            .alias("u".to_string())
+            .limit(3)
+            .cursor(Cursor::Default { offset: 0 })
+            .strategy(Arc::new(DefaultOffset { offset: 0 }))
+            .in_clause(
+                "id".to_string(),
+                vec![
+                    Value::Int(10),
+                    Value::Int(20),
+                    Value::Int(30),
+                    Value::Int(40),
+                    Value::Int(50),
+                ],
+            )
+            .order_random(true)
+            .build();
+
+        let (sql, params) = generator.select(&request);
+
+        // Should have both IN clause and random ordering
+        assert!(sql.contains(r#""u"."id" IN ($1, $2, $3, $4, $5)"#));
+        assert!(sql.contains("ORDER BY RANDOM()"));
+        assert!(sql.contains("LIMIT"));
+        // Should not have additional ORDER BY for pagination
+        assert!(!sql.contains("ASC"));
+        assert!(!sql.contains("DESC"));
+        // IN values (5) + limit (1) = 6 params (no offset when using random ordering)
+        assert_eq!(params.len(), 6);
+        assert_eq!(params[0], Value::Int(10));
+        assert_eq!(params[1], Value::Int(20));
+        assert_eq!(params[2], Value::Int(30));
+        assert_eq!(params[3], Value::Int(40));
+        assert_eq!(params[4], Value::Int(50));
+        assert_eq!(params[5], Value::Int(3)); // limit
+    }
+
+    #[test]
+    fn test_select_with_in_clause_and_random_order_mysql() {
+        let generator = QueryGenerator::new(&MySql);
+
+        let request = FetchRowsRequestBuilder::new("posts".to_string())
+            .alias("p".to_string())
+            .limit(5)
+            .cursor(Cursor::Default { offset: 0 })
+            .strategy(Arc::new(DefaultOffset { offset: 0 }))
+            .in_clause(
+                "category".to_string(),
+                vec![
+                    Value::String("tech".to_string()),
+                    Value::String("news".to_string()),
+                ],
+            )
+            .order_random(true)
+            .build();
+
+        let (sql, params) = generator.select(&request);
+
+        // Should have both IN clause and random ordering
+        assert!(sql.contains("`p`.`category` IN (?, ?)"));
+        assert!(sql.contains("ORDER BY RAND()"));
+        assert!(sql.contains("LIMIT"));
+        // Should not have additional ORDER BY for pagination
+        assert!(!sql.contains("ASC"));
+        assert!(!sql.contains("DESC"));
+        // IN values (2) + limit (1) = 3 params (no offset when using random ordering)
+        assert_eq!(params.len(), 3);
+        assert_eq!(params[0], Value::String("tech".to_string()));
+        assert_eq!(params[1], Value::String("news".to_string()));
+        assert_eq!(params[2], Value::Int(5)); // limit
+    }
 }

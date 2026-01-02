@@ -65,7 +65,7 @@ pub struct Join {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pagination {
     pub strategy: String,
-    pub cursor: String,
+    pub column: String,
     pub tiebreaker: Option<String>,
     pub timezone: Option<String>,
 }
@@ -87,7 +87,7 @@ pub struct ValidationRule {
     pub action: ValidationAction,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum ValidationSeverity {
     Assert,
     Warn,

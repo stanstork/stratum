@@ -19,7 +19,7 @@ use model::{
     execution::pipeline::Pipeline, pagination::cursor::Cursor,
     transform::mapping::TransformationMetadata,
 };
-use planner::query::offsets::OffsetStrategy;
+use query_builder::offsets::OffsetStrategy;
 use std::{future::Future, sync::Arc};
 
 /// Represents the context for a single item in the migration process.

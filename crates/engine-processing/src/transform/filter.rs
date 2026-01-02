@@ -22,7 +22,7 @@ impl UnmappedTableFilter {
 
     fn has_any_mapping(&self, table: &str) -> bool {
         // Check if table has entity mapping
-        if self.mapping.entities.contains_key(table) {
+        if self.mapping.entities.contains_target(table) {
             return true;
         }
 
