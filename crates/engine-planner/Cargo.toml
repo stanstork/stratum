@@ -22,7 +22,7 @@ thiserror = "2.0.12"
 tracing = "0.1.41"
 uuid = "1.19.0"
 async-trait = "0.1.86"
-mysql_async = "0.34.2"
+mysql_async = "0.36.1"
 tokio-postgres = "0.7.12"
 tokio = { version = "1.43.0", features = ["full"] }
 toml = "0.8"

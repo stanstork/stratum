@@ -44,6 +44,15 @@ pub struct ConsumerActor {
 
     // EventBus for publishing migration events
     event_bus: Option<EventBus>,
+
+    // Progress tracking
+    // TODO: Move progress tracking to Metrics
+    run_id: Option<String>,
+    item_id: Option<String>,
+    last_progress_report: std::time::Instant,
+    progress_report_interval: Duration,
+    start_time: Option<std::time::Instant>,
+    last_rows_processed: u64,
 }
 
 impl ConsumerActor {
@@ -57,6 +66,12 @@ impl ConsumerActor {
             idle_delay: Duration::from_millis(100), // Default idle delay
             actor_ref: None,
             event_bus: None,
+            run_id: None,
+            item_id: None,
+            last_progress_report: std::time::Instant::now(),
+            progress_report_interval: Duration::from_millis(500), // Report progress every 500ms
+            start_time: None,
+            last_rows_processed: 0,
         }
     }
 
@@ -140,6 +155,11 @@ impl Actor<ConsumerMsg> for ConsumerActor {
                     warn!(error = %e, "Failed to resume consumer state");
                 }
 
+                // Store IDs for progress reporting
+                self.run_id = Some(run_id.clone());
+                self.item_id = Some(item_id.clone());
+                self.start_time = Some(std::time::Instant::now());
+
                 self.running = true;
 
                 if let Some(ref event_bus) = self.event_bus {
@@ -177,6 +197,43 @@ impl Actor<ConsumerMsg> for ConsumerActor {
                 let response = match self.consumer.tick().await {
                     Ok(status) => {
                         self.breaker.record_success();
+
+                        // Publish progress events periodically
+                        let now = std::time::Instant::now();
+                        if now.duration_since(self.last_progress_report)
+                            >= self.progress_report_interval
+                            && let (Some(event_bus), Some(run_id), Some(item_id), Some(start_time)) = (
+                                &self.event_bus,
+                                &self.run_id,
+                                &self.item_id,
+                                self.start_time,
+                            )
+                        {
+                            let snapshot = self.metrics.snapshot();
+
+                            // Calculate throughput (rows per second)
+                            let elapsed = now.duration_since(start_time).as_secs_f64();
+                            let rows_per_second = if elapsed > 0.0 {
+                                snapshot.records_processed as f64 / elapsed
+                            } else {
+                                0.0
+                            };
+
+                            event_bus
+                                .publish(MigrationEvent::Progress {
+                                    run_id: run_id.clone(),
+                                    item_id: item_id.clone(),
+                                    rows_processed: snapshot.records_processed,
+                                    rows_skipped: snapshot.rows_skipped,
+                                    rows_failed: snapshot.rows_failed,
+                                    bytes_transferred: snapshot.bytes_transferred,
+                                    rows_per_second,
+                                    timestamp: chrono::Utc::now(),
+                                })
+                                .await;
+                            self.last_progress_report = now;
+                            self.last_rows_processed = snapshot.records_processed;
+                        }
 
                         if shutdown_requested {
                             info!(

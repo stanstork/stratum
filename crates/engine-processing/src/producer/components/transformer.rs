@@ -14,6 +14,17 @@ use model::{
 use std::sync::Arc;
 use tracing::{info, warn};
 
+/// Result of transforming a batch of rows, including statistics
+#[derive(Debug, Clone)]
+pub struct TransformResult {
+    /// Successfully transformed rows
+    pub rows: Vec<RowData>,
+    /// Number of rows filtered/skipped during transformation
+    pub rows_skipped: u64,
+    /// Number of rows that failed transformation
+    pub rows_failed: u64,
+}
+
 /// Handles transformation of rows with batch processing and failed row tracking.
 pub struct TransformService {
     pipeline: TransformPipeline,
@@ -54,8 +65,8 @@ impl TransformService {
         run_id: &str,
         batch_id: &str,
         rows: Vec<RowData>,
-    ) -> Result<Vec<RowData>, TransformError> {
-        let (successful, _filtered, _failed_rows, has_fatal) =
+    ) -> Result<TransformResult, TransformError> {
+        let (successful, filtered, failed_rows, has_fatal) =
             self.transform_batch(run_id, batch_id, rows).await;
 
         if has_fatal {
@@ -67,7 +78,11 @@ impl TransformService {
         }
 
         // Regular transformation errors were sent to DLQ - continue migration
-        Ok(successful)
+        Ok(TransformResult {
+            rows: successful,
+            rows_skipped: filtered.len() as u64,
+            rows_failed: failed_rows.len() as u64,
+        })
     }
 
     /// Transform a batch of rows with fail-fast semantics.

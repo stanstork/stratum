@@ -1,4 +1,12 @@
+use crate::{Cli, error::CliError};
 use clap::{Subcommand, ValueEnum};
+use tokio_util::sync::CancellationToken;
+
+pub mod apply;
+pub mod plan;
+pub mod test_conn;
+pub mod verify;
+pub mod version;
 
 /// Sampling method for data preview
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
@@ -44,7 +52,7 @@ pub enum Commands {
 
         /// Name of the ID column for sampling
         #[arg(long, default_value = "id")]
-        id_column: String,
+        id_column: Option<String>,
 
         /// Specific IDs to sample (comma-separated)
         #[arg(long, value_delimiter = ',')]
@@ -52,7 +60,7 @@ pub enum Commands {
 
         /// Use exact COUNT for filtered rows (slower but accurate). By default uses EXPLAIN estimates (faster)
         #[arg(long)]
-        exact_where: bool,
+        exact_filter: bool,
     },
     /// Execute the migration
     Apply {
@@ -62,6 +70,16 @@ pub enum Commands {
             help = "Path to SMQL config file (auto-discovered if not specified)"
         )]
         config: Option<String>,
+
+        #[arg(long, help = "Run with interactive TUI (experimental)")]
+        tui: bool,
+
+        #[arg(long, help = "Run with pretty colored output")]
+        pretty: bool,
+
+        /// Use exact COUNT for filtered rows (slower but accurate). By default uses EXPLAIN estimates (faster)
+        #[arg(long)]
+        exact_filter: bool,
     },
     /// Verify migrated data matches source data
     Verify {
@@ -95,4 +113,27 @@ pub enum Commands {
     },
     /// Show version information
     Version,
+}
+
+/// Executes the appropriate command based on CLI arguments
+pub async fn execute_command(cli: &Cli, cancel: CancellationToken) -> Result<(), CliError> {
+    match &cli.command {
+        Commands::Plan { .. } => plan::execute(cli, &cli.command).await,
+        Commands::Apply {
+            config,
+            tui,
+            pretty,
+            exact_filter,
+        } => apply::execute(config.clone(), *tui, *pretty, *exact_filter, cancel).await,
+        Commands::Verify { config, output } => {
+            verify::execute(cli, config.clone(), output.clone()).await
+        }
+        Commands::TestConn { url, format } => {
+            test_conn::execute(cli, url.clone(), format.clone()).await
+        }
+        Commands::Version => {
+            version::execute();
+            Ok(())
+        }
+    }
 }

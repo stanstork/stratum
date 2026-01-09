@@ -19,7 +19,7 @@ execution {
 // ─────────────────────────────────────────────────────────────────────────────
 define {
     // Literal constants
-    default_batch_size = 50000
+    default_batch_size = 1
     max_rental_rate    = 4.99
     min_payment_amount = 0.01
     tax_multiplier     = 1.08
@@ -181,7 +181,7 @@ pipeline "migrate_films_affordable" {
     settings {
         create_missing_tables = true
         ignore_constraints    = true
-        batch_size            = 200
+        batch_size            = 1
         copy_columns          = "MAP_ONLY"
     }
 }
@@ -272,7 +272,7 @@ pipeline "migrate_film_details" {
     settings {
         create_missing_tables  = true
         ignore_constraints     = true
-        batch_size             = 100
+        batch_size             = 1
         copy_columns           = "MAP_ONLY"
     }
 }
@@ -378,7 +378,7 @@ pipeline "migrate_films_with_warnings" {
     settings {
         create_missing_tables = true
         ignore_constraints    = true
-        batch_size            = 500
+        batch_size            = 1
         copy_columns          = "MAP_ONLY"
     }
 }
@@ -436,7 +436,7 @@ pipeline "migrate_addresses_filtered" {
     settings {
         create_missing_tables = true
         ignore_constraints    = true
-        batch_size            = 500
+        batch_size            = 1
         copy_columns          = "MAP_ONLY"
     }
 }
@@ -498,7 +498,7 @@ pipeline "migrate_film_actors_enriched" {
     settings {
         create_missing_tables  = true
         ignore_constraints     = true
-        batch_size             = 500
+        batch_size             = 1
         copy_columns           = "MAP_ONLY"
     }
 }
@@ -546,7 +546,7 @@ pipeline "migrate_inventory_with_file_dlq" {
     settings {
         create_missing_tables = true
         ignore_constraints    = true
-        batch_size            = 200
+        batch_size            = 1
         copy_columns          = "MAP_ONLY"
     }
 }
@@ -687,7 +687,7 @@ pipeline "create_customer_360_view" {
     settings {
         create_missing_tables  = true
         ignore_constraints     = true
-        batch_size             = 250
+        batch_size             = 1
         copy_columns           = "MAP_ONLY"
     }
 }
@@ -743,7 +743,7 @@ pipeline "create_migration_summary" {
     settings {
         create_missing_tables = true
         ignore_constraints    = true
-        batch_size            = 10
+        batch_size            = 1
         copy_columns          = "MAP_ONLY"
     }
 }

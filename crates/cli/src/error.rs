@@ -60,4 +60,7 @@ pub enum CliError {
 
     #[error("Connection test failed: {0}")]
     Connection(#[from] ConnectionError),
+
+    #[error("Unknown error: {0}")]
+    Unknown(String),
 }

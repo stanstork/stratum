@@ -8,6 +8,8 @@ struct InnerMetrics {
     records_processed: AtomicU64,
     bytes_transferred: AtomicU64,
     batches_processed: AtomicU64,
+    rows_skipped: AtomicU64,
+    rows_failed: AtomicU64,
     failure_count: AtomicU64,
     retry_count: AtomicU64,
 }
@@ -22,6 +24,8 @@ pub struct MetricsSnapshot {
     pub records_processed: u64,
     pub bytes_transferred: u64,
     pub batches_processed: u64,
+    pub rows_skipped: u64,
+    pub rows_failed: u64,
     pub failure_count: u64,
     pub retry_count: u64,
 }
@@ -51,6 +55,14 @@ impl Metrics {
             .fetch_add(count, Ordering::Relaxed);
     }
 
+    pub fn increment_rows_skipped(&self, count: u64) {
+        self.inner.rows_skipped.fetch_add(count, Ordering::Relaxed);
+    }
+
+    pub fn increment_rows_failed(&self, count: u64) {
+        self.inner.rows_failed.fetch_add(count, Ordering::Relaxed);
+    }
+
     pub fn increment_failures(&self, count: u64) {
         self.inner.failure_count.fetch_add(count, Ordering::Relaxed);
     }
@@ -64,6 +76,8 @@ impl Metrics {
             records_processed: self.inner.records_processed.load(Ordering::Relaxed),
             bytes_transferred: self.inner.bytes_transferred.load(Ordering::Relaxed),
             batches_processed: self.inner.batches_processed.load(Ordering::Relaxed),
+            rows_skipped: self.inner.rows_skipped.load(Ordering::Relaxed),
+            rows_failed: self.inner.rows_failed.load(Ordering::Relaxed),
             failure_count: self.inner.failure_count.load(Ordering::Relaxed),
             retry_count: self.inner.retry_count.load(Ordering::Relaxed),
         }

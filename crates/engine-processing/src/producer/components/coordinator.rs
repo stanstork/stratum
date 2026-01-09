@@ -1,4 +1,7 @@
-use crate::{error::ProducerError, state_manager::StateManager};
+use crate::{
+    error::ProducerError, producer::components::transformer::TransformResult,
+    state_manager::StateManager,
+};
 use model::{
     pagination::cursor::Cursor,
     records::{
@@ -12,7 +15,10 @@ use tokio::sync::mpsc;
 pub struct BatchCoordinator {
     batch_tx: Option<mpsc::Sender<Batch>>,
     state_manager: StateManager,
+    batches_processed: u64,
     rows_produced: u64,
+    rows_skipped: u64,
+    rows_failed: u64,
 }
 
 impl BatchCoordinator {
@@ -20,7 +26,10 @@ impl BatchCoordinator {
         Self {
             batch_tx: Some(batch_tx),
             state_manager,
+            batches_processed: 0,
             rows_produced: 0,
+            rows_skipped: 0,
+            rows_failed: 0,
         }
     }
 
@@ -57,13 +66,15 @@ impl BatchCoordinator {
     }
 
     /// Complete batch lifecycle: log start, send, and optionally commit.
+    /// Records transformation statistics only after successful batch processing.
     pub async fn process_batch(
         &mut self,
         batch_id: String,
         current_cursor: Cursor,
-        rows: Vec<RowData>,
+        transform_result: TransformResult,
         next_cursor: Cursor,
     ) -> Result<(), ProducerError> {
+        let rows = transform_result.rows;
         let rows_count = rows.len();
 
         // Log batch start for crash recovery
@@ -76,7 +87,12 @@ impl BatchCoordinator {
             .await?;
 
         self.state_manager.commit_batch(&batch_id).await?;
+
+        // Only record stats after successful processing
+        self.batches_processed += 1;
         self.rows_produced += rows_count as u64;
+        self.rows_skipped += transform_result.rows_skipped;
+        self.rows_failed += transform_result.rows_failed;
 
         Ok(())
     }
@@ -85,7 +101,19 @@ impl BatchCoordinator {
         &self.state_manager
     }
 
+    pub fn batches_processed(&self) -> u64 {
+        self.batches_processed
+    }
+
     pub fn rows_produced(&self) -> u64 {
         self.rows_produced
+    }
+
+    pub fn rows_skipped(&self) -> u64 {
+        self.rows_skipped
+    }
+
+    pub fn rows_failed(&self) -> u64 {
+        self.rows_failed
     }
 }

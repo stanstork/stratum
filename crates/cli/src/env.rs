@@ -1,8 +1,7 @@
+use crate::error::CliError;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-
-use crate::error::CliError;
 
 /// Environment variable manager that loads from system and .env files
 #[derive(Debug, Clone)]

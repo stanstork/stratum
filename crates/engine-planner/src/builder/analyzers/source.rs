@@ -17,10 +17,10 @@ use connectors::sql::base::{
     metadata::{index::IndexMetadata, table::TableMetadata},
     query::generator::QueryGenerator,
 };
-use engine_core::connectors::source::{DataSource as CoreDataSource, Source as CoreSource};
+use engine_core::filter::{compiler::FilterCompiler, sql::SqlFilterCompiler};
 use engine_core::{
-    filter::{compiler::FilterCompiler, sql::SqlFilterCompiler},
-    utils::combine_filters,
+    connectors::source::{DataSource as CoreDataSource, Source as CoreSource},
+    filter::combine_filters,
 };
 use model::{core::value::Value, execution::pipeline::DataSource, pagination::cursor::Cursor};
 use std::sync::Arc;

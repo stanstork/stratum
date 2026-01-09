@@ -228,16 +228,17 @@ impl Producer {
         let next = fetch_result.next_cursor.unwrap_or(Cursor::None);
 
         // Transform data - will process entire batch even if some rows fail
-        let transformed_rows = self
+        let transform_result = self
             .transformer
             .transform(&self.ids.run_id(), &batch_id, fetch_result.rows)
             .await?;
 
+        // Process batch - stats are recorded only after successful completion
         self.coordinator
             .process_batch(
                 batch_id,
                 self.cursor.clone(),
-                transformed_rows,
+                transform_result,
                 next.clone(),
             )
             .await?;
@@ -253,5 +254,20 @@ impl Producer {
         }
 
         Ok(ProducerStatus::Working)
+    }
+
+    /// Returns the total number of batches processed
+    pub fn batches_processed(&self) -> u64 {
+        self.coordinator.batches_processed()
+    }
+
+    /// Returns the total number of rows skipped during transformation
+    pub fn total_rows_skipped(&self) -> u64 {
+        self.coordinator.rows_skipped()
+    }
+
+    /// Returns the total number of rows that failed during transformation
+    pub fn total_rows_failed(&self) -> u64 {
+        self.coordinator.rows_failed()
     }
 }

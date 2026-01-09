@@ -7,18 +7,24 @@ use engine_config::settings;
 use engine_core::{
     connectors::{destination::Destination, source::Source},
     context::{exec::ExecutionContext, item::ItemContext},
+    event_bus::bus::EventBus,
     plan::execution::ExecutionPlan,
     state::{StateStore, models::WalEntry, sled_store::SledStateStore},
+    utils::make_item_id,
 };
 use futures::lock::Mutex;
 use futures::stream::{self, StreamExt};
-use model::execution::{
-    execution_config::{ExecutionConfig, ExecutionStrategy, FailureStrategy},
-    pipeline::Pipeline,
+use model::{
+    events::migration::MigrationEvent,
+    execution::{
+        execution_config::{ExecutionConfig, ExecutionStrategy, FailureStrategy},
+        pipeline::Pipeline,
+    },
 };
 use model::{pagination::cursor::Cursor, transform::mapping::TransformationMetadata};
 use query_builder::offsets::OffsetStrategyFactory;
 use std::{collections::HashSet, sync::Arc};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
@@ -28,28 +34,31 @@ pub struct DagExecutor {
     cancel: CancellationToken,
     exec_ctx: ExecutionContext,
     exec_config: ExecutionConfig,
+    event_bus: EventBus,
 }
 
 impl DagExecutor {
+    /// Create executor without event bus (headless mode)
     pub async fn new(
         plan: ExecutionPlan,
         dry_run: bool,
         cancel: CancellationToken,
     ) -> Result<Self, MigrationError> {
-        let home_dir = dirs::home_dir().ok_or_else(|| {
-            MigrationError::InitializationError("Could not determine home directory".to_string())
-        })?;
-        let state = Arc::new(SledStateStore::open(home_dir.join(".stratum/state"))?);
-        let exec_ctx = ExecutionContext::new(&plan, state).await?;
-        let exec_config = plan.execution_config.clone();
+        // Create default event bus for internal monitoring
+        let event_bus = EventBus::new();
+        Self::subscribe_to_events(&event_bus).await;
 
-        Ok(Self {
-            plan,
-            dry_run,
-            cancel,
-            exec_ctx,
-            exec_config,
-        })
+        Self::init(plan, dry_run, cancel, event_bus).await
+    }
+
+    /// Create executor with event bus for external monitoring (TUI/Pretty mode)
+    pub async fn with_event_bus(
+        plan: ExecutionPlan,
+        dry_run: bool,
+        cancel: CancellationToken,
+        event_bus: EventBus,
+    ) -> Result<Self, MigrationError> {
+        Self::init(plan, dry_run, cancel, event_bus).await
     }
 
     pub async fn execute(self, dag: Dag) -> Result<(), MigrationError> {
@@ -200,16 +209,44 @@ impl DagExecutor {
         }
     }
 
+    async fn init(
+        plan: ExecutionPlan,
+        dry_run: bool,
+        cancel: CancellationToken,
+        event_bus: EventBus,
+    ) -> Result<Self, MigrationError> {
+        let home_dir = dirs::home_dir().ok_or_else(|| {
+            MigrationError::InitializationError("Could not determine home directory".to_string())
+        })?;
+
+        let state = Arc::new(SledStateStore::open(home_dir.join(".stratum/state"))?);
+        let exec_ctx = ExecutionContext::new(&plan, state).await?;
+        let exec_config = plan.execution_config.clone();
+
+        Ok(Self {
+            plan,
+            dry_run,
+            cancel,
+            exec_ctx,
+            exec_config,
+            event_bus,
+        })
+    }
+
     async fn execute_level_parallel(
         &self,
         pipelines: &[String],
         max_concurrency: usize,
     ) -> Vec<(String, Result<(), MigrationError>)> {
-        stream::iter(pipelines)
-            .map(|pipeline_name| async move {
+        let pipeline_names: Vec<String> = pipelines.to_vec();
+
+        stream::iter(pipeline_names)
+            .map(|pipeline_name| {
                 let name = pipeline_name.clone();
-                let result = self.execute_pipeline(pipeline_name).await;
-                (name, result)
+                async move {
+                    let result = self.execute_pipeline(&name).await;
+                    (name, result)
+                }
             })
             .buffer_unordered(max_concurrency)
             .collect()
@@ -237,7 +274,7 @@ impl DagExecutor {
         // Prepare context
         let exec_ctx = Arc::new(self.exec_ctx.clone());
         let run_id = self.exec_ctx.run_id();
-        let item_id = Self::make_item_id(&self.plan.hash(), pipeline, idx);
+        let item_id = make_item_id(&self.plan.hash(), &pipeline.destination.table, idx);
         let offset_strategy = OffsetStrategyFactory::from_pagination(&pipeline.source.pagination);
         let cursor = Cursor::None;
 
@@ -288,8 +325,13 @@ impl DagExecutor {
 
         // Create and execute the pipeline orchestrator
         // This handles: before hooks -> pipeline execution -> after hooks
-        let orchestrator =
-            PipelineOrchestrator::new(pipeline.clone(), item_ctx, settings, self.cancel.clone());
+        let orchestrator = PipelineOrchestrator::new(
+            pipeline.clone(),
+            item_ctx,
+            settings,
+            self.cancel.clone(),
+            self.event_bus.clone(),
+        );
 
         orchestrator.execute().await?;
 
@@ -303,14 +345,19 @@ impl DagExecutor {
         Ok(())
     }
 
-    fn make_item_id(plan_hash: &str, p: &Pipeline, idx: usize) -> String {
-        // Stable & human-ish: plan-hash + item-index + dest-name
-        let mut h = blake3::Hasher::new();
-        h.update(plan_hash.as_bytes());
-        h.update(b":");
-        h.update(idx.to_string().as_bytes());
-        h.update(b":");
-        h.update(p.destination.table.as_bytes());
-        format!("itm-{}", &h.finalize().to_hex()[..16])
+    async fn subscribe_to_events(event_bus: &EventBus) {
+        let (event_tx, mut event_rx) = mpsc::channel::<Arc<MigrationEvent>>(100);
+
+        event_bus.subscribe::<MigrationEvent>(event_tx).await;
+
+        // Spawn background task to handle all migration events
+        tokio::spawn(async move {
+            while let Some(event) = event_rx.recv().await {
+                // TODO: Add more sophisticated event handling (logging, metrics, etc.)
+                info!("Migration Event: {}", event);
+            }
+        });
+
+        info!("Event subscriber configured for migration monitoring");
     }
 }

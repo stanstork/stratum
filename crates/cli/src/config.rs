@@ -1,5 +1,52 @@
+use crate::error::CliError;
+use engine_core::plan::execution::ExecutionPlan;
+use smql_syntax::ast::doc::SmqlDocument;
 use std::path::PathBuf;
-use tracing::debug;
+use tracing::{debug, info};
+
+/// Resolves config file path from CLI argument, environment, or auto-discovery
+pub fn resolve_path(config: Option<String>) -> Result<String, CliError> {
+    // Priority order:
+    // 1. Explicit --config argument
+    // 2. STRATUM_CONFIG environment variable
+    // 3. Auto-discovery
+
+    match config {
+        Some(path) => {
+            // User explicitly provided a config path via CLI argument
+            Ok(path)
+        }
+        None => {
+            // Check environment variable
+            if let Ok(env_path) = std::env::var("STRATUM_CONFIG") {
+                info!("Using config file from STRATUM_CONFIG: {}", env_path);
+                return Ok(env_path);
+            }
+
+            // Try to auto-discover the config file
+            match discover_config() {
+                Some(path) => {
+                    info!("Auto-discovered config file at: {}", path.display());
+                    Ok(path.to_string_lossy().to_string())
+                }
+                None => Err(CliError::ConfigNotFound(display_search_paths())),
+            }
+        }
+    }
+}
+
+/// Loads and parses a migration plan from the config file
+pub async fn load_plan(path: &str, from_ast: bool) -> Result<ExecutionPlan, CliError> {
+    let source = tokio::fs::read_to_string(path).await?;
+    let doc: SmqlDocument = if from_ast {
+        // If `from_ast` is true, read the config file as a pre-parsed AST
+        serde_json::from_str(&source)?
+    } else {
+        // Otherwise, read the config file and parse it
+        smql_syntax::builder::parse(&source)?
+    };
+    Ok(ExecutionPlan::build(&doc)?)
+}
 
 /// Discovers the config file path by searching in multiple locations
 ///
@@ -9,7 +56,7 @@ use tracing::debug;
 /// 3. Current working directory: config/stratum.smql
 /// 4. User home directory: ~/.stratum/stratum.smql
 /// 5. User home directory: ~/.config/stratum/stratum.smql
-pub fn discover_config() -> Option<PathBuf> {
+fn discover_config() -> Option<PathBuf> {
     let search_paths = get_search_paths();
 
     for path in search_paths {
@@ -53,7 +100,7 @@ fn home_dir() -> Option<PathBuf> {
     }
 }
 
-pub fn display_search_paths() -> String {
+fn display_search_paths() -> String {
     let paths = get_search_paths();
     let mut output = String::from("Config file search order:\n");
 

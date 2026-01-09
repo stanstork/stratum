@@ -33,9 +33,18 @@ pub struct ProducerActor {
     cancel_token: CancellationToken,
     mode: Option<ProducerMode>,
 
+    // Execution context
+    run_id: Option<String>,
+    item_id: Option<String>,
+
     // Resilience
     breaker: CircuitBreaker,
     metrics: Metrics,
+
+    // Track previous values to compute deltas
+    last_batches_processed: u64,
+    last_rows_skipped: u64,
+    last_rows_failed: u64,
 
     // Configuration
     idle_delay: Duration,
@@ -54,8 +63,13 @@ impl ProducerActor {
             running: false,
             cancel_token,
             mode: None,
+            run_id: None,
+            item_id: None,
             breaker: CircuitBreaker::default_db(),
             metrics,
+            last_batches_processed: 0,
+            last_rows_skipped: 0,
+            last_rows_failed: 0,
             idle_delay: Duration::from_millis(500), // Default idle delay
             actor_ref: None,
             event_bus: None,
@@ -138,6 +152,8 @@ impl Actor<ProducerMsg> for ProducerActor {
 
                 self.running = true;
                 self.mode = Some(ProducerMode::Snapshot);
+                self.run_id = Some(run_id.clone());
+                self.item_id = Some(item_id.clone());
 
                 if let Some(ref event_bus) = self.event_bus {
                     event_bus
@@ -173,6 +189,8 @@ impl Actor<ProducerMsg> for ProducerActor {
                 }
                 self.running = true;
                 self.mode = Some(ProducerMode::Cdc);
+                self.run_id = Some(run_id.clone());
+                self.item_id = Some(item_id.clone());
 
                 if let Some(ref event_bus) = self.event_bus {
                     event_bus
@@ -217,6 +235,48 @@ impl Actor<ProducerMsg> for ProducerActor {
                 let response = match self.producer.tick().await {
                     Ok(status) => {
                         self.breaker.record_success();
+
+                        // Update metrics with transformation statistics (only the delta)
+                        let current_batches = self.producer.batches_processed();
+                        let current_skipped = self.producer.total_rows_skipped();
+                        let current_failed = self.producer.total_rows_failed();
+
+                        if current_batches > self.last_batches_processed {
+                            let delta = current_batches - self.last_batches_processed;
+                            self.metrics.increment_batches(delta);
+                            self.last_batches_processed = current_batches;
+
+                            // Emit BatchRead events for each new batch processed
+                            if let (Some(event_bus), Some(run_id), Some(item_id)) =
+                                (&self.event_bus, &self.run_id, &self.item_id)
+                            {
+                                // Note: We don't have batch_id or row_count here, but we can emit basic events
+                                // TODO: Enhance Producer to provide batch details for accurate events
+                                for _ in 0..delta {
+                                    event_bus
+                                        .publish(MigrationEvent::BatchRead {
+                                            run_id: run_id.clone(),
+                                            item_id: item_id.clone(),
+                                            batch_id: format!("batch-{}", current_batches),
+                                            row_count: 0,
+                                            timestamp: chrono::Utc::now(),
+                                        })
+                                        .await;
+                                }
+                            }
+                        }
+
+                        if current_skipped > self.last_rows_skipped {
+                            self.metrics
+                                .increment_rows_skipped(current_skipped - self.last_rows_skipped);
+                            self.last_rows_skipped = current_skipped;
+                        }
+
+                        if current_failed > self.last_rows_failed {
+                            self.metrics
+                                .increment_rows_failed(current_failed - self.last_rows_failed);
+                            self.last_rows_failed = current_failed;
+                        }
 
                         if shutdown_requested {
                             info!(

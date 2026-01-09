@@ -52,10 +52,12 @@ impl BatchCoordinator {
     pub async fn process_batch(&self, batch: Batch) -> Result<(), ConsumerError> {
         let batch_id = batch.id.clone();
         let row_count = batch.rows.len();
+        let byte_count = batch.size_bytes();
 
         info!(
             batch_id = %batch_id,
             rows = row_count,
+            bytes = byte_count,
             cursor = ?batch.cursor,
             next = ?batch.next,
             "Processing batch"
@@ -102,11 +104,13 @@ impl BatchCoordinator {
             })?;
 
         self.metrics.increment_records(row_count as u64);
+        self.metrics.increment_bytes(byte_count as u64);
         self.metrics.increment_batches(1);
 
         info!(
             batch_id = %batch_id,
             rows = row_count,
+            bytes = byte_count,
             total_rows = new_rows,
             strategy = ?write_result.strategy,
             "Batch processed successfully"

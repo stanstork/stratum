@@ -1,4 +1,5 @@
 use crate::{actor::coordinator::PipelineCoordinator, error::MigrationError};
+use chrono;
 use connectors::adapter::Adapter;
 use engine_config::settings::validated::ValidatedSettings;
 use engine_core::{context::item::ItemContext, event_bus::bus::EventBus, metrics::Metrics};
@@ -19,6 +20,7 @@ pub struct PipelineOrchestrator {
     ctx: Arc<Mutex<ItemContext>>,
     settings: ValidatedSettings,
     cancel: CancellationToken,
+    event_bus: EventBus,
 }
 
 impl PipelineOrchestrator {
@@ -27,12 +29,14 @@ impl PipelineOrchestrator {
         ctx: Arc<Mutex<ItemContext>>,
         settings: ValidatedSettings,
         cancel: CancellationToken,
+        event_bus: EventBus,
     ) -> Self {
         Self {
             pipeline,
             ctx,
             settings,
             cancel,
+            event_bus,
         }
     }
 
@@ -67,6 +71,28 @@ impl PipelineOrchestrator {
     async fn execute_pipeline(&self) -> Result<(), MigrationError> {
         info!("Starting pipeline execution: {}", self.pipeline.name);
 
+        let (run_id, item_id) = {
+            let ctx_guard = self.ctx.lock().await;
+            (ctx_guard.run_id.clone(), ctx_guard.item_id.clone())
+        };
+
+        let source = self.pipeline.source.connection.name.clone();
+        let destination = self.pipeline.destination.connection.name.clone();
+
+        // Publish Started event
+        self.event_bus
+            .publish(MigrationEvent::Started {
+                run_id: run_id.clone(),
+                item_id: item_id.clone(),
+                source,
+                destination,
+                timestamp: chrono::Utc::now(),
+            })
+            .await;
+
+        // Track start time for duration calculation
+        let start_time = std::time::Instant::now();
+
         // Create communication channel between producer and consumer
         let (batch_tx, batch_rx) = mpsc::channel::<Batch>(64);
         let metrics = Metrics::new();
@@ -84,18 +110,13 @@ impl PipelineOrchestrator {
             MigrationError::PipelineFailed(format!("Coordinator initialization failed: {}", e))
         })?;
 
-        let event_bus = EventBus::new();
         coordinator
-            .set_event_bus(event_bus.clone())
+            .set_event_bus(self.event_bus.clone())
             .await
             .map_err(|e| {
                 error!("Failed to set event bus: {}", e);
                 MigrationError::PipelineFailed(format!("Failed to set event bus: {}", e))
             })?;
-
-        // Subscribe to migration events for logging and monitoring
-        self.subscribe_to_events(event_bus).await;
-        info!("EventBus configured for migration events");
 
         let (run_id, item_id) = {
             let ctx_guard = self.ctx.lock().await;
@@ -106,7 +127,7 @@ impl PipelineOrchestrator {
 
         // Start the snapshot pipeline
         coordinator
-            .start_snapshot_pipeline(run_id, item_id, part_id)
+            .start_snapshot_pipeline(run_id.clone(), item_id.clone(), part_id)
             .await
             .map_err(|e| {
                 error!("Failed to start snapshot pipeline: {}", e);
@@ -122,14 +143,48 @@ impl PipelineOrchestrator {
         let wait_fut = coordinator.wait();
         tokio::pin!(wait_fut);
 
-        tokio::select! {
+        let pipeline_result = tokio::select! {
             result = &mut wait_fut => {
-                result.map_err(|e| {
-                    error!("Pipeline error: {}", e);
-                    MigrationError::PipelineFailed(format!("Pipeline error: {}", e))
-                })?;
-                info!("Pipeline completed successfully");
-                Ok(())
+                match result {
+                    Ok(()) => {
+                        info!("Pipeline completed successfully");
+
+                        // Publish Completed event
+                        let snapshot = metrics.snapshot();
+                            let duration_ms = start_time.elapsed().as_millis() as u64;
+                            self.event_bus
+                                .publish(MigrationEvent::Completed {
+                                    run_id: run_id.clone(),
+                                    item_id: item_id.clone(),
+                                    rows_processed: snapshot.records_processed,
+                                    rows_skipped: snapshot.rows_skipped,
+                                    rows_failed: snapshot.rows_failed,
+                                    duration_ms,
+                                    timestamp: chrono::Utc::now(),
+                                })
+                                .await;
+
+                        Ok(())
+                    }
+                    Err(e) => {
+                        error!("Pipeline error: {}", e);
+
+                        // Publish Failed event
+                        let snapshot = metrics.snapshot();
+                        self.event_bus
+                            .publish(MigrationEvent::Failed {
+                                run_id: run_id.clone(),
+                                item_id: item_id.clone(),
+                                error: e.to_string(),
+                                error_code: None,
+                                rows_processed: snapshot.records_processed,
+                                timestamp: chrono::Utc::now(),
+                            })
+                            .await;
+
+                        Err(MigrationError::PipelineFailed(format!("Pipeline error: {}", e)))
+                    }
+                }
             }
             _ = &mut cancel_fut => {
                 warn!("Shutdown signal received, waiting for in-flight operations to complete");
@@ -159,7 +214,9 @@ impl PipelineOrchestrator {
                     }
                 }
             }
-        }
+        };
+
+        pipeline_result
     }
 
     async fn execute_after_hooks(&self) -> Result<(), MigrationError> {
@@ -173,21 +230,6 @@ impl PipelineOrchestrator {
             })?;
         }
         Ok(())
-    }
-
-    async fn subscribe_to_events(&self, event_bus: EventBus) {
-        let (event_tx, mut event_rx) = mpsc::channel::<Arc<MigrationEvent>>(100);
-
-        event_bus.subscribe::<MigrationEvent>(event_tx).await;
-
-        // Spawn background task to handle all migration events
-        tokio::spawn(async move {
-            while let Some(event) = event_rx.recv().await {
-                info!("Migration Event: {}", event);
-            }
-        });
-
-        info!("Event subscriber configured for migration monitoring");
     }
 
     async fn get_adapter(&self) -> Result<Arc<Adapter>, MigrationError> {

@@ -23,6 +23,8 @@ pub enum MigrationEvent {
         run_id: String,
         item_id: String,
         rows_processed: u64,
+        rows_skipped: u64,
+        rows_failed: u64,
         duration_ms: u64,
         timestamp: DateTime<Utc>,
     },
@@ -101,9 +103,10 @@ pub enum MigrationEvent {
         run_id: String,
         item_id: String,
         rows_processed: u64,
+        rows_skipped: u64,
+        rows_failed: u64,
+        bytes_transferred: u64,
         rows_per_second: f64,
-        percentage: Option<f64>,
-        eta_seconds: Option<u64>,
         timestamp: DateTime<Utc>,
     },
 
@@ -331,6 +334,15 @@ pub enum ProducerMode {
     Cdc,
 }
 
+impl fmt::Display for ProducerMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProducerMode::Snapshot => write!(f, "snapshot"),
+            ProducerMode::Cdc => write!(f, "cdc"),
+        }
+    }
+}
+
 /// Type of connection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -380,13 +392,17 @@ impl fmt::Display for MigrationEvent {
                 run_id,
                 item_id,
                 rows_processed,
+                rows_skipped,
+                rows_failed,
                 duration_ms,
                 timestamp,
             } => write!(
                 f,
-                "[{}] Migration completed: {} rows in {}ms (run={}, item={})",
+                "[{}] Migration completed: {} rows ({} skipped, {} failed) in {}ms (run={}, item={})",
                 timestamp.format("%Y-%m-%d %H:%M:%S"),
                 rows_processed,
+                rows_skipped,
+                rows_failed,
                 duration_ms,
                 run_id,
                 item_id
@@ -455,20 +471,30 @@ impl fmt::Display for MigrationEvent {
                 run_id,
                 item_id,
                 rows_processed,
+                rows_skipped,
+                rows_failed,
+                bytes_transferred,
                 rows_per_second,
-                percentage,
                 timestamp,
                 ..
             } => {
-                let pct_str = percentage
-                    .map(|p| format!("{:.1}%", p))
-                    .unwrap_or_else(|| "N/A".to_string());
+                let bytes_str = if *bytes_transferred >= 1_073_741_824 {
+                    format!("{:.2} GB", *bytes_transferred as f64 / 1_073_741_824.0)
+                } else if *bytes_transferred >= 1_048_576 {
+                    format!("{:.2} MB", *bytes_transferred as f64 / 1_048_576.0)
+                } else if *bytes_transferred >= 1024 {
+                    format!("{:.2} KB", *bytes_transferred as f64 / 1024.0)
+                } else {
+                    format!("{} B", bytes_transferred)
+                };
                 write!(
                     f,
-                    "[{}] Progress: {} rows ({}) @ {:.0} rows/s (run={}, item={})",
+                    "[{}] Progress: {} rows ({} skipped, {} failed), {} @ {:.0} rows/s (run={}, item={})",
                     timestamp.format("%Y-%m-%d %H:%M:%S"),
                     rows_processed,
-                    pct_str,
+                    rows_skipped,
+                    rows_failed,
+                    bytes_str,
                     rows_per_second,
                     run_id,
                     item_id
@@ -1115,16 +1141,16 @@ mod tests {
             run_id: "run-123".to_string(),
             item_id: "item-456".to_string(),
             rows_processed: 10000,
+            rows_skipped: 100,
+            rows_failed: 5,
+            bytes_transferred: 5_242_880, // 5 MB
             rows_per_second: 1234.5,
-            percentage: Some(45.6),
-            eta_seconds: Some(120),
             timestamp: Utc::now(),
         };
 
         let display = format!("{}", event);
         assert!(display.contains("Progress"));
         assert!(display.contains("10000"));
-        assert!(display.contains("45.6%"));
     }
 
     #[test]
@@ -1146,9 +1172,10 @@ mod tests {
             run_id: "run-123".to_string(),
             item_id: "item-456".to_string(),
             rows_processed: 10000,
+            rows_skipped: 100,
+            rows_failed: 5,
+            bytes_transferred: 5_242_880, // 5 MB
             rows_per_second: 1234.5,
-            percentage: Some(45.6),
-            eta_seconds: Some(120),
             timestamp: Utc::now(),
         };
 

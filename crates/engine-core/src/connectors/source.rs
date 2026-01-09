@@ -1,7 +1,8 @@
 use crate::{
     connectors::{filter::Filter, format::DataFormat, linked::LinkedSource},
-    filter::{compiler::FilterCompiler, csv::CsvFilterCompiler, sql::SqlFilterCompiler},
-    utils::combine_filters,
+    filter::{
+        combine_filters, compiler::FilterCompiler, csv::CsvFilterCompiler, sql::SqlFilterCompiler,
+    },
 };
 use connectors::{
     adapter::Adapter,

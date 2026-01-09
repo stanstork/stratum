@@ -12,10 +12,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use connectors::sql::base::metadata::{provider::MetadataProvider, table::TableMetadata};
-use engine_core::{
-    filter::{compiler::FilterCompiler, sql::SqlFilterCompiler},
-    utils::combine_filters,
-};
+use engine_core::filter::{combine_filters, compiler::FilterCompiler, sql::SqlFilterCompiler};
 use expression_engine::ExpressionAnalyzer;
 use model::execution::pipeline::DataSource;
 use std::{collections::HashSet, sync::Arc};
