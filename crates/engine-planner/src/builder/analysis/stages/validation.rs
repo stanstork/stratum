@@ -6,13 +6,14 @@ use crate::builder::{
     analyzers::validation::ValidationAnalyzer,
 };
 use async_trait::async_trait;
+use engine_processing::io::driver::SchemaDriver;
 
 pub struct ValidationStage {
     pub analyzer: ValidationAnalyzer,
 }
 
 #[async_trait]
-impl PipelineAnalysisStage for ValidationStage {
+impl<S: SchemaDriver, D: SchemaDriver> PipelineAnalysisStage<S, D> for ValidationStage {
     fn name(&self) -> &'static str {
         "validation"
     }
@@ -20,7 +21,7 @@ impl PipelineAnalysisStage for ValidationStage {
     async fn run(
         &self,
         input: &PipelineAnalysisInput,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
         state: &mut AnalysisState,
     ) -> AnalyzerResult<()> {
         let validations =

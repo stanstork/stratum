@@ -11,37 +11,37 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use connectors::sql::base::metadata::{provider::MetadataProvider, table::TableMetadata};
-use engine_core::filter::{combine_filters, compiler::FilterCompiler, sql::SqlFilterCompiler};
+use connectors::sql::metadata::table::TableMetadata;
+use engine_processing::io::{
+    driver::SchemaDriver,
+    filter::{
+        compiler::{FilterCompiler, sql::SqlFilterCompiler},
+        utils::combine_filters,
+    },
+};
 use expression_engine::ExpressionAnalyzer;
 use model::execution::pipeline::DataSource;
 use std::{collections::HashSet, sync::Arc};
 use tracing::info;
 
 /// Analyzes filters to determine their impact on query performance
-pub struct FilterAnalyzer {
-    cache: Arc<MetadataCache>,
+pub struct FilterAnalyzer<S: SchemaDriver> {
+    _cache: Arc<MetadataCache<S>>,
 }
 
-impl FilterAnalyzer {
-    pub fn new(cache: Arc<MetadataCache>) -> Self {
-        Self { cache }
+impl<S: SchemaDriver> FilterAnalyzer<S> {
+    pub fn new(cache: Arc<MetadataCache<S>>) -> Self {
+        Self { _cache: cache }
     }
 
     /// Validates that all filter columns exist within the metadata graph (primary + joins).
-    async fn validate_columns(
+    async fn validate_columns<D: SchemaDriver>(
         &self,
         columns: &[String],
         metadata: &TableMetadata,
+        ctx: &AnalysisContext<S, D>,
     ) -> Result<(), FilterAnalyzerError> {
-        let meta_graph = MetadataProvider::build_metadata_graph(
-            self.cache.adapter().get_sql(),
-            std::slice::from_ref(&metadata.name),
-        )
-        .await
-        .map_err(|e| {
-            FilterAnalyzerError::QueryFailed(format!("Metadata graph build failed: {}", e))
-        })?;
+        let meta_graph = ctx.schema_plan.metadata_graph();
 
         for col in columns {
             let col_ref = ColumnRefParser::parse(col, &metadata.name).map_err(|e| {
@@ -82,16 +82,12 @@ impl FilterAnalyzer {
 
         source_plan.indexes.iter().any(|idx| {
             let idx_cols: HashSet<_> = idx.columns.iter().map(|c| c.to_lowercase()).collect();
-            // Heuristic: Check if the index covers the filter columns
             target_cols.iter().all(|tc| idx_cols.contains(tc))
         })
     }
 
     /// Calculate selectivity using pre-calculated filtered rows from SourcePlan.
-    /// This avoids running additional EXPLAIN queries since SourceAnalyzer already
-    /// calculated filtered rows using either exact COUNT or EXPLAIN estimates.
     fn estimate_selectivity(&self, source_plan: &SourcePlan) -> FilterSelectivity {
-        // Use pre-calculated filtered rows from SourcePlan if available
         if let Some(filtered_rows) = &source_plan.filtered_rows {
             let total = source_plan.total_rows.value as f64;
             if total > 0.0 {
@@ -104,7 +100,6 @@ impl FilterAnalyzer {
             }
         }
 
-        // Default neutral selectivity if no filtered rows data
         FilterSelectivity {
             selectivity: 1.0,
             is_estimated: true,
@@ -114,8 +109,7 @@ impl FilterAnalyzer {
 }
 
 #[async_trait]
-impl PlanAnalyzer for FilterAnalyzer {
-    // FilterAnalyzer needs both DataSource and SourcePlan as input
+impl<S: SchemaDriver, D: SchemaDriver> PlanAnalyzer<S, D> for FilterAnalyzer<S> {
     type Input = (DataSource, SourcePlan);
     type Output = Option<FilterPlan>;
 
@@ -126,7 +120,7 @@ impl PlanAnalyzer for FilterAnalyzer {
     async fn analyze(
         &self,
         input: &Self::Input,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<Self::Output> {
         let (source, source_plan) = input;
 
@@ -144,8 +138,7 @@ impl PlanAnalyzer for FilterAnalyzer {
         let sql_filter = SqlFilterCompiler::compile(&expr);
         let columns = sql_filter.columns();
 
-        // Perform static and dynamic analysis
-        self.validate_columns(&columns, &metadata)
+        self.validate_columns(&columns, &metadata, ctx)
             .await
             .map_err(|e| AnalyzerError::error("filter", e.to_string()))?;
 

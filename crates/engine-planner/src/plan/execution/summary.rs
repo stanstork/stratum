@@ -1,4 +1,4 @@
-use crate::plan::execution::types::RowCount;
+use model::execution::row_count::RowCount;
 use serde::Serialize;
 
 /// High-level plan summary

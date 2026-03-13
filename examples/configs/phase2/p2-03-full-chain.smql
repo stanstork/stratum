@@ -1,0 +1,68 @@
+// =============================================================================
+// Phase 2 Test 03 — Full FK Chain: depth = all, cascade data
+// =============================================================================
+//
+// WHAT THIS TESTS:
+//   - GraphExpander traverses the full Sakila FK graph starting from `rental`
+//   - Topological order must be: country → city → address → customer/staff/inventory
+//     → rental (root) with payment as dependent
+//   - All tables created in correct dependency order with no FK violations
+//   - Data migration produces referentially intact destination
+//
+// EXPECTED TABLE CREATION ORDER (topological):
+//   country, city, address, language, film, actor, category, store,
+//   customer, staff, inventory, film_actor, film_category, rental
+//
+// NOTE: store ↔ staff circular FK is handled by deferring FK constraints to post-DDL
+//
+// RUN:
+//   cargo run -p cli -- plan -c dev-fixtures/configs/phase2/p2-03-full-chain.smql
+//   -- review the plan output for correct CREATE TABLE order --
+//   cargo run -p cli -- apply -c dev-fixtures/configs/phase2/p2-03-full-chain.smql
+//
+// VERIFY:
+//   -- Check row counts match source:
+//   SELECT 'rental'   AS t, COUNT(*) FROM rental   UNION ALL
+//   SELECT 'customer' AS t, COUNT(*) FROM customer UNION ALL
+//   SELECT 'inventory'AS t, COUNT(*) FROM inventory UNION ALL
+//   SELECT 'film'     AS t, COUNT(*) FROM film;
+//
+//   -- Check FK constraints were added:
+//   SELECT conname FROM pg_constraint WHERE contype = 'f' AND conrelid = 'rental'::regclass;
+//
+// =============================================================================
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" {
+    driver = "mysql"
+    url    = define.mysql_url
+}
+
+connection "dst" {
+    driver = "postgres"
+    url    = define.postgres_url
+}
+
+pipeline "full_chain_from_rental" {
+    from {
+        connection = connection.src
+        table      = "rental"
+
+        with references {
+            data  = cascade
+            depth = all
+        }
+    }
+
+    to {
+        connection = connection.dst
+    }
+
+    settings {
+        batch_size = 500
+    }
+}

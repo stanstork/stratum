@@ -6,13 +6,14 @@ use crate::builder::{
     analyzers::pagination::PaginationAnalyzer,
 };
 use async_trait::async_trait;
+use engine_processing::io::driver::SchemaDriver;
 
 pub struct PaginationStage {
     pub analyzer: PaginationAnalyzer,
 }
 
 #[async_trait]
-impl PipelineAnalysisStage for PaginationStage {
+impl<S: SchemaDriver, D: SchemaDriver> PipelineAnalysisStage<S, D> for PaginationStage {
     fn name(&self) -> &'static str {
         "pagination"
     }
@@ -20,7 +21,7 @@ impl PipelineAnalysisStage for PaginationStage {
     async fn run(
         &self,
         input: &PipelineAnalysisInput,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
         state: &mut AnalysisState,
     ) -> AnalyzerResult<()> {
         let pagination = PlanAnalyzer::analyze(

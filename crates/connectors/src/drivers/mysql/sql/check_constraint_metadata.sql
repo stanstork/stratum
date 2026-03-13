@@ -1,0 +1,10 @@
+SELECT cc.CONSTRAINT_NAME as constraint_name,
+       tc.TABLE_NAME as table_name,
+       cc.CHECK_CLAUSE as definition
+FROM information_schema.CHECK_CONSTRAINTS cc
+JOIN information_schema.TABLE_CONSTRAINTS tc
+  ON cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+  AND cc.CONSTRAINT_SCHEMA = tc.TABLE_SCHEMA
+WHERE tc.TABLE_NAME = ?
+  AND tc.TABLE_SCHEMA = DATABASE()
+  AND tc.CONSTRAINT_TYPE = 'CHECK'

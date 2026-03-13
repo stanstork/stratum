@@ -2,7 +2,8 @@ use crate::{
     dag::{builder::DagBuilder, executor::DagExecutor},
     error::MigrationError,
 };
-use engine_core::plan::execution::ExecutionPlan;
+use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan};
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -10,6 +11,7 @@ pub async fn run(
     plan: ExecutionPlan,
     dry_run: bool,
     cancel: CancellationToken,
+    env: Arc<EnvContext>,
 ) -> Result<(), MigrationError> {
     // Build DAG from the execution plan
     let mut builder = DagBuilder::new();
@@ -30,7 +32,7 @@ pub async fn run(
         info!("  Level {}: {:?}", level_idx + 1, level);
     }
 
-    DagExecutor::new(plan, dry_run, cancel)
+    DagExecutor::new(plan, dry_run, cancel, env)
         .await?
         .execute(dag)
         .await

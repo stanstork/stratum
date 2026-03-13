@@ -1,243 +1,379 @@
 use crate::{actor::coordinator::PipelineCoordinator, error::MigrationError};
 use chrono;
-use connectors::adapter::Adapter;
-use engine_config::settings::validated::ValidatedSettings;
-use engine_core::{context::item::ItemContext, event_bus::bus::EventBus, metrics::Metrics};
-use engine_processing::{consumer::Consumer, hooks::executor::HookExecutor, producer::Producer};
-use futures::lock::Mutex;
-use model::{
-    events::migration::MigrationEvent, execution::pipeline::Pipeline, records::batch::Batch,
+use engine_config::settings::{self, validated::ValidatedSettings};
+use engine_core::{
+    dispatch_driver, drivers::DriverRef, event_bus::bus::EventBus, metrics::Metrics,
+    schema::schema_ops::SchemaOps,
 };
-use std::{sync::Arc, time::Duration};
+use engine_processing::{
+    consumer::Consumer,
+    context::PipelineContext,
+    hooks::executor::HookExecutor,
+    producer::{Producer, config::ProducerConfig},
+};
+use model::{
+    events::migration::MigrationEvent,
+    execution::{pipeline::Pipeline, references::DataMode},
+    records::batch::Batch,
+};
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
+
+const BATCH_CHANNEL_CAPACITY: usize = 64;
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[derive(Debug, Clone, Copy)]
+enum HookPhase {
+    Before,
+    After,
+}
 
 /// Orchestrates the complete pipeline execution lifecycle including hooks.
 /// The orchestrator ensures proper sequencing and error handling across all phases.
 pub struct PipelineOrchestrator {
     pipeline: Pipeline,
-    ctx: Arc<Mutex<ItemContext>>,
+    ctx: PipelineContext,
+    dst_driver: DriverRef,
     settings: ValidatedSettings,
+    schema_ops: SchemaOps,
     cancel: CancellationToken,
     event_bus: EventBus,
+    done_ops: Arc<Mutex<HashSet<String>>>,
+    cascade_tables: Vec<String>,
 }
 
 impl PipelineOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pipeline: Pipeline,
-        ctx: Arc<Mutex<ItemContext>>,
+        ctx: PipelineContext,
+        dst_driver: DriverRef,
         settings: ValidatedSettings,
+        schema_ops: SchemaOps,
         cancel: CancellationToken,
         event_bus: EventBus,
+        done_ops: Arc<Mutex<HashSet<String>>>,
+        cascade_tables: Vec<String>,
     ) -> Self {
         Self {
             pipeline,
             ctx,
+            dst_driver,
             settings,
+            schema_ops,
             cancel,
             event_bus,
+            done_ops,
+            cascade_tables,
         }
     }
 
-    /// Executes the complete pipeline lifecycle with hooks.
+    /// Executes the complete pipeline lifecycle:
+    /// pre-DDL -> before hooks -> data migration -> post-DDL -> after hooks
     pub async fn execute(&self) -> Result<(), MigrationError> {
-        // Execute before hooks
-        self.execute_before_hooks().await?;
+        self.execute_schema_ops("pre-migration", &self.schema_ops.pre)
+            .await?;
+        self.execute_hooks(HookPhase::Before).await?;
 
-        // Execute the data migration pipeline
-        self.execute_pipeline().await?;
-
-        // Execute after hooks (only on success)
-        self.execute_after_hooks().await?;
-
-        Ok(())
-    }
-
-    async fn execute_before_hooks(&self) -> Result<(), MigrationError> {
-        if let Some(ref hooks) = self.pipeline.lifecycle
-            && !hooks.before.is_empty()
-        {
-            let adapter = self.get_adapter().await?;
-            let mut executor = HookExecutor::new(adapter, hooks.clone());
-            executor.execute_before().await.map_err(|e| {
-                MigrationError::HookExecutionFailed(format!("Before hooks failed: {}", e))
-            })?;
+        if self.is_schema_only() {
+            info!(
+                "Schema-only mode: skipping data migration for pipeline '{}'",
+                self.pipeline.name
+            );
+        } else {
+            self.execute_pipeline().await?;
         }
+
+        self.execute_schema_ops("post-migration", &self.schema_ops.post)
+            .await?;
+        self.execute_hooks(HookPhase::After).await?;
         Ok(())
     }
 
-    /// Executes the main data migration pipeline.
+    /// Execute a batch of schema operations against the destination driver,
+    /// skipping any ops whose SQL has already been executed in a prior pipeline.
+    async fn execute_schema_ops(
+        &self,
+        phase: &str,
+        ops: &[engine_core::schema::schema_ops::SchemaOp],
+    ) -> Result<(), MigrationError> {
+        if ops.is_empty() {
+            return Ok(());
+        }
+
+        info!("Executing {} {} schema operations", ops.len(), phase);
+
+        for op in ops {
+            {
+                let set = self.done_ops.lock().unwrap();
+                if set.contains(&op.sql) {
+                    info!("Skipping already-executed schema op: {}", op.description);
+                    continue;
+                }
+            }
+
+            dispatch_driver!(&self.dst_driver, |d| {
+                settings::apply_schema_ops(d.as_ref(), std::slice::from_ref(op))
+                    .await
+                    .map_err(|e| {
+                        MigrationError::PipelineFailed(format!(
+                            "{} schema operation failed: {}",
+                            phase, e
+                        ))
+                    })?
+            });
+
+            self.done_ops.lock().unwrap().insert(op.sql.clone());
+        }
+
+        Ok(())
+    }
+
+    async fn execute_hooks(&self, phase: HookPhase) -> Result<(), MigrationError> {
+        let hooks = match &self.pipeline.lifecycle {
+            Some(h) => h,
+            None => return Ok(()),
+        };
+
+        // Check if there are actual hooks to run for this phase
+        let should_run = match phase {
+            HookPhase::Before => !hooks.before.is_empty(),
+            HookPhase::After => !hooks.after.is_empty(),
+        };
+
+        if should_run {
+            dispatch_driver!(&self.dst_driver, |d| {
+                let mut executor = HookExecutor::new(d.clone(), hooks.clone());
+                let result = match phase {
+                    HookPhase::Before => executor.execute_before().await,
+                    HookPhase::After => executor.execute_after().await,
+                };
+                result.map_err(|e| {
+                    MigrationError::HookExecutionFailed(format!("{:?} hooks failed: {}", phase, e))
+                })?;
+            });
+        }
+
+        Ok(())
+    }
+
     async fn execute_pipeline(&self) -> Result<(), MigrationError> {
         info!("Starting pipeline execution: {}", self.pipeline.name);
 
-        let (run_id, item_id) = {
-            let ctx_guard = self.ctx.lock().await;
-            (ctx_guard.run_id.clone(), ctx_guard.item_id.clone())
-        };
-
-        let source = self.pipeline.source.connection.name.clone();
-        let destination = self.pipeline.destination.connection.name.clone();
-
-        // Publish Started event
-        self.event_bus
-            .publish(MigrationEvent::Started {
-                run_id: run_id.clone(),
-                item_id: item_id.clone(),
-                source,
-                destination,
-                timestamp: chrono::Utc::now(),
-            })
-            .await;
-
-        // Track start time for duration calculation
+        self.publish_started().await;
         let start_time = std::time::Instant::now();
 
-        // Create communication channel between producer and consumer
-        let (batch_tx, batch_rx) = mpsc::channel::<Batch>(64);
+        // Initialize Producer, Consumer, and Coordinator
+        let (coordinator, metrics) = self.build_coordinator().await?;
+
+        // Run the pipeline with cancellation support
+
+        self.await_completion_or_cancel(coordinator, &metrics, start_time)
+            .await
+    }
+
+    async fn build_coordinator(&self) -> Result<(PipelineCoordinator, Metrics), MigrationError> {
+        let (batch_tx, batch_rx) = mpsc::channel::<Batch>(BATCH_CHANNEL_CAPACITY);
         let metrics = Metrics::new();
 
-        // Create producer and consumer
-        let producer = Producer::new(&self.ctx, batch_tx, &self.settings).await;
-        let consumer =
-            Consumer::new(&self.ctx, batch_rx, self.cancel.clone(), metrics.clone()).await;
+        // Setup Producer
+        let config = ProducerConfig::default().with_batch_size(self.settings.batch_size);
+        let producer = Producer::new(
+            &self.ctx,
+            batch_tx,
+            config,
+            self.settings.mapped_columns_only(),
+        )
+        .await;
 
-        let coordinator =
-            PipelineCoordinator::new(producer, consumer, metrics.clone(), self.cancel.clone());
-
-        coordinator.initialize().await.map_err(|e| {
-            error!("Failed to initialize coordinator: {}", e);
-            MigrationError::PipelineFailed(format!("Coordinator initialization failed: {}", e))
-        })?;
-
-        coordinator
-            .set_event_bus(self.event_bus.clone())
-            .await
-            .map_err(|e| {
-                error!("Failed to set event bus: {}", e);
-                MigrationError::PipelineFailed(format!("Failed to set event bus: {}", e))
-            })?;
-
-        let (run_id, item_id) = {
-            let ctx_guard = self.ctx.lock().await;
-            (ctx_guard.run_id.clone(), ctx_guard.item_id.clone())
+        // Setup Consumer: fetch destination table metadata.
+        // In cascade mode, fetch metadata for all discovered tables; otherwise just the single dest table.
+        let dest_metas: Vec<_> = if !self.cascade_tables.is_empty() {
+            let mut metas = Vec::with_capacity(self.cascade_tables.len());
+            for table in &self.cascade_tables {
+                let meta = self.dst_driver.table_metadata(table).await.map_err(|e| {
+                    MigrationError::PipelineFailed(format!(
+                        "Failed to get cascade destination metadata for '{}': {}",
+                        table, e
+                    ))
+                })?;
+                metas.push(meta);
+            }
+            metas
+        } else {
+            let dest_table = &self.ctx.destination.name;
+            let meta = self
+                .dst_driver
+                .table_metadata(dest_table)
+                .await
+                .map_err(|e| {
+                    MigrationError::PipelineFailed(format!(
+                        "Failed to get destination metadata: {}",
+                        e
+                    ))
+                })?;
+            vec![meta]
         };
 
-        let part_id = "part-0".to_string();
+        let consumer = Consumer::new(
+            &self.ctx,
+            batch_rx,
+            dest_metas,
+            self.cancel.clone(),
+            metrics.clone(),
+        )
+        .await;
 
-        // Start the snapshot pipeline
+        let coordinator = PipelineCoordinator::new(
+            producer,
+            consumer,
+            metrics.clone(),
+            self.cancel.clone(),
+            self.event_bus.clone(),
+        );
+
+        Ok((coordinator, metrics))
+    }
+
+    async fn await_completion_or_cancel(
+        &self,
+        coordinator: PipelineCoordinator,
+        metrics: &Metrics,
+        start_time: std::time::Instant,
+    ) -> Result<(), MigrationError> {
+        let part_id = "part-0".to_string(); // TODO: Make this dynamic when multi-part support is added
+
         coordinator
-            .start_snapshot_pipeline(run_id.clone(), item_id.clone(), part_id)
+            .start_snapshot_pipeline(self.ctx.run_id.clone(), self.ctx.item_id.clone(), part_id)
             .await
             .map_err(|e| {
                 error!("Failed to start snapshot pipeline: {}", e);
                 MigrationError::PipelineFailed(format!("Failed to start pipeline: {}", e))
             })?;
 
-        // Wait for pipeline to complete or shutdown
-        const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
-
         let cancel_fut = self.cancel.cancelled();
-        tokio::pin!(cancel_fut);
-
         let wait_fut = coordinator.wait();
+
+        tokio::pin!(cancel_fut);
         tokio::pin!(wait_fut);
 
-        let pipeline_result = tokio::select! {
+        tokio::select! {
             result = &mut wait_fut => {
-                match result {
-                    Ok(()) => {
-                        info!("Pipeline completed successfully");
-
-                        // Publish Completed event
-                        let snapshot = metrics.snapshot();
-                            let duration_ms = start_time.elapsed().as_millis() as u64;
-                            self.event_bus
-                                .publish(MigrationEvent::Completed {
-                                    run_id: run_id.clone(),
-                                    item_id: item_id.clone(),
-                                    rows_processed: snapshot.records_processed,
-                                    rows_skipped: snapshot.rows_skipped,
-                                    rows_failed: snapshot.rows_failed,
-                                    duration_ms,
-                                    timestamp: chrono::Utc::now(),
-                                })
-                                .await;
-
-                        Ok(())
-                    }
-                    Err(e) => {
-                        error!("Pipeline error: {}", e);
-
-                        // Publish Failed event
-                        let snapshot = metrics.snapshot();
-                        self.event_bus
-                            .publish(MigrationEvent::Failed {
-                                run_id: run_id.clone(),
-                                item_id: item_id.clone(),
-                                error: e.to_string(),
-                                error_code: None,
-                                rows_processed: snapshot.records_processed,
-                                timestamp: chrono::Utc::now(),
-                            })
-                            .await;
-
-                        Err(MigrationError::PipelineFailed(format!("Pipeline error: {}", e)))
-                    }
-                }
+                self.handle_pipeline_result(result, metrics, start_time).await
             }
             _ = &mut cancel_fut => {
-                warn!("Shutdown signal received, waiting for in-flight operations to complete");
-                info!("Waiting up to {}s for graceful shutdown", SHUTDOWN_TIMEOUT.as_secs());
-
-                // Give the pipeline time to finish in-flight operations
-                let shutdown_result = tokio::time::timeout(SHUTDOWN_TIMEOUT, wait_fut).await;
-
-                match shutdown_result {
-                    Ok(Ok(())) => {
-                        info!("Pipeline shutdown completed gracefully");
-                        Err(MigrationError::ShutdownRequested)
-                    }
-                    Ok(Err(e)) => {
-                        error!("Pipeline error during shutdown: {}", e);
-                        Err(MigrationError::PipelineFailed(format!(
-                            "Pipeline error during shutdown: {}",
-                            e
-                        )))
-                    }
-                    Err(_) => {
-                        warn!(
-                            "Pipeline did not complete within {}s timeout - progress has been checkpointed",
-                            SHUTDOWN_TIMEOUT.as_secs()
-                        );
-                        Err(MigrationError::ShutdownRequested)
-                    }
-                }
+                self.handle_shutdown(wait_fut).await
             }
-        };
-
-        pipeline_result
-    }
-
-    async fn execute_after_hooks(&self) -> Result<(), MigrationError> {
-        if let Some(ref hooks) = self.pipeline.lifecycle
-            && !hooks.after.is_empty()
-        {
-            let adapter = self.get_adapter().await?;
-            let mut executor = HookExecutor::new(adapter, hooks.clone());
-            executor.execute_after().await.map_err(|e| {
-                MigrationError::HookExecutionFailed(format!("After hooks failed: {}", e))
-            })?;
         }
-        Ok(())
     }
 
-    async fn get_adapter(&self) -> Result<Arc<Adapter>, MigrationError> {
-        let ctx_guard = self.ctx.lock().await;
-        let adapter = ctx_guard
-            .exec_ctx
-            .get_adapter(&self.pipeline.destination.connection)
-            .await?;
-        Ok(Arc::new(adapter))
+    async fn handle_pipeline_result(
+        &self,
+        result: Result<(), impl std::fmt::Display>,
+        metrics: &Metrics,
+        start_time: std::time::Instant,
+    ) -> Result<(), MigrationError> {
+        match result {
+            Ok(()) => {
+                info!("Pipeline completed successfully");
+                self.publish_completed(metrics, start_time).await;
+                Ok(())
+            }
+            Err(e) => {
+                error!("Pipeline error: {}", e);
+                self.publish_failed(&e.to_string(), metrics).await;
+                Err(MigrationError::PipelineFailed(format!(
+                    "Pipeline error: {}",
+                    e
+                )))
+            }
+        }
+    }
+
+    async fn handle_shutdown(
+        &self,
+        wait_fut: impl Future<Output = Result<(), impl std::fmt::Display>>,
+    ) -> Result<(), MigrationError> {
+        warn!("Shutdown signal received, waiting for in-flight operations to complete");
+        info!(
+            "Waiting up to {}s for graceful shutdown",
+            SHUTDOWN_TIMEOUT.as_secs()
+        );
+
+        match tokio::time::timeout(SHUTDOWN_TIMEOUT, wait_fut).await {
+            Ok(Ok(())) => {
+                info!("Pipeline shutdown completed gracefully");
+                Err(MigrationError::ShutdownRequested)
+            }
+            Ok(Err(e)) => {
+                error!("Pipeline error during shutdown: {}", e);
+                Err(MigrationError::PipelineFailed(format!(
+                    "Pipeline error during shutdown: {}",
+                    e
+                )))
+            }
+            Err(_) => {
+                warn!(
+                    "Pipeline did not complete within {}s timeout - progress has been checkpointed",
+                    SHUTDOWN_TIMEOUT.as_secs()
+                );
+                Err(MigrationError::ShutdownRequested)
+            }
+        }
+    }
+
+    fn is_schema_only(&self) -> bool {
+        self.pipeline
+            .source
+            .graph_references
+            .as_ref()
+            .is_some_and(|r| matches!(r.data_mode, DataMode::SchemaOnly))
+    }
+
+    async fn publish_started(&self) {
+        self.event_bus
+            .publish(MigrationEvent::Started {
+                run_id: self.ctx.run_id.clone(),
+                item_id: self.ctx.item_id.clone(),
+                source: self.pipeline.source.connection.name.clone(),
+                destination: self.pipeline.destination.connection.name.clone(),
+                timestamp: chrono::Utc::now(),
+            })
+            .await;
+    }
+
+    async fn publish_completed(&self, metrics: &Metrics, start_time: std::time::Instant) {
+        let snapshot = metrics.snapshot();
+        self.event_bus
+            .publish(MigrationEvent::Completed {
+                run_id: self.ctx.run_id.clone(),
+                item_id: self.ctx.item_id.clone(),
+                rows_processed: snapshot.records_processed,
+                rows_skipped: snapshot.rows_skipped,
+                rows_failed: snapshot.rows_failed,
+                duration_ms: start_time.elapsed().as_millis() as u64,
+                timestamp: chrono::Utc::now(),
+            })
+            .await;
+    }
+
+    async fn publish_failed(&self, error: &str, metrics: &Metrics) {
+        let snapshot = metrics.snapshot();
+        self.event_bus
+            .publish(MigrationEvent::Failed {
+                run_id: self.ctx.run_id.clone(),
+                item_id: self.ctx.item_id.clone(),
+                error: error.to_string(),
+                error_code: None,
+                rows_processed: snapshot.records_processed,
+                timestamp: chrono::Utc::now(),
+            })
+            .await;
     }
 }

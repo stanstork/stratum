@@ -5,6 +5,8 @@ members = [
     "crates/query-builder",
     "crates/connectors",
     "crates/engine-core",
+    "crates/engine-state",
+    "crates/engine-infra",
     "crates/engine-config",
     "crates/engine-runtime",
     "crates/engine-processing",
@@ -12,6 +14,7 @@ members = [
     "crates/expression-engine",
     "crates/cli",
     "crates/engine-planner",
+    "crates/engine-schema",
 ]
 
 resolver = "2"

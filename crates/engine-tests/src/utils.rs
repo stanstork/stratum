@@ -2,16 +2,20 @@
 
 use super::{TEST_MYSQL_URL_ORDERS, TEST_MYSQL_URL_SAKILA, TEST_PG_URL, mysql_pool};
 use crate::pg_pool;
-use connectors::{file::csv::error::FileError, sql::base::row::DbRow};
-use engine_core::plan::execution::ExecutionPlan;
+use connectors::{
+    drivers::{csv::error::FileError, postgres::row::PgRowDecoder},
+    traits::row_decoder::RowDecoder,
+};
+use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan};
 use engine_runtime::{error::MigrationError, execution::executor::run};
-use model::records::row::RowData;
+use model::records::Record;
 use mysql_async::Row as MySqlRow;
 use mysql_async::prelude::Queryable;
 use smql_syntax::builder::parse;
 use std::{
     fs::File,
     io::{BufRead, BufReader},
+    sync::Arc,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -100,12 +104,20 @@ pub enum DbType {
     Postgres,
 }
 
+/// Read a `.smql` file and run it, resolving the path relative to the workspace root.
+pub async fn run_smql_file(path: &str) -> Result<(), MigrationError> {
+    let smql = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("failed to read SMQL file '{path}': {e}"));
+    run_smql(&smql).await
+}
+
 /// Parse & run the SMQL plan, panicking on any error
 pub async fn run_smql(smql: &str) -> Result<(), MigrationError> {
     let doc = parse(smql).expect("parse smql");
-    let plan = ExecutionPlan::build(&doc).expect("build execution plan");
+    let env = Arc::new(EnvContext::empty());
+    let plan = ExecutionPlan::build(&doc, env.clone()).expect("build execution plan");
     let cancel = CancellationToken::new();
-    run(plan, false, cancel).await
+    run(plan, false, cancel, env).await
 }
 
 /// Assert that a table exists (or not) in Postgres
@@ -275,23 +287,20 @@ pub async fn fetch_rows(
     query: &str,
     source_db: &str,
     db: DbType,
-) -> Result<Vec<RowData>, Box<dyn std::error::Error>> {
+) -> Result<Vec<Record>, Box<dyn std::error::Error>> {
     match db {
         DbType::MySql => {
             let mysql = mysql_pool(source_db).await;
             let mut conn = mysql.get_conn().await?;
             let rows: Vec<MySqlRow> = conn.query(query).await?;
-            Ok(rows
-                .into_iter()
-                .map(|row| DbRow::MySqlRow(&row).to_row_data("source_table"))
-                .collect())
+            Ok(rows.iter().map(|r| r.decode("source_table")).collect())
         }
         DbType::Postgres => {
             let pg = pg_pool().await;
             let rows = pg.query(query, &[]).await?;
             Ok(rows
-                .into_iter()
-                .map(|row| DbRow::PostgresRow(&row).to_row_data("dest_table"))
+                .iter()
+                .map(|row| PgRowDecoder(row).decode("dest_table"))
                 .collect())
         }
     }

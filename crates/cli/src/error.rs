@@ -1,4 +1,4 @@
-use engine_planner::builder::errors::{ConnectionError, PlanBuilderError};
+use engine_planner::builder::errors::{ConnectionError, ReportBuilderError};
 use engine_runtime::{dag::error::DagError, error::MigrationError};
 use model::execution::errors::ConvertError;
 use smql_syntax::errors::{BuildError, SmqlError};
@@ -55,8 +55,8 @@ pub enum CliError {
     #[error("DAG error: {0}")]
     Dag(#[from] DagError),
 
-    #[error("Plan builder error: {0}")]
-    PlanBuilder(#[from] PlanBuilderError),
+    #[error("Report builder error: {0}")]
+    ReportBuilder(#[from] ReportBuilderError),
 
     #[error("Connection test failed: {0}")]
     Connection(#[from] ConnectionError),

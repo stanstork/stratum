@@ -7,22 +7,24 @@ use crate::{
     },
     plan::{
         connection::plan::DatabaseDriver,
-        execution::types::RowCount,
         pipeline::source::{ColumnInfo, IndexInfo, SourcePlan},
     },
 };
 use async_trait::async_trait;
 use chrono::Utc;
-use connectors::sql::base::{
+use connectors::sql::{
     metadata::{index::IndexMetadata, table::TableMetadata},
     query::generator::QueryGenerator,
+    request::FetchRowsRequestBuilder,
 };
-use engine_core::filter::{compiler::FilterCompiler, sql::SqlFilterCompiler};
-use engine_core::{
-    connectors::source::{DataSource as CoreDataSource, Source as CoreSource},
-    filter::combine_filters,
+use engine_processing::io::{
+    driver::SchemaDriver,
+    filter::{
+        compiler::{FilterCompiler, sql::SqlFilterCompiler},
+        utils::combine_filters,
+    },
 };
-use model::{core::value::Value, execution::pipeline::DataSource, pagination::cursor::Cursor};
+use model::execution::{pipeline::DataSource, row_count::RowCount};
 use std::sync::Arc;
 use tracing::info;
 
@@ -35,32 +37,28 @@ struct SourceTableMetrics {
 }
 
 /// Analyzes source tables to gather schema metadata and statistics
-pub struct SourceAnalyzer {
-    cache: Arc<MetadataCache>,
-    core_source: CoreSource,
+pub struct SourceAnalyzer<S: SchemaDriver> {
+    _cache: Arc<MetadataCache<S>>,
 }
 
-impl SourceAnalyzer {
-    pub fn new(cache: Arc<MetadataCache>, core_source: CoreSource) -> Self {
-        Self { cache, core_source }
+impl<S: SchemaDriver> SourceAnalyzer<S> {
+    pub fn new(cache: Arc<MetadataCache<S>>) -> Self {
+        Self { _cache: cache }
     }
 
     /// Orchestrates the full analysis of a source data entity.
-    async fn analyze_source(
+    async fn analyze_source<D: SchemaDriver>(
         &self,
         source: &DataSource,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<SourcePlan> {
         info!(target: "analyzer", table = %source.table, "Performing source metadata and statistics analysis");
 
-        // Verify existence and connectivity
         self.ensure_table_exists(&source.table, ctx).await?;
 
-        // Gather physical metadata and indexing info
         let metadata = self.fetch_metadata(&source.table, ctx).await?;
         let indexes = self.fetch_indexes(&source.table, ctx).await?;
 
-        // Calculate metrics (row counts, filtered volume, and physical size)
         let (total_rows, filtered_rows) = self.calculate_row_metrics(source, ctx).await;
         let size_bytes = ctx
             .source_cache
@@ -68,7 +66,6 @@ impl SourceAnalyzer {
             .await
             .unwrap_or(0);
 
-        // Resolve driver and map to the final execution plan format
         let driver = DatabaseDriver::from_name(&source.connection.driver);
         let plan = self.assemble_source_plan(
             source,
@@ -94,7 +91,11 @@ impl SourceAnalyzer {
     }
 
     /// Validates that the table is reachable and exists in the source system.
-    async fn ensure_table_exists(&self, table: &str, ctx: &AnalysisContext) -> AnalyzerResult<()> {
+    async fn ensure_table_exists<D: SchemaDriver>(
+        &self,
+        table: &str,
+        ctx: &AnalysisContext<S, D>,
+    ) -> AnalyzerResult<()> {
         let exists = ctx.source_cache.table_exists(table).await.map_err(|e| {
             AnalyzerError::error(
                 "source",
@@ -112,10 +113,10 @@ impl SourceAnalyzer {
     }
 
     /// Fetches structured table metadata (columns, constraints).
-    async fn fetch_metadata(
+    async fn fetch_metadata<D: SchemaDriver>(
         &self,
         table: &str,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<TableMetadata> {
         ctx.source_cache.table_metadata(table).await.map_err(|e| {
             AnalyzerError::error(
@@ -126,10 +127,10 @@ impl SourceAnalyzer {
     }
 
     /// Fetches physical index information for performance tuning and diagnostic checks.
-    async fn fetch_indexes(
+    async fn fetch_indexes<D: SchemaDriver>(
         &self,
         table: &str,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<Vec<IndexMetadata>> {
         ctx.source_cache.index_metadata(table).await.map_err(|e| {
             AnalyzerError::error(
@@ -139,11 +140,11 @@ impl SourceAnalyzer {
         })
     }
 
-    /// Calculates row counts, applying any configured source filters to estimate actual ingestion volume.
-    async fn calculate_row_metrics(
+    /// Calculates row counts, applying any configured source filters.
+    async fn calculate_row_metrics<D: SchemaDriver>(
         &self,
         source: &DataSource,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> (RowCount, Option<RowCount>) {
         let total_rows = ctx.source_cache.count_rows(&source.table, None).await;
 
@@ -152,15 +153,13 @@ impl SourceAnalyzer {
                 let sql_filter = SqlFilterCompiler::compile(&filter);
 
                 if ctx.use_exact_where {
-                    // Use exact COUNT (slower but accurate)
                     Some(
                         ctx.source_cache
                             .count_rows(&source.table, Some(&sql_filter))
                             .await,
                     )
                 } else {
-                    // Use EXPLAIN estimate (faster but approximate)
-                    self.estimate_filtered_rows(source).await
+                    self.estimate_filtered_rows(source, ctx).await
                 }
             }
             None => None,
@@ -170,26 +169,30 @@ impl SourceAnalyzer {
     }
 
     /// Estimate filtered row count using EXPLAIN (faster than exact COUNT)
-    async fn estimate_filtered_rows(&self, source: &DataSource) -> Option<RowCount> {
+    async fn estimate_filtered_rows<D: SchemaDriver>(
+        &self,
+        source: &DataSource,
+        ctx: &AnalysisContext<S, D>,
+    ) -> Option<RowCount> {
         let driver = DatabaseDriver::from_name(&source.connection.driver);
         let prefix = match driver {
             DatabaseDriver::Postgres => "EXPLAIN (FORMAT JSON) ",
             DatabaseDriver::MySql => "EXPLAIN FORMAT=JSON ",
-            _ => return None, // Fallback to None for unsupported drivers
+            _ => return None,
         };
 
-        let res = self.sample_query_statement().await;
-        let (sql, params) = match res {
-            Some((s, p)) => (s, p),
-            None => return None,
-        };
+        // Build a simple SELECT query from the table to EXPLAIN
+        let request = FetchRowsRequestBuilder::new(source.table.clone())
+            .limit(1)
+            .build();
+        let dialect = ctx.source_dialect.as_query_dialect();
+        let generator = QueryGenerator::new(dialect.as_ref());
+        let (sql, params) = generator.select(&request);
 
         let explain_sql = format!("{}{}", prefix, sql);
-        let rows = self
-            .cache
-            .adapter()
-            .get_sql()
-            .query_rows_params(&explain_sql, params)
+        let rows = ctx
+            .src_driver
+            .query_params(&explain_sql, &params)
             .await
             .map_err(|e| SourceAnalyzerError::QueryFailed(format!("EXPLAIN command failed: {}", e)))
             .ok()?;
@@ -220,40 +223,8 @@ impl SourceAnalyzer {
         Some(RowCount {
             value: rows_examined.unwrap() as u64,
             is_estimated: true,
-            confidence: Some(0.7), // EXPLAIN estimates are less confident than exact counts
+            confidence: Some(0.7),
         })
-    }
-
-    async fn sample_query_statement(&self) -> Option<(String, Vec<Value>)> {
-        if let CoreDataSource::Database(db_arc) = &self.core_source.primary {
-            let db = db_arc.lock().await;
-            let dialect = self.core_source.dialect();
-            let generator = QueryGenerator::new(dialect.as_ref());
-
-            // Build a trivial fetch request to obtain the SQL syntax
-            db.build_fetch_rows_requests(1, Cursor::Default { offset: 0 })
-                .into_iter()
-                .next()
-                .map(|req| generator.select(&req))
-        } else {
-            None
-        }
-    }
-
-    /// Injects metadata into the core database source to enable SQL generation.
-    async fn sync_source_metadata(
-        &self,
-        metadata: &TableMetadata,
-    ) -> Result<(), SourceAnalyzerError> {
-        if let CoreDataSource::Database(db_arc) = &self.core_source.primary {
-            let mut db = db_arc.lock().await;
-            db.set_metadata(metadata.clone());
-            Ok(())
-        } else {
-            Err(SourceAnalyzerError::UnsupportedSourceType {
-                source_type: "File/Non-DB".into(),
-            })
-        }
     }
 
     /// Maps gathered metadata into the SourcePlan structure.
@@ -267,7 +238,7 @@ impl SourceAnalyzer {
             .metadata
             .columns()
             .iter()
-            .map(|col| ColumnInfo::from_metadata(col, &driver))
+            .map(ColumnInfo::from_metadata)
             .collect();
 
         let index_infos = metrics
@@ -279,7 +250,7 @@ impl SourceAnalyzer {
         SourcePlan {
             connection: source.connection.name.clone(),
             table: source.table.clone(),
-            schema: None, // Resolved dynamically in engine
+            schema: None,
             fqn: source.table.clone(),
             driver,
             total_rows: metrics.total_rows,
@@ -294,7 +265,7 @@ impl SourceAnalyzer {
 }
 
 #[async_trait]
-impl PlanAnalyzer for SourceAnalyzer {
+impl<S: SchemaDriver, D: SchemaDriver> PlanAnalyzer<S, D> for SourceAnalyzer<S> {
     type Input = DataSource;
     type Output = SourcePlan;
 
@@ -305,17 +276,8 @@ impl PlanAnalyzer for SourceAnalyzer {
     async fn analyze(
         &self,
         source: &Self::Input,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<Self::Output> {
-        let metadata = ctx
-            .source_cache
-            .table_metadata(&source.table)
-            .await
-            .map_err(|e| AnalyzerError::error("source", format!("Metadata cache miss: {}", e)))?;
-
-        self.sync_source_metadata(&metadata)
-            .await
-            .map_err(|e| AnalyzerError::error("source", e.to_string()))?;
         self.analyze_source(source, ctx).await
     }
 }

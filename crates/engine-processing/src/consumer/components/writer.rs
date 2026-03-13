@@ -1,10 +1,14 @@
+use crate::io::destination::Destination;
 use crate::{
     error::ConsumerError,
-    retry::{classify_db_error, classify_sink_error},
+    io::error::SinkError,
+    retry::{classify_driver_error, classify_sink_error},
 };
-use connectors::sql::base::metadata::table::TableMetadata;
-use engine_core::{connectors::destination::Destination, retry::RetryPolicy};
+use connectors::sql::metadata::table::TableMetadata;
+use engine_core::retry::RetryPolicy;
+use model::records::Record;
 use model::records::batch::Batch;
+use std::collections::HashMap;
 use tracing::{info, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -110,27 +114,27 @@ impl BatchWriter {
             });
         }
 
-        // For now we support only single destination table
-        let meta = self.meta[0].clone();
-
-        // Use retry policy for transient failures
-        self.retry
-            .run(
-                || {
-                    let sink = self.destination.sink().clone();
-                    let meta = meta.clone();
-                    async move { sink.write_fast_path(&meta, batch).await }
-                },
-                classify_sink_error,
-            )
-            .await
-            .map_err(|e| ConsumerError::Write {
-                batch_id: batch.id.clone(),
-                source: Box::new(std::io::Error::other(format!("{:?}", e))),
-            })?;
+        let mut rows_written = 0;
+        for (meta, rows) in self.group_rows(&batch.rows) {
+            self.retry
+                .run(
+                    || {
+                        let sink = self.destination.sink().clone();
+                        let meta = meta.clone();
+                        let rows = rows.clone();
+                        async move { sink.write_fast_path(&meta, &rows).await }
+                    },
+                    classify_sink_error,
+                )
+                .await
+                .map_err(|e| ConsumerError::Write {
+                    batch_id: batch.id.clone(),
+                    source: e.into_inner(),
+                })?;
+            rows_written += rows.len();
+        }
 
         let duration = start.elapsed();
-        let rows_written = batch.rows.len();
         let rows_per_sec = rows_written as f64 / duration.as_secs_f64();
 
         info!(
@@ -169,27 +173,27 @@ impl BatchWriter {
             });
         }
 
-        // For now we support only single destination table
-        let meta = self.meta[0].clone();
-
-        // Use retry policy for transient failures
-        self.retry
-            .run(
-                || {
-                    let dest = self.destination.clone();
-                    let meta = meta.clone();
-                    async move { dest.write_batch(&meta, &batch.rows).await }
-                },
-                classify_db_error,
-            )
-            .await
-            .map_err(|e| ConsumerError::Write {
-                batch_id: batch.id.clone(),
-                source: Box::new(std::io::Error::other(format!("{:?}", e))),
-            })?;
+        let mut rows_written = 0;
+        for (meta, rows) in self.group_rows(&batch.rows) {
+            self.retry
+                .run(
+                    || {
+                        let sink = self.destination.sink().clone();
+                        let meta = meta.clone();
+                        let rows = rows.clone();
+                        async move { sink.write_batch(&meta, &rows).await }
+                    },
+                    classify_driver_error,
+                )
+                .await
+                .map_err(|e| ConsumerError::Write {
+                    batch_id: batch.id.clone(),
+                    source: SinkError::Driver(e.into_inner()),
+                })?;
+            rows_written += rows.len();
+        }
 
         let duration = start.elapsed();
-        let rows_written = batch.rows.len();
         let rows_per_sec = rows_written as f64 / duration.as_secs_f64();
 
         info!(
@@ -206,5 +210,44 @@ impl BatchWriter {
             duration,
             strategy: WriteStrategy::Regular,
         })
+    }
+
+    /// Group rows by their `schema` field and match to the corresponding TableMetadata.
+    /// Falls back to `self.meta[0]` for rows whose schema has no explicit metadata entry.
+    fn group_rows<'a>(&'a self, rows: &'a [Record]) -> Vec<(&'a TableMetadata, Vec<Record>)> {
+        if self.meta.len() == 1 {
+            // Fast path: single table, no grouping needed
+            return vec![(&self.meta[0], rows.to_vec())];
+        }
+
+        // Build a lookup from table name -> metadata index
+        let meta_index: HashMap<&str, usize> = self
+            .meta
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.name.as_str(), i))
+            .collect();
+
+        let mut groups: HashMap<usize, Vec<Record>> = HashMap::new();
+        for row in rows {
+            let idx = meta_index.get(row.schema.as_str()).copied().unwrap_or(0); // fallback to first table if schema unknown
+            groups.entry(idx).or_default().push(row.clone());
+        }
+
+        let mut result: Vec<_> = groups
+            .into_iter()
+            .map(|(idx, rows)| (&self.meta[idx], rows))
+            .collect();
+
+        // Preserve insertion order for determinism
+        // TODO: perf improvement - avoid sorting by using an ordered data structure from the start
+        result.sort_by_key(|(meta, _)| {
+            self.meta
+                .iter()
+                .position(|m| m.name == meta.name)
+                .unwrap_or(0)
+        });
+
+        result
     }
 }

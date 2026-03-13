@@ -1,10 +1,9 @@
+use model::execution::row_count::RowCount;
+
 use crate::plan::{
     connection::plan::ConnectionPlan,
     diagnostics::level::DiagnosticLevel,
-    execution::{
-        summary::{PlanStatus, PlanSummary},
-        types::RowCount,
-    },
+    execution::summary::{PlanStatus, PlanSummary},
     pipeline::plan::PipelinePlan,
 };
 

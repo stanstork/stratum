@@ -5,7 +5,7 @@ use crate::ast::{
     create_table::{ColumnDef, CreateTable, TableConstraint},
     expr::Expr,
 };
-use model::core::data_type::DataType;
+use model::core::types::Type;
 
 #[derive(Debug, Clone)]
 pub struct CreateTableBuilder {
@@ -32,12 +32,7 @@ impl CreateTableBuilder {
         self
     }
 
-    pub fn column(
-        self,
-        name: &str,
-        data_type: DataType,
-        max_length: Option<usize>,
-    ) -> ColumnBuilder {
+    pub fn column(self, name: &str, data_type: Type, max_length: Option<usize>) -> ColumnBuilder {
         ColumnBuilder::new(self, name, data_type, max_length)
     }
 
@@ -62,7 +57,7 @@ impl ColumnBuilder {
     pub fn new(
         table_builder: CreateTableBuilder,
         name: &str,
-        data_type: DataType,
+        data_type: Type,
         max_length: Option<usize>,
     ) -> Self {
         Self {
@@ -74,6 +69,8 @@ impl ColumnBuilder {
                 is_primary_key: false,
                 default_value: None,
                 max_length,
+                generated_expression: None,
+                is_stored: false,
             },
         }
     }
@@ -93,6 +90,12 @@ impl ColumnBuilder {
         self
     }
 
+    pub fn generated(mut self, expression: &str, is_stored: bool) -> Self {
+        self.column.generated_expression = Some(expression.to_string());
+        self.column.is_stored = is_stored;
+        self
+    }
+
     pub fn add(mut self) -> CreateTableBuilder {
         self.table_builder.ast.columns.push(self.column);
         self.table_builder
@@ -101,7 +104,10 @@ impl ColumnBuilder {
 
 #[cfg(test)]
 mod tests {
-    use model::{core::data_type::DataType, core::value::Value::Boolean};
+    use model::core::{
+        types::{IntSize, Type},
+        value::Value,
+    };
 
     use crate::{
         ast::{common::TableRef, expr::Expr},
@@ -121,13 +127,28 @@ mod tests {
 
         let ast = builder
             .if_not_exists()
-            .column("id", DataType::IntUnsigned, None)
+            .column(
+                "id",
+                Type::Int {
+                    bits: IntSize::I32,
+                    unsigned: true,
+                    auto_increment: false,
+                },
+                None,
+            )
             .primary_key()
             .add()
-            .column("username", DataType::VarChar, Some(255))
+            .column(
+                "username",
+                Type::Varchar {
+                    length: Some(255),
+                    charset: None,
+                },
+                Some(255),
+            )
             .add()
-            .column("is_active", DataType::Boolean, None)
-            .default_value(Expr::Value(Boolean(true)))
+            .column("is_active", Type::Boolean, None)
+            .default_value(Expr::Value(Value::Boolean(true)))
             .add()
             .build();
 
@@ -135,7 +156,13 @@ mod tests {
         assert_eq!(ast.table.name, "users");
         assert_eq!(ast.columns.len(), 3);
         assert!(ast.columns[0].is_primary_key);
-        assert_eq!(ast.columns[1].data_type, DataType::VarChar);
+        assert_eq!(
+            ast.columns[1].data_type,
+            Type::Varchar {
+                length: Some(255),
+                charset: None,
+            }
+        );
         assert!(!ast.columns[2].is_nullable); // Should be NOT NULL by default
         assert!(ast.columns[2].default_value.is_some());
     }

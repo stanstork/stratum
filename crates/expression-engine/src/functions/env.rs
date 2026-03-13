@@ -66,72 +66,52 @@ pub fn eval_env(args: &[Value], ctx: &EvalContext) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use engine_core::context::env::{clear_env_context, init_env_context, EnvContext};
+    use engine_core::context::env::EnvContext;
     use std::collections::HashMap;
-    use std::sync::Mutex;
-
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    fn test_env_getter(key: &str) -> Option<String> {
-        engine_core::context::env::get_env(key)
-    }
 
     #[test]
     fn test_env_required_exists() {
-        let _guard = TEST_LOCK.lock().unwrap();
-        clear_env_context();
-
         let mut env = EnvContext::empty();
         env.set("TEST_VAR".to_string(), "test_value".to_string());
-        init_env_context(env);
+        let env_getter = |key: &str| env.get(key);
 
         let definitions = HashMap::new();
         let ctx = EvalContext::BuildTime {
             definitions: &definitions,
-            env_getter: test_env_getter,
+            env_getter: &env_getter,
         };
 
         let args = vec![Value::String("TEST_VAR".to_string())];
         let result = eval_env(&args, &ctx).unwrap();
         assert_eq!(result, Value::String("test_value".to_string()));
-
-        clear_env_context();
     }
 
     #[test]
     fn test_env_required_missing() {
-        let _guard = TEST_LOCK.lock().unwrap();
-        clear_env_context();
-
         let env = EnvContext::empty();
-        init_env_context(env);
+        let env_getter = |key: &str| env.get(key);
 
         let definitions = HashMap::new();
         let ctx = EvalContext::BuildTime {
             definitions: &definitions,
-            env_getter: test_env_getter,
+            env_getter: &env_getter,
         };
 
         let args = vec![Value::String("MISSING_VAR".to_string())];
         let result = eval_env(&args, &ctx);
         assert!(result.is_err());
-
-        clear_env_context();
     }
 
     #[test]
     fn test_env_with_typed_default_int() {
-        let _guard = TEST_LOCK.lock().unwrap();
-        clear_env_context();
-
         let mut env = EnvContext::empty();
         env.set("BATCH_SIZE".to_string(), "5000".to_string());
-        init_env_context(env);
+        let env_getter = |key: &str| env.get(key);
 
         let definitions = HashMap::new();
         let ctx = EvalContext::BuildTime {
             definitions: &definitions,
-            env_getter: test_env_getter,
+            env_getter: &env_getter,
         };
 
         let args = vec![
@@ -139,24 +119,19 @@ mod tests {
             Value::Float(1000.0),
         ];
         let result = eval_env(&args, &ctx).unwrap();
-        assert_eq!(result, Value::Uint(5000));
-
-        clear_env_context();
+        assert_eq!(result, Value::UInt(5000));
     }
 
     #[test]
     fn test_env_with_typed_default_bool() {
-        let _guard = TEST_LOCK.lock().unwrap();
-        clear_env_context();
-
         let mut env = EnvContext::empty();
         env.set("ENABLE_FEATURE".to_string(), "true".to_string());
-        init_env_context(env);
+        let env_getter = |key: &str| env.get(key);
 
         let definitions = HashMap::new();
         let ctx = EvalContext::BuildTime {
             definitions: &definitions,
-            env_getter: test_env_getter,
+            env_getter: &env_getter,
         };
 
         let args = vec![
@@ -165,50 +140,38 @@ mod tests {
         ];
         let result = eval_env(&args, &ctx).unwrap();
         assert_eq!(result, Value::Boolean(true));
-
-        clear_env_context();
     }
 
     #[test]
     fn test_env_missing_returns_default() {
-        let _guard = TEST_LOCK.lock().unwrap();
-        clear_env_context();
-
         let env = EnvContext::empty();
-        init_env_context(env);
+        let env_getter = |key: &str| env.get(key);
 
         let definitions = HashMap::new();
         let ctx = EvalContext::BuildTime {
             definitions: &definitions,
-            env_getter: test_env_getter,
+            env_getter: &env_getter,
         };
 
         let args = vec![Value::String("MISSING".to_string()), Value::Float(1234.0)];
         let result = eval_env(&args, &ctx).unwrap();
         assert_eq!(result, Value::Float(1234.0));
-
-        clear_env_context();
     }
 
     #[test]
     fn test_env_parse_failure() {
-        let _guard = TEST_LOCK.lock().unwrap();
-        clear_env_context();
-
         let mut env = EnvContext::empty();
         env.set("BAD_INT".to_string(), "not_a_number".to_string());
-        init_env_context(env);
+        let env_getter = |key: &str| env.get(key);
 
         let definitions = HashMap::new();
         let ctx = EvalContext::BuildTime {
             definitions: &definitions,
-            env_getter: test_env_getter,
+            env_getter: &env_getter,
         };
 
         let args = vec![Value::String("BAD_INT".to_string()), Value::Float(100.0)];
         let result = eval_env(&args, &ctx);
         assert!(result.is_err());
-
-        clear_env_context();
     }
 }

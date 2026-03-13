@@ -1,0 +1,64 @@
+// =============================================================================
+// Phase 2 Test 04 — Depth Limiting: depth = 1
+// =============================================================================
+//
+// WHAT THIS TESTS:
+//   - Only direct FK dependencies of the root table are discovered
+//   - Transitive deps (depth >= 2) are NOT created
+//   - `rental` has direct FKs to: inventory, customer, staff
+//   - `inventory` depends on film + store — those should NOT appear (depth 2)
+//   - `customer` depends on address — that should NOT appear (depth 2)
+//
+// TABLES EXPECTED ON DESTINATION:
+//   inventory  (depth 1 — rental.inventory_id → inventory)
+//   customer   (depth 1 — rental.customer_id → customer)
+//   staff      (depth 1 — rental.staff_id → staff)
+//   rental     (root)
+//
+// TABLES MUST NOT APPEAR:
+//   film, store, address, city, country, language, ...
+//
+// RUN:
+//   cargo run -p cli -- plan -c dev-fixtures/configs/phase2/p2-04-depth-limit.smql
+//
+// VERIFY:
+//   \dt   -- only the 4 tables above should exist
+//   SELECT COUNT(*) FROM film;   -- should fail (table doesn't exist)
+//   SELECT COUNT(*) FROM rental; -- should succeed
+//
+// =============================================================================
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" {
+    driver = "mysql"
+    url    = define.mysql_url
+}
+
+connection "dst" {
+    driver = "postgres"
+    url    = define.postgres_url
+}
+
+pipeline "depth_limited_rental" {
+    from {
+        connection = connection.src
+        table      = "rental"
+
+        with references {
+            data  = schema_only
+            depth = 1
+        }
+    }
+
+    to {
+        connection = connection.dst
+    }
+    
+    settings {
+        batch_size = 500
+    }
+}

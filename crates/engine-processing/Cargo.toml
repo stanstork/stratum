@@ -9,7 +9,7 @@ model = { path = "../model" }
 connectors = { path = "../connectors" }
 query-builder = { path = "../query-builder" }
 engine-core = { path = "../engine-core" }
-engine-config = { path = "../engine-config" }
+engine-state = { path = "../engine-state" }
 expression-engine = { path = "../expression-engine" }
 
 tracing = "0.1.41"
@@ -25,6 +25,7 @@ tokio-util = "0.7.17"
 bigdecimal = { version = "0.4.7", features = ["serde"] }
 mysql_async = "0.36.1"
 tokio-postgres = "0.7.15"
+uuid = { version = "1.13.1", features = ["serde", "v4"] }
 
 [dev-dependencies]
 tempfile = "3.15.0"

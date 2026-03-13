@@ -1,6 +1,5 @@
-use crate::plan::{
-    connection::plan::DatabaseDriver, execution::types::RowCount, pipeline::source::ColumnInfo,
-};
+use crate::plan::{connection::plan::DatabaseDriver, pipeline::source::ColumnInfo};
+use model::execution::row_count::RowCount;
 use serde::Serialize;
 
 #[derive(Serialize, Debug, Clone)]

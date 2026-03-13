@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use engine_processing::io::driver::SchemaDriver;
 use std::fmt;
 
 /// Unified trait for all pipeline analyzers
@@ -6,7 +7,7 @@ use std::fmt;
 /// This trait provides a common interface for all analyzer components,
 /// enabling registry-based orchestration and composition.
 #[async_trait]
-pub trait PlanAnalyzer: Send + Sync {
+pub trait PlanAnalyzer<S: SchemaDriver, D: SchemaDriver>: Send + Sync {
     /// Input type for this analyzer
     type Input;
 
@@ -27,7 +28,7 @@ pub trait PlanAnalyzer: Send + Sync {
     async fn analyze(
         &self,
         input: &Self::Input,
-        ctx: &super::context::AnalysisContext,
+        ctx: &super::context::AnalysisContext<S, D>,
     ) -> AnalyzerResult<Self::Output>;
 }
 

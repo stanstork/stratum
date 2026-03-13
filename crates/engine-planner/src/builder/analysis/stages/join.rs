@@ -6,13 +6,14 @@ use crate::builder::{
     analyzers::join::JoinAnalyzer,
 };
 use async_trait::async_trait;
+use engine_processing::io::driver::SchemaDriver;
 
 pub struct JoinStage {
     pub analyzer: JoinAnalyzer,
 }
 
 #[async_trait]
-impl PipelineAnalysisStage for JoinStage {
+impl<S: SchemaDriver, D: SchemaDriver> PipelineAnalysisStage<S, D> for JoinStage {
     fn name(&self) -> &'static str {
         "join"
     }
@@ -20,7 +21,7 @@ impl PipelineAnalysisStage for JoinStage {
     async fn run(
         &self,
         input: &PipelineAnalysisInput,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
         state: &mut AnalysisState,
     ) -> AnalyzerResult<()> {
         let joins =

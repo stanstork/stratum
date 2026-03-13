@@ -1,11 +1,11 @@
-use crate::{pagination::cursor::Cursor, records::row::RowData};
+use crate::{pagination::cursor::Cursor, records::Record};
 use serde::{Deserialize, Serialize};
 
 /// Result of a single fetch page.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FetchResult {
     /// Fetched rows from the source.
-    pub rows: Vec<RowData>,
+    pub rows: Vec<Record>,
 
     /// Cursor that should be used to fetch the next page.
     /// `None` means no next page (end of source data).

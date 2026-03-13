@@ -35,7 +35,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     };
 
     let pipeline_plan = app
-        .execution_plan
+        .report
         .pipelines
         .iter()
         .find(|p| p.name == pipeline.name);

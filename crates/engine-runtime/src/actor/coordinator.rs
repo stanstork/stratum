@@ -1,22 +1,18 @@
-use super::{consumer::ConsumerActor, producer::ProducerActor};
+use super::{consumer::run_consumer, producer::run_producer};
 use crate::{
-    actor::{
-        ActorRef,
-        messages::{ConsumerMsg, ProducerMsg},
-        spawn::spawn_actor,
-    },
+    actor::messages::{ConsumerMsg, ProducerMsg},
     error::ActorError,
 };
 use engine_core::{event_bus::bus::EventBus, metrics::Metrics};
 use engine_processing::{consumer::Consumer, producer::Producer};
-use tokio::task::JoinHandle;
+use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
-/// Coordinates the Producer and Consumer actors in a data pipeline.
+/// Coordinates the Producer and Consumer tasks in a data pipeline.
 pub struct PipelineCoordinator {
-    producer_ref: ActorRef<ProducerMsg>,
-    consumer_ref: ActorRef<ConsumerMsg>,
+    producer_tx: mpsc::Sender<ProducerMsg>,
+    consumer_tx: mpsc::Sender<ConsumerMsg>,
     producer_handle: JoinHandle<Result<(), ActorError>>,
     consumer_handle: JoinHandle<Result<(), ActorError>>,
     cancel_token: CancellationToken,
@@ -28,59 +24,47 @@ impl PipelineCoordinator {
         consumer: Consumer,
         metrics: Metrics,
         cancel_token: CancellationToken,
+        event_bus: EventBus,
     ) -> Self {
-        // Create and spawn producer actor
-        let producer_actor = ProducerActor::new(producer, cancel_token.clone(), metrics.clone());
-        let (producer_ref, producer_handle) = spawn_actor("producer", 100, producer_actor);
+        let (producer_tx, producer_rx) = mpsc::channel::<ProducerMsg>(100);
+        let (consumer_tx, consumer_rx) = mpsc::channel::<ConsumerMsg>(100);
 
-        // Create and spawn consumer actor
-        let consumer_actor = ConsumerActor::new(consumer, cancel_token.clone(), metrics);
-        let (consumer_ref, consumer_handle) = spawn_actor("consumer", 100, consumer_actor);
+        let producer_handle = tokio::spawn(run_producer(
+            producer,
+            producer_rx,
+            cancel_token.clone(),
+            event_bus.clone(),
+            metrics.clone(),
+        ));
+
+        let consumer_handle = tokio::spawn(run_consumer(
+            consumer,
+            consumer_rx,
+            cancel_token.clone(),
+            event_bus,
+            metrics,
+        ));
 
         Self {
-            producer_ref,
-            consumer_ref,
+            producer_tx,
+            consumer_tx,
             producer_handle,
             consumer_handle,
             cancel_token,
         }
     }
 
-    /// Initializes the actors by setting their self-references.
-    pub async fn initialize(&self) -> Result<(), ActorError> {
-        self.producer_ref
-            .send(ProducerMsg::SetActorRef(self.producer_ref.clone()))
-            .await?;
-        self.consumer_ref
-            .send(ConsumerMsg::SetActorRef(self.consumer_ref.clone()))
-            .await?;
-
-        Ok(())
-    }
-
-    /// Sets the EventBus for both producer and consumer actors.
-    pub async fn set_event_bus(&self, event_bus: EventBus) -> Result<(), ActorError> {
-        self.producer_ref
-            .send(ProducerMsg::SetEventBus(event_bus.clone()))
-            .await?;
-
-        self.consumer_ref
-            .send(ConsumerMsg::SetEventBus(event_bus))
-            .await?;
-
-        Ok(())
-    }
-
     /// Starts the producer for snapshot processing.
     pub async fn start_snapshot(&self, run_id: String, item_id: String) -> Result<(), ActorError> {
         info!(run_id = %run_id, item_id = %item_id, "Starting snapshot");
 
-        self.producer_ref
+        self.producer_tx
             .send(ProducerMsg::StartSnapshot {
                 run_id: run_id.clone(),
                 item_id: item_id.clone(),
             })
-            .await?;
+            .await
+            .map_err(|_| ActorError::MailboxClosed)?;
 
         Ok(())
     }
@@ -92,13 +76,14 @@ impl PipelineCoordinator {
         item_id: String,
         part_id: String,
     ) -> Result<(), ActorError> {
-        self.consumer_ref
+        self.consumer_tx
             .send(ConsumerMsg::Start {
                 run_id,
                 item_id,
                 part_id,
             })
-            .await?;
+            .await
+            .map_err(|_| ActorError::MailboxClosed)?;
 
         Ok(())
     }
@@ -107,9 +92,10 @@ impl PipelineCoordinator {
     pub async fn start_cdc(&self, run_id: String, item_id: String) -> Result<(), ActorError> {
         info!(run_id = %run_id, item_id = %item_id, "Starting CDC");
 
-        self.producer_ref
+        self.producer_tx
             .send(ProducerMsg::StartCdc { run_id, item_id })
-            .await?;
+            .await
+            .map_err(|_| ActorError::MailboxClosed)?;
 
         Ok(())
     }
@@ -118,9 +104,10 @@ impl PipelineCoordinator {
     pub async fn flush_consumer(&self, run_id: String, item_id: String) -> Result<(), ActorError> {
         info!(run_id = %run_id, item_id = %item_id, "Flushing consumer");
 
-        self.consumer_ref
+        self.consumer_tx
             .send(ConsumerMsg::Flush { run_id, item_id })
-            .await?;
+            .await
+            .map_err(|_| ActorError::MailboxClosed)?;
 
         Ok(())
     }
@@ -137,7 +124,7 @@ impl PipelineCoordinator {
         self.cancel_token.cancel();
 
         if let Err(e) = self
-            .producer_ref
+            .producer_tx
             .send(ProducerMsg::Stop {
                 run_id: run_id.clone(),
                 item_id: item_id.clone(),
@@ -148,7 +135,7 @@ impl PipelineCoordinator {
         }
 
         if let Err(e) = self
-            .consumer_ref
+            .consumer_tx
             .send(ConsumerMsg::Stop {
                 run_id,
                 item_id,
@@ -163,47 +150,33 @@ impl PipelineCoordinator {
         Ok(())
     }
 
-    /// Waits for both actors to complete and returns any errors.
-    ///
-    /// This method will return an error if:
-    /// - Either actor task panicked (JoinError)
-    /// - Either actor returned an error during execution (ActorError)
+    /// Waits for both tasks to complete and returns any errors.
     pub async fn wait(self) -> Result<(), ActorError> {
-        // Drop actor references to allow mailboxes to close when actors finish
-        // This is necessary because actors hold self-references that they drop when done,
-        // but the coordinator also holds references that must be dropped for termination
-        drop(self.producer_ref);
-        drop(self.consumer_ref);
+        // Senders are intentionally kept alive for the duration of the join.
+        // Dropping them here (before join) would immediately close the channel,
+        // causing tasks to receive None on rx.recv() and stop before doing any work.
+        // Tasks stop themselves via TickAction::Done when their work is complete;
+        // the senders drop naturally when this function returns.
+        let _producer_tx = self.producer_tx;
+        let _consumer_tx = self.consumer_tx;
 
-        // Wait for both actors to finish
         let (producer_join_result, consumer_join_result) =
             tokio::join!(self.producer_handle, self.consumer_handle);
 
-        // Handle producer: JoinError (task panic) -> ActorError
         let producer_result = producer_join_result.map_err(|e| {
             error!("Producer task panicked: {}", e);
             ActorError::Internal(format!("Producer task panicked: {}", e))
         })?;
 
-        // Handle consumer: JoinError (task panic) -> ActorError
         let consumer_result = consumer_join_result.map_err(|e| {
             error!("Consumer task panicked: {}", e);
             ActorError::Internal(format!("Consumer task panicked: {}", e))
         })?;
 
-        // Propagate actor execution errors
         producer_result?;
         consumer_result?;
 
         Ok(())
-    }
-
-    pub fn producer_ref(&self) -> &ActorRef<ProducerMsg> {
-        &self.producer_ref
-    }
-
-    pub fn consumer_ref(&self) -> &ActorRef<ConsumerMsg> {
-        &self.consumer_ref
     }
 
     /// Starts a complete snapshot pipeline: starts both producer and consumer.

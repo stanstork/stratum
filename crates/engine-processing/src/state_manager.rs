@@ -1,7 +1,10 @@
-use crate::{error::StateError, item::ItemId};
-use engine_core::state::{
-    StateStore,
-    models::{Checkpoint, CheckpointSummary, WalEntry},
+use crate::item::ItemId;
+use engine_core::{
+    error::StateStoreError,
+    state::{
+        StateStore,
+        models::{Checkpoint, CheckpointSummary, WalEntry},
+    },
 };
 use model::pagination::cursor::Cursor;
 use std::sync::Arc;
@@ -24,7 +27,7 @@ impl StateManager {
         batch_id: &str,
         current: &Cursor,
         next: &Cursor,
-    ) -> Result<(), StateError> {
+    ) -> Result<(), StateStoreError> {
         // Load current progress
         let rows_done = self.get_rows_done().await?;
 
@@ -36,8 +39,7 @@ impl StateManager {
                 part_id: self.ids.part_id(),
                 batch_id: batch_id.to_string(),
             })
-            .await
-            .map_err(|e| StateError::WalOperation(e.to_string()))?;
+            .await?;
 
         // Update checkpoint with "read" stage
         self.store
@@ -53,11 +55,10 @@ impl StateManager {
                 updated_at: chrono::Utc::now(),
             })
             .await
-            .map_err(|e| StateError::CheckpointLoad(e.to_string()))
     }
 
     /// Commit a batch by appending WAL entry.
-    pub async fn commit_batch(&self, batch_id: &str) -> Result<(), StateError> {
+    pub async fn commit_batch(&self, batch_id: &str) -> Result<(), StateStoreError> {
         self.store
             .append_wal(&WalEntry::BatchCommit {
                 run_id: self.ids.run_id(),
@@ -67,7 +68,6 @@ impl StateManager {
                 ts: chrono::Utc::now(),
             })
             .await
-            .map_err(|e| StateError::WalOperation(e.to_string()))
     }
 
     /// Save a checkpoint with specific stage and cursor information.
@@ -78,7 +78,7 @@ impl StateManager {
         pending_offset: Option<&Cursor>,
         batch_id: &str,
         rows_done: u64,
-    ) -> Result<(), StateError> {
+    ) -> Result<(), StateStoreError> {
         self.store
             .save_checkpoint(&Checkpoint {
                 run_id: self.ids.run_id(),
@@ -92,24 +92,21 @@ impl StateManager {
                 updated_at: chrono::Utc::now(),
             })
             .await
-            .map_err(|e| StateError::CheckpointLoad(e.to_string()))
     }
 
     /// Load the current checkpoint.
-    pub async fn load_checkpoint(&self) -> Result<Option<Checkpoint>, StateError> {
+    pub async fn load_checkpoint(&self) -> Result<Option<Checkpoint>, StateStoreError> {
         self.store
             .load_checkpoint(&self.ids.run_id(), &self.ids.item_id(), &self.ids.part_id())
             .await
-            .map_err(|e| StateError::CheckpointLoad(e.to_string()))
     }
 
     /// Resume from the last checkpoint, determining the correct cursor.
-    pub async fn resume_cursor(&self) -> Result<Cursor, StateError> {
+    pub async fn resume_cursor(&self) -> Result<Cursor, StateStoreError> {
         let summary = self
             .store
             .last_checkpoint(&self.ids.run_id(), &self.ids.item_id(), &self.ids.part_id())
-            .await
-            .map_err(|e| StateError::CheckpointLoad(e.to_string()))?;
+            .await?;
 
         match summary {
             Some(s) => {
@@ -208,13 +205,12 @@ impl StateManager {
     }
 
     /// Get current rows_done count from checkpoint
-    async fn get_rows_done(&self) -> Result<u64, StateError> {
-        self.store
+    async fn get_rows_done(&self) -> Result<u64, StateStoreError> {
+        Ok(self
+            .store
             .load_checkpoint(&self.ids.run_id(), &self.ids.item_id(), &self.ids.part_id())
-            .await
-            .map_err(|e| StateError::CheckpointLoad(e.to_string()))?
+            .await?
             .map(|cp| cp.rows_done)
-            .ok_or_else(|| StateError::CheckpointLoad("No checkpoint found".to_string()))
-            .or(Ok(0))
+            .unwrap_or(0))
     }
 }

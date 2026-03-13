@@ -9,12 +9,13 @@ use crate::{
     plan::sample::preview::SampleDataPreview,
 };
 use async_trait::async_trait;
+use engine_processing::io::driver::SchemaDriver;
 use std::sync::Arc;
 
 pub struct SampleStage;
 
 #[async_trait]
-impl PipelineAnalysisStage for SampleStage {
+impl<S: SchemaDriver, D: SchemaDriver> PipelineAnalysisStage<S, D> for SampleStage {
     fn name(&self) -> &'static str {
         "sample"
     }
@@ -22,7 +23,7 @@ impl PipelineAnalysisStage for SampleStage {
     async fn run(
         &self,
         input: &PipelineAnalysisInput,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
         state: &mut AnalysisState,
     ) -> AnalyzerResult<()> {
         // Skip sample collection if not enabled
@@ -33,7 +34,7 @@ impl PipelineAnalysisStage for SampleStage {
 
         let validations = state.require_validations()?.clone();
         let sample_collector =
-            SampleCollector::new(Arc::clone(&input.core_source), input.sample_config.clone());
+            SampleCollector::new(Arc::clone(&ctx.src_driver), input.sample_config.clone());
         let sample = PlanAnalyzer::analyze(
             &sample_collector,
             &(

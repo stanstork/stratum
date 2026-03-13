@@ -132,7 +132,7 @@ impl MaskingPolicy {
 
     /// Mask a Value type if needed based on the name or if it's a database URL
     pub fn mask_by_name(&self, name: &str, value: &Value) -> String {
-        let value_str = value.as_string().unwrap_or_else(|| value.to_string());
+        let value_str = value.as_string().unwrap_or_else(|| format!("{:?}", value));
 
         // Always mask database URLs with credentials
         if Self::is_db_url(&value_str) {

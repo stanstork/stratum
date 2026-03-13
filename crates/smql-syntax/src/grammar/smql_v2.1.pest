@@ -31,6 +31,8 @@ kw_paginate    = @{ "paginate" ~ !(ASCII_ALPHANUMERIC | "_") }
 kw_settings    = @{ "settings" ~ !(ASCII_ALPHANUMERIC | "_") }
 kw_retry       = @{ "retry" ~ !(ASCII_ALPHANUMERIC | "_") }
 kw_failed_rows = @{ "failed_rows" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_references  = @{ "references" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_map         = @{ "map" ~ !(ASCII_ALPHANUMERIC | "_") }
 kw_is          = @{ "is" ~ !(ASCII_ALPHANUMERIC | "_") }
 kw_not         = @{ "not" ~ !(ASCII_ALPHANUMERIC | "_") }
 kw_null        = @{ "null" ~ !(ASCII_ALPHANUMERIC | "_") }
@@ -108,6 +110,7 @@ pipeline_content = _{
   | to_block
   | where_block
   | with_block
+  | named_select_block
   | select_block
   | validate_block
   | on_error_block
@@ -117,12 +120,15 @@ pipeline_content = _{
   | settings_block
 }
 
-from_block        = { kw_from ~ lbrace ~ (attribute | nested_block)* ~ rbrace }
-to_block          = { kw_to ~ lbrace ~ (attribute | nested_block)* ~ rbrace }
+from_block        = { kw_from ~ lbrace ~ (attribute | references_block | nested_block)* ~ rbrace }
+to_block          = { kw_to ~ lbrace ~ (attribute | map_block | nested_block)* ~ rbrace }
+references_block  = { kw_with ~ kw_references ~ lbrace ~ attribute* ~ rbrace }
+map_block         = { kw_map ~ lbrace ~ field_mapping* ~ rbrace }
 where_block       = { kw_where ~ lit_string? ~ lbrace ~ expression* ~ rbrace }
 with_block        = { kw_with ~ lbrace ~ join_clause* ~ rbrace }
 join_clause       = { ident ~ kw_from ~ ident ~ (kw_where ~ expression)? }
 select_block      = { kw_select ~ lbrace ~ field_mapping* ~ rbrace }
+named_select_block = { kw_select ~ lit_string ~ lbrace ~ field_mapping* ~ rbrace }
 field_mapping     = { ident ~ op_eq ~ expression }
 validate_block    = { kw_validate ~ lbrace ~ validation_check* ~ rbrace }
 validation_check  = { (kw_assert | kw_warn) ~ lit_string ~ lbrace ~ validation_body ~ rbrace }

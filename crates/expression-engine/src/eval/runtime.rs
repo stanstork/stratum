@@ -2,7 +2,7 @@ use crate::{context::EvalContext, eval::binary::BinaryOpEvaluator, functions::Fu
 use model::{
     core::value::Value,
     execution::expr::{BinaryOp, CompiledExpression},
-    records::row::RowData,
+    records::Record,
     transform::mapping::TransformationMetadata,
 };
 use tracing::warn;
@@ -11,22 +11,22 @@ use tracing::warn;
 pub trait Evaluator {
     fn evaluate(
         &self,
-        row: &RowData,
+        row: &Record,
         mapping: &TransformationMetadata,
-        env_getter: fn(&str) -> Option<String>,
+        env_getter: &dyn Fn(&str) -> Option<String>,
     ) -> Option<Value>;
 }
 
 impl Evaluator for CompiledExpression {
     fn evaluate(
         &self,
-        row: &RowData,
+        row: &Record,
         mapping: &TransformationMetadata,
-        env_getter: fn(&str) -> Option<String>,
+        env_getter: &dyn Fn(&str) -> Option<String>,
     ) -> Option<Value> {
         match self {
             CompiledExpression::Identifier(identifier) => row
-                .field_values
+                .fields
                 .iter()
                 .find(|col| col.name.eq_ignore_ascii_case(identifier))
                 .map(|col| col.value.clone())
@@ -60,7 +60,7 @@ impl Evaluator for CompiledExpression {
                     // Given the CrossEntityReference, find the matching column in the current row
                     .and_then(|lk| {
                         if let Some(target) = &lk.target {
-                            row.field_values
+                            row.fields
                                 .iter()
                                 .find(|col| col.name.eq_ignore_ascii_case(target))
                                 .and_then(|col| col.value.clone())
@@ -72,10 +72,10 @@ impl Evaluator for CompiledExpression {
 
                 // For source table references, the column may be renamed in the row data.
                 // We need to resolve the source column name to the target column name.
-                let resolved_key = mapping.field_mappings.resolve(&row.entity, key);
+                let resolved_key = mapping.field_mappings.resolve(&row.schema, key);
 
                 let raw = row
-                    .field_values
+                    .fields
                     .iter()
                     .find(|col| col.name.eq_ignore_ascii_case(&resolved_key))
                     .and_then(|col| col.value.clone());
@@ -92,7 +92,7 @@ impl Evaluator for CompiledExpression {
 
             // Single-segment DotPath is just a field reference
             CompiledExpression::DotPath(segments) if segments.len() == 1 => row
-                .field_values
+                .fields
                 .iter()
                 .find(|col| col.name.eq_ignore_ascii_case(&segments[0]))
                 .map(|col| col.value.clone())
@@ -150,9 +150,9 @@ fn eval_binary_op(left: &Value, right: &Value, op: &BinaryOp) -> Option<Value> {
 fn eval_function(
     name: &str,
     args: &[Value],
-    row: &RowData,
+    row: &Record,
     mapping: &TransformationMetadata,
-    env_getter: fn(&str) -> Option<String>,
+    env_getter: &dyn Fn(&str) -> Option<String>,
 ) -> Option<Value> {
     let registry = FunctionRegistry::new();
     let ctx = EvalContext::Runtime {

@@ -262,7 +262,7 @@ mod tests {
             .build();
 
         // Check limit
-        assert_eq!(ast.limit, Some(value(Value::Uint(50))));
+        assert_eq!(ast.limit, Some(value(Value::Int(50))));
 
         // Check order by
         assert_eq!(ast.order_by.len(), 1);
@@ -286,7 +286,7 @@ mod tests {
                     column: "id".to_string(),
                 }),
                 op: BinaryOperator::Gt,
-                right: value(Value::Uint(100)),
+                right: value(Value::UInt(100)),
             }))
         );
     }
@@ -305,7 +305,7 @@ mod tests {
             .build();
 
         // Check limit
-        assert_eq!(ast.limit, Some(value(Value::Uint(50))));
+        assert_eq!(ast.limit, Some(value(Value::Int(50))));
 
         // Check where clause - should be None
         assert!(ast.where_clause.is_none());
@@ -342,7 +342,7 @@ mod tests {
             .build();
 
         // Check limit
-        assert_eq!(ast.limit, Some(value(Value::Uint(25))));
+        assert_eq!(ast.limit, Some(value(Value::Int(25))));
 
         // Check order by
         assert_eq!(ast.order_by.len(), 2);
@@ -419,7 +419,7 @@ mod tests {
                     column: "id".to_string(),
                 }),
                 op: BinaryOperator::Gt,
-                right: value(Value::Uint(42)),
+                right: value(Value::UInt(42)),
             }))
         );
     }
@@ -487,11 +487,11 @@ mod tests {
                 value(Value::String("active".to_string())),
                 value(Value::String("verified".to_string())),
             ]))
-            .limit(value(Value::Int(100)))
+            .limit(value(Value::UInt(100)))
             .build();
 
         assert!(ast.where_clause.is_some());
-        assert_eq!(ast.limit, Some(value(Value::Int(100))));
+        assert_eq!(ast.limit, Some(value(Value::UInt(100))));
     }
 
     #[test]

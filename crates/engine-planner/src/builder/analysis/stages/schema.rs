@@ -6,13 +6,14 @@ use crate::builder::{
     analyzers::schema::SchemaAnalyzer,
 };
 use async_trait::async_trait;
+use engine_processing::io::driver::SchemaDriver;
 
 pub struct SchemaStage {
     pub analyzer: SchemaAnalyzer,
 }
 
 #[async_trait]
-impl PipelineAnalysisStage for SchemaStage {
+impl<S: SchemaDriver, D: SchemaDriver> PipelineAnalysisStage<S, D> for SchemaStage {
     fn name(&self) -> &'static str {
         "schema"
     }
@@ -20,7 +21,7 @@ impl PipelineAnalysisStage for SchemaStage {
     async fn run(
         &self,
         input: &PipelineAnalysisInput,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
         state: &mut AnalysisState,
     ) -> AnalyzerResult<()> {
         let schema_changes =

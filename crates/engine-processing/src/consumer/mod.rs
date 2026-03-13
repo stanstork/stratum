@@ -1,26 +1,19 @@
+use crate::context::PipelineContext;
 use crate::{
-    consumer::{
-        components::{coordinator::BatchCoordinator, writer::BatchWriter},
-        config::ConsumerConfig,
-    },
+    consumer::components::{coordinator::BatchCoordinator, writer::BatchWriter},
     error::ConsumerError,
     item::ItemId,
     state_manager::StateManager,
 };
-use engine_core::{
-    connectors::destination::DataDestination, context::item::ItemContext, metrics::Metrics,
-    retry::RetryPolicy,
-};
-use futures::lock::Mutex;
+use connectors::sql::metadata::table::TableMetadata;
+use engine_core::{metrics::Metrics, retry::RetryPolicy};
 use model::records::batch::Batch;
-use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 pub mod components;
 pub mod config;
-pub mod trigger;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConsumerStatus {
@@ -57,36 +50,26 @@ pub struct Consumer {
     // State
     mode: ConsumerMode,
     ids: ItemId,
-
-    // Config
-    config: ConsumerConfig,
 }
 
 impl Consumer {
     pub async fn new(
-        ctx: &Arc<Mutex<ItemContext>>,
+        ctx: &PipelineContext,
         batch_rx: mpsc::Receiver<Batch>,
+        dest_metadata: Vec<TableMetadata>,
         cancel: CancellationToken,
         metrics: Metrics,
     ) -> Self {
-        let (run_id, item_id, destination, pipeline, state_store) = {
-            let c = ctx.lock().await;
-            (
-                c.run_id.clone(),
-                c.item_id.clone(),
-                c.destination.clone(),
-                c.pipeline.clone(),
-                c.state.clone(),
-            )
-        };
+        let run_id = ctx.run_id.clone();
+        let item_id = ctx.item_id.clone();
+        let destination = ctx.destination.clone();
+        let pipeline = ctx.pipeline.clone();
+        let state_store = ctx.state.clone();
 
-        let config = ConsumerConfig::default();
         let part_id = "part-0".to_string();
         let ids = ItemId::new(run_id, item_id, part_id);
 
-        let meta = match &destination.data_dest {
-            DataDestination::Database(db) => db.data.lock().await.tables(),
-        };
+        let meta = dest_metadata;
 
         // Create retry policy from pipeline config, fallback to database defaults
         let retry_config = pipeline
@@ -106,7 +89,6 @@ impl Consumer {
             cancel,
             mode: ConsumerMode::Idle,
             ids,
-            config,
         }
     }
 
@@ -116,11 +98,6 @@ impl Consumer {
             item_id = %self.ids.item_id(),
             "Starting LiveConsumer"
         );
-
-        if self.config.disable_triggers {
-            info!("Consumer configured to disable triggers on start");
-            // TODO: Disable triggers if applicable
-        }
 
         self.mode = ConsumerMode::Running;
         info!("LiveConsumer started successfully");
@@ -236,11 +213,6 @@ impl Consumer {
             item_id = %self.ids.item_id(),
             "Stopping LiveConsumer"
         );
-
-        if self.config.disable_triggers {
-            info!("Consumer configured to re-enable triggers on stop");
-            // TODO: Re-enable triggers if applicable
-        }
 
         self.mode = ConsumerMode::Finished;
         info!("LiveConsumer stopped successfully");

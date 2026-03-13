@@ -1,103 +1,92 @@
-use crate::{
-    actor::{Actor, ActorContext, ActorRef, messages::ProducerMsg},
-    error::ActorError,
-};
-use async_trait::async_trait;
+use super::TickAction;
+use crate::actor::messages::ProducerMsg;
+use crate::error::ActorError;
 use engine_core::{event_bus::bus::EventBus, metrics::Metrics};
 use engine_processing::{
     cb::{CircuitBreaker, CircuitBreakerState},
+    error::ProducerError,
     producer::{Producer, ProducerStatus},
 };
 use model::events::migration::{MigrationEvent, ProducerMode};
 use std::time::Duration;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum TickResponse {
-    /// Schedule another tick immediately
-    ScheduleImmediate,
-
-    /// Schedule another tick after a delay
-    ScheduleDelayed(Duration),
-
-    /// No more ticks needed (finished or stopped)
-    NoMoreTicks,
-}
-
-pub struct ProducerActor {
+/// Encapsulates the state and logic of the running producer.
+struct ProducerTask {
     producer: Producer,
-
-    // Control state
-    running: bool,
-    cancel_token: CancellationToken,
-    mode: Option<ProducerMode>,
-
-    // Execution context
-    run_id: Option<String>,
-    item_id: Option<String>,
-
-    // Resilience
     breaker: CircuitBreaker,
     metrics: Metrics,
+    event_bus: EventBus,
+    run_id: String,
+    item_id: String,
 
-    // Track previous values to compute deltas
+    // Delta tracking
     last_batches_processed: u64,
     last_rows_skipped: u64,
     last_rows_failed: u64,
-
-    // Configuration
-    idle_delay: Duration,
-
-    // Self-reference for scheduling ticks
-    actor_ref: Option<ActorRef<ProducerMsg>>,
-
-    // EventBus for publishing migration events
-    event_bus: Option<EventBus>,
 }
 
-impl ProducerActor {
-    pub fn new(producer: Producer, cancel_token: CancellationToken, metrics: Metrics) -> Self {
+impl ProducerTask {
+    fn new(
+        producer: Producer,
+        metrics: Metrics,
+        event_bus: EventBus,
+        run_id: String,
+        item_id: String,
+    ) -> Self {
         Self {
             producer,
-            running: false,
-            cancel_token,
-            mode: None,
-            run_id: None,
-            item_id: None,
             breaker: CircuitBreaker::default_db(),
             metrics,
+            event_bus,
+            run_id,
+            item_id,
             last_batches_processed: 0,
             last_rows_skipped: 0,
             last_rows_failed: 0,
-            idle_delay: Duration::from_millis(500), // Default idle delay
-            actor_ref: None,
-            event_bus: None,
         }
     }
 
-    pub fn set_actor_ref(&mut self, actor_ref: ActorRef<ProducerMsg>) {
-        self.actor_ref = Some(actor_ref);
+    /// Executes a single work unit.
+    async fn tick(&mut self) -> TickAction {
+        match self.producer.tick().await {
+            Ok(status) => self.handle_success(status).await,
+            Err(e) => self.handle_error(e).await,
+        }
     }
 
-    pub fn set_event_bus(&mut self, event_bus: EventBus) {
-        self.event_bus = Some(event_bus);
-    }
+    async fn handle_success(&mut self, status: ProducerStatus) -> TickAction {
+        self.breaker.record_success();
+        self.update_metrics().await;
 
-    fn next_action(&self, status: ProducerStatus) -> TickResponse {
         match status {
-            ProducerStatus::Working => TickResponse::ScheduleImmediate,
-            ProducerStatus::Idle => TickResponse::ScheduleDelayed(self.idle_delay),
-            ProducerStatus::Finished => TickResponse::NoMoreTicks,
+            ProducerStatus::Working => TickAction::Continue,
+            ProducerStatus::Idle => TickAction::Idle,
+            ProducerStatus::Finished => {
+                info!("Producer finished");
+                let _ = self.producer.stop().await;
+                TickAction::Done
+            }
         }
     }
 
-    async fn handle_tick_error(
-        &mut self,
-        error: impl std::fmt::Display,
-    ) -> Result<TickResponse, ActorError> {
+    async fn handle_error(&mut self, e: ProducerError) -> TickAction {
+        if e.is_shutdown() {
+            info!("Consumer channel closed, producer stopping gracefully");
+            let _ = self.producer.stop().await;
+            return TickAction::Done;
+        }
+
+        if e.is_fatal() {
+            error!(error = %e, "Fatal error - stopping migration immediately");
+            let _ = self.producer.stop().await;
+            return TickAction::Failed(ActorError::Internal(e.to_string()));
+        }
+
         self.metrics.increment_failures(1);
-        error!(error = %error, "Producer tick failed");
+        error!(error = %e, "Producer tick failed");
 
         match self.breaker.record_failure() {
             CircuitBreakerState::RetryAfter(delay) => {
@@ -107,289 +96,224 @@ impl ProducerActor {
                     "Circuit breaker: backing off"
                 );
                 tokio::time::sleep(delay).await;
-                Ok(TickResponse::ScheduleImmediate)
+                TickAction::Continue
             }
             CircuitBreakerState::Open => {
                 error!(
                     failures = self.breaker.consecutive_failures(),
                     "Circuit breaker open, stopping producer"
                 );
-                self.running = false;
-                Ok(TickResponse::NoMoreTicks)
+                let _ = self.producer.stop().await;
+                TickAction::Done
+            }
+        }
+    }
+
+    async fn handle_stop(&mut self, run_id: String, item_id: String) -> TickAction {
+        info!("Producer received stop");
+        if let Err(e) = self.producer.stop().await {
+            error!(error = %e, "Producer stop failed");
+            return TickAction::Failed(ActorError::Internal(e.to_string()));
+        }
+
+        let rows_produced = self.producer.rows_produced();
+        self.event_bus
+            .publish(MigrationEvent::ProducerStopped {
+                run_id,
+                item_id,
+                timestamp: chrono::Utc::now(),
+                rows_produced,
+            })
+            .await;
+
+        TickAction::Done
+    }
+
+    async fn update_metrics(&mut self) {
+        let current_batches = self.producer.batches_processed();
+        let current_skipped = self.producer.total_rows_skipped();
+        let current_failed = self.producer.total_rows_failed();
+
+        if current_batches > self.last_batches_processed {
+            let delta = current_batches - self.last_batches_processed;
+            self.metrics.increment_batches(delta);
+            self.last_batches_processed = current_batches;
+
+            for _ in 0..delta {
+                self.event_bus
+                    .publish(MigrationEvent::BatchRead {
+                        run_id: self.run_id.clone(),
+                        item_id: self.item_id.clone(),
+                        batch_id: format!("batch-{}", current_batches),
+                        row_count: 0,
+                        timestamp: chrono::Utc::now(),
+                    })
+                    .await;
+            }
+        }
+
+        if current_skipped > self.last_rows_skipped {
+            self.metrics
+                .increment_rows_skipped(current_skipped - self.last_rows_skipped);
+            self.last_rows_skipped = current_skipped;
+        }
+
+        if current_failed > self.last_rows_failed {
+            self.metrics
+                .increment_rows_failed(current_failed - self.last_rows_failed);
+            self.last_rows_failed = current_failed;
+        }
+    }
+}
+
+/// Runs the producer loop as a standalone async task.
+pub async fn run_producer(
+    mut producer: Producer,
+    mut rx: mpsc::Receiver<ProducerMsg>,
+    cancel_token: CancellationToken,
+    event_bus: EventBus,
+    metrics: Metrics,
+) -> Result<(), ActorError> {
+    // Wait for start signal
+    let (run_id, item_id) =
+        match wait_for_start(&mut producer, &mut rx, &cancel_token, &event_bus).await? {
+            Some(ids) => ids,
+            None => return Ok(()), // Cancelled or Stopped before starting
+        };
+
+    let mut task = ProducerTask::new(producer, metrics, event_bus, run_id, item_id);
+    let idle_delay = Duration::from_millis(500);
+    let mut tick_interval = tokio::time::interval(Duration::from_millis(1));
+    tick_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    // Main loop: tick producer and handle messages
+    loop {
+        tokio::select! {
+            _ = tick_interval.tick() => {
+                match task.tick().await {
+                    TickAction::Continue => tick_interval.reset_immediately(),
+                    TickAction::Idle => {
+                        tick_interval = tokio::time::interval(idle_delay);
+                        tick_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                    }
+                    TickAction::Done => return Ok(()),
+                    TickAction::Failed(e) => return Err(e),
+                }
+            }
+            msg = rx.recv() => match msg {
+                Some(ProducerMsg::Stop { run_id, item_id }) => {
+                    return match task.handle_stop(run_id, item_id).await {
+                        TickAction::Done => Ok(()),
+                        TickAction::Failed(e) => Err(e),
+                        _ => Ok(()),
+                    };
+                }
+                Some(_) => {}
+                None => {
+                    info!("Producer mailbox closed, stopping");
+                    let _ = task.producer.stop().await;
+                    return Ok(());
+                }
+            },
+            _ = cancel_token.cancelled() => {
+                info!("Producer stopping after cancellation");
+                let _ = task.producer.stop().await;
+                return Ok(());
             }
         }
     }
 }
 
-#[async_trait]
-impl Actor<ProducerMsg> for ProducerActor {
-    async fn on_start(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
-        Ok(())
-    }
-
-    async fn handle(&mut self, msg: ProducerMsg, ctx: &ActorContext) -> Result<(), ActorError> {
-        match msg {
-            ProducerMsg::SetActorRef(actor_ref) => {
-                self.set_actor_ref(actor_ref);
-                Ok(())
+async fn wait_for_start(
+    producer: &mut Producer,
+    rx: &mut mpsc::Receiver<ProducerMsg>,
+    cancel_token: &CancellationToken,
+    event_bus: &EventBus,
+) -> Result<Option<(String, String)>, ActorError> {
+    tokio::select! {
+        msg = rx.recv() => match msg {
+            Some(ProducerMsg::StartSnapshot { run_id, item_id }) => {
+                start_snapshot(producer, event_bus, &run_id, &item_id).await?;
+                Ok(Some((run_id, item_id)))
             }
-
-            ProducerMsg::SetEventBus(event_bus) => {
-                self.set_event_bus(event_bus);
-                Ok(())
+            Some(ProducerMsg::StartCdc { run_id, item_id }) => {
+                start_cdc(producer, event_bus, &run_id, &item_id).await?;
+                Ok(Some((run_id, item_id)))
             }
-
-            ProducerMsg::StartSnapshot { run_id, item_id } => {
-                if let Err(e) = self.producer.resume(&run_id, &item_id, "part-0").await {
-                    error!("Failed to resume producer state: {}", e);
-                    return Err(ActorError::Internal(e.to_string()));
-                }
-
-                if let Err(e) = self.producer.start_snapshot().await {
-                    error!("Failed to start snapshot: {}", e);
-                    return Err(ActorError::Internal(e.to_string()));
-                }
-
-                self.running = true;
-                self.mode = Some(ProducerMode::Snapshot);
-                self.run_id = Some(run_id.clone());
-                self.item_id = Some(item_id.clone());
-
-                if let Some(ref event_bus) = self.event_bus {
-                    event_bus
-                        .publish(MigrationEvent::SnapshotStarted {
-                            run_id: run_id.clone(),
-                            item_id: item_id.clone(),
-                            timestamp: chrono::Utc::now(),
-                            estimated_rows: None,
-                        })
-                        .await;
-                    event_bus
-                        .publish(MigrationEvent::ProducerStarted {
-                            run_id: run_id.clone(),
-                            item_id: item_id.clone(),
-                            mode: ProducerMode::Snapshot,
-                            timestamp: chrono::Utc::now(),
-                        })
-                        .await;
-                }
-
-                // Send the first tick to start the processing loop
-                if let Some(ref actor_ref) = self.actor_ref {
-                    actor_ref.try_send(ProducerMsg::Tick)?;
-                }
-
-                Ok(())
+            Some(ProducerMsg::Stop { .. }) | None => {
+                info!("Producer stopping before start");
+                Ok(None)
             }
-
-            ProducerMsg::StartCdc { run_id, item_id } => {
-                if let Err(e) = self.producer.start_cdc().await {
-                    error!("Failed to start CDC: {}", e);
-                    return Err(ActorError::Internal(e.to_string()));
-                }
-                self.running = true;
-                self.mode = Some(ProducerMode::Cdc);
-                self.run_id = Some(run_id.clone());
-                self.item_id = Some(item_id.clone());
-
-                if let Some(ref event_bus) = self.event_bus {
-                    event_bus
-                        .publish(MigrationEvent::CdcStarted {
-                            run_id: run_id.clone(),
-                            item_id: item_id.clone(),
-                            timestamp: chrono::Utc::now(),
-                            starting_position: None,
-                        })
-                        .await;
-                    event_bus
-                        .publish(MigrationEvent::ProducerStarted {
-                            run_id: run_id.clone(),
-                            item_id: item_id.clone(),
-                            mode: ProducerMode::Cdc,
-                            timestamp: chrono::Utc::now(),
-                        })
-                        .await;
-                }
-
-                // Send the first tick to start the processing loop
-                if let Some(ref actor_ref) = self.actor_ref {
-                    actor_ref.try_send(ProducerMsg::Tick)?;
-                }
-
-                Ok(())
-            }
-
-            ProducerMsg::Tick => {
-                // Check if shutdown requested (but allow current tick to complete)
-                let shutdown_requested = self.cancel_token.is_cancelled();
-
-                if !self.running {
-                    info!(actor = ctx.name(), "Producer stopping");
-                    let _ = self.producer.stop().await;
-                    // Drop self-reference to allow actor termination
-                    self.actor_ref = None;
-                    return Ok(());
-                }
-
-                // Process one tick to complete any in-flight batch
-                let response = match self.producer.tick().await {
-                    Ok(status) => {
-                        self.breaker.record_success();
-
-                        // Update metrics with transformation statistics (only the delta)
-                        let current_batches = self.producer.batches_processed();
-                        let current_skipped = self.producer.total_rows_skipped();
-                        let current_failed = self.producer.total_rows_failed();
-
-                        if current_batches > self.last_batches_processed {
-                            let delta = current_batches - self.last_batches_processed;
-                            self.metrics.increment_batches(delta);
-                            self.last_batches_processed = current_batches;
-
-                            // Emit BatchRead events for each new batch processed
-                            if let (Some(event_bus), Some(run_id), Some(item_id)) =
-                                (&self.event_bus, &self.run_id, &self.item_id)
-                            {
-                                // Note: We don't have batch_id or row_count here, but we can emit basic events
-                                // TODO: Enhance Producer to provide batch details for accurate events
-                                for _ in 0..delta {
-                                    event_bus
-                                        .publish(MigrationEvent::BatchRead {
-                                            run_id: run_id.clone(),
-                                            item_id: item_id.clone(),
-                                            batch_id: format!("batch-{}", current_batches),
-                                            row_count: 0,
-                                            timestamp: chrono::Utc::now(),
-                                        })
-                                        .await;
-                                }
-                            }
-                        }
-
-                        if current_skipped > self.last_rows_skipped {
-                            self.metrics
-                                .increment_rows_skipped(current_skipped - self.last_rows_skipped);
-                            self.last_rows_skipped = current_skipped;
-                        }
-
-                        if current_failed > self.last_rows_failed {
-                            self.metrics
-                                .increment_rows_failed(current_failed - self.last_rows_failed);
-                            self.last_rows_failed = current_failed;
-                        }
-
-                        if shutdown_requested {
-                            info!(
-                                actor = ctx.name(),
-                                "Producer stopping after completing in-flight work"
-                            );
-                            self.running = false;
-                            let _ = self.producer.stop().await;
-                            self.actor_ref = None;
-                            return Ok(());
-                        }
-
-                        self.next_action(status)
-                    }
-                    Err(e) => {
-                        // Check if this is a graceful shutdown (channel closed)
-                        if e.is_shutdown() {
-                            info!(
-                                actor = ctx.name(),
-                                "Consumer channel closed, producer stopping gracefully"
-                            );
-                            self.running = false;
-                            let _ = self.producer.stop().await;
-                            self.actor_ref = None;
-                            return Ok(());
-                        }
-
-                        // Check if this is a fatal error that should bypass circuit breaker
-                        if e.is_fatal() {
-                            error!(
-                                actor = ctx.name(),
-                                error = %e,
-                                "Fatal error - stopping migration immediately"
-                            );
-                            self.running = false;
-                            let _ = self.producer.stop().await;
-                            self.actor_ref = None;
-                            return Err(ActorError::Internal(e.to_string()));
-                        }
-
-                        // For transient errors, use circuit breaker
-                        self.handle_tick_error(e).await?
-                    }
-                };
-
-                match response {
-                    TickResponse::ScheduleImmediate => {
-                        if let Some(ref actor_ref) = self.actor_ref {
-                            let actor_ref = actor_ref.clone();
-                            tokio::spawn(async move {
-                                if let Err(e) = actor_ref.send(ProducerMsg::Tick).await {
-                                    error!(error = ?e, "Failed to schedule immediate tick");
-                                }
-                            });
-                        }
-                    }
-                    TickResponse::ScheduleDelayed(delay) => {
-                        info!(delay_ms = delay.as_millis(), "Producer idle");
-                        if let Some(ref actor_ref) = self.actor_ref {
-                            let actor_ref = actor_ref.clone();
-                            tokio::spawn(async move {
-                                tokio::time::sleep(delay).await;
-                                if let Err(e) = actor_ref.send(ProducerMsg::Tick).await {
-                                    error!(error = ?e, "Failed to schedule delayed tick");
-                                }
-                            });
-                        }
-                    }
-                    TickResponse::NoMoreTicks => {
-                        info!(
-                            "Producer finished - dropping self-reference to allow actor termination"
-                        );
-                        self.running = false;
-                        let _ = self.producer.stop().await;
-
-                        // Drop self-reference so the mailbox can close and actor can terminate
-                        self.actor_ref = None;
-                    }
-                }
-
-                Ok(())
-            }
-
-            ProducerMsg::Stop { run_id, item_id } => {
-                self.running = false;
-                if let Err(e) = self.producer.stop().await {
-                    error!(error = %e, "Producer stop failed");
-                    return Err(ActorError::Internal(e.to_string()));
-                }
-
-                if let Some(ref event_bus) = self.event_bus {
-                    let rows_produced = self.producer.rows_produced();
-                    event_bus
-                        .publish(MigrationEvent::ProducerStopped {
-                            run_id,
-                            item_id,
-                            timestamp: chrono::Utc::now(),
-                            rows_produced,
-                        })
-                        .await;
-                }
-
-                Ok(())
-            }
+        },
+        _ = cancel_token.cancelled() => {
+            info!("Producer cancelled before start");
+            Ok(None)
         }
     }
+}
 
-    async fn on_stop(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
-        info!("Producer actor stopping.");
-        if let Err(e) = self.producer.stop().await {
-            error!(?e, "Producer stop failed");
-            return Err(ActorError::Internal(e.to_string()));
-        }
-        Ok(())
+async fn start_snapshot(
+    producer: &mut Producer,
+    event_bus: &EventBus,
+    run_id: &str,
+    item_id: &str,
+) -> Result<(), ActorError> {
+    if let Err(e) = producer.resume(run_id, item_id, "part-0").await {
+        error!("Failed to resume producer state: {}", e);
+        return Err(ActorError::Internal(e.to_string()));
     }
+    if let Err(e) = producer.start_snapshot().await {
+        error!("Failed to start snapshot: {}", e);
+        return Err(ActorError::Internal(e.to_string()));
+    }
+
+    event_bus
+        .publish(MigrationEvent::SnapshotStarted {
+            run_id: run_id.to_owned(),
+            item_id: item_id.to_owned(),
+            timestamp: chrono::Utc::now(),
+            estimated_rows: None,
+        })
+        .await;
+    event_bus
+        .publish(MigrationEvent::ProducerStarted {
+            run_id: run_id.to_owned(),
+            item_id: item_id.to_owned(),
+            mode: ProducerMode::Snapshot,
+            timestamp: chrono::Utc::now(),
+        })
+        .await;
+
+    Ok(())
+}
+
+async fn start_cdc(
+    producer: &mut Producer,
+    event_bus: &EventBus,
+    run_id: &str,
+    item_id: &str,
+) -> Result<(), ActorError> {
+    if let Err(e) = producer.start_cdc().await {
+        error!("Failed to start CDC: {}", e);
+        return Err(ActorError::Internal(e.to_string()));
+    }
+
+    event_bus
+        .publish(MigrationEvent::CdcStarted {
+            run_id: run_id.to_owned(),
+            item_id: item_id.to_owned(),
+            timestamp: chrono::Utc::now(),
+            starting_position: None,
+        })
+        .await;
+    event_bus
+        .publish(MigrationEvent::ProducerStarted {
+            run_id: run_id.to_owned(),
+            item_id: item_id.to_owned(),
+            mode: ProducerMode::Cdc,
+            timestamp: chrono::Utc::now(),
+        })
+        .await;
+
+    Ok(())
 }

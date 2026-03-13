@@ -1,0 +1,79 @@
+// =============================================================================
+// Phase 2 Test 09 — Generated Columns
+// =============================================================================
+//
+// WHAT THIS TESTS:
+//   - Generated columns are introspected correctly (is_generated = true)
+//   - DDL includes GENERATED ALWAYS AS (...) STORED clause
+//   - Generated columns are EXCLUDED from INSERT column lists
+//   - Generated columns are EXCLUDED from COPY statement headers
+//   - Data migration succeeds (DB recomputes generated values automatically)
+//
+// PREREQUISITE — Add a generated column to Sakila MySQL before running:
+//
+//   ALTER TABLE film
+//   ADD COLUMN title_length INT
+//   GENERATED ALWAYS AS (CHAR_LENGTH(title)) STORED;
+//
+//   ALTER TABLE film
+//   ADD COLUMN rental_revenue DECIMAL(10,2)
+//   GENERATED ALWAYS AS (rental_rate * rental_duration) STORED;
+//
+// EXPECTED:
+//   - PG DDL: title_length integer GENERATED ALWAYS AS (char_length(title)) STORED
+//   - PG DDL: rental_revenue numeric GENERATED ALWAYS AS (rental_rate * rental_duration) STORED
+//   - INSERT into film must NOT list title_length or rental_revenue in col list
+//   - After INSERT, SELECT title_length FROM film should return correct computed values
+//
+// RUN:
+//   cargo run -p cli -- plan -c dev-fixtures/configs/phase2/p2-09-generated-columns.smql
+//   cargo run -p cli -- apply -c dev-fixtures/configs/phase2/p2-09-generated-columns.smql
+//
+// VERIFY:
+//   \d film
+//   -- title_length and rental_revenue columns should show "generated always" in psql
+//
+//   SELECT film_id, title, title_length, rental_revenue FROM film LIMIT 5;
+//   -- title_length should equal char_length(title)
+//   -- rental_revenue should equal rental_rate * rental_duration
+//
+//   -- Confirm generated cols absent from INSERT (check query log or EXPLAIN):
+//   -- No INSERT should list title_length or rental_revenue
+//
+// =============================================================================
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" {
+    driver = "mysql"
+    url    = define.mysql_url
+}
+
+connection "dst" {
+    driver = "postgres"
+    url    = define.postgres_url
+}
+
+pipeline "migrate_film_with_generated" {
+    from {
+        connection = connection.src
+        table      = "film"
+
+        with references {
+            data    = cascade
+            depth   = 1
+            exclude = ["film_actor", "film_category", "inventory"]
+        }
+    }
+
+    to {
+        connection = connection.dst
+    }
+
+    settings {
+        batch_size = 500
+    }
+}

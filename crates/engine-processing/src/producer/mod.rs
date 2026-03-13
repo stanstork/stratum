@@ -1,3 +1,4 @@
+use crate::context::PipelineContext;
 use crate::{
     error::ProducerError,
     item::ItemId,
@@ -16,9 +17,7 @@ use crate::{
         validation::PipelineValidator,
     },
 };
-use engine_config::settings::validated::ValidatedSettings;
-use engine_core::{context::item::ItemContext, retry::RetryPolicy};
-use futures::lock::Mutex;
+use engine_core::{context::env::EnvContext, retry::RetryPolicy};
 use model::{
     execution::pipeline::Pipeline, pagination::cursor::Cursor, records::batch::Batch,
     transform::mapping::TransformationMetadata,
@@ -34,6 +33,7 @@ pub fn build_transform_pipeline(
     pipeline: &Pipeline,
     mapping: &TransformationMetadata,
     mapped_columns_only: bool,
+    env: Arc<EnvContext>,
 ) -> TransformPipeline {
     let mut transform_pipeline = TransformPipeline::new();
 
@@ -46,11 +46,11 @@ pub fn build_transform_pipeline(
             FieldMapper::new(mapping.field_mappings.clone())
         })
         .add_if(!mapping.field_mappings.computed_fields.is_empty(), || {
-            ComputedTransform::new(mapping.clone())
+            ComputedTransform::new(mapping.clone(), env.clone())
         })
         .add_if(mapped_columns_only, || FieldPruner::new(mapping.clone()))
         .add_validator_if(!pipeline.validations.is_empty(), || {
-            PipelineValidator::new(pipeline.validations.clone(), mapping.clone())
+            PipelineValidator::new(pipeline.validations.clone(), mapping.clone(), env.clone())
         });
 
     transform_pipeline
@@ -91,26 +91,21 @@ pub struct Producer {
 
 impl Producer {
     pub async fn new(
-        item_ctx: &Arc<Mutex<ItemContext>>,
+        ctx: &PipelineContext,
         batch_tx: mpsc::Sender<Batch>,
-        settings: &ValidatedSettings,
+        config: ProducerConfig,
+        mapped_columns_only: bool,
     ) -> Self {
-        let (exec_ctx, run_id, item_id, part_id, source, pipeline, mapping, state_store, cursor) = {
-            let c = item_ctx.lock().await;
-            (
-                c.exec_ctx.clone(),
-                c.run_id.clone(),
-                c.item_id.clone(),
-                "part-0".to_string(),
-                c.source.clone(),
-                c.pipeline.clone(),
-                c.mapping.clone(),
-                c.state.clone(),
-                c.cursor.clone(),
-            )
-        };
+        let exec_ctx = ctx.exec_ctx.clone();
+        let run_id = ctx.run_id.clone();
+        let item_id = ctx.item_id.clone();
+        let part_id = "part-0".to_string();
+        let source = ctx.source.clone();
+        let pipeline = ctx.pipeline.clone();
+        let mapping = ctx.mapping.clone();
+        let state_store = ctx.state.clone();
+        let cursor = ctx.cursor.clone();
 
-        let config = ProducerConfig::from_settings(settings);
         let ids = ItemId::new(run_id, item_id, part_id);
 
         // Create retry policy from pipeline config, fallback to database defaults
@@ -123,8 +118,9 @@ impl Producer {
         // Create components
         let reader = SnapshotReader::new(source, retry_policy, config.batch_size);
 
+        let env = exec_ctx.env.clone();
         let transform_pipeline =
-            build_transform_pipeline(&pipeline, &mapping, settings.mapped_columns_only());
+            build_transform_pipeline(&pipeline, &mapping, mapped_columns_only, env);
         let transformer = TransformService::new(
             exec_ctx,
             transform_pipeline,

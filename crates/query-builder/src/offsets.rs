@@ -16,7 +16,7 @@ use model::{
         cursor::{Cursor, QualCol},
         offset_config::OffsetConfig,
     },
-    records::row::RowData,
+    records::Record,
 };
 use std::{convert::TryFrom, str::FromStr, sync::Arc};
 
@@ -31,7 +31,7 @@ pub trait OffsetStrategy: Send + Sync {
     ) -> SelectBuilder<FromState>;
 
     /// Generates the next cursor based on the last fetched row.
-    fn next_cursor(&self, row: &RowData) -> Cursor;
+    fn next_cursor(&self, row: &Record) -> Cursor;
 
     /// Clones the boxed trait object.
     fn clone_box(&self) -> Box<dyn OffsetStrategy>;
@@ -78,15 +78,15 @@ fn append_where(
 }
 
 fn limit_expr(limit: usize) -> Expr {
-    value(Value::Uint(limit as u64))
+    value(Value::Int(limit as i64))
 }
 
 fn offset_expr(offset: usize) -> Expr {
-    value(Value::Uint(offset as u64))
+    value(Value::UInt(offset as u64))
 }
 
 fn uint_literal(val: u64) -> Expr {
-    value(Value::Uint(val))
+    value(Value::UInt(val))
 }
 
 fn int_literal(val: i64) -> Expr {
@@ -136,12 +136,10 @@ impl OffsetStrategy for PkOffset {
         builder
     }
 
-    fn next_cursor(&self, row: &RowData) -> Cursor {
+    fn next_cursor(&self, row: &Record) -> Cursor {
         let id_opt = match row.get_value(&self.pk.column) {
-            Value::Uint(id) => Some(id),
-            Value::Usize(u) => Some(u as u64),
+            Value::UInt(id) => Some(id),
             Value::Int(i) if i >= 0 => Some(i as u64),
-            Value::Int32(i) if i >= 0 => Some(i as u64),
             Value::String(s) => s.parse::<u64>().ok(),
             _ => None,
         };
@@ -185,16 +183,16 @@ impl OffsetStrategy for NumericOffset {
         builder
     }
 
-    fn next_cursor(&self, row: &RowData) -> Cursor {
+    fn next_cursor(&self, row: &Record) -> Cursor {
         let num_v = row.get_value(&self.col.column);
         let pk_v = row.get_value(&self.pk.column);
 
         match (extract_numeric_value(&num_v), pk_v) {
-            (Some(val), Value::Uint(id)) => Cursor::CompositeNumPk {
+            (Some(val), Value::Int(id)) => Cursor::CompositeNumPk {
                 num_col: self.col.clone(),
                 pk_col: self.pk.clone(),
                 val,
-                id,
+                id: id as u64,
             },
             _ => Cursor::Default { offset: 0 }, // TODO: better fallback
         }
@@ -284,49 +282,50 @@ impl OffsetStrategy for TimestampOffset {
         builder
     }
 
-    fn next_cursor(&self, row: &RowData) -> Cursor {
+    fn next_cursor(&self, row: &Record) -> Cursor {
         let ts_v = row.get_value(&self.ts_col.column);
         let pk_v = row.get_value(&self.pk.column);
 
+        let extract_pk_id = |pk: &Value| -> u64 {
+            match pk {
+                Value::UInt(id) => *id,
+                Value::Int(i) if *i >= 0 => *i as u64,
+                Value::String(s) => s.parse::<u64>().unwrap_or(0),
+                _ => 0,
+            }
+        };
+
         match ts_v {
-            Value::Timestamp(dt_local) => {
+            // Timestamp with timezone offset
+            Value::Timestamp {
+                value: dt_local,
+                offset_secs: Some(_),
+            } => {
                 // Convert local timestamp to UTC micros
-                if let Some(dt_utc) = self
-                    .tz
-                    .from_local_datetime(&dt_local.naive_local())
-                    .single()
-                {
+                if let Some(dt_utc) = self.tz.from_local_datetime(&dt_local).single() {
                     let utc_ts = dt_utc.timestamp_micros();
-                    let id = match pk_v {
-                        Value::Uint(id) => id,
-                        Value::Int(i) if i >= 0 => i as u64,
-                        Value::String(ref s) => s.parse::<u64>().unwrap_or(0),
-                        _ => 0,
-                    };
                     Cursor::CompositeTsPk {
                         ts_col: self.ts_col.clone(),
                         pk_col: self.pk.clone(),
                         ts: utc_ts,
-                        id,
+                        id: extract_pk_id(&pk_v),
                     }
                 } else {
                     Cursor::None
                 }
             }
-            Value::TimestampNaive(dt_local) => {
+            // Timestamp without timezone
+            Value::Timestamp {
+                value: dt_local,
+                offset_secs: None,
+            } => {
                 if let Some(dt_utc) = self.tz.from_local_datetime(&dt_local).single() {
                     let utc_ts = dt_utc.timestamp_micros();
-                    let id = match pk_v {
-                        Value::Uint(id) => id,
-                        Value::Int(i) if i >= 0 => i as u64,
-                        Value::String(ref s) => s.parse::<u64>().unwrap_or(0),
-                        _ => 0,
-                    };
                     Cursor::CompositeTsPk {
                         ts_col: self.ts_col.clone(),
                         pk_col: self.pk.clone(),
                         ts: utc_ts,
-                        id,
+                        id: extract_pk_id(&pk_v),
                     }
                 } else {
                     Cursor::None
@@ -367,7 +366,7 @@ impl OffsetStrategy for DefaultOffset {
         builder
     }
 
-    fn next_cursor(&self, _row: &RowData) -> Cursor {
+    fn next_cursor(&self, _row: &Record) -> Cursor {
         Cursor::Default {
             offset: self.offset,
         }
@@ -516,9 +515,7 @@ impl OffsetStrategyFactory {
 fn extract_numeric_value(val: &Value) -> Option<i128> {
     match val {
         Value::Int(i) => Some(*i as i128),
-        Value::Int32(i) => Some(*i as i128),
-        Value::Uint(u) => Some(*u as i128),
-        Value::Usize(u) => Some(*u as i128),
+        Value::UInt(u) => Some(*u as i128),
         Value::Float(f) => {
             if f.is_finite() {
                 Some(*f as i128)

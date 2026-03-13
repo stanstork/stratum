@@ -1,22 +1,24 @@
-use connectors::{
-    error::AdapterError,
-    sql::base::error::{ConnectorError, DbError},
-};
-use engine_core::{error::SinkError, retry::RetryDisposition};
+use crate::io::error::SinkError;
+use connectors::error::{DbError, DriverError};
+use engine_core::retry::RetryDisposition;
 use mysql_async::Error as MySqlError;
 use tokio_postgres::{Error as PgError, error::SqlState};
 
-pub fn classify_adapter_error(err: &AdapterError) -> RetryDisposition {
+pub fn classify_driver_error(err: &DriverError) -> RetryDisposition {
     match err {
-        AdapterError::Database(db_err) => classify_db_error(db_err),
-        AdapterError::Connector(conn_err) => classify_connector_error(conn_err),
-        AdapterError::Generic(_) => RetryDisposition::Stop,
-        AdapterError::UnsupportedFormat(_) => RetryDisposition::Stop,
-        AdapterError::AdapterNotFound(_) => RetryDisposition::Stop,
-        AdapterError::FileError(_) => RetryDisposition::Stop,
-        AdapterError::InvalidMetadata(_) => RetryDisposition::Stop,
-        AdapterError::UnsupportedDriver(_) => RetryDisposition::Stop,
-        AdapterError::MissingProperty(_) => RetryDisposition::Stop,
+        DriverError::DatabaseError(db_err) => classify_db_error(db_err),
+        DriverError::MySqlError(mysql_err) => classify_mysql_error(mysql_err),
+        DriverError::PgError(pg_err) => classify_pg_error(pg_err),
+        DriverError::ConnectionError(_) => RetryDisposition::Retry,
+        DriverError::QueryError(_) => RetryDisposition::Stop,
+        DriverError::TransactionError(_) => RetryDisposition::Stop,
+        DriverError::Unknown(_) => RetryDisposition::Stop,
+        DriverError::UnsupportedFormat(_) => RetryDisposition::Stop,
+        DriverError::UnsupportedScheme(_) => RetryDisposition::Stop,
+        DriverError::DriverNotFound(_) => RetryDisposition::Stop,
+        DriverError::InvalidUrl(_) => RetryDisposition::Stop,
+        DriverError::CircularReference(_) => RetryDisposition::Stop,
+        DriverError::UnsupportedDriver(_) => RetryDisposition::Stop,
     }
 }
 
@@ -42,15 +44,7 @@ pub fn classify_sink_error(err: &SinkError) -> RetryDisposition {
         SinkError::Capabilities => RetryDisposition::Stop,
         SinkError::FastPathNotSupported(_) => RetryDisposition::Stop,
         SinkError::Other(_) => RetryDisposition::Stop,
-    }
-}
-
-fn classify_connector_error(err: &ConnectorError) -> RetryDisposition {
-    match err {
-        ConnectorError::MySql(mysql_err) => classify_mysql_error(mysql_err),
-        ConnectorError::Connection(pg_err) => classify_pg_error(pg_err),
-        ConnectorError::InvalidUrl(_) => RetryDisposition::Stop,
-        ConnectorError::TlsConfig(_) => RetryDisposition::Retry,
+        SinkError::Driver(driver_err) => classify_driver_error(driver_err),
     }
 }
 

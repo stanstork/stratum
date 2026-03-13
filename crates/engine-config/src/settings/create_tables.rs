@@ -1,28 +1,38 @@
-use super::{MigrationSetting, context::SchemaSettingContext, phase::MigrationSettingsPhase};
-use crate::settings::{error::SettingsError, validated::ValidatedSettings};
-use async_trait::async_trait;
-use engine_core::{
-    connectors::{destination::Destination, source::Source},
-    context::item::ItemContext,
+use super::{
+    MigrationSetting, context::SchemaSettingContext, driver::SchemaDriver,
+    phase::MigrationSettingsPhase,
 };
-use model::transform::mapping::TransformationMetadata;
+use crate::settings::error::SettingsError;
+use async_trait::async_trait;
+use engine_core::schema::schema_ops::{SchemaOp, SchemaOps};
+use engine_processing::context::PipelineContext;
 use tracing::info;
 
-pub struct CreateMissingTablesSetting {
-    context: SchemaSettingContext,
+pub struct CreateMissingTablesSetting<S: SchemaDriver, D: SchemaDriver> {
+    context: SchemaSettingContext<S, D>,
 }
 
 #[async_trait]
-impl MigrationSetting for CreateMissingTablesSetting {
+impl<S: SchemaDriver, D: SchemaDriver> MigrationSetting for CreateMissingTablesSetting<S, D> {
     fn phase(&self) -> MigrationSettingsPhase {
         MigrationSettingsPhase::CreateMissingTables
     }
 
-    async fn apply(&mut self, _ctx: &mut ItemContext) -> Result<(), SettingsError> {
+    async fn plan(&mut self, _ctx: &PipelineContext) -> Result<SchemaOps, SettingsError> {
+        self.build_schema_ops().await
+    }
+}
+
+impl<S: SchemaDriver, D: SchemaDriver> CreateMissingTablesSetting<S, D> {
+    pub async fn new(ctx: SchemaSettingContext<S, D>) -> Self {
+        Self { context: ctx }
+    }
+
+    async fn build_schema_ops(&self) -> Result<SchemaOps, SettingsError> {
         // If the table already exists, bail out
         if self.context.destination_exists().await? {
             info!("Destination table already exists; skipping schema creation.");
-            return Ok(());
+            return Ok(SchemaOps::empty());
         }
 
         // Resolve source name from the destination
@@ -32,22 +42,36 @@ impl MigrationSetting for CreateMissingTablesSetting {
         let schema_planner = self.context.init_schema_planner().await?;
         let plan = schema_planner.plan_schema(&src_name).await?;
 
-        self.context.apply_to_destination(plan).await?;
+        let mut ops = SchemaOps::empty();
 
-        info!("Create missing tables setting applied");
-        Ok(())
-    }
-}
-
-impl CreateMissingTablesSetting {
-    pub async fn new(
-        src: &Source,
-        dest: &Destination,
-        mapping: &TransformationMetadata,
-        settings: &ValidatedSettings,
-    ) -> Self {
-        Self {
-            context: SchemaSettingContext::new(src, dest, mapping, settings).await,
+        // Enum queries -> pre (idempotent)
+        for (sql, name) in plan.enum_queries() {
+            ops.pre.push(SchemaOp {
+                sql,
+                description: format!("Create enum type '{}'", name),
+                idempotent: true,
+            });
         }
+
+        // Table queries -> pre
+        for (sql, name) in plan.table_queries().await {
+            ops.pre.push(SchemaOp {
+                sql,
+                description: format!("Create table '{}'", name),
+                idempotent: false,
+            });
+        }
+
+        // FK queries -> post
+        for (sql, name) in plan.fk_queries() {
+            ops.post.push(SchemaOp {
+                sql,
+                description: format!("Add foreign key constraint on '{}'", name),
+                idempotent: false,
+            });
+        }
+
+        info!("Create missing tables setting planned");
+        Ok(ops)
     }
 }

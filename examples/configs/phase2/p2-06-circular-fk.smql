@@ -1,0 +1,70 @@
+// =============================================================================
+// Phase 2 Test 06 — Circular FK: store ↔ staff mutual dependency
+// =============================================================================
+//
+// WHAT THIS TESTS:
+//   - Sakila has a real circular FK:
+//       store.manager_staff_id → staff.staff_id
+//       staff.store_id         → store.store_id
+//   - DependencyGraph.without_self_references() must break the cycle
+//   - Phase 2 two-phase strategy: CREATE TABLE without FK → data → ALTER TABLE ADD FK
+//   - No infinite loop or crash during graph expansion
+//
+// EXPECTED BEHAVIOR:
+//   Pre-DDL:   CREATE TABLE address, CREATE TABLE store, CREATE TABLE staff
+//              (no FK constraints inline)
+//   Data:      migrate store + staff rows
+//   Post-DDL:  ALTER TABLE staff ADD CONSTRAINT fk_staff_store FOREIGN KEY ...
+//              ALTER TABLE store ADD CONSTRAINT fk_store_manager FOREIGN KEY ...
+//
+// RUN:
+//   cargo run -p cli -- plan -c dev-fixtures/configs/phase2/p2-06-circular-fk.smql
+//   -- plan output must show no infinite loop, two-phase FK creation --
+//   cargo run -p cli -- apply -c dev-fixtures/configs/phase2/p2-06-circular-fk.smql
+//
+// VERIFY:
+//   SELECT COUNT(*) FROM store;  -- should match source (2 rows in Sakila)
+//   SELECT COUNT(*) FROM staff;  -- should match source (2 rows in Sakila)
+//
+//   -- Both FKs must exist post-migration:
+//   SELECT conname FROM pg_constraint
+//   WHERE conrelid IN ('store'::regclass, 'staff'::regclass)
+//   AND contype = 'f';
+//   -- expected: fk on staff.store_id and fk on store.manager_staff_id
+//
+// =============================================================================
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" {
+    driver = "mysql"
+    url    = define.mysql_url
+}
+
+connection "dst" {
+    driver = "postgres"
+    url    = define.postgres_url
+}
+
+pipeline "circular_store_staff" {
+    from {
+        connection = connection.src
+        table      = "store"
+
+        with references {
+            data  = cascade
+            depth = 1
+        }
+    }
+
+    to {
+        connection = connection.dst
+    }
+
+    settings {
+        batch_size = 10
+    }
+}

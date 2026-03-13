@@ -1,6 +1,6 @@
 use crate::{
     core::value::Value,
-    execution::{connection::Connection, expr::CompiledExpression},
+    execution::{connection::Connection, expr::CompiledExpression, references::GraphReferences},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -14,6 +14,8 @@ pub struct Pipeline {
     pub source: DataSource,
     pub destination: DataDestination,
     pub transformations: Vec<Transformation>,
+    /// Field mappings for referenced (cascade) tables keyed by source table name.
+    pub named_transformations: HashMap<String, Vec<Transformation>>,
     pub validations: Vec<ValidationRule>,
     pub lifecycle: Option<LifecycleHooks>,
     pub error_handling: Option<ErrorHandling>,
@@ -28,6 +30,7 @@ pub struct DataSource {
     pub filters: Vec<Filter>,
     pub joins: Vec<Join>,
     pub pagination: Option<Pagination>,
+    pub graph_references: Option<GraphReferences>,
 }
 
 /// To block - data destination configuration
@@ -36,6 +39,7 @@ pub struct DataDestination {
     pub connection: Connection,
     pub table: String,
     pub mode: WriteMode,
+    pub table_map: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,44 +1,86 @@
-use crate::{
-    file::csv::error::FileError,
-    sql::base::error::{ConnectorError, DbError},
-};
+use std::string::FromUtf8Error;
 use thiserror::Error;
 
+/// All errors coming from the database/query layer.
 #[derive(Debug, Error)]
-pub enum AdapterError {
-    /// An unsupported data format was requested.
+pub enum DbError {
+    /// Low‐level I/O failure.
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// Any MySQL driver error.
+    #[error("MySQL error: {0}")]
+    MySqlError(#[from] mysql_async::Error),
+
+    /// Any Pg driver error.
+    #[error("Pg error: {0}")]
+    PgError(#[from] tokio_postgres::Error),
+
+    /// We detected a circular reference in the metadata graph.
+    #[error("Circular reference detected: {0}")]
+    CircularReference(String),
+
+    /// UTF-8 decoding failed on some byte data.
+    #[error("UTF-8 conversion error: {0}")]
+    Utf8(#[from] FromUtf8Error),
+
+    /// Writing rows to the database failed at the application level.
+    #[error("Write error: {0}")]
+    Write(String),
+
+    /// A mis-configured or unsupported database adapter was specified.
+    #[error("Invalid adapter: {0}")]
+    InvalidAdapter(String),
+
+    /// An error occurred while building a SQL query.
+    #[error("Query build error: {0}")]
+    QueryBuildError(String),
+
+    /// An unknown error occurred.
+    #[error("Unknown error: {0}")]
+    Unknown(String),
+}
+
+#[derive(Debug, Error)]
+pub enum DriverError {
+    #[error("Unsupported scheme: {0}")]
+    UnsupportedScheme(String),
+
     #[error("Unsupported format: {0}")]
     UnsupportedFormat(String),
 
-    /// Adapter not found for the specified format.
-    #[error("Adapter not found for format: {0}")]
-    AdapterNotFound(String),
+    #[error("Driver not found for driver id: {0}")]
+    DriverNotFound(String),
 
-    /// Failed to initialize a data connector/adapter.
-    #[error("Connector error: {0}")]
-    Connector(#[from] ConnectorError),
+    #[error("Invalid URL: {0}")]
+    InvalidUrl(String),
 
-    /// File-related error.
-    #[error("File error: {0}")]
-    FileError(#[from] FileError),
-
-    /// Generic adapter error.
-    #[error("Adapter error: {0}")]
-    Generic(String),
-
-    /// Database-related error.
     #[error("Database error: {0}")]
-    Database(#[from] DbError),
+    DatabaseError(#[from] DbError),
 
-    /// Invalid metadata error.
-    #[error("Invalid Metadata: {0}")]
-    InvalidMetadata(String),
+    #[error("Circular reference detected: {0}")]
+    CircularReference(String),
 
-    /// Unsupported driver error.
+    #[error("Connection error: {0}")]
+    ConnectionError(String),
+
+    #[error("Query error: {0}")]
+    QueryError(String),
+
+    #[error("Transaction error: {0}")]
+    TransactionError(String),
+
+    /// Any MySQL driver error.
+    #[error("MySQL error: {0}")]
+    MySqlError(#[from] mysql_async::Error),
+
+    /// Any Pg driver error.
+    #[error("Pg error: {0}")]
+    PgError(#[from] tokio_postgres::Error),
+
+    #[error("Unknown error: {0}")]
+    Unknown(String),
+
     #[error("Unsupported driver: {0}")]
     UnsupportedDriver(String),
-
-    /// Missing required property error.
-    #[error("Missing required property: {0}")]
-    MissingProperty(String),
 }

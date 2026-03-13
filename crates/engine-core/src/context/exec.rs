@@ -1,6 +1,10 @@
-use crate::{plan::execution::ExecutionPlan, state::sled_store::SledStateStore};
+use crate::{
+    context::env::EnvContext, plan::execution::ExecutionPlan, state::sled_store::SledStateStore,
+};
 use connectors::{
-    adapter::Adapter, driver::SqlDriver, error::AdapterError, file::csv::settings::CsvSettings,
+    drivers::{mysql::driver::MySqlDriver, postgres::driver::PgDriver},
+    error::DriverError,
+    traits::driver::Driver,
 };
 use model::execution::connection::Connection;
 use std::{collections::HashMap, sync::Arc};
@@ -9,18 +13,20 @@ use tokio::sync::RwLock;
 /// Holds connections and file adapters for the duration of a migration.
 #[derive(Clone)]
 pub struct ExecutionContext {
-    /// Connection pool - reuses adapters across pipelines
+    /// Connection pool - reuses drivers across pipelines
     connection_pool: Arc<RwLock<ConnectionPool>>,
 
     pub run_id: String,
     pub state: Arc<SledStateStore>,
+    pub env: Arc<EnvContext>,
 }
 
 impl ExecutionContext {
     pub async fn new(
         plan: &ExecutionPlan,
         state: Arc<SledStateStore>,
-    ) -> Result<Self, AdapterError> {
+        env: Arc<EnvContext>,
+    ) -> Result<Self, DriverError> {
         // Generate a deterministic run_id based on the plan hash
         // This allows resuming the same migration after restart
         let run_id = format!("run-{}", &plan.hash()[..16]);
@@ -29,6 +35,7 @@ impl ExecutionContext {
             connection_pool: Arc::new(RwLock::new(ConnectionPool::new())),
             run_id,
             state,
+            env,
         })
     }
 
@@ -36,73 +43,95 @@ impl ExecutionContext {
         self.run_id.clone()
     }
 
-    pub async fn get_adapter(&self, conn: &Connection) -> Result<Adapter, AdapterError> {
+    /// Get a driver from the pool (trait object).
+    pub async fn get_driver(&self, conn: &Connection) -> Result<Arc<dyn Driver>, DriverError> {
         let mut pool = self.connection_pool.write().await;
         pool.get_or_create(conn).await
     }
+
+    /// Get a typed PostgreSQL driver for full capability access.
+    pub async fn get_pg_driver(&self, conn: &Connection) -> Result<Arc<PgDriver>, DriverError> {
+        let mut pool = self.connection_pool.write().await;
+        pool.get_or_create_postgres(conn).await
+    }
+
+    /// Get a typed MySQL driver for full capability access.
+    pub async fn get_mysql_driver(
+        &self,
+        conn: &Connection,
+    ) -> Result<Arc<MySqlDriver>, DriverError> {
+        let mut pool = self.connection_pool.write().await;
+        pool.get_or_create_mysql(conn).await
+    }
 }
 
-/// Connection pool for reusing adapters
+/// Connection pool for reusing drivers.
 pub struct ConnectionPool {
-    adapters: HashMap<String, Adapter>,
+    pg_drivers: HashMap<String, Arc<PgDriver>>,
+    mysql_drivers: HashMap<String, Arc<MySqlDriver>>,
 }
 
 impl ConnectionPool {
     pub fn new() -> Self {
         ConnectionPool {
-            adapters: HashMap::new(),
+            pg_drivers: HashMap::new(),
+            mysql_drivers: HashMap::new(),
         }
     }
 
-    pub async fn get_or_create(&mut self, conn: &Connection) -> Result<Adapter, AdapterError> {
-        if let Some(adapter) = self.adapters.get(&conn.name) {
-            return Ok(adapter.clone());
-        }
-
-        let adapter = match conn.driver.as_str() {
+    pub async fn get_or_create(
+        &mut self,
+        conn: &Connection,
+    ) -> Result<Arc<dyn Driver>, DriverError> {
+        match conn.driver.as_str() {
             "postgres" | "postgresql" => {
-                let url = conn
-                    .properties
-                    .get_string("url")
-                    .ok_or_else(|| AdapterError::MissingProperty("url".to_string()))?;
-
-                Adapter::sql(SqlDriver::Postgres, &url).await?
+                let driver = self.get_or_create_postgres(conn).await?;
+                Ok(driver as Arc<dyn Driver>)
             }
             "mysql" => {
-                let url = conn
-                    .properties
-                    .get_string("url")
-                    .ok_or_else(|| AdapterError::MissingProperty("url".to_string()))?;
-
-                Adapter::sql(SqlDriver::MySql, &url).await?
+                let driver = self.get_or_create_mysql(conn).await?;
+                Ok(driver as Arc<dyn Driver>)
             }
-            "csv" => {
-                let path = conn
-                    .properties
-                    .get_string("path")
-                    .ok_or_else(|| AdapterError::MissingProperty("path".to_string()))?;
+            driver => Err(DriverError::UnsupportedScheme(driver.to_string())),
+        }
+    }
 
-                let settings = CsvSettings {
-                    delimiter: conn
-                        .properties
-                        .get_string("delimiter")
-                        .and_then(|v| v.chars().next())
-                        .unwrap_or(','),
-                    has_headers: conn.properties.get_bool("has_header").unwrap_or(true),
-                    pk_column: conn.properties.get_string("id_column"),
-                    sample_size: conn.properties.get_usize("sample_size").unwrap_or(50),
-                };
+    /// Get or create a PostgreSQL driver with full type information.
+    pub async fn get_or_create_postgres(
+        &mut self,
+        conn: &Connection,
+    ) -> Result<Arc<PgDriver>, DriverError> {
+        if let Some(driver) = self.pg_drivers.get(&conn.name) {
+            return Ok(driver.clone());
+        }
 
-                Adapter::file(&path, settings)?
-            }
-            driver => {
-                return Err(AdapterError::UnsupportedDriver(driver.to_string()));
-            }
-        };
+        let url = conn
+            .properties
+            .get_string("url")
+            .ok_or_else(|| DriverError::InvalidUrl("missing 'url' property".to_string()))?;
 
-        // Cache the adapter
-        self.adapters.insert(conn.name.clone(), adapter.clone());
-        Ok(adapter)
+        let driver = Arc::new(PgDriver::connect(&url).await?);
+        self.pg_drivers.insert(conn.name.clone(), driver.clone());
+        Ok(driver)
+    }
+
+    /// Get or create a MySQL driver with full type information.
+    pub async fn get_or_create_mysql(
+        &mut self,
+        conn: &Connection,
+    ) -> Result<Arc<MySqlDriver>, DriverError> {
+        if let Some(driver) = self.mysql_drivers.get(&conn.name) {
+            return Ok(driver.clone());
+        }
+
+        let url = conn
+            .properties
+            .get_string("url")
+            .ok_or_else(|| DriverError::InvalidUrl("missing 'url' property".to_string()))?;
+
+        let driver = Arc::new(MySqlDriver::connect(&url).await?);
+        self.mysql_drivers.insert(conn.name.clone(), driver.clone());
+        Ok(driver)
     }
 }
 

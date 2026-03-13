@@ -7,14 +7,15 @@ use crate::builder::{
     infra::metadata_cache::MetadataCache,
 };
 use async_trait::async_trait;
+use engine_processing::io::driver::SchemaDriver;
 use std::sync::Arc;
 
-pub struct FilterStage {
-    pub source_cache: Arc<MetadataCache>,
+pub struct FilterStage<S: SchemaDriver> {
+    pub source_cache: Arc<MetadataCache<S>>,
 }
 
 #[async_trait]
-impl PipelineAnalysisStage for FilterStage {
+impl<S: SchemaDriver, D: SchemaDriver> PipelineAnalysisStage<S, D> for FilterStage<S> {
     fn name(&self) -> &'static str {
         "filter"
     }
@@ -22,7 +23,7 @@ impl PipelineAnalysisStage for FilterStage {
     async fn run(
         &self,
         input: &PipelineAnalysisInput,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
         state: &mut AnalysisState,
     ) -> AnalyzerResult<()> {
         let source_plan = state.require_source()?.clone();

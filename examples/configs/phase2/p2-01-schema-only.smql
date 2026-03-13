@@ -1,0 +1,66 @@
+// =============================================================================
+// Phase 2 Test 01 — Schema-Only: with references, data = schema_only
+// =============================================================================
+//
+// WHAT THIS TESTS:
+//   - `with references` introspects FK graph from root table `film`
+//   - DDL created for all discovered tables in topological order
+//   - No data migrated (schema_only mode)
+//   - Destination DB should have empty tables at the end
+//
+// TABLES EXPECTED TO BE CREATED (Sakila FK graph from film):
+//   language              (no deps — created first)
+//   film                  (depends on language)
+//   actor                 (no deps)
+//   category              (no deps)
+//   film_actor            (depends on film, actor)
+//   film_category         (depends on film, category)
+//   inventory             (depends on film, store — store may be excluded if circular)
+//
+// RUN:
+//   cargo run -p cli -- plan -c dev-fixtures/configs/phase2/p2-01-schema-only.smql
+//   cargo run -p cli -- apply -c dev-fixtures/configs/phase2/p2-01-schema-only.smql
+//
+// VERIFY (on destination postgres):
+//   \dt                            -- should show all tables above
+//   SELECT COUNT(*) FROM film;     -- should be 0 (schema_only)
+//   SELECT COUNT(*) FROM language; -- should be 0
+//   \d film                        -- should show correct column types
+//   \d+ film                       -- should show indexes
+//
+// =============================================================================
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" {
+    driver = "mysql"
+    url    = define.mysql_url
+}
+
+connection "dst" {
+    driver = "postgres"
+    url    = define.postgres_url
+}
+
+pipeline "schema_only_from_film" {
+    from {
+        connection = connection.src
+        table      = "film"
+
+        with references {
+            data  = schema_only
+            depth = all
+        }
+    }
+
+    to {
+        connection = connection.dst
+    }
+
+    settings {
+        batch_size = 500
+    }
+}

@@ -1,12 +1,12 @@
 use super::pipeline::Filter;
-use model::{records::row::RowData, transform::mapping::TransformationMetadata};
+use model::{records::Record, transform::mapping::TransformationMetadata};
 
 /// Filters out rows that have no mapped fields for their table.
 pub struct EmptyRowFilter;
 
 impl Filter for EmptyRowFilter {
-    fn should_keep(&self, row: &RowData) -> bool {
-        !row.field_values.is_empty()
+    fn should_keep(&self, row: &Record) -> bool {
+        !row.fields.is_empty()
     }
 }
 
@@ -45,8 +45,8 @@ impl UnmappedTableFilter {
 }
 
 impl Filter for UnmappedTableFilter {
-    fn should_keep(&self, row: &RowData) -> bool {
-        self.has_any_mapping(&row.entity)
+    fn should_keep(&self, row: &Record) -> bool {
+        self.has_any_mapping(&row.schema)
     }
 }
 
@@ -54,14 +54,14 @@ impl Filter for UnmappedTableFilter {
 /// Example: keep only rows where a specific field meets a condition.
 pub struct FieldValueFilter<F>
 where
-    F: Fn(&RowData) -> bool + Send + Sync,
+    F: Fn(&Record) -> bool + Send + Sync,
 {
     predicate: F,
 }
 
 impl<F> FieldValueFilter<F>
 where
-    F: Fn(&RowData) -> bool + Send + Sync,
+    F: Fn(&Record) -> bool + Send + Sync,
 {
     pub fn new(predicate: F) -> Self {
         Self { predicate }
@@ -70,9 +70,9 @@ where
 
 impl<F> Filter for FieldValueFilter<F>
 where
-    F: Fn(&RowData) -> bool + Send + Sync,
+    F: Fn(&Record) -> bool + Send + Sync,
 {
-    fn should_keep(&self, row: &RowData) -> bool {
+    fn should_keep(&self, row: &Record) -> bool {
         (self.predicate)(row)
     }
 }
@@ -81,7 +81,7 @@ where
 mod tests {
     use super::*;
     use model::core::{
-        data_type::DataType,
+        types::{IntSize, Type},
         value::{FieldValue, Value},
     };
 
@@ -89,15 +89,19 @@ mod tests {
     fn test_empty_row_filter() {
         let filter = EmptyRowFilter;
 
-        let empty_row = RowData::new("test_table", vec![]);
+        let empty_row = Record::new("test_table", vec![]);
         assert!(!filter.should_keep(&empty_row));
 
-        let non_empty_row = RowData::new(
+        let non_empty_row = Record::new(
             "test_table",
             vec![FieldValue {
                 name: "id".to_string(),
                 value: Some(Value::Int(1)),
-                data_type: DataType::LongLong,
+                data_type: Type::Int {
+                    bits: IntSize::I64,
+                    unsigned: false,
+                    auto_increment: false,
+                },
             }],
         );
         assert!(filter.should_keep(&non_empty_row));
@@ -105,7 +109,7 @@ mod tests {
 
     #[test]
     fn test_field_value_filter() {
-        let filter = FieldValueFilter::new(|row: &RowData| {
+        let filter = FieldValueFilter::new(|row: &Record| {
             // Keep rows where 'active' field is true
             row.get("active")
                 .and_then(|f| f.value.as_ref())
@@ -113,22 +117,22 @@ mod tests {
                 .unwrap_or(false)
         });
 
-        let active_row = RowData::new(
+        let active_row = Record::new(
             "users",
             vec![FieldValue {
                 name: "active".to_string(),
                 value: Some(Value::Boolean(true)),
-                data_type: DataType::Boolean,
+                data_type: Type::Boolean,
             }],
         );
         assert!(filter.should_keep(&active_row));
 
-        let inactive_row = RowData::new(
+        let inactive_row = Record::new(
             "users",
             vec![FieldValue {
                 name: "active".to_string(),
                 value: Some(Value::Boolean(false)),
-                data_type: DataType::Boolean,
+                data_type: Type::Boolean,
             }],
         );
         assert!(!filter.should_keep(&inactive_row));

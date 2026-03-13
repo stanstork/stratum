@@ -6,13 +6,14 @@ use crate::builder::{
     analyzers::hooks::HooksAnalyzer,
 };
 use async_trait::async_trait;
+use engine_processing::io::driver::SchemaDriver;
 
-pub struct HooksStage {
-    pub analyzer: HooksAnalyzer,
+pub struct HooksStage<D: SchemaDriver> {
+    pub analyzer: HooksAnalyzer<D>,
 }
 
 #[async_trait]
-impl PipelineAnalysisStage for HooksStage {
+impl<S: SchemaDriver, D: SchemaDriver> PipelineAnalysisStage<S, D> for HooksStage<D> {
     fn name(&self) -> &'static str {
         "hooks"
     }
@@ -20,7 +21,7 @@ impl PipelineAnalysisStage for HooksStage {
     async fn run(
         &self,
         input: &PipelineAnalysisInput,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
         state: &mut AnalysisState,
     ) -> AnalyzerResult<()> {
         let hooks = PlanAnalyzer::analyze(&self.analyzer, input.pipeline.as_ref(), ctx).await?;

@@ -9,9 +9,9 @@ use crate::{
         literal::Literal,
         operator::BinaryOperator,
         pipeline::{
-            AfterBlock, BeforeBlock, FieldMapping, FromBlock, JoinClause, NestedBlock,
-            PaginateBlock, PipelineBlock, SelectBlock, SettingsBlock, ToBlock, WhereClause,
-            WithBlock,
+            AfterBlock, BeforeBlock, FieldMapping, FromBlock, JoinClause, MapBlock,
+            NamedSelectBlock, NestedBlock, PaginateBlock, PipelineBlock, ReferencesBlock,
+            SelectBlock, SettingsBlock, ToBlock, WhereClause, WithBlock,
         },
         span::Span,
         validation::{
@@ -151,6 +151,7 @@ fn build_pipeline_block(pair: Pair<Rule>) -> BuildResult<PipelineBlock> {
     let mut where_clauses = Vec::new();
     let mut with_block = None;
     let mut select_block = None;
+    let mut named_select_blocks = Vec::new();
     let mut validate_block = None;
     let mut on_error_block = None;
     let mut paginate_block = None;
@@ -180,6 +181,9 @@ fn build_pipeline_block(pair: Pair<Rule>) -> BuildResult<PipelineBlock> {
             }
             Rule::select_block => {
                 select_block = Some(build_select_block(inner)?);
+            }
+            Rule::named_select_block => {
+                named_select_blocks.push(build_named_select_block(inner)?);
             }
             Rule::validate_block => {
                 validate_block = Some(build_validate_block(inner)?);
@@ -212,6 +216,7 @@ fn build_pipeline_block(pair: Pair<Rule>) -> BuildResult<PipelineBlock> {
         where_clauses,
         with_block,
         select_block,
+        named_select_blocks,
         validate_block,
         on_error_block,
         paginate_block,
@@ -262,11 +267,15 @@ fn build_from_block(pair: Pair<Rule>) -> BuildResult<FromBlock> {
     let span = pair_to_span(&pair);
     let mut attributes = Vec::new();
     let mut nested_blocks = Vec::new();
+    let mut references = None;
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::attribute => {
                 attributes.push(build_attribute(inner)?);
+            }
+            Rule::references_block => {
+                references = Some(build_references_block(inner)?);
             }
             Rule::nested_block => {
                 nested_blocks.push(build_nested_block(inner)?);
@@ -278,6 +287,7 @@ fn build_from_block(pair: Pair<Rule>) -> BuildResult<FromBlock> {
     Ok(FromBlock {
         attributes,
         nested_blocks,
+        references,
         span,
     })
 }
@@ -286,11 +296,15 @@ fn build_to_block(pair: Pair<Rule>) -> BuildResult<ToBlock> {
     let span = pair_to_span(&pair);
     let mut attributes = Vec::new();
     let mut nested_blocks = Vec::new();
+    let mut map_block = None;
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::attribute => {
                 attributes.push(build_attribute(inner)?);
+            }
+            Rule::map_block => {
+                map_block = Some(build_map_block(inner)?);
             }
             Rule::nested_block => {
                 nested_blocks.push(build_nested_block(inner)?);
@@ -302,8 +316,35 @@ fn build_to_block(pair: Pair<Rule>) -> BuildResult<ToBlock> {
     Ok(ToBlock {
         attributes,
         nested_blocks,
+        map_block,
         span,
     })
+}
+
+fn build_references_block(pair: Pair<Rule>) -> BuildResult<ReferencesBlock> {
+    let span = pair_to_span(&pair);
+    let mut attributes = Vec::new();
+
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::attribute {
+            attributes.push(build_attribute(inner)?);
+        }
+    }
+
+    Ok(ReferencesBlock { attributes, span })
+}
+
+fn build_map_block(pair: Pair<Rule>) -> BuildResult<MapBlock> {
+    let span = pair_to_span(&pair);
+    let mut mappings = Vec::new();
+
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::field_mapping {
+            mappings.push(build_field_mapping(inner)?);
+        }
+    }
+
+    Ok(MapBlock { mappings, span })
 }
 
 fn build_where_clause(pair: Pair<Rule>) -> BuildResult<WhereClause> {
@@ -385,6 +426,30 @@ fn build_select_block(pair: Pair<Rule>) -> BuildResult<SelectBlock> {
     }
 
     Ok(SelectBlock { fields, span })
+}
+
+fn build_named_select_block(pair: Pair<Rule>) -> BuildResult<NamedSelectBlock> {
+    let span = pair_to_span(&pair);
+    let mut table = String::new();
+    let mut fields = Vec::new();
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::lit_string => {
+                table = parse_string_literal(inner.as_str());
+            }
+            Rule::field_mapping => {
+                fields.push(build_field_mapping(inner)?);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(NamedSelectBlock {
+        table,
+        fields,
+        span,
+    })
 }
 
 fn build_field_mapping(pair: Pair<Rule>) -> BuildResult<FieldMapping> {

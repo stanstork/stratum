@@ -1,7 +1,7 @@
 use crate::tui::pipeline::{PipelineState, PipelineStatus};
 use engine_core::utils::make_item_id;
 use engine_planner::plan::{
-    execution::execution_plan::ExecutionPlan, pipeline::plan::PipelinePlan,
+    execution::migration_report::MigrationReport, pipeline::plan::PipelinePlan,
 };
 use std::collections::HashMap;
 
@@ -10,7 +10,7 @@ use std::collections::HashMap;
 /// This pre-populates the TUI with pipeline metadata from the plan,
 /// including row counts, execution stages, and dependencies.
 pub fn initialize_pipelines_from_plan(
-    plan: &ExecutionPlan,
+    plan: &MigrationReport,
     plan_hash: &str,
 ) -> HashMap<String, PipelineState> {
     let mut pipelines = HashMap::new();
@@ -67,15 +67,14 @@ mod tests {
     use engine_planner::plan::{
         connection::plan::DatabaseDriver,
         estimation::pipeline::PipelineEstimations,
-        execution::types::RowCount,
         pipeline::{
             data_flow_summary::DataFlowSummary,
             destination::{DataImpact, DataImpactAction, DestinationPlan, WriteMode},
-            plan::PipelinePlan,
             settings::PipelineSettings,
             source::SourcePlan,
         },
     };
+    use model::execution::row_count::RowCount;
 
     fn create_test_source_plan(total_rows: u64) -> SourcePlan {
         SourcePlan {
@@ -145,7 +144,7 @@ mod tests {
             sample: None,
         };
 
-        let plan = engine_planner::plan::execution::execution_plan::ExecutionPlan {
+        let plan = engine_planner::plan::execution::migration_report::MigrationReport {
             plan_id: "test".to_string(),
             generated_at: chrono::Utc::now(),
             engine_version: "0.1.0".to_string(),
@@ -205,7 +204,7 @@ mod tests {
             sample: None,
         };
 
-        let plan = engine_planner::plan::execution::execution_plan::ExecutionPlan {
+        let plan = engine_planner::plan::execution::migration_report::MigrationReport {
             plan_id: "test".to_string(),
             generated_at: chrono::Utc::now(),
             engine_version: "0.1.0".to_string(),

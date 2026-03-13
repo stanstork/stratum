@@ -1,13 +1,14 @@
 use super::column_parser::ColumnRef;
 use crate::builder::infra::metadata_cache::MetadataCache;
+use engine_processing::io::driver::SchemaDriver;
 
 /// Validates column references against schema metadata
-pub struct ColumnValidator<'a> {
-    source_cache: &'a MetadataCache,
+pub struct ColumnValidator<'a, D: SchemaDriver> {
+    source_cache: &'a MetadataCache<D>,
 }
 
-impl<'a> ColumnValidator<'a> {
-    pub fn new(source_cache: &'a MetadataCache) -> Self {
+impl<'a, D: SchemaDriver> ColumnValidator<'a, D> {
+    pub fn new(source_cache: &'a MetadataCache<D>) -> Self {
         Self { source_cache }
     }
 

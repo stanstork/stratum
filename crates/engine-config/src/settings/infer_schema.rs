@@ -1,83 +1,108 @@
 use super::{
-    MigrationSetting, context::SchemaSettingContext, error::SettingsError,
+    MigrationSetting, context::SchemaSettingContext, driver::SchemaDriver, error::SettingsError,
     phase::MigrationSettingsPhase,
 };
-use crate::settings::validated::ValidatedSettings;
 use async_trait::async_trait;
 use connectors::{
-    metadata::entity::EntityMetadata, sql::base::metadata::provider::MetadataProvider,
+    sql::metadata::provider::MetadataProvider, traits::introspector::SchemaIntrospector,
 };
-use engine_core::{
-    connectors::{destination::Destination, format::DataFormat, source::Source},
-    context::item::ItemContext,
-    schema::plan::SchemaPlan,
+use engine_core::schema::{
+    plan::SchemaPlan,
+    schema_ops::{SchemaOp, SchemaOps},
 };
-use model::transform::mapping::TransformationMetadata;
-use std::slice;
+use engine_processing::{context::PipelineContext, io::format::DataFormat};
+use std::{slice, sync::Arc};
 use tracing::info;
 
-pub struct InferSchemaSetting {
-    context: SchemaSettingContext,
+pub struct InferSchemaSetting<S: SchemaDriver, D: SchemaDriver> {
+    context: SchemaSettingContext<S, D>,
 }
 
 #[async_trait]
-impl MigrationSetting for InferSchemaSetting {
+impl<S: SchemaDriver, D: SchemaDriver> MigrationSetting for InferSchemaSetting<S, D> {
     fn phase(&self) -> MigrationSettingsPhase {
         MigrationSettingsPhase::InferSchema
     }
 
-    fn can_apply(&self, ctx: &ItemContext) -> bool {
+    fn can_apply(&self, ctx: &PipelineContext) -> bool {
         matches!(
             (ctx.source.format, ctx.destination.format),
             (DataFormat::MySql, DataFormat::Postgres)
         )
     }
 
-    async fn apply(&mut self, _ctx: &mut ItemContext) -> Result<(), SettingsError> {
-        self.apply_schema().await?;
-
-        info!("Infer schema setting applied");
-        Ok(())
+    async fn plan(&mut self, ctx: &PipelineContext) -> Result<SchemaOps, SettingsError> {
+        if !self.can_apply(ctx) {
+            return Ok(SchemaOps::empty());
+        }
+        self.build_schema_ops().await
     }
 }
 
-impl InferSchemaSetting {
-    pub async fn new(
-        src: &Source,
-        dest: &Destination,
-        mapping: &TransformationMetadata,
-        settings: &ValidatedSettings,
-    ) -> Self {
-        Self {
-            context: SchemaSettingContext::new(src, dest, mapping, settings).await,
-        }
+impl<S: SchemaDriver, D: SchemaDriver> InferSchemaSetting<S, D> {
+    pub async fn new(ctx: SchemaSettingContext<S, D>) -> Self {
+        Self { context: ctx }
     }
 
-    async fn apply_schema(&mut self) -> Result<(), SettingsError> {
+    async fn build_schema_ops(&mut self) -> Result<SchemaOps, SettingsError> {
         let ctx = &self.context;
-
-        let adapter = ctx.source_adapter().await?;
-        let mut schema_plan = ctx.build_schema_plan().await?;
 
         // Check for existing destination
         if ctx.destination_exists().await? {
             info!("Skipping schema inference: destination table already exists");
-            return Ok(());
+            return Ok(SchemaOps::empty());
         }
-        info!("Destination table not found—applying schema inference");
+        info!("Destination table not found—planning schema inference");
+
+        let mut schema_plan = ctx.build_schema_plan().await?;
 
         // Build metadata graph for source tables
         let sources = slice::from_ref(&ctx.source.name);
-        let meta_graph = MetadataProvider::build_metadata_graph(&*adapter, sources).await?;
+        let introspector = ctx.destination.driver.clone() as Arc<dyn SchemaIntrospector>;
+        let meta_graph =
+            MetadataProvider::build_metadata_graph(introspector.as_ref(), sources).await?;
 
         // Add only those metadata entries that aren't already in schema plan
         for meta in meta_graph.values() {
             if !schema_plan.metadata_exists(&meta.name) {
                 SchemaPlan::collect_schema_deps(meta, &mut schema_plan);
-                schema_plan.add_metadata(&meta.name, EntityMetadata::Table(meta.clone()));
+                schema_plan.add_metadata(&meta.name, meta.clone());
             }
         }
 
-        self.context.apply_to_destination(schema_plan).await
+        Self::schema_plan_to_ops(&schema_plan).await
+    }
+
+    async fn schema_plan_to_ops(plan: &SchemaPlan) -> Result<SchemaOps, SettingsError> {
+        let mut ops = SchemaOps::empty();
+
+        // Enum queries -> pre (idempotent - safe to skip "already exists")
+        for (sql, name) in plan.enum_queries() {
+            ops.pre.push(SchemaOp {
+                sql,
+                description: format!("Create enum type '{}'", name),
+                idempotent: true,
+            });
+        }
+
+        // Table queries -> pre
+        for (sql, name) in plan.table_queries().await {
+            ops.pre.push(SchemaOp {
+                sql,
+                description: format!("Create table '{}'", name),
+                idempotent: false,
+            });
+        }
+
+        // FK queries -> post (created after data migration)
+        for (sql, name) in plan.fk_queries() {
+            ops.post.push(SchemaOp {
+                sql,
+                description: format!("Add foreign key constraint on '{}'", name),
+                idempotent: false,
+            });
+        }
+
+        Ok(ops)
     }
 }

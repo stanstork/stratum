@@ -1,10 +1,11 @@
 use crate::transform::{error::TransformError, pipeline::Validator};
-use engine_core::context::env::get_env;
+use engine_core::context::env::EnvContext;
 use expression_engine::eval::runtime::Evaluator;
 use model::{
-    core::value::Value, execution::pipeline::ValidationRule, records::row::RowData,
+    core::value::Value, execution::pipeline::ValidationRule, records::Record,
     transform::mapping::TransformationMetadata,
 };
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationAction {
@@ -26,19 +27,30 @@ pub enum ValidationResult {
 pub struct PipelineValidator {
     rules: Vec<ValidationRule>,
     metadata: TransformationMetadata,
+    env: Arc<EnvContext>,
 }
 
 impl PipelineValidator {
-    pub fn new(rules: Vec<ValidationRule>, metadata: TransformationMetadata) -> Self {
-        Self { rules, metadata }
+    pub fn new(
+        rules: Vec<ValidationRule>,
+        metadata: TransformationMetadata,
+        env: Arc<EnvContext>,
+    ) -> Self {
+        Self {
+            rules,
+            metadata,
+            env,
+        }
     }
 }
 
 impl Validator for PipelineValidator {
-    fn validate(&self, row: &RowData) -> Result<ValidationResult, TransformError> {
+    fn validate(&self, row: &Record) -> Result<ValidationResult, TransformError> {
+        let env = self.env.clone();
+        let env_getter = move |key: &str| env.get(key);
         for rule in &self.rules {
             // Evaluate the validation check expression
-            let result = rule.check.evaluate(row, &self.metadata, get_env);
+            let result = rule.check.evaluate(row, &self.metadata, &env_getter);
 
             // Check if the validation passed (expression should evaluate to true)
             let passed = match result {

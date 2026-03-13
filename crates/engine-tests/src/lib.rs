@@ -1,12 +1,16 @@
 #![allow(dead_code)]
 
-use connectors::sql::postgres::utils::connect_client;
+use connectors::error::DriverError;
 use mysql_async::Pool;
+use native_tls::TlsConnector;
+use postgres_native_tls::MakeTlsConnector;
 use std::sync::Arc;
-use tokio_postgres::Client;
+use tokio_postgres::{Client, Config, NoTls, config::SslMode};
+use tracing::{error, warn};
 
 pub mod dag_integration;
 pub mod integration;
+pub mod phase2;
 pub mod utils;
 
 // Test database URLs
@@ -31,11 +35,14 @@ async fn pg_pool() -> Arc<Client> {
 /// Also clears the state store to ensure tests start with clean state.
 async fn reset_postgres_schema() {
     let pool = pg_pool().await;
-    // This will drop all tables, types, etc. in `public` and re-create it.
+    // Drop and recreate public schema (removes all tables, types, etc.).
+    // Also clean up any pg_type entries whose namespace no longer exists (can accumulate
+    // from parallel test runs that race on DROP SCHEMA).
     pool.batch_execute(
         r#"
         DROP SCHEMA public CASCADE;
         CREATE SCHEMA public;
+        DELETE FROM pg_type WHERE typnamespace NOT IN (SELECT oid FROM pg_namespace);
     "#,
     )
     .await
@@ -52,4 +59,48 @@ async fn reset_postgres_schema() {
             let _ = std::fs::remove_dir_all(&state_path);
         }
     }
+}
+
+async fn connect_client(url: &str) -> Result<Client, DriverError> {
+    let config = url
+        .parse::<Config>()
+        .map_err(|e| DriverError::InvalidUrl(e.to_string()))?;
+    let ssl_mode = config.get_ssl_mode();
+
+    match ssl_mode {
+        SslMode::Disable => connect_without_tls(config).await,
+        SslMode::Require => connect_with_tls(config).await,
+        SslMode::Prefer => match connect_with_tls(config.clone()).await {
+            Ok(client) => Ok(client),
+            Err(error) => {
+                warn!(%error, "Postgres TLS handshake failed, retrying without TLS");
+                connect_without_tls(config).await
+            }
+        },
+        _ => connect_with_tls(config).await,
+    }
+}
+
+async fn connect_with_tls(config: Config) -> Result<Client, DriverError> {
+    let connector = TlsConnector::builder()
+        .build()
+        .map_err(|e| DriverError::ConnectionError(e.to_string()))?;
+    let tls = MakeTlsConnector::new(connector);
+    let (client, connection) = config.connect(tls).await?;
+    tokio::spawn(async move {
+        if let Err(err) = connection.await {
+            error!(%err, "Postgres connection error");
+        }
+    });
+    Ok(client)
+}
+
+async fn connect_without_tls(config: Config) -> Result<Client, DriverError> {
+    let (client, connection) = config.connect(NoTls).await?;
+    tokio::spawn(async move {
+        if let Err(err) = connection.await {
+            error!(%err, "Postgres connection error");
+        }
+    });
+    Ok(client)
 }

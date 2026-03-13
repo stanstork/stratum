@@ -1,4 +1,4 @@
-use crate::context::env::get_env;
+use crate::context::env::EnvContext;
 use model::{
     core::value::Value,
     execution::{
@@ -14,6 +14,7 @@ use model::{
             ValidationSeverity, WriteMode,
         },
         properties::Properties,
+        references::{DataMode, GraphReferences, TraversalDepth},
     },
 };
 use smql_syntax::ast::{
@@ -24,7 +25,7 @@ use smql_syntax::ast::{
     pipeline::{FromBlock, PipelineBlock, ToBlock},
     validation::ValidationKind,
 };
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 // ============================================================
 // Attribute Name Constants
@@ -53,6 +54,19 @@ const ATTR_ACTION: &str = "action";
 const ATTR_PATH: &str = "path";
 const ATTR_FORMAT: &str = "format";
 const ATTR_SCHEMA: &str = "schema";
+
+// References block attributes
+const ATTR_DATA: &str = "data";
+const ATTR_DEPTH: &str = "depth";
+const ATTR_EXCLUDE: &str = "exclude";
+const ATTR_DROP_CONSTRAINTS: &str = "drop_constraints";
+
+// References data modes
+const DATA_MODE_CASCADE: &str = "cascade";
+const DATA_MODE_SCHEMA_ONLY: &str = "schema_only";
+
+// Depth values
+const DEPTH_ALL: &str = "all";
 
 // Nested block names
 const BLOCK_TABLE: &str = "table";
@@ -120,13 +134,15 @@ pub struct PlanBuilder {
     // For resolving references
     pub global_definitions: HashMap<String, DefinitionInfo>,
     pub connections: HashMap<String, Connection>,
+    pub env: Arc<EnvContext>,
 }
 
 impl PlanBuilder {
-    pub fn new() -> Self {
+    pub fn new(env: Arc<EnvContext>) -> Self {
         Self {
             global_definitions: HashMap::new(),
             connections: HashMap::new(),
+            env,
         }
     }
 
@@ -186,9 +202,8 @@ impl PlanBuilder {
                 }
                 ATTR_MAX_CONCURRENCY => {
                     let concurrency = match value {
-                        Value::Int32(n) => n as u32,
                         Value::Int(n) => n as u32,
-                        Value::Uint(n) => n as u32,
+                        Value::UInt(n) => n as u32,
                         Value::Float(f) => f as u32,
                         _ => {
                             return Err(ConvertError::Plan(
@@ -254,6 +269,7 @@ impl PlanBuilder {
         let destination = self.build_destination(pipeline_block)?;
         let dependencies = self.build_dependencies(pipeline_block)?;
         let transformations = self.build_transformations(pipeline_block)?;
+        let named_transformations = self.build_named_transformations(pipeline_block)?;
         let validation_rules = self.build_validation_rules(pipeline_block)?;
         let error_handling = self.build_error_handling(pipeline_block)?;
         let lifecycle = self.build_lifecycle(pipeline_block)?;
@@ -266,6 +282,7 @@ impl PlanBuilder {
             source,
             destination,
             transformations,
+            named_transformations,
             validations: validation_rules,
             lifecycle: Some(lifecycle),
             error_handling: Some(error_handling),
@@ -372,6 +389,8 @@ impl PlanBuilder {
             })
             .ok_or_else(|| ConvertError::Plan(ERR_MISSING_TABLE.to_string()))?;
 
+        let graph_references = self.build_graph_references(from)?;
+
         Ok(DataSource {
             connection: self.connections.get(&connection).cloned().ok_or_else(|| {
                 ConvertError::Connection(format!("Connection `{}` not found", connection))
@@ -380,6 +399,7 @@ impl PlanBuilder {
             filters,
             joins,
             pagination,
+            graph_references,
         })
     }
 
@@ -394,7 +414,7 @@ impl PlanBuilder {
 
         let connection = self.resolve_connection_to(to)?;
 
-        // Extract table name
+        // Extract table name (optional - omitted in schema_only / graph-reference pipelines)
         let table = to
             .attributes
             .iter()
@@ -404,7 +424,7 @@ impl PlanBuilder {
                 Value::String(s) => Some(s),
                 _ => None,
             })
-            .ok_or_else(|| ConvertError::Plan(ERR_MISSING_TABLE.to_string()))?;
+            .unwrap_or_default();
 
         let mode = to
             .attributes
@@ -423,12 +443,15 @@ impl PlanBuilder {
             })
             .unwrap_or(WriteMode::Insert);
 
+        let table_map = self.build_table_map(to)?;
+
         Ok(DataDestination {
             connection: self.connections.get(&connection).cloned().ok_or_else(|| {
                 ConvertError::Connection(format!("Connection `{}` not found", connection))
             })?,
             table,
             mode,
+            table_map,
         })
     }
 
@@ -517,6 +540,25 @@ impl PlanBuilder {
         }
     }
 
+    fn build_named_transformations(
+        &self,
+        pipeline_block: &PipelineBlock,
+    ) -> Result<HashMap<String, Vec<Transformation>>, ConvertError> {
+        let mut result = HashMap::new();
+        for named in &pipeline_block.named_select_blocks {
+            let transforms = named
+                .fields
+                .iter()
+                .map(|f| Transformation {
+                    target_field: f.name.name.clone(),
+                    expression: self.compile_expression(&f.value).unwrap(),
+                })
+                .collect();
+            result.insert(named.table.to_ascii_lowercase(), transforms);
+        }
+        Ok(result)
+    }
+
     fn build_validation_rules(
         &self,
         pipeline_block: &PipelineBlock,
@@ -565,7 +607,7 @@ impl PlanBuilder {
                     .find(|a| a.key.name == ATTR_MAX_ATTEMPTS)
                     .and_then(|a| self.eval_with_definitions(&a.value).ok())
                     .and_then(|v| match v {
-                        Value::Int32(n) => Some(n as u32),
+                        Value::Int(n) => Some(n as u32),
                         Value::Float(f) => Some(f as u32),
                         _ => None,
                     })
@@ -754,6 +796,108 @@ impl PlanBuilder {
         }
     }
 
+    fn build_graph_references(
+        &self,
+        from: &FromBlock,
+    ) -> Result<Option<GraphReferences>, ConvertError> {
+        let refs_block = match &from.references {
+            Some(rb) => rb,
+            None => return Ok(None),
+        };
+
+        let mut data_mode = DataMode::default();
+        let mut depth = TraversalDepth::default();
+        let mut exclude = Vec::new();
+        let mut drop_constraints = false;
+
+        for attr in &refs_block.attributes {
+            // Bare identifiers (schema_only, all) are treated as string enum values
+            let value = match &attr.value.kind {
+                ExpressionKind::Identifier(name) => Value::String(name.clone()),
+                _ => self.eval_with_definitions(&attr.value)?,
+            };
+            match attr.key.name.as_str() {
+                ATTR_DATA => {
+                    if let Value::String(s) = value {
+                        data_mode = match s.as_str() {
+                            DATA_MODE_CASCADE => DataMode::Cascade,
+                            DATA_MODE_SCHEMA_ONLY => DataMode::SchemaOnly,
+                            _ => {
+                                return Err(ConvertError::Plan(format!(
+                                    "Invalid data mode: '{}'. Must be 'cascade' or 'schema_only'",
+                                    s
+                                )));
+                            }
+                        };
+                    }
+                }
+                ATTR_DEPTH => match value {
+                    Value::String(s) if s == DEPTH_ALL => {
+                        depth = TraversalDepth::All;
+                    }
+                    Value::Int(n) if n > 0 => {
+                        depth = TraversalDepth::Limited(n as usize);
+                    }
+                    Value::UInt(n) if n > 0 => {
+                        depth = TraversalDepth::Limited(n as usize);
+                    }
+                    Value::Float(f) if f > 0.0 => {
+                        depth = TraversalDepth::Limited(f as usize);
+                    }
+                    _ => {
+                        return Err(ConvertError::Plan(
+                            "depth must be 'all' or a positive integer".to_string(),
+                        ));
+                    }
+                },
+                ATTR_EXCLUDE => {
+                    if let Value::Array(items) = value {
+                        for item in items {
+                            if let Value::String(s) = item {
+                                exclude.push(s);
+                            }
+                        }
+                    }
+                }
+                ATTR_DROP_CONSTRAINTS => {
+                    if let Value::Boolean(b) = value {
+                        drop_constraints = b;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Ok(Some(GraphReferences {
+            data_mode,
+            depth,
+            exclude,
+            drop_constraints,
+        }))
+    }
+
+    fn build_table_map(&self, to: &ToBlock) -> Result<HashMap<String, String>, ConvertError> {
+        let map_block = match &to.map_block {
+            Some(mb) => mb,
+            None => return Ok(HashMap::new()),
+        };
+
+        let mut table_map = HashMap::new();
+        for mapping in &map_block.mappings {
+            let target_value = self.eval_with_definitions(&mapping.value)?;
+            if let Value::String(s) = target_value {
+                table_map.insert(mapping.name.name.clone(), s);
+            } else {
+                return Err(ConvertError::Plan(format!(
+                    "Table mapping value for '{}' must be a string",
+                    mapping.name.name
+                )));
+            }
+        }
+
+        Ok(table_map)
+    }
+
     fn resolve_connection_from(&self, from: &FromBlock) -> Result<String, ConvertError> {
         // Look for connection = connection.name attribute
         for attr in &from.attributes {
@@ -828,15 +972,19 @@ impl PlanBuilder {
     }
 
     // Used for simple expressions only during plan building
-    pub fn eval_expression(expr: &Expression) -> Result<Value, ConvertError> {
+    pub fn eval_expression(&self, expr: &Expression) -> Result<Value, ConvertError> {
         let definitions = HashMap::new();
-        expression_engine::eval_ast_expression(expr, &definitions, get_env)
+        let env = self.env.clone();
+        let env_getter = move |key: &str| env.get(key);
+        expression_engine::eval_ast_expression(expr, &definitions, &env_getter)
             .map_err(|e| ConvertError::Expression(e.to_string()))
     }
 
     // Evaluate expression with access to global definitions (for define.X references)
     fn eval_with_definitions(&self, expr: &Expression) -> Result<Value, ConvertError> {
-        expression_engine::eval_ast_expression(expr, &self.global_definitions, get_env)
+        let env = self.env.clone();
+        let env_getter = move |key: &str| env.get(key);
+        expression_engine::eval_ast_expression(expr, &self.global_definitions, &env_getter)
             .map_err(|e| ConvertError::Expression(e.to_string()))
     }
 
@@ -849,7 +997,7 @@ impl PlanBuilder {
 
         let mut definitions = HashMap::new();
         for attr in &def_block.attributes {
-            let value = Self::eval_expression(&attr.value)?;
+            let value = self.eval_expression(&attr.value)?;
             let source = EnvVarCollector::analyze_value_source(&attr.value);
 
             definitions.insert(attr.key.name.clone(), DefinitionInfo { value, source });
@@ -878,7 +1026,7 @@ impl PlanBuilder {
 
 impl Default for PlanBuilder {
     fn default() -> Self {
-        Self::new()
+        Self::new(Arc::new(EnvContext::empty()))
     }
 }
 
@@ -939,10 +1087,6 @@ mod tests {
             ValidationCheck,
         },
     };
-    use std::sync::Mutex;
-
-    // Shared lock for tests that use the global EnvContext to prevent race conditions
-    static ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn test_span() -> Span {
         Span::new(0, 10, 1, 1)
@@ -993,7 +1137,7 @@ mod tests {
 
     #[test]
     fn test_extract_definitions() {
-        let mut builder = PlanBuilder::new();
+        let mut builder = PlanBuilder::default();
         let def_block = DefineBlock {
             attributes: vec![
                 make_attribute("tax_rate", make_number_expr(1.4)),
@@ -1018,7 +1162,7 @@ mod tests {
 
     #[test]
     fn test_build_connection_basic() {
-        let builder = PlanBuilder::new();
+        let builder = PlanBuilder::default();
         let conn_block = ConnectionBlock {
             name: "postgres_prod".to_string(),
             attributes: vec![
@@ -1042,7 +1186,7 @@ mod tests {
 
     #[test]
     fn test_build_dependencies() {
-        let builder = PlanBuilder::new();
+        let builder = PlanBuilder::default();
 
         // Test with array of DotPath (modern syntax: after = [pipeline.name1, pipeline.name2])
         let array_expr = Expression::new(
@@ -1062,6 +1206,7 @@ mod tests {
             where_clauses: vec![],
             with_block: None,
             select_block: None,
+            named_select_blocks: vec![],
             validate_block: None,
             on_error_block: None,
             paginate_block: None,
@@ -1079,7 +1224,7 @@ mod tests {
 
     #[test]
     fn test_build_lifecycle() {
-        let builder = PlanBuilder::new();
+        let builder = PlanBuilder::default();
         let pipeline = PipelineBlock {
             name: "test".to_string(),
             description: None,
@@ -1089,6 +1234,7 @@ mod tests {
             where_clauses: vec![],
             with_block: None,
             select_block: None,
+            named_select_blocks: vec![],
             validate_block: None,
             on_error_block: None,
             paginate_block: None,
@@ -1113,7 +1259,7 @@ mod tests {
 
     #[test]
     fn test_build_settings() {
-        let builder = PlanBuilder::new();
+        let builder = PlanBuilder::default();
         let pipeline = PipelineBlock {
             name: "test".to_string(),
             description: None,
@@ -1123,6 +1269,7 @@ mod tests {
             where_clauses: vec![],
             with_block: None,
             select_block: None,
+            named_select_blocks: vec![],
             validate_block: None,
             on_error_block: None,
             paginate_block: None,
@@ -1146,7 +1293,7 @@ mod tests {
 
     #[test]
     fn test_compile_expression_literals() {
-        let builder = PlanBuilder::new();
+        let builder = PlanBuilder::default();
 
         // String literal
         let expr = make_string_expr("hello");
@@ -1175,7 +1322,7 @@ mod tests {
 
     #[test]
     fn test_compile_expression_identifier() {
-        let builder = PlanBuilder::new();
+        let builder = PlanBuilder::default();
         let expr = make_ident_expr("customer_id");
         let compiled = builder.compile_expression(&expr).unwrap();
         match compiled {
@@ -1186,7 +1333,7 @@ mod tests {
 
     #[test]
     fn test_compile_expression_dotpath() {
-        let builder = PlanBuilder::new();
+        let builder = PlanBuilder::default();
         let expr = make_dotpath_expr(vec!["customers", "email"]);
         let compiled = builder.compile_expression(&expr).unwrap();
         match compiled {
@@ -1199,7 +1346,7 @@ mod tests {
 
     #[test]
     fn test_compile_expression_binary() {
-        let builder = PlanBuilder::new();
+        let builder = PlanBuilder::default();
         let left = make_number_expr(5.0);
         let right = make_number_expr(3.0);
         let expr = Expression::new(
@@ -1222,7 +1369,7 @@ mod tests {
 
     #[test]
     fn test_compile_expression_with_define_reference() {
-        let mut builder = PlanBuilder::new();
+        let mut builder = PlanBuilder::default();
         builder.global_definitions.insert(
             "tax_rate".to_string(),
             DefinitionInfo {
@@ -1241,7 +1388,7 @@ mod tests {
 
     #[test]
     fn test_convert_binop_all_operators() {
-        let builder = PlanBuilder::new();
+        let builder = PlanBuilder::default();
 
         assert!(matches!(
             builder.convert_binop(BinaryOperator::Add),
@@ -1279,7 +1426,7 @@ mod tests {
 
     #[test]
     fn test_build_pagination_with_all_fields() {
-        let mut builder = PlanBuilder::new();
+        let mut builder = PlanBuilder::default();
 
         // Add a test connection
         let mut properties = Properties::new();
@@ -1311,12 +1458,14 @@ mod tests {
                     make_attribute("table", make_string_expr("customers")),
                 ],
                 nested_blocks: vec![],
+                references: None,
                 span: test_span(),
             }),
             to: None,
             where_clauses: vec![],
             with_block: None,
             select_block: None,
+            named_select_blocks: vec![],
             validate_block: None,
             on_error_block: None,
             paginate_block: Some(PaginateBlock {
@@ -1340,7 +1489,7 @@ mod tests {
 
     #[test]
     fn test_build_validation_rules() {
-        let builder = PlanBuilder::new();
+        let builder = PlanBuilder::default();
         let pipeline = PipelineBlock {
             name: "test".to_string(),
             description: None,
@@ -1350,6 +1499,7 @@ mod tests {
             where_clauses: vec![],
             with_block: None,
             select_block: None,
+            named_select_blocks: vec![],
             validate_block: Some(ValidateBlock {
                 checks: vec![
                     ValidationCheck {
@@ -1411,7 +1561,7 @@ mod tests {
 
     #[test]
     fn test_build_error_handling() {
-        let builder = PlanBuilder::new();
+        let builder = PlanBuilder::default();
         let pipeline = PipelineBlock {
             name: "test".to_string(),
             description: None,
@@ -1421,6 +1571,7 @@ mod tests {
             where_clauses: vec![],
             with_block: None,
             select_block: None,
+            named_select_blocks: vec![],
             validate_block: None,
             on_error_block: Some(OnErrorBlock {
                 retry: Some(RetryBlock {
@@ -1446,7 +1597,7 @@ mod tests {
 
     #[test]
     fn test_failed_rows_with_table_block_with_schema() {
-        let mut builder = PlanBuilder::new();
+        let mut builder = PlanBuilder::default();
 
         // Add a test connection to the builder's connections map
         builder.connections.insert(
@@ -1468,6 +1619,7 @@ mod tests {
             where_clauses: vec![],
             with_block: None,
             select_block: None,
+            named_select_blocks: vec![],
             validate_block: None,
             on_error_block: Some(OnErrorBlock {
                 retry: None,
@@ -1517,7 +1669,7 @@ mod tests {
 
     #[test]
     fn test_failed_rows_with_table_block_without_schema() {
-        let mut builder = PlanBuilder::new();
+        let mut builder = PlanBuilder::default();
 
         // Add a test connection to the builder's connections map
         builder.connections.insert(
@@ -1539,6 +1691,7 @@ mod tests {
             where_clauses: vec![],
             with_block: None,
             select_block: None,
+            named_select_blocks: vec![],
             validate_block: None,
             on_error_block: Some(OnErrorBlock {
                 retry: None,
@@ -1588,7 +1741,7 @@ mod tests {
 
     #[test]
     fn test_failed_rows_with_file_block_explicit_format() {
-        let builder = PlanBuilder::new();
+        let builder = PlanBuilder::default();
         let pipeline = PipelineBlock {
             name: "test".to_string(),
             description: None,
@@ -1598,6 +1751,7 @@ mod tests {
             where_clauses: vec![],
             with_block: None,
             select_block: None,
+            named_select_blocks: vec![],
             validate_block: None,
             on_error_block: Some(OnErrorBlock {
                 retry: None,
@@ -1637,7 +1791,7 @@ mod tests {
 
     #[test]
     fn test_failed_rows_with_file_block_auto_detect_format() {
-        let builder = PlanBuilder::new();
+        let builder = PlanBuilder::default();
         let pipeline = PipelineBlock {
             name: "test".to_string(),
             description: None,
@@ -1647,6 +1801,7 @@ mod tests {
             where_clauses: vec![],
             with_block: None,
             select_block: None,
+            named_select_blocks: vec![],
             validate_block: None,
             on_error_block: Some(OnErrorBlock {
                 retry: None,
@@ -1685,18 +1840,11 @@ mod tests {
 
     #[test]
     fn test_env_function_with_typed_defaults() {
-        use crate::context::env::{EnvContext, clear_env_context, init_env_context};
-
-        // Use a static mutex to ensure tests using global env context don't run in parallel
-        let _guard = ENV_TEST_LOCK.lock().unwrap();
-
-        // Clean up and create fresh context
-        clear_env_context();
         let mut env_ctx = EnvContext::empty();
         env_ctx.set("BATCH_SIZE".to_string(), "5000".to_string());
         env_ctx.set("CREATE_TABLES".to_string(), "true".to_string());
         env_ctx.set("THRESHOLD".to_string(), "0.95".to_string());
-        init_env_context(env_ctx);
+        let builder = PlanBuilder::new(Arc::new(env_ctx));
 
         // Test integer default - env var exists
         let expr_int = Expression::new(
@@ -1709,9 +1857,9 @@ mod tests {
             },
             test_span(),
         );
-        let result_int = PlanBuilder::eval_expression(&expr_int).unwrap();
+        let result_int = builder.eval_expression(&expr_int).unwrap();
         // Should parse as Uint since positive integer
-        assert!(matches!(result_int, Value::Uint(5000)));
+        assert!(matches!(result_int, Value::UInt(5000)));
 
         // Test boolean default - env var exists
         let expr_bool = Expression::new(
@@ -1724,7 +1872,7 @@ mod tests {
             },
             test_span(),
         );
-        let result_bool = PlanBuilder::eval_expression(&expr_bool).unwrap();
+        let result_bool = builder.eval_expression(&expr_bool).unwrap();
         assert!(matches!(result_bool, Value::Boolean(true)));
 
         // Test float default - env var exists
@@ -1738,7 +1886,7 @@ mod tests {
             },
             test_span(),
         );
-        let result_float = PlanBuilder::eval_expression(&expr_float).unwrap();
+        let result_float = builder.eval_expression(&expr_float).unwrap();
         assert!(matches!(result_float, Value::Float(v) if (v - 0.95).abs() < 0.001));
 
         // Test when env var doesn't exist - should return typed default
@@ -1752,23 +1900,15 @@ mod tests {
             },
             test_span(),
         );
-        let result_missing = PlanBuilder::eval_expression(&expr_missing_int).unwrap();
+        let result_missing = builder.eval_expression(&expr_missing_int).unwrap();
         assert!(matches!(result_missing, Value::Float(1234.0)));
-
-        clear_env_context();
     }
 
     #[test]
     fn test_env_function_parse_failure() {
-        use crate::context::env::{EnvContext, clear_env_context, init_env_context};
-
-        // Use a static mutex to ensure tests using global env context don't run in parallel
-        let _guard = ENV_TEST_LOCK.lock().unwrap();
-
-        clear_env_context();
         let mut env_ctx = EnvContext::empty();
         env_ctx.set("BAD_INT".to_string(), "not_a_number".to_string());
-        init_env_context(env_ctx);
+        let builder = PlanBuilder::new(Arc::new(env_ctx));
 
         // Try to parse invalid integer
         let expr = Expression::new(
@@ -1779,7 +1919,7 @@ mod tests {
             test_span(),
         );
 
-        let result = PlanBuilder::eval_expression(&expr);
+        let result = builder.eval_expression(&expr);
         assert!(result.is_err());
         assert!(
             result
@@ -1787,7 +1927,5 @@ mod tests {
                 .to_string()
                 .contains("Failed to parse environment variable")
         );
-
-        clear_env_context();
     }
 }

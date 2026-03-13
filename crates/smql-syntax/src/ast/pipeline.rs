@@ -20,6 +20,7 @@ pub struct PipelineBlock {
     pub where_clauses: Vec<WhereClause>,
     pub with_block: Option<WithBlock>,
     pub select_block: Option<SelectBlock>,
+    pub named_select_blocks: Vec<NamedSelectBlock>,
     pub validate_block: Option<ValidateBlock>,
     pub on_error_block: Option<OnErrorBlock>,
     pub paginate_block: Option<PaginateBlock>,
@@ -33,6 +34,7 @@ pub struct PipelineBlock {
 pub struct FromBlock {
     pub attributes: Vec<Attribute>,
     pub nested_blocks: Vec<NestedBlock>,
+    pub references: Option<ReferencesBlock>,
     pub span: Span,
 }
 
@@ -40,6 +42,19 @@ pub struct FromBlock {
 pub struct ToBlock {
     pub attributes: Vec<Attribute>,
     pub nested_blocks: Vec<NestedBlock>,
+    pub map_block: Option<MapBlock>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReferencesBlock {
+    pub attributes: Vec<Attribute>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MapBlock {
+    pub mappings: Vec<FieldMapping>,
     pub span: Span,
 }
 
@@ -79,6 +94,15 @@ pub struct JoinClause {
 /// Select block for field mappings
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SelectBlock {
+    pub fields: Vec<FieldMapping>,
+    pub span: Span,
+}
+
+/// Named select block for field mappings of a referenced table
+/// Syntax: select "table_name" { field = table.column }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NamedSelectBlock {
+    pub table: String,
     pub fields: Vec<FieldMapping>,
     pub span: Span,
 }

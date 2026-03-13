@@ -1,0 +1,140 @@
+// =============================================================================
+// Phase 2 Test 11 — Full Sakila Migration (warehouse-style naming + computed columns)
+// =============================================================================
+//
+// WHAT THIS TESTS:
+//   - Complete end-to-end migration of all Sakila tables
+//   - `map` block renames tables using fact/dim/bridge naming convention
+//   - Computed column `amount_cents` derived from payment.amount
+//   - All FK constraints resolve to renamed destination table names
+//   - Indexes, sequences, ENUM types created with renamed table names
+//   - Row counts match source exactly
+//   - FK integrity holds on destination
+//
+// TABLE RENAMES:
+//   payment       → fact_payment    (primary fact)
+//   rental        → fact_rental
+//   film          → dim_film
+//   actor         → dim_actor
+//   category      → dim_category
+//   language      → dim_language
+//   customer      → dim_customer
+//   store         → dim_store
+//   staff         → dim_staff
+//   inventory     → dim_inventory
+//   address       → dim_address
+//   city          → dim_city
+//   country       → dim_country
+//   film_actor    → bridge_film_actor
+//   film_category → bridge_film_category
+//
+// FIELD RENAMES (in fact_payment):
+//   payment_date  → pmt_date    (shorter warehouse-style name)
+//   last_update   → updated_at  (canonical audit column name)
+//
+// NAMED SELECTS (field renames for cascade tables):
+//   dim_customer: first_name → given_name, last_name → family_name, create_date → registered_at
+//   dim_film:     rental_rate → price, rental_duration → rent_days, release_year → year
+//
+// COMPUTED COLUMNS (added to fact_payment):
+//   amount_cents  — payment.amount * 100  (decimal, cents representation)
+//
+// RUN:
+//   cargo run -p cli -- apply -c dev-fixtures/configs/phase2/p2-11-full-sakila.smql --pretty
+//
+// =============================================================================
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" {
+    driver = "mysql"
+    url    = define.mysql_url
+}
+
+connection "dst" {
+    driver = "postgres"
+    url    = define.postgres_url
+}
+
+// Single pipeline — payment's FK graph covers all Sakila tables.
+// Tables are renamed to a data-warehouse fact/dim/bridge convention.
+pipeline "full_sakila" {
+    from {
+        connection = connection.src
+        table      = "payment"
+
+        with references {
+            data  = cascade
+            depth = all
+        }
+    }
+
+    to {
+        connection = connection.dst
+
+        map {
+            payment       = "fact_payment"
+            rental        = "fact_rental"
+            film          = "dim_film"
+            actor         = "dim_actor"
+            category      = "dim_category"
+            language      = "dim_language"
+            customer      = "dim_customer"
+            store         = "dim_store"
+            staff         = "dim_staff"
+            inventory     = "dim_inventory"
+            address       = "dim_address"
+            city          = "dim_city"
+            country       = "dim_country"
+            film_actor    = "bridge_film_actor"
+            film_category = "bridge_film_category"
+        }
+    }
+
+    select {
+        payment_id   = payment.payment_id
+        customer_id  = payment.customer_id
+        staff_id     = payment.staff_id
+        rental_id    = payment.rental_id
+        amount       = payment.amount
+        amount_cents = payment.amount * 100
+        pmt_date     = payment.payment_date
+        updated_at   = payment.last_update
+    }
+
+    // Field renames for dim_customer (source: customer table)
+    select "customer" {
+        customer_id  = customer.customer_id
+        given_name   = customer.first_name
+        family_name  = customer.last_name
+        email        = customer.email
+        registered_at = customer.create_date
+        active       = customer.active
+        address_id   = customer.address_id
+        store_id     = customer.store_id
+        last_update  = customer.last_update
+    }
+
+    // Field renames for dim_film (source: film table)
+    select "film" {
+        film_id          = film.film_id
+        title            = film.title
+        description      = film.description
+        year             = film.release_year
+        language_id      = film.language_id
+        rent_days        = film.rental_duration
+        price            = film.rental_rate
+        length           = film.length
+        replacement_cost = film.replacement_cost
+        rating           = film.rating
+        special_features = film.special_features
+        last_update      = film.last_update
+    }
+
+    settings {
+        batch_size = 25000
+    }
+}

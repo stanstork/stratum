@@ -1,8 +1,11 @@
 use crate::tui::app::command::MigrationCommand;
-use engine_core::{event_bus::bus::EventBus, plan::execution::ExecutionPlan as CoreExecutionPlan};
+use engine_core::{
+    context::env::EnvContext, event_bus::bus::EventBus,
+    plan::execution::ExecutionPlan as CoreExecutionPlan,
+};
 use engine_runtime::dag::{Dag, executor::DagExecutor};
 use model::events::migration::MigrationEvent;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
@@ -49,12 +52,13 @@ pub fn spawn_executor(
     plan: CoreExecutionPlan,
     graph: Dag,
     cancel: CancellationToken,
+    env: Arc<EnvContext>,
 ) {
     tokio::spawn(async move {
         // Debounce start to let TUI paint first frame
         tokio::time::sleep(Duration::from_millis(500)).await;
 
-        let result = DagExecutor::with_event_bus(plan, false, cancel, bus).await;
+        let result = DagExecutor::with_event_bus(plan, false, cancel, bus, env).await;
 
         match result {
             Ok(executor) => {

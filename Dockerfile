@@ -20,7 +20,7 @@ FROM debian:bookworm-slim
 
 # Install necessary runtime dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libssl3 && \
+    apt-get install -y --no-install-recommends libssl3 ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 # Create a user to run the application

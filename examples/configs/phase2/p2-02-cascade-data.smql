@@ -1,0 +1,71 @@
+// =============================================================================
+// Phase 2 Test 02 — Cascade Data: with references, data = cascade
+// =============================================================================
+//
+// WHAT THIS TESTS:
+//   - Full schema AND data migration via `data = cascade`
+//   - DbSourceReader two-phase fetch: payment rows fetched first,
+//     then customer/rental/staff fetched scoped to FK values from that batch
+//   - Related table rows must NOT contain rows unrelated to the primary batch
+//
+// TABLES EXPECTED (payment FK graph, depth = 1):
+//   customer   (payment.customer_id → customer.customer_id)
+//   staff      (payment.staff_id → staff.staff_id)
+//   rental     (payment.rental_id → rental.rental_id)
+//   payment    (root)
+//
+// KEY CORRECTNESS CHECK:
+//   SELECT COUNT(DISTINCT p.customer_id)
+//   FROM payment p
+//   WHERE p.payment_id <= <first batch size>;
+//   -- customer rows migrated per batch must match only those customer_ids
+//
+// RUN:
+//   cargo run -p cli -- apply -c dev-fixtures/configs/phase2/p2-02-cascade-data.smql --pretty
+//
+// VERIFY (on destination postgres):
+//   SELECT COUNT(*) FROM payment;   -- should match source
+//   SELECT COUNT(*) FROM customer;  -- should match source (all referenced)
+//   SELECT COUNT(*) FROM rental;    -- should match source (all referenced)
+//
+//   -- FK integrity check (no orphaned payments):
+//   SELECT COUNT(*) FROM payment p
+//   LEFT JOIN customer c ON p.customer_id = c.customer_id
+//   WHERE c.customer_id IS NULL;    -- should be 0
+//
+// =============================================================================
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" {
+    driver = "mysql"
+    url    = define.mysql_url
+}
+
+connection "dst" {
+    driver = "postgres"
+    url    = define.postgres_url
+}
+
+pipeline "cascade_payment" {
+    from {
+        connection = connection.src
+        table      = "payment"
+
+        with references {
+            data  = cascade
+            depth = 1
+        }
+    }
+
+    to {
+        connection = connection.dst
+    }
+
+    settings {
+        batch_size = 100
+    }
+}

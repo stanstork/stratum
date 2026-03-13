@@ -12,7 +12,7 @@ use crate::tui::{
     ui::{render::render, widgets::modal::ModalState},
 };
 use chrono::{DateTime, Utc};
-use engine_planner::plan::execution::execution_plan::ExecutionPlan;
+use engine_planner::plan::execution::migration_report::MigrationReport;
 use model::events::migration::MigrationEvent;
 use ratatui::{Terminal, prelude::Backend};
 use std::{collections::HashMap, time::Duration};
@@ -25,7 +25,7 @@ pub struct App {
     pub current_view: View,
     pub modal_state: ModalState,
     pub pipelines: HashMap<String, PipelineState>,
-    pub execution_plan: ExecutionPlan,
+    pub report: MigrationReport,
     pub errors: Vec<ErrorEntry>,
     pub selected_pipeline: usize,
     pub start_time: Option<DateTime<Utc>>,
@@ -43,7 +43,7 @@ impl App {
         command_tx: mpsc::Sender<MigrationCommand>,
         terminal_rx: mpsc::Receiver<TerminalEvent>,
         pipelines: HashMap<String, PipelineState>,
-        execution_plan: ExecutionPlan,
+        report: MigrationReport,
     ) -> Self {
         let mut app = Self {
             state: AppState::Running, // Start in Running state since pipelines are loaded
@@ -53,7 +53,7 @@ impl App {
             current_view: View::Overview,
             modal_state: ModalState::None,
             pipelines,
-            execution_plan,
+            report,
             errors: Vec::new(),
             selected_pipeline: 0,
             start_time: Some(Utc::now()),

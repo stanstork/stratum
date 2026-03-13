@@ -64,7 +64,7 @@ fn render_add_column(col: &ColumnDef, r: &mut Renderer) {
 
 #[cfg(test)]
 mod tests {
-    use model::core::data_type::DataType;
+    use model::core::types::Type;
 
     use crate::{
         ast::{
@@ -86,11 +86,16 @@ mod tests {
             operations: vec![
                 AlterTableOperation::AddColumn(ColumnDef {
                     name: "category".to_string(),
-                    data_type: DataType::VarChar,
+                    data_type: Type::Varchar {
+                        length: Some(100),
+                        charset: None,
+                    },
                     is_nullable: true,
                     is_primary_key: false,
                     default_value: None,
                     max_length: Some(100),
+                    generated_expression: None,
+                    is_stored: false,
                 }),
                 AlterTableOperation::ToggleTriggers { enabled: false },
                 AlterTableOperation::ToggleTriggers { enabled: true },

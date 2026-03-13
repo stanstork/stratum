@@ -6,7 +6,7 @@ use crate::ast::{
     create_table::{ColumnDef, TableConstraint},
     expr::Expr,
 };
-use model::core::data_type::DataType;
+use model::core::types::Type;
 
 #[derive(Debug, Clone)]
 pub struct AlterTableBuilder {
@@ -23,7 +23,7 @@ impl AlterTableBuilder {
         }
     }
 
-    pub fn add_column(self, name: &str, data_type: DataType) -> AddColumnBuilder {
+    pub fn add_column(self, name: &str, data_type: Type) -> AddColumnBuilder {
         AddColumnBuilder::new(self, name, data_type)
     }
 
@@ -35,9 +35,54 @@ impl AlterTableBuilder {
     ) -> Self {
         self.ast.operations.push(AlterTableOperation::AddConstraint(
             TableConstraint::ForeignKey {
+                name: None,
                 columns: columns.iter().map(|s| s.to_string()).collect(),
                 references,
                 referenced_columns: referenced_columns.iter().map(|s| s.to_string()).collect(),
+                on_delete: None,
+                on_update: None,
+            },
+        ));
+        self
+    }
+
+    pub fn add_named_foreign_key(
+        mut self,
+        name: Option<String>,
+        columns: &[&str],
+        references: TableRef,
+        referenced_columns: &[&str],
+        on_delete: Option<String>,
+        on_update: Option<String>,
+    ) -> Self {
+        self.ast.operations.push(AlterTableOperation::AddConstraint(
+            TableConstraint::ForeignKey {
+                name,
+                columns: columns.iter().map(|s| s.to_string()).collect(),
+                references,
+                referenced_columns: referenced_columns.iter().map(|s| s.to_string()).collect(),
+                on_delete,
+                on_update,
+            },
+        ));
+        self
+    }
+
+    pub fn add_check(mut self, name: Option<String>, expression: String) -> Self {
+        self.ast
+            .operations
+            .push(AlterTableOperation::AddConstraint(TableConstraint::Check {
+                name,
+                expression,
+            }));
+        self
+    }
+
+    pub fn add_unique(mut self, name: Option<String>, columns: &[&str]) -> Self {
+        self.ast.operations.push(AlterTableOperation::AddConstraint(
+            TableConstraint::Unique {
+                name,
+                columns: columns.iter().map(|s| s.to_string()).collect(),
             },
         ));
         self
@@ -61,7 +106,7 @@ pub struct AddColumnBuilder {
 }
 
 impl AddColumnBuilder {
-    pub fn new(table_builder: AlterTableBuilder, name: &str, data_type: DataType) -> Self {
+    pub fn new(table_builder: AlterTableBuilder, name: &str, data_type: Type) -> Self {
         Self {
             table_builder,
             column: ColumnDef {
@@ -71,6 +116,8 @@ impl AddColumnBuilder {
                 is_primary_key: false, // Cannot add PK via ADD COLUMN
                 default_value: None,
                 max_length: None,
+                generated_expression: None,
+                is_stored: false,
             },
         }
     }
@@ -96,7 +143,7 @@ impl AddColumnBuilder {
 
 #[cfg(test)]
 mod tests {
-    use model::core::data_type::DataType;
+    use model::core::types::{IntSize, Type};
 
     use crate::{
         ast::{alter_table::AlterTableOperation, common::TableRef},
@@ -115,7 +162,14 @@ mod tests {
         let builder = AlterTableBuilder::new(table("posts"));
 
         let ast = builder
-            .add_column("category_id", DataType::Int)
+            .add_column(
+                "category_id",
+                Type::Int {
+                    bits: IntSize::I32,
+                    unsigned: false,
+                    auto_increment: false,
+                },
+            )
             .add()
             .toggle_triggers(false) // Disable triggers
             .build();

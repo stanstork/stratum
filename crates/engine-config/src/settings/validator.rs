@@ -3,21 +3,29 @@ use crate::settings::{
     error::SettingsError,
     validated::{ValidatedSettings, ValidatedSettingsBuilder},
 };
-use engine_core::connectors::{destination::Destination, format::DataFormat, source::Source};
+use connectors::traits::introspector::SchemaIntrospector;
+use engine_processing::io::{destination::Destination, format::DataFormat, source::Source};
 use tracing::{info, warn};
 
 /// Validates migration settings before they are applied.
 pub struct SettingsValidator<'a> {
     source: &'a Source,
     destination: &'a Destination,
+    introspector: &'a dyn SchemaIntrospector,
     dry_run: bool,
 }
 
 impl<'a> SettingsValidator<'a> {
-    pub fn new(source: &'a Source, destination: &'a Destination, dry_run: bool) -> Self {
+    pub fn new(
+        source: &'a Source,
+        destination: &'a Destination,
+        introspector: &'a dyn SchemaIntrospector,
+        dry_run: bool,
+    ) -> Self {
         Self {
             source,
             destination,
+            introspector,
             dry_run,
         }
     }
@@ -204,9 +212,8 @@ impl<'a> SettingsValidator<'a> {
     }
 
     async fn destination_exists(&self) -> Result<bool, SettingsError> {
-        let adapter = self.destination.data_dest.adapter().await;
         let table = &self.destination.name;
-        let exists = adapter.table_exists(table).await?;
+        let exists = self.introspector.table_exists(table).await?;
         Ok(exists)
     }
 

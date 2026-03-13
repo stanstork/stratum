@@ -1,4 +1,4 @@
-use connectors::error::AdapterError;
+use connectors::error::DriverError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -8,9 +8,9 @@ pub enum HookError {
         index: usize,
         sql: String,
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: DriverError,
     },
 
-    #[error("Adapter error: {0}")]
-    AdapterError(#[from] AdapterError),
+    #[error("Driver error: {0}")]
+    DriverError(#[from] DriverError),
 }

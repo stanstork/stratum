@@ -12,11 +12,12 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use connectors::sql::base::{metadata::column::ColumnMetadata, query::column::ColumnDef};
+use connectors::sql::{metadata::column::ColumnMetadata, query::column::ColumnDef};
 use engine_core::schema::plan::SchemaPlan;
+use engine_processing::io::driver::SchemaDriver;
 use expression_engine::ExpressionAnalyzer;
 use model::{
-    core::data_type::DataType,
+    core::types::{FloatSize, IntSize, Type},
     execution::{expr::CompiledExpression, pipeline::Transformation},
     transform::mapping::TransformationMetadata,
 };
@@ -62,8 +63,8 @@ impl MappingAnalyzer {
             target,
             source,
             mapping_type,
-            source_type: Some(source_data_type.mysql_name().to_string()),
-            target_type: target_data_type.postgres_name().to_string(),
+            source_type: Some(format!("{:?}", source_data_type)),
+            target_type: format!("{:?}", target_data_type),
             type_conversion,
             nullable,
         })
@@ -75,11 +76,12 @@ impl MappingAnalyzer {
         transformation: &Transformation,
         source_plan: &SourcePlan,
         resolved_columns: &[ColumnDef],
-    ) -> Result<(MappingSource, MappingType, DataType), MappingAnalyzerError> {
+    ) -> Result<(MappingSource, MappingType, Type), MappingAnalyzerError> {
         match &transformation.expression {
             CompiledExpression::Identifier(name) => {
                 let physical_table = self.mapping.entities.resolve(&source_plan.table);
                 let meta = self.fetch_column_meta(&physical_table, name)?;
+                let source_type = self.column_to_type(&meta);
 
                 Ok((
                     MappingSource::Column {
@@ -87,7 +89,7 @@ impl MappingAnalyzer {
                         column: name.clone(),
                     },
                     MappingType::Direct,
-                    meta.data_type,
+                    source_type,
                 ))
             }
 
@@ -96,6 +98,7 @@ impl MappingAnalyzer {
                 let column = &segments[1];
                 let table = self.mapping.entities.reverse_resolve(alias);
                 let meta = self.fetch_column_meta(&table, column)?;
+                let source_type = self.column_to_type(&meta);
 
                 let m_type = if table == source_plan.table {
                     MappingType::Direct
@@ -109,18 +112,18 @@ impl MappingAnalyzer {
                         column: column.clone(),
                     },
                     m_type,
-                    meta.data_type,
+                    source_type,
                 ))
             }
 
             CompiledExpression::Literal(value) => {
-                let dtype = value.data_type().clone();
+                let dtype = value.data_type();
                 let (val_str, _) = ExpressionAnalyzer::format_literal(value);
 
                 Ok((
                     MappingSource::Constant {
                         value: val_str,
-                        value_type: dtype.mysql_name().to_string(),
+                        value_type: format!("{:?}", dtype),
                     },
                     MappingType::Constant,
                     dtype,
@@ -132,12 +135,20 @@ impl MappingAnalyzer {
         }
     }
 
+    /// Convert a ColumnMetadata to a canonical Type using the schema plan's type engine.
+    fn column_to_type(&self, col: &ColumnMetadata) -> Type {
+        self.schema_plan
+            .type_engine()
+            .source_dialect()
+            .to_canonical(col)
+    }
+
     /// Handles complex computed logic using the SchemaPlan for inferred types.
     fn analyze_complex_expression(
         &self,
         transformation: &Transformation,
         resolved_columns: &[ColumnDef],
-    ) -> Result<(MappingSource, MappingType, DataType), MappingAnalyzerError> {
+    ) -> Result<(MappingSource, MappingType, Type), MappingAnalyzerError> {
         let inferred_type =
             self.get_target_data_type(&transformation.target_field, resolved_columns)?;
         let expr = &transformation.expression;
@@ -184,11 +195,7 @@ impl MappingAnalyzer {
     }
 
     /// Determines if a conversion is required and assesses the risk (lossy vs safe).
-    fn evaluate_conversion_safety(
-        &self,
-        source: &DataType,
-        target: &DataType,
-    ) -> Option<TypeConversion> {
+    fn evaluate_conversion_safety(&self, source: &Type, target: &Type) -> Option<TypeConversion> {
         if source == target {
             return None;
         }
@@ -196,78 +203,124 @@ impl MappingAnalyzer {
         let is_lossy = self.check_lossy_risk(source, target);
         let method = self.conversion_method(source, target);
 
+        let source_name = format!("{:?}", source);
+        let target_name = format!("{:?}", target);
+
         let warning = if is_lossy {
             Some(format!(
                 "Potential data loss or precision truncation during {} to {} conversion.",
-                source.mysql_name(),
-                target.postgres_name()
+                source_name, target_name
             ))
         } else if matches!(method, ConversionMethod::Explicit) {
             Some(format!(
                 "Explicit type cast required for {} to {} mapping.",
-                source.mysql_name(),
-                target.postgres_name()
+                source_name, target_name
             ))
         } else {
             None
         };
 
         Some(TypeConversion {
-            from_type: source.mysql_name().to_string(),
-            to_type: target.postgres_name().to_string(),
+            from_type: source_name,
+            to_type: target_name,
             is_safe: !is_lossy,
             warning,
             conversion_method: method,
         })
     }
 
-    /// Logic for determining conversion strategy based on the `DataType` enum categories.
-    fn conversion_method(&self, from: &DataType, to: &DataType) -> ConversionMethod {
-        use DataType::*;
+    /// Logic for determining conversion strategy based on the `Type` enum categories.
+    fn conversion_method(&self, from: &Type, to: &Type) -> ConversionMethod {
         match (from, to) {
             // Implicit: Upscaling numeric types
             (
-                Short | ShortUnsigned | Int | Int4 | IntUnsigned,
-                Long | LongLong | Float | Double | Decimal | NewDecimal,
-            ) => ConversionMethod::Implicit,
+                Type::Int { .. },
+                Type::Int {
+                    bits: IntSize::I64, ..
+                },
+            )
+            | (Type::Int { .. }, Type::Float { .. })
+            | (Type::Int { .. }, Type::Decimal { .. }) => ConversionMethod::Implicit,
 
             // Explicit: Downscaling or cross-category
-            (Float | Double | Decimal | NewDecimal, Short | Int | Int4 | Long) => {
+            (Type::Float { .. } | Type::Decimal { .. }, Type::Int { .. }) => {
                 ConversionMethod::Explicit
             }
-            (String | VarChar | Char, Int | Int4 | Long | Float | Double | Decimal | Boolean) => {
+            (
+                Type::Text { .. } | Type::Varchar { .. } | Type::Char { .. },
+                Type::Int { .. } | Type::Float { .. } | Type::Decimal { .. } | Type::Boolean,
+            ) => ConversionMethod::Explicit,
+            (Type::Json { .. }, Type::Text { .. } | Type::Varchar { .. }) => {
                 ConversionMethod::Explicit
             }
-            (Json, String | VarChar) => ConversionMethod::Explicit,
 
             // Function-based: Temporal transformations
-            (Timestamp | TimestampTz | Date, String | VarChar) => ConversionMethod::Function {
-                name: "to_char".to_string(),
-            },
-            (String | VarChar, Timestamp | TimestampTz | Date) => ConversionMethod::Function {
-                name: "to_timestamp".to_string(),
-            },
-
-            // Binary to String (usually requires encoding like base64 or hex)
-            (Blob | LongBlob | Bytea | Binary | VarBinary, String | VarChar) => {
+            (Type::Timestamp { .. } | Type::Date, Type::Text { .. } | Type::Varchar { .. }) => {
                 ConversionMethod::Function {
-                    name: "encode".to_string(),
+                    name: "to_char".to_string(),
                 }
             }
+            (Type::Text { .. } | Type::Varchar { .. }, Type::Timestamp { .. } | Type::Date) => {
+                ConversionMethod::Function {
+                    name: "to_timestamp".to_string(),
+                }
+            }
+
+            // Binary to String (usually requires encoding like base64 or hex)
+            (
+                Type::Blob { .. } | Type::Binary { .. } | Type::Varbinary { .. },
+                Type::Text { .. } | Type::Varchar { .. },
+            ) => ConversionMethod::Function {
+                name: "encode".to_string(),
+            },
 
             // Default
             _ => ConversionMethod::Explicit,
         }
     }
 
-    fn check_lossy_risk(&self, from: &DataType, to: &DataType) -> bool {
-        use DataType::*;
+    fn check_lossy_risk(&self, from: &Type, to: &Type) -> bool {
         match (from, to) {
-            (Float | Double | Decimal | NewDecimal, Short | Int | Int4 | Long | LongLong) => true, // Decimals to Int
-            (Long | LongLong | IntUnsigned, Int | Int4 | Short) => true, // Overflow risk
-            (TimestampTz, Timestamp | Date) => true,                     // Timezone truncation
-            (Double, Float) => true,                                     // Precision loss
-            (Timestamp | Date | Json, String | VarChar) => true,         // Format dependency
+            // Decimals/Floats to Int
+            (Type::Float { .. } | Type::Decimal { .. }, Type::Int { .. }) => true,
+            // Large int to smaller int (overflow risk)
+            (
+                Type::Int {
+                    bits: IntSize::I64, ..
+                },
+                Type::Int {
+                    bits: IntSize::I32 | IntSize::I16 | IntSize::I8,
+                    ..
+                },
+            ) => true,
+            (
+                Type::Int {
+                    bits: IntSize::I32, ..
+                },
+                Type::Int {
+                    bits: IntSize::I16 | IntSize::I8,
+                    ..
+                },
+            ) => true,
+            // Timezone truncation
+            (
+                Type::Timestamp { with_tz: true, .. },
+                Type::Timestamp { with_tz: false, .. } | Type::Date,
+            ) => true,
+            // Double to float precision loss
+            (
+                Type::Float {
+                    bits: FloatSize::F64,
+                },
+                Type::Float {
+                    bits: FloatSize::F32,
+                },
+            ) => true,
+            // Timestamp/Date/Json to text (format dependency)
+            (
+                Type::Timestamp { .. } | Type::Date | Type::Json { .. },
+                Type::Text { .. } | Type::Varchar { .. },
+            ) => true,
             _ => false,
         }
     }
@@ -276,7 +329,7 @@ impl MappingAnalyzer {
         &self,
         name: &str,
         columns: &[ColumnDef],
-    ) -> Result<DataType, MappingAnalyzerError> {
+    ) -> Result<Type, MappingAnalyzerError> {
         columns
             .iter()
             .find(|c| c.name == name)
@@ -315,7 +368,7 @@ impl MappingAnalyzer {
 }
 
 #[async_trait]
-impl PlanAnalyzer for MappingAnalyzer {
+impl<S: SchemaDriver, D: SchemaDriver> PlanAnalyzer<S, D> for MappingAnalyzer {
     type Input = (Vec<Transformation>, SourcePlan);
     type Output = Vec<ColumnMapping>;
 
@@ -326,7 +379,7 @@ impl PlanAnalyzer for MappingAnalyzer {
     async fn analyze(
         &self,
         input: &Self::Input,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<Self::Output> {
         let (transformations, source_plan) = input;
         let resolved_columns = ctx.schema_plan.resolved_column_defs().await;

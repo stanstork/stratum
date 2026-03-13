@@ -1,6 +1,5 @@
-pub mod adapter;
-pub mod driver;
+pub mod drivers;
 pub mod error;
-pub mod file;
-pub mod metadata;
+pub mod registry;
 pub mod sql;
+pub mod traits;

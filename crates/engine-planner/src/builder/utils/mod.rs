@@ -1,13 +1,11 @@
 pub mod column_parser;
 pub mod column_validator;
-pub mod dialect_resolver;
 pub mod masking;
 
 use std::time::Duration;
 
 pub use column_parser::{ColumnRef, ColumnRefError, ColumnRefParser};
 pub use column_validator::ColumnValidator;
-pub use dialect_resolver::dialect_for_adapter;
 pub use masking::MaskingPolicy;
 
 pub fn format_duration(d: &Duration) -> String {

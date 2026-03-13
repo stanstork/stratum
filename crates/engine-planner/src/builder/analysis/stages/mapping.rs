@@ -6,13 +6,14 @@ use crate::builder::{
     analyzers::mapping::MappingAnalyzer,
 };
 use async_trait::async_trait;
+use engine_processing::io::driver::SchemaDriver;
 
 pub struct MappingStage {
     pub analyzer: MappingAnalyzer,
 }
 
 #[async_trait]
-impl PipelineAnalysisStage for MappingStage {
+impl<S: SchemaDriver, D: SchemaDriver> PipelineAnalysisStage<S, D> for MappingStage {
     fn name(&self) -> &'static str {
         "mapping"
     }
@@ -20,7 +21,7 @@ impl PipelineAnalysisStage for MappingStage {
     async fn run(
         &self,
         input: &PipelineAnalysisInput,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
         state: &mut AnalysisState,
     ) -> AnalyzerResult<()> {
         let source_plan = state.require_source()?.clone();

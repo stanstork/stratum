@@ -1,19 +1,19 @@
 # Stratum Documentation
 
 ## What is Stratum?
-Stratum is a declarative data migration engine that moves data between databases with:
+Stratum is a declarative data pipeline engine that safely migrates data and schema between databases with:
 
 - **High Performance**: Parallel producer-consumer architecture with batching
 - **Reliability**: Built-in checkpointing, retries, and circuit breakers
-- **Declarative**: Simple SMQL syntax to define migrations
+- **Declarative**: SMQL pipelines for data movement and schema migration
 - **Type Safety**: Automatic schema inference and type coercion
-- **Resumability**: Crash-safe with state tracking
+- **Resumability**: Crash-safe with sled-backed state tracking
 
 ## Supported Connectors
 
 **Sources:**
 - MySQL
-- PostgreSQL  
+- PostgreSQL
 - CSV files
 
 **Destinations:**
@@ -21,23 +21,34 @@ Stratum is a declarative data migration engine that moves data between databases
 
 ## Core Features
 
-- Snapshot migrations with pagination
-- Field-level transformations
-- Computed columns
+- DAG-based pipeline execution with parallel levels
+- Schema migration: CREATE TABLE, indexes, foreign keys, sequences, ENUMs
+- Snapshot migrations with cursor-based pagination (pk / numeric / timestamp)
+- Field-level transformations and computed columns
+- Row-level data validation
+- Dead Letter Queue for failed rows
 - Graceful shutdown (SIGINT/SIGTERM)
-- Progress tracking
-- Dry-run validation
+- Dry-run analysis (`plan` command)
 - Automatic resume from checkpoints
 
 ## Architecture at a Glance
 
-
 ```
-User → SMQL Parser → Migration Plan → Execution Engine
-                                       ↓
-                          [Producer] → MPSC → [Consumer]
-                                 ↓               ↓
-                          Source DB        Destination DB
+SMQL → ExecutionPlan → DAG Executor
+                           ↓  (level by level, parallel within level)
+                  PipelineOrchestrator
+                      ↓           ↓
+              Schema Ops      Data Pipeline
+          (CREATE TABLE,    run_producer() → MPSC → run_consumer()
+           indexes, FKs)         ↓                       ↓
+                            Source DB             Destination DB
+                                                  + SledStateStore
+                                                    (checkpoints)
 ```
 
-See [Architecture Overview](architecture.md) for detailed diagrams.
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [architecture.md](architecture.md) | Full crate map, layer breakdown, design decisions |
+| [smql-reference.md](smql-reference.md) | SMQL v2.1 language reference with examples |

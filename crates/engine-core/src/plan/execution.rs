@@ -1,4 +1,7 @@
-use crate::plan::{builder::PlanBuilder, env::EnvVarCollector};
+use crate::{
+    context::env::EnvContext,
+    plan::{builder::PlanBuilder, env::EnvVarCollector},
+};
 use model::execution::{
     connection::Connection,
     define::{EnvVar, GlobalDefinitions},
@@ -8,7 +11,7 @@ use model::execution::{
 };
 use serde::{Deserialize, Serialize};
 use smql_syntax::ast::doc::SmqlDocument;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 /// Top-level execution plan compiled from SMQL AST
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,8 +28,8 @@ pub struct ExecutionPlan {
 
 impl ExecutionPlan {
     /// Build execution plan from SMQL document
-    pub fn build(doc: &SmqlDocument) -> Result<ExecutionPlan, ConvertError> {
-        let mut builder = PlanBuilder::new();
+    pub fn build(doc: &SmqlDocument, env: Arc<EnvContext>) -> Result<ExecutionPlan, ConvertError> {
+        let mut builder = PlanBuilder::new(env);
 
         if let Some(def_block) = &doc.define_block {
             builder.global_definitions = builder.extract_definitions(def_block)?;
@@ -53,7 +56,7 @@ impl ExecutionPlan {
 
         // Collect all environment variable usage throughout the document
         let mut env_collector = EnvVarCollector::new();
-        env_collector.collect_document(doc, |expr| PlanBuilder::eval_expression(expr).ok());
+        env_collector.collect_document(doc, |expr| builder.eval_expression(expr).ok());
 
         Ok(ExecutionPlan {
             definitions: GlobalDefinitions {
@@ -84,8 +87,9 @@ impl ExecutionPlan {
 mod tests {
     use model::{core::value::Value, execution::pipeline::WriteMode};
     use smql_syntax::builder::parse;
+    use std::sync::Arc;
 
-    use crate::plan::execution::ExecutionPlan;
+    use crate::{context::env::EnvContext, plan::execution::ExecutionPlan};
 
     #[test]
     fn test_full_document_conversion() {
@@ -119,7 +123,8 @@ pipeline "copy_customers" {
         "#;
 
         let doc = parse(input).expect("Failed to parse SMQL");
-        let plan = ExecutionPlan::build(&doc).expect("Failed to build execution plan");
+        let plan = ExecutionPlan::build(&doc, Arc::new(EnvContext::empty()))
+            .expect("Failed to build execution plan");
 
         // Check definitions
         assert_eq!(plan.definitions.variables.len(), 1);

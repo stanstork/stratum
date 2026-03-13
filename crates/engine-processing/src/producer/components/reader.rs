@@ -1,8 +1,6 @@
-use crate::{error::ProducerError, retry::classify_adapter_error};
-use engine_core::{
-    connectors::source::Source,
-    retry::{RetryError, RetryPolicy},
-};
+use crate::io::source::Source;
+use crate::{error::ProducerError, retry::classify_driver_error};
+use engine_core::retry::{RetryError, RetryPolicy};
 use model::pagination::{cursor::Cursor, page::FetchResult};
 
 /// Handles data fetching from source with retry logic.
@@ -33,9 +31,9 @@ impl SnapshotReader {
                 || {
                     let source = source.clone();
                     let cursor = cursor_template.clone();
-                    async move { source.fetch_data(batch_size, cursor).await }
+                    async move { source.fetch(batch_size, cursor).await }
                 },
-                classify_adapter_error,
+                classify_driver_error,
             )
             .await;
 
@@ -44,7 +42,7 @@ impl SnapshotReader {
             Err(RetryError::Fatal(e)) => {
                 return Err(ProducerError::Fetch {
                     cursor: cursor_template,
-                    source: Box::new(std::io::Error::other(e)),
+                    source: e,
                 });
             }
             Err(RetryError::AttemptsExceeded(e)) => {

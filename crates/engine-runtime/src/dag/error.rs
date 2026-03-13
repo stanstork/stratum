@@ -20,12 +20,8 @@ pub enum DagError {
 
 #[derive(Error, Debug)]
 pub enum ExecutionError {
-    #[error("Pipeline '{pipeline}' failed: {source}")]
-    PipelineFailed {
-        pipeline: String,
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
+    #[error("Pipeline '{pipeline}' failed: {reason}")]
+    PipelineFailed { pipeline: String, reason: String },
 
     #[error("Multiple pipelines failed: {0:?}")]
     MultiplePipelinesFailed(Vec<String>),

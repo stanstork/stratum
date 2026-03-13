@@ -1,66 +1,92 @@
 flowchart TD
-    START([User Request]) --> PARSE[Parse SMQL config → AST]
-    PARSE --> PLAN[Generate MigrationPlan<br/>with hash]
-    PLAN --> INIT[Initialize GlobalContext<br/>+ StateStore]
-    INIT --> LOOP{For each<br/>MigrationItem}
-    
-    LOOP --> CTX[Create ItemContext]
-    CTX --> SRC[Source adapter<br/>MySQL/Postgres/CSV]
-    CTX --> DEST[Destination adapter]
-    CTX --> MAP[Entity mapping]
-    
-    SRC --> META
-    DEST --> META
-    MAP --> META
-    
-    META[Load metadata<br/>introspect schemas] --> VALIDATE[Validate settings]
-    
-    VALIDATE --> SPAWN[Spawn Pipeline]
-    
-    SPAWN --> COORD[PipelineCoordinator]
-    COORD --> PROD_ACTOR[ProducerActor<br/>spawned as Tokio task]
-    COORD --> CONS_ACTOR[ConsumerActor<br/>spawned as Tokio task]
-    COORD --> CHANNEL_INIT[MPSC batch channel<br/>capacity: 64]
-    
-    PROD_ACTOR --> PROC_LOOP[Processing Loop]
-    CONS_ACTOR --> PROC_LOOP
-    CHANNEL_INIT --> PROC_LOOP
-    
-    PROC_LOOP --> PRODUCER_START[Producer Side]
-    
-    subgraph PRODUCER[Producer Processing]
-        PRODUCER_START --> SNAP[SnapshotReader<br/>reads batch]
-        SNAP --> TRANS[TransformService<br/>applies mappings]
-        TRANS --> BATCH_C[BatchCoordinator<br/>sends to channel]
-        BATCH_C --> PROD_STATE[State:<br/>Working/Idle/Finished]
+    START([User: stratum apply -c config.smql]) --> PARSE[smql-syntax<br/>Parse SMQL → AST]
+    PARSE --> BUILD_PLAN[engine-config<br/>AST → ExecutionPlan<br/>resolve env vars, validate settings]
+    BUILD_PLAN --> HASH["Deterministic plan hash<br/>run_id = run-&lt;hash16&gt;"]
+    HASH --> INIT[Initialize ExecutionContext<br/>connection pool + SledStateStore<br/>EnvContext]
+
+    INIT --> DAG_BUILD[Build DAG<br/>from after= declarations<br/>topological sort → levels]
+
+    DAG_BUILD --> LEVEL_LOOP{For each<br/>DAG level}
+
+    LEVEL_LOOP --> PARALLEL[Run pipelines in parallel<br/>futures::stream]
+
+    PARALLEL --> PIPELINE{For each<br/>pipeline}
+
+    PIPELINE --> CHECKPOINT_CHECK{Checkpoint<br/>exists?}
+    CHECKPOINT_CHECK -->|Yes| RESUME[Load cursor from SledStateStore<br/>skip processed rows]
+    CHECKPOINT_CHECK -->|No| FRESH[Start from beginning]
+
+    RESUME --> SCHEMA_P1
+    FRESH --> SCHEMA_P1
+
+    SCHEMA_P1["Schema Phase 1<br/>SchemaPlanner introspects source<br/>DependencyGraph → topological order<br/>CREATE TABLE (no FKs)"]
+
+    SCHEMA_P1 --> DATA_MIGRATE[Data Migration]
+
+    subgraph PRODUCER["run_producer() — Tokio task"]
+        SNAP["SnapshotReader<br/>paginate source<br/>(pk / numeric / timestamp cursor)"]
+        TRANS["TransformService<br/>field mapping<br/>computed columns<br/>type coercion (Transform hints)"]
+        BATCH["BatchCoordinator<br/>group into batches<br/>send to MPSC channel"]
+
+        SNAP --> TRANS
+        TRANS --> BATCH
     end
-    
-    PROD_STATE --> MPSC[MPSC Channel<br/>backpressure]
-    
-    MPSC --> CONSUMER_START[Consumer Side]
-    
-    subgraph CONSUMER[Consumer Processing]
-        CONSUMER_START --> RECV[Receive batch<br/>from channel]
-        RECV --> WRITE[BatchWriter applies<br/>COPY/MERGE/INSERT]
-        WRITE --> STATE_UPD[StateManager<br/>updates checkpoint]
-        STATE_UPD --> METRICS_INC[Metrics increment]
-        METRICS_INC --> CONS_STATE[State:<br/>Working/Idle/Finished]
+
+    subgraph CONSUMER["run_consumer() — Tokio task"]
+        RECV["Receive Batch<br/>from MPSC channel"]
+        WRITE["Sink::write_batch()<br/>PostgresSink: COPY protocol<br/>fallback: INSERT"]
+        CKPT["SledStateStore<br/>commit checkpoint<br/>(cursor + row counts)"]
+        MET["Metrics increment<br/>records_processed<br/>bytes_transferred"]
+
+        RECV --> WRITE
+        WRITE --> CKPT
+        CKPT --> MET
     end
-    
-    CONS_STATE --> PROGRESS[Progress tracking]
-    PROGRESS --> EVENTBUS[EventBus]
-    EVENTBUS --> MONITOR[Monitoring]
-    
-    MONITOR --> CHECK{More<br/>MigrationItems?}
-    CHECK -->|Yes| LOOP
-    CHECK -->|No| END([Complete])
-    
+
+    DATA_MIGRATE --> PRODUCER
+    DATA_MIGRATE --> CONSUMER
+
+    BATCH -.->|"Batch (cap:64, backpressure)"| RECV
+
+    CB["Circuit Breaker<br/>4 failures → open<br/>backoff: 1s…30s → retry"]
+    WRITE -.->|failure| CB
+    CB -.->|retry| WRITE
+
+    MET --> EVENTBUS[EventBus<br/>BatchProcessed event]
+    EVENTBUS --> SUBSCRIBERS["Subscribers:<br/>TUI progress bars<br/>structured logger"]
+
+    MET --> SCHEMA_P3
+
+    SCHEMA_P3["Schema Phase 3<br/>CREATE INDEX<br/>ALTER TABLE ADD CONSTRAINT (FKs)"]
+
+    SCHEMA_P3 --> PIPELINE_DONE([Pipeline complete])
+
+    PIPELINE_DONE --> MORE_LEVELS{More DAG<br/>levels?}
+    MORE_LEVELS -->|Yes| LEVEL_LOOP
+    MORE_LEVELS -->|No| SHUTDOWN
+
+    SHUTDOWN["Graceful shutdown<br/>drain in-flight batches<br/>write final checkpoint<br/>close connections"]
+
+    SHUTDOWN --> END([Done — exit 0])
+
+    SIGINT(["SIGINT / SIGTERM"]) -->|CancellationToken| PRODUCER
+    SIGINT -->|CancellationToken| CONSUMER
+    PRODUCER -.->|tokio::select!| CANCEL_P([cancel: drain + checkpoint])
+    CONSUMER -.->|tokio::select!| CANCEL_C([cancel: drain + checkpoint])
+
     style START fill:#90EE90
-    style END fill:#FFB6C1
-    style LOOP fill:#FFE4B5
-    style CHECK fill:#FFE4B5
+    style END fill:#90EE90
+    style PIPELINE_DONE fill:#90EE90
+    style CANCEL_P fill:#FFB6C1
+    style CANCEL_C fill:#FFB6C1
+    style SIGINT fill:#FFB6C1
+    style LEVEL_LOOP fill:#FFE4B5
+    style PIPELINE fill:#FFE4B5
+    style MORE_LEVELS fill:#FFE4B5
+    style CHECKPOINT_CHECK fill:#FFE4B5
     style PRODUCER fill:#E6F3FF
     style CONSUMER fill:#FFE6F0
-    style MPSC fill:#FFF9E6
-    style COORD fill:#F0E6FF
-    style MONITOR fill:#E6FFE6
+    style CB fill:#FFF0E6
+    style SCHEMA_P1 fill:#E6FFE6
+    style SCHEMA_P3 fill:#E6FFE6
+    style EVENTBUS fill:#F0E6FF

@@ -1,0 +1,17 @@
+[package]
+name = "engine-infra"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+model = { path = "../model" }
+engine-state = { path = "../engine-state" }
+
+tokio = { version = "1.43.0", features = ["full"] }
+chrono = { version = "0.4.39", features = ["serde"] }
+serde = "1.0.217"
+tracing = "0.1.41"
+
+[dev-dependencies]
+tokio = { version = "1.43.0", features = ["full"] }
+tempfile = "3.14.0"

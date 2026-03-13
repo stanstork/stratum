@@ -1,7 +1,5 @@
-use model::{
-    core::value::Value,
-    execution::expr::{BinaryOp, CompiledExpression, UnaryOp},
-};
+use model::core::value::Value;
+use model::execution::expr::{BinaryOp, CompiledExpression, UnaryOp};
 
 /// Analyzes compiled expressions to extract metadata
 pub struct ExpressionAnalyzer;
@@ -135,30 +133,6 @@ impl ExpressionAnalyzer {
         }
     }
 
-    /// Format a literal value to (string representation, type name)
-    pub fn format_literal(value: &Value) -> (String, String) {
-        match value {
-            Value::String(s) => (s.clone(), "string".to_string()),
-            Value::Int(i) => (i.to_string(), "integer".to_string()),
-            Value::Int32(i) => (i.to_string(), "integer".to_string()),
-            Value::SmallInt(i) => (i.to_string(), "integer".to_string()),
-            Value::Uint(u) => (u.to_string(), "integer".to_string()),
-            Value::Usize(u) => (u.to_string(), "integer".to_string()),
-            Value::Float(f) => (f.to_string(), "float".to_string()),
-            Value::Decimal(d) => (d.to_string(), "decimal".to_string()),
-            Value::Boolean(b) => (b.to_string(), "boolean".to_string()),
-            Value::Null => ("NULL".to_string(), "null".to_string()),
-            Value::Date(d) => (d.to_string(), "date".to_string()),
-            Value::Timestamp(ts) => (ts.to_string(), "timestamp".to_string()),
-            Value::TimestampNaive(ts) => (ts.to_string(), "timestamp".to_string()),
-            Value::StringArray(arr) => (format!("{:?}", arr), "array".to_string()),
-            Value::Json(j) => (j.to_string(), "json".to_string()),
-            Value::Uuid(u) => (u.to_string(), "uuid".to_string()),
-            Value::Bytes(b) => (format!("{:?}", b), "bytes".to_string()),
-            Value::Enum(typ, val) => (val.clone(), typ.clone()),
-        }
-    }
-
     /// Check if an expression is a simple column reference
     pub fn is_simple_column(expr: &CompiledExpression) -> bool {
         matches!(
@@ -175,6 +149,28 @@ impl ExpressionAnalyzer {
     /// Check if an expression is a constant (literal value)
     pub fn is_constant(expr: &CompiledExpression) -> bool {
         matches!(expr, CompiledExpression::Literal(_))
+    }
+
+    /// Format a literal value as a string representation
+    /// Returns (formatted_string, optional_type_hint)
+    pub fn format_literal(value: &Value) -> (String, Option<String>) {
+        let formatted = match value {
+            Value::Null => "NULL".to_string(),
+            Value::Boolean(b) => if *b { "TRUE" } else { "FALSE" }.to_string(),
+            Value::String(s) => format!("'{}'", s),
+            Value::Int(n) => n.to_string(),
+            Value::UInt(n) => n.to_string(),
+            Value::Float(n) => n.to_string(),
+            Value::Decimal(n) => n.to_string(),
+            Value::Date(d) => format!("'{}'", d),
+            Value::Time { value, .. } => format!("'{}'", value),
+            Value::Timestamp { value, .. } => format!("'{}'", value),
+            Value::Uuid(u) => format!("'{}'", u),
+            Value::Json(j) => format!("'{}'", j),
+            _ => "NULL".to_string(),
+        };
+
+        (formatted, None)
     }
 
     /// Get the complexity score of an expression (number of nodes)
@@ -218,7 +214,7 @@ impl ExpressionAnalyzer {
     /// Convert expression to SQL-like string representation
     pub fn to_string(expr: &CompiledExpression) -> String {
         match expr {
-            CompiledExpression::Literal(value) => Self::format_value_for_sql(value),
+            CompiledExpression::Literal(value) => Self::format_literal(value).0,
             CompiledExpression::Identifier(name) => name.clone(),
             CompiledExpression::DotPath(segments) => segments.join("."),
 
@@ -324,36 +320,6 @@ impl ExpressionAnalyzer {
         match op {
             UnaryOp::Not => "NOT",
             UnaryOp::Negate => "-",
-        }
-    }
-
-    /// Format value for SQL representation
-    fn format_value_for_sql(value: &Value) -> String {
-        match value {
-            Value::String(s) => format!("'{}'", s.replace('\'', "''")),
-            Value::Int(i) => i.to_string(),
-            Value::Int32(i) => i.to_string(),
-            Value::SmallInt(i) => i.to_string(),
-            Value::Uint(u) => u.to_string(),
-            Value::Usize(u) => u.to_string(),
-            Value::Float(f) => f.to_string(),
-            Value::Decimal(d) => d.to_string(),
-            Value::Boolean(b) => b.to_string().to_uppercase(),
-            Value::Null => "NULL".to_string(),
-            Value::Date(d) => format!("'{}'", d),
-            Value::Timestamp(ts) => format!("'{}'", ts),
-            Value::TimestampNaive(ts) => format!("'{}'", ts),
-            Value::StringArray(arr) => format!(
-                "ARRAY[{}]",
-                arr.iter()
-                    .map(|s| format!("'{}'", s.replace('\'', "''")))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Value::Json(j) => format!("'{}'", j),
-            Value::Uuid(u) => format!("'{}'", u),
-            Value::Bytes(b) => format!("E'\\\\x{}'", hex::encode(b)),
-            Value::Enum(_typ, val) => format!("'{}'", val.replace('\'', "''")),
         }
     }
 }

@@ -1,11 +1,8 @@
 use model::{
-    core::value::Value, execution::define::DefinitionInfo, records::row::RowData,
+    core::value::Value, execution::define::DefinitionInfo, records::Record,
     transform::mapping::TransformationMetadata,
 };
 use std::collections::HashMap;
-
-/// Function type for getting environment variables
-pub type EnvGetter = fn(&str) -> Option<String>;
 
 /// Evaluation context that provides access to different data sources
 /// depending on whether we're evaluating at build-time or runtime
@@ -13,13 +10,13 @@ pub enum EvalContext<'a> {
     /// Build-time evaluation: has access to global definitions and env getter
     BuildTime {
         definitions: &'a HashMap<String, DefinitionInfo>,
-        env_getter: EnvGetter,
+        env_getter: &'a dyn Fn(&str) -> Option<String>,
     },
     /// Runtime evaluation: has access to row data, mappings, and env getter
     Runtime {
-        row_data: &'a RowData,
+        row_data: &'a Record,
         mapping: &'a TransformationMetadata,
-        env_getter: EnvGetter,
+        env_getter: &'a dyn Fn(&str) -> Option<String>,
     },
 }
 
@@ -46,7 +43,7 @@ impl<'a> EvalContext<'a> {
     }
 
     /// Get row data (runtime only)
-    pub fn get_row_data(&self) -> Option<&RowData> {
+    pub fn get_row_data(&self) -> Option<&Record> {
         match self {
             EvalContext::BuildTime { .. } => None,
             EvalContext::Runtime { row_data, .. } => Some(row_data),

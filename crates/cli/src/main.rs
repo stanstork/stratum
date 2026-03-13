@@ -3,8 +3,8 @@ use crate::{
     shutdown::ShutdownCoordinator,
 };
 use clap::Parser;
-use engine_processing::env_context::{EnvContext, init_env_context};
-use std::process;
+use engine_processing::EnvContext;
+use std::{process, sync::Arc};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -44,14 +44,14 @@ async fn run(cli: Cli) -> Result<(), CliError> {
     shutdown_coordinator.register_handlers();
 
     // Initialize environment variables
-    init_environment(cli.env_file.as_deref())?;
+    let env = init_environment(cli.env_file.as_deref())?;
 
     // Execute the command
-    execute_command(&cli, cancel).await
+    execute_command(&cli, cancel, env).await
 }
 
 /// Initializes environment variables from file if provided
-fn init_environment(env_file: Option<&str>) -> Result<(), CliError> {
+fn init_environment(env_file: Option<&str>) -> Result<Arc<EnvContext>, CliError> {
     let mut env_manager = EnvManager::new();
 
     if let Some(path) = env_file {
@@ -64,9 +64,7 @@ fn init_environment(env_file: Option<&str>) -> Result<(), CliError> {
         env_context.set(key.clone(), value.clone());
     }
 
-    init_env_context(env_context);
-
-    Ok(())
+    Ok(Arc::new(env_context))
 }
 
 /// Handles application errors and returns appropriate exit code

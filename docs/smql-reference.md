@@ -1,649 +1,1105 @@
-# SMQL Reference (v2.0)
+# SMQL Reference (v2.1)
 
-SMQL (Stratum Migration Query Language) is a declarative language for defining data migrations with powerful inline clauses and rich source definitions.
+SMQL (Stratum Migration Query Language) is a declarative, SQL-inspired language for defining data pipelines and migrations. It is data-first: every keyword maps directly to a data concept rather than an infrastructure concept.
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Top-Level Statements](#top-level-statements)
-  - [CONNECTIONS](#connections)
-  - [MIGRATE](#migrate)
-- [Inline Clauses](#inline-clauses)
-  - [SETTINGS](#settings)
-  - [FILTER](#filter)
-  - [LOAD / MATCH](#load--match)
-  - [MAP](#map)
-  - [OFFSET](#offset)
+- [Core Principles](#core-principles)
+- [Top-Level Blocks](#top-level-blocks)
+  - [connection](#connection)
+  - [define](#define)
+  - [transform](#transform)
+  - [pipeline](#pipeline)
+- [Pipeline Blocks](#pipeline-blocks)
+  - [from](#from)
+  - [to](#to)
+  - [where](#where)
+  - [with](#with-joins)
+  - [select](#select)
+  - [validate](#validate)
+  - [on_error](#on_error)
+  - [paginate](#paginate)
+  - [before / after hooks](#before--after-hooks)
+  - [settings](#settings)
+- [Expressions](#expressions)
+- [Graph References](#graph-references)
 - [Complete Example](#complete-example)
-- [Best Practices](#best-practices)
 
 ---
 
-## Overview
+## Core Principles
 
-SMQL v2.0 introduces inline clauses and richer source definitions, letting you express per-mapping settings, filters, loads, and maps in a single MIGRATE block.
-
-**Key Features:**
-- Inline `[...]` blocks under each `SOURCE → DEST` mapping
-- Support for plural sources via `SOURCES(...)`
-- Explicit `TABLE` / `API` / `FILE` source and destination types
-- Powerful clauses for `FILTER`, `LOAD` (with `MATCH`), and `MAP` inside each mapping
-- Top-level `WITH SETTINGS` for global defaults
+1. **Named pipelines** — not "migrations" or "resources"
+2. **Data-first language** — tables, columns, rows
+3. **SQL-inspired where it makes sense** — `where`, `with`, `select`
+4. **Declarative but opinionated** — clear intent over flexibility
+5. **Clear data flow** — `from → to` is always explicit
 
 ---
 
-## Top-Level Statements
+## Top-Level Blocks
 
-### CONNECTIONS
+### connection
 
-Defines your source and destination endpoints.
+Defines a named data source or destination. Referenced inside pipelines via `connection.<name>`.
 
-**Syntax:**
 ```smql
-CONNECTIONS (
-    SOURCE(MYSQL, "mysql://user:pass@localhost:3306/db"),
-    DESTINATION(POSTGRES, "postgres://user:pass@localhost:5432/db")
-);
+connection "mysql_prod" {
+  driver = "mysql"
+  url    = env("SOURCE_DB_URL")  // required
+
+  pool {
+    max_size = env("DB_POOL_SIZE", 20)  // optional, with default
+  }
+}
+
+connection "warehouse_pg" {
+  driver = "postgres"
+  url    = env("DEST_DB")
+
+  pool {
+    max_size = 50
+    timeout  = "60s"
+  }
+}
 ```
 
-**Supported Database Types:**
-- `MYSQL`
-- `POSTGRES`
+**Supported drivers:** `"mysql"`, `"postgres"`
 
-**Connection String Format:**
-- Standard database connection URIs
-- Must include: protocol, credentials, host, port, database name
+**pool options:**
 
-**Examples:**
-
-MySQL:
-```smql
-SOURCE(MYSQL, "mysql://root:secret@localhost:3306/myapp")
-```
-
-PostgreSQL:
-```smql
-DESTINATION(POSTGRES, "postgres://user:pass@db.example.com:5432/warehouse")
-```
+| Key | Type | Description |
+|-----|------|-------------|
+| `max_size` | integer | Maximum number of pooled connections |
+| `timeout` | string | Connection timeout (e.g. `"30s"`, `"60s"`) |
 
 ---
 
-### MIGRATE
+### define
 
-The core of your migration plan. Each `SOURCE → DEST` mapping can have its own inline clauses.
+Declares named constants that can be referenced throughout pipelines as `define.<name>`.
 
-**Syntax:**
 ```smql
-MIGRATE (
-  SOURCE(TABLE, orders) -> DEST(TABLE, orders_flat) [
-    // Inline clauses here
-  ],
-  
-  SOURCES(TABLE, [a, b, c]) -> DEST(TABLE, combined) [
-    // Inline clauses here
-  ],
-  
-  SOURCE(API, "https://api.example.com/data") -> DEST(FILE, "/tmp/out.json") [
-    // Inline clauses here
-  ]
-)
-WITH SETTINGS (
-  CREATE_MISSING_TABLES = TRUE,
-  BATCH_SIZE = 1000
-);
+define {
+  tax_rate      = 1.4
+  cutoff_date   = "2024-01-01"
+  active_status = "active"
+}
 ```
 
-**Source Types:**
-
-| Type | Description | Example |
-|------|-------------|---------|
-| `SOURCE(TABLE, name)` | Single database table | `SOURCE(TABLE, users)` |
-| `SOURCES(TABLE, [list])` | Multiple tables (union) | `SOURCES(TABLE, [users_a, users_b])` |
-| `SOURCE(API, uri)` | REST API endpoint | `SOURCE(API, "https://...")` |
-| `SOURCE(FILE, path)` | File source | `SOURCE(FILE, "/data/input.csv")` |
-
-**Destination Types:**
-
-| Type | Description | Example |
-|------|-------------|---------|
-| `DEST(TABLE, name)` | Database table | `DEST(TABLE, customers)` |
-| `DEST(FILE, path)` | Output file | `DEST(FILE, "/tmp/export.json")` |
-
-**Global Settings:**
-
-The `WITH SETTINGS` block applies defaults to all mappings unless overridden inline.
+Use `define.<name>` anywhere an expression is valid:
 
 ```smql
-WITH SETTINGS (
-  CREATE_MISSING_TABLES = TRUE,
-  BATCH_SIZE = 1000,
-  WORKERS = 4,
-  CHECKPOINT_EVERY = 1
-)
+where "recent" {
+  orders.created_at >= define.cutoff_date
+}
+
+select {
+  order_tax = orders.total * define.tax_rate
+}
 ```
 
 ---
 
-## Inline Clauses
+### transform
 
-Each mapping can include any subset of these clauses inside `[...]` blocks, in any order.
+Defines a reusable named transformation. Takes typed input, returns an expression output. Called in `select` blocks via `transform.<name>(arg)`.
 
-### SETTINGS
-
-Mapping-specific overrides for behavior and schema management.
-
-**Syntax:**
 ```smql
-SETTINGS(
-  INFER_SCHEMA = TRUE,
-  IGNORE_CONSTRAINTS = FALSE,
-  CREATE_MISSING_COLUMNS = TRUE,
-  COPY_COLUMNS = MAP_ONLY
-)
+transform "normalize_email" {
+  input  = string
+  output = lower(trim(input))
+}
+
+transform "calculate_tax" {
+  input  = number
+  output = input * define.tax_rate
+}
 ```
 
-**Available Settings:**
+Usage in a pipeline:
 
-| Name | Type | Default | Description |
-|------|------|---------|-------------|
-| `INFER_SCHEMA` | Boolean | `FALSE` | Emit DDL for this mapping's tables & foreign keys |
-| `IGNORE_CONSTRAINTS` | Boolean | `FALSE` | Don't validate foreign keys at runtime |
-| `CREATE_MISSING_COLUMNS` | Boolean | `FALSE` | Auto-add new columns in target if missing |
-| `CREATE_MISSING_TABLES` | Boolean | `FALSE` | Auto-create new target tables if missing |
-| `COPY_COLUMNS` | Enum | `ALL` | Which source columns to copy: `ALL`, `MAP_ONLY` |
-
-**Examples:**
-
-Only copy explicitly mapped columns:
 ```smql
-SETTINGS(
-  COPY_COLUMNS = MAP_ONLY
-)
-```
-
-Auto-create missing schema:
-```smql
-SETTINGS(
-  INFER_SCHEMA = TRUE
-)
-```
-
-Disable constraint validation for performance:
-```smql
-SETTINGS(
-  IGNORE_CONSTRAINTS = TRUE
-)
+select {
+  email = transform.normalize_email(customers.email)
+  tax   = transform.calculate_tax(orders.subtotal)
+}
 ```
 
 ---
 
-### FILTER
+### pipeline
 
-Row-level predicates with support for complex boolean logic.
+The core building block. Each pipeline reads from a source, optionally transforms data, and writes to a destination.
 
-**Syntax:**
 ```smql
-FILTER(
-  AND(
-    orders[status] = "active",
-    orders[total] > 400,
-    users[id] < 4
-  )
-)
+pipeline "pipeline_name" {
+  description = "Human-readable description"
+
+  after = [pipeline.other_pipeline]  // DAG dependency
+
+  from { ... }
+  to   { ... }
+
+  where "filter_name" { ... }
+  with  { ... }
+  select { ... }
+  validate { ... }
+  on_error { ... }
+  paginate { ... }
+  before { ... }
+  after  { ... }
+  settings { ... }
+}
 ```
 
-**Lookup Syntax:**
-- `table[column]` - Reference a column from a table
-- Works with source table and any loaded tables (see LOAD)
+The `after` field declares dependencies, creating a DAG. All listed pipelines must complete before this one starts. Pipelines without dependencies run in parallel.
 
-**Comparison Operators:**
-- `=` - Equals
-- `!=` - Not equals
-- `>` - Greater than
-- `<` - Less than
-- `>=` - Greater than or equal
-- `<=` - Less than or equal
+---
 
-**Logical Functions:**
-- `AND(condition1, condition2, ...)` - All conditions must be true
-- `OR(condition1, condition2, ...)` - At least one condition must be true
-- `NOT(condition)` - Negates a condition
+## Pipeline Blocks
 
-**Examples:**
+### from
 
-Simple filter:
+Defines the data source.
+
+**Single table:**
 ```smql
-FILTER(
-  orders[status] = "active"
-)
+from {
+  connection = connection.mysql_prod
+  table      = "orders"
+}
 ```
 
-Complex filter with AND:
+**Multiple tables (implicit union):**
 ```smql
-FILTER(
-  AND(
-    orders[status] = "active",
-    orders[total] > 1000,
-    orders[created_at] >= "2024-01-01"
-  )
-)
+from {
+  connection = connection.mysql_prod
+  tables     = ["orders_2023", "orders_2024"]  // Union
+}
 ```
 
-OR condition:
+**Explicit union with per-table filters:**
 ```smql
-FILTER(
-  OR(
-    orders[status] = "pending",
-    orders[status] = "processing",
-    orders[status] = "shipped"
-  )
-)
+from {
+  connection = connection.mysql_prod
+  union {
+    table "orders_2023" where year == 2023
+    table "orders_2024" where year == 2024
+  }
+}
 ```
 
-Nested logic:
+**With graph references** (see [Graph References](#graph-references)):
 ```smql
-FILTER(
-  AND(
-    OR(
-      orders[status] = "active",
-      orders[status] = "pending"
-    ),
-    NOT(orders[flagged] = TRUE),
-    orders[total] > 100
-  )
-)
+from {
+  connection = connection.mysql_prod
+  table      = "orders"
+
+  with references {
+    data    = cascade
+    depth   = 3
+    exclude = ["audit_logs", "temp_*"]
+  }
+}
 ```
 
 ---
 
-### LOAD / MATCH
+### to
 
-Join additional tables for lookup or filtering. This enables denormalization and complex transformations.
+Defines the destination.
 
-**Syntax:**
 ```smql
-LOAD(
-  TABLES(users, order_items, products),
-  MATCH(
-    ON(users[id] -> orders[user_id]),
-    ON(order_items[order_id] -> orders[id]),
-    ON(products[product_id] -> order_items[id])
-  )
-)
+to {
+  connection = connection.warehouse_pg
+  table      = "fact_orders"
+  mode       = "append"
+}
 ```
 
-**Components:**
+**mode values:**
 
-**TABLES(table1, table2, ...)**
-- Lists tables to join into this mapping
-- Tables must exist in the source database
-- All listed tables become available in FILTER and MAP clauses
+| Mode | Behavior |
+|------|----------|
+| `"replace"` | Truncate destination table and reload |
+| `"append"` | Insert new rows, keep existing |
+| `"upsert"` | Insert or update on conflict |
+| `"merge"` | Full merge based on key columns |
 
-**MATCH(...)**
-- Defines join conditions (foreign key relationships)
-- Syntax: `ON(source_table[column] -> target_table[column])`
-- Multiple `ON(...)` clauses for multi-table joins
-
-**Join Scope:**
-- Joins apply only to this specific mapping (not global)
-- Creates a denormalized result set for the destination
-
-**Examples:**
-
-Simple lookup (users):
+**With table renaming for graph pipelines:**
 ```smql
-LOAD(
-  TABLES(users),
-  MATCH(
-    ON(users[id] -> orders[user_id])
-  )
-)
-```
+to {
+  connection = connection.warehouse_pg
+  mode       = "replace"
 
-Multi-table join:
-```smql
-LOAD(
-  TABLES(customers, products, categories),
-  MATCH(
-    ON(customers[id] -> orders[customer_id]),
-    ON(products[id] -> order_items[product_id]),
-    ON(categories[id] -> products[category_id])
-  )
-)
-```
-
-Star schema denormalization:
-```smql
-LOAD(
-  TABLES(dim_date, dim_customer, dim_product, dim_region),
-  MATCH(
-    ON(dim_date[date_key] -> fact_sales[date_key]),
-    ON(dim_customer[customer_key] -> fact_sales[customer_key]),
-    ON(dim_product[product_key] -> fact_sales[product_key]),
-    ON(dim_region[region_key] -> fact_sales[region_key])
-  )
-)
+  map {
+    orders   = "fact_orders"
+    users    = "dim_users"
+    products = "dim_products"
+  }
+}
 ```
 
 ---
 
-### MAP
+### where
 
-Project or compute output columns with expressions and functions.
+Named row-level filter. The name makes it reusable and self-documenting.
 
-**Syntax:**
 ```smql
-MAP(
-  users[name] -> user_name,
-  order_items[price] -> order_price,
-  order_items[price] * 1.4 -> price_with_tax,
-  CONCAT(users[name], products[name]) -> customer_product
-)
+where "active_only" {
+  customers.status == define.active_status
+}
 ```
 
-**Components:**
-- **Left side:** Any expression (lookup, arithmetic, function call)
-- **Right side:** Target column name (destination)
-- **Arrow operator:** `->` separates source expression from destination
-
-**Supported Operations:**
-
-**Column Lookups:**
+**Multiple conditions** (implicit AND):
 ```smql
-MAP(
-  users[email] -> email,
-  orders[total] -> order_total
-)
+where "valid_orders" {
+  orders.status == define.active_status
+  orders.total > 100
+  orders.created_at >= define.cutoff_date
+}
+```
+
+**Operators:** `==`, `!=`, `>`, `<`, `>=`, `<=`, `is null`, `is not null`, `matches "regex"`
+
+---
+
+### with (Joins)
+
+Compact multi-join syntax. Each line declares: `alias from table where join_condition`.
+
+```smql
+with {
+  users     from users     where users.id == orders.user_id
+  products  from products  where products.id == order_items.product_id
+  regions   from regions   where regions.id == orders.region_id
+}
+```
+
+All joined tables become available in `where`, `select`, and `validate` blocks.
+
+---
+
+### select
+
+Field mapping block. Syntax is `destination_col = expression`.
+
+**Simple column copy:**
+```smql
+select {
+  order_id   = orders.id
+  user_id    = orders.user_id
+}
+```
+
+**Rename:**
+```smql
+select {
+  customer_id = orders.user_id  // renamed
+  order_total = orders.total
+}
 ```
 
 **Arithmetic:**
 ```smql
-MAP(
-  products[price] * 1.2 -> price_with_markup,
-  orders[subtotal] + orders[tax] -> total,
-  inventory[quantity] - sales[sold] -> remaining
-)
+select {
+  order_tax     = orders.total * define.tax_rate
+  net_revenue   = orders.total - orders.discount
+}
 ```
 
-**String Functions:**
+**Functions:**
 ```smql
-MAP(
-  CONCAT(users[first_name], " ", users[last_name]) -> full_name,
-  UPPER(users[email]) -> email_upper,
-  LOWER(products[sku]) -> sku_lower
-)
+select {
+  customer_email = lower(trim(users.email))
+  order_date     = date(orders.created_at)
+  order_year     = year(orders.created_at)
+  order_month    = month(orders.created_at)
+  order_quarter  = quarter(orders.created_at)
+  synced_at      = now()
+}
+```
+
+**`when` expression (conditional / pattern matching):**
+```smql
+select {
+  revenue_tier = when {
+    orders.total > 10000  then "enterprise"
+    orders.total > 1000   then "business"
+    orders.total > 100    then "standard"
+    else "small"
+  }
+
+  status_label = when {
+    orders.status == "pending"   then "Pending"
+    orders.status == "shipped"   then "Shipped"
+    orders.status == "delivered" then "Delivered"
+    else orders.status
+  }
+}
+```
+
+**`coalesce` (null fallback):**
+```smql
+select {
+  display_name = coalesce(customers.nickname, customers.name, "Anonymous")
+}
+```
+
+**Reusable transform:**
+```smql
+select {
+  email = transform.normalize_email(customers.email)
+}
+```
+
+**Named select for graph-referenced tables** (see [Graph References](#graph-references)):
+```smql
+// Primary table (unnamed)
+select {
+  order_id   = orders.id
+  order_total = orders.total
+}
+
+// Named select for a referenced table
+select "users" {
+  user_id    = users.id
+  user_name  = users.name
+  user_email = lower(trim(users.email))
+}
 ```
 
 ---
 
-### OFFSET
+### validate
 
-Control pagination strategy for reading source data.
+Data quality checks run per row before writing. Two rule types:
 
-**Syntax:**
+- `assert` — on failure: `skip` the row, `fail` the pipeline, or `warn` and continue
+- `warn` — always continues, logs a warning
+
 ```smql
-OFFSET(
-  STRATEGY -> pk | numeric | timestamp,
-  CURSOR -> <column_name>,
-  TIEBREAKER -> <pk_column_name>,
-  TIMEZONE -> <IANA_TZ>
-)
+validate {
+  assert "positive_total" {
+    check   = orders.total >= 0
+    message = "Order total cannot be negative"
+    action  = skip  // skip | fail | warn
+  }
+
+  assert "valid_email" {
+    check   = customer_email matches "^[^@]+@[^@]+\.[^@]+$"
+    message = "Invalid email format"
+    action  = skip
+  }
+
+  warn "high_discount" {
+    check   = orders.discount <= orders.total * 0.8
+    message = "Discount exceeds 80% of total"
+  }
+
+  warn "missing_customer" {
+    check   = customers.customer_key is not null
+    message = "Customer not found in dimension"
+  }
+}
+```
+
+**action values:**
+
+| Action | Behavior |
+|--------|----------|
+| `skip` | Drop the row, continue pipeline |
+| `fail` | Abort the pipeline with an error |
+| `warn` | Log a warning, write the row |
+
+---
+
+### on_error
+
+Configures retry behavior, dead-letter routing, and alerting.
+
+```smql
+on_error {
+  retry {
+    max_attempts = 3
+    backoff      = "5s"
+  }
+
+  failed_rows {
+    table = "failed_orders"
+  }
+
+  alert {
+    email = "team@example.com"
+  }
+}
+```
+
+**Compact form:**
+```smql
+on_error {
+  retry      { max_attempts = 3, backoff = "5s" }
+  failed_rows { table = "errors" }
+  alert      { email = "team@example.com" }
+}
+```
+
+---
+
+### paginate
+
+Controls how the source table is paginated. Required for large tables or incremental loads.
+
+```smql
+paginate {
+  using      = "timestamp"
+  column     = orders.updated_at
+  tiebreaker = orders.id
+  timezone   = "UTC"
+}
+```
+
+**using strategies:**
+
+#### `"pk"` — Primary Key (default)
+Best for tables with auto-increment IDs.
+
+```smql
+paginate {
+  using  = "pk"
+  column = orders.id  // defaults to id if omitted
+}
+```
+
+Generated query:
+```sql
+WHERE id > :last_cursor ORDER BY id LIMIT :batch_size
+```
+
+#### `"numeric"` — Numeric Column
+For paginating by any numeric column that isn't the PK.
+
+```smql
+paginate {
+  using      = "numeric"
+  column     = events.sequence_num
+  tiebreaker = events.id
+}
+```
+
+Generated query:
+```sql
+WHERE (sequence_num > :last_cursor)
+   OR (sequence_num = :last_cursor AND id > :last_id)
+ORDER BY sequence_num, id LIMIT :batch_size
+```
+
+#### `"timestamp"` — Timestamp Column
+For incremental / CDC-like loads.
+
+```smql
+paginate {
+  using      = "timestamp"
+  column     = orders.updated_at
+  tiebreaker = orders.id
+  timezone   = "UTC"
+}
+```
+
+Generated query:
+```sql
+WHERE (updated_at > :last_cursor)
+   OR (updated_at = :last_cursor AND id > :last_id)
+ORDER BY updated_at, id LIMIT :batch_size
 ```
 
 **Parameters:**
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `STRATEGY` | Yes | Pagination strategy: `pk`, `numeric`, `timestamp` |
-| `CURSOR` | Conditional | Column to use for pagination (required for numeric/timestamp, optional for pk) |
-| `TIEBREAKER` | Conditional | Primary key column for stable sorting (required when cursor may be non-unique) |
-| `TIMEZONE` | No | IANA timezone for timestamp strategy (default: `UTC`) |
+| Key | Required | Description |
+|-----|----------|-------------|
+| `using` | Yes | Strategy: `"pk"`, `"numeric"`, `"timestamp"` |
+| `column` | Conditional | Pagination column. Defaults to `id` for `pk` |
+| `tiebreaker` | Conditional | PK for stable ordering when cursor is non-unique |
+| `timezone` | No | IANA timezone for timestamp strategy (default: `"UTC"`) |
 
-**Strategies:**
+---
 
-#### 1. Primary Key (pk)
+### before / after hooks
 
-Best for: Most common case, stable pagination with auto-increment IDs
-
-```smql
-OFFSET(
-  STRATEGY -> pk,
-  CURSOR -> id
-)
-```
-
-Query generated:
-```sql
-WHERE id > :last_cursor
-ORDER BY id
-LIMIT :batch_size
-```
-
-**Defaults:**
-- `CURSOR` defaults to `id` if not specified
-- No tiebreaker needed (PKs are unique)
-
-#### 2. Numeric Column (numeric)
-
-Best for: Paginating by numeric columns that aren't primary keys
+Raw SQL executed before or after the data migration. Useful for disabling indexes, triggers, or constraints during bulk load.
 
 ```smql
-OFFSET(
-  STRATEGY -> numeric,
-  CURSOR -> event_id,
-  TIEBREAKER -> id
-)
+before {
+  sql = [
+    "ALTER TABLE fact_orders DISABLE TRIGGER ALL",
+    "DROP INDEX IF EXISTS idx_orders_customer",
+    "DROP INDEX IF EXISTS idx_orders_date"
+  ]
+}
+
+after {
+  sql = [
+    "CREATE INDEX CONCURRENTLY idx_orders_customer ON fact_orders(customer_id)",
+    "CREATE INDEX CONCURRENTLY idx_orders_date ON fact_orders(order_date)",
+    "ALTER TABLE fact_orders ENABLE TRIGGER ALL",
+    "VACUUM ANALYZE fact_orders"
+  ]
+}
 ```
 
-Query generated:
-```sql
-WHERE (event_id > :last_cursor)
-   OR (event_id = :last_cursor AND id > :last_id)
-ORDER BY event_id, id
-LIMIT :batch_size
-```
+---
 
-**Requirements:**
-- `CURSOR` is required
-- `TIEBREAKER` is required (defaults to `id`)
-- Tiebreaker ensures stable ordering when cursor values are duplicated
+### settings
 
-#### 3. Timestamp (timestamp)
-
-Best for: Incremental updates, CDC-like patterns
+Per-pipeline configuration overrides.
 
 ```smql
-OFFSET(
-  STRATEGY -> timestamp,
-  CURSOR -> updated_at,
-  TIEBREAKER -> id,
-  TIMEZONE -> America/New_York
-)
+settings {
+  batch_size = env("batch_size")
+  workers    = 4
+  checkpoint = every_batch
+}
 ```
 
-Query generated:
-```sql
-WHERE (updated_at > :last_cursor)
-   OR (updated_at = :last_cursor AND id > :last_id)
-ORDER BY updated_at, id
-LIMIT :batch_size
-```
+**Available settings:**
 
-**Requirements:**
-- `CURSOR` is required (timestamp column)
-- `TIEBREAKER` is required (defaults to `id`)
-- `TIMEZONE` defaults to `UTC`
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `batch_size` | integer | `1000` | Rows per batch |
+| `workers` | integer | `4` | Parallel worker count |
+| `checkpoint` | enum | `every_batch` | When to checkpoint state |
+| `create_missing_tables` | bool | `false` | Auto-create destination table if missing |
+| `offset_strategy` | string | `"pk"` | Default pagination strategy |
 
-**Examples:**
+---
 
-Explicit PK column:
+## Expressions
+
+Expressions are used in `select`, `where`, `validate` and `define`.
+
+### Literals
+
 ```smql
-OFFSET(STRATEGY -> pk, CURSOR -> user_id)
+"string value"        // string
+42                    // integer
+3.14                  // float
+true / false          // boolean
+"2024-01-01"          // date string
 ```
 
-Numeric with tiebreaker:
+### Column References
+
 ```smql
-OFFSET(STRATEGY -> numeric, CURSOR -> sequence_num, TIEBREAKER -> id)
+table.column          // qualified (required when multiple tables in scope)
+column                // unqualified (when source is unambiguous)
 ```
 
-Timestamp for incremental sync:
+### Arithmetic
+
 ```smql
-OFFSET(STRATEGY -> timestamp, CURSOR -> updated_at, TIEBREAKER -> id, TIMEZONE -> UTC)
+orders.total * 1.4
+orders.subtotal + orders.tax
+orders.total - orders.discount
+inventory.quantity / 100
+```
+
+### Comparison Operators
+
+```smql
+col == "value"
+col != "value"
+col > 100
+col >= define.cutoff_date
+col is null
+col is not null
+col matches "^[A-Z]+"   // regex match
+```
+
+### Logical Operators
+
+```smql
+condition_a and condition_b
+condition_a or condition_b
+```
+
+### Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `lower(s)` | Lowercase string | `lower(users.email)` |
+| `upper(s)` | Uppercase string | `upper(users.code)` |
+| `trim(s)` | Strip whitespace | `trim(users.name)` |
+| `concat(a, b, ...)` | String concatenation | `concat(users.first, " ", users.last)` |
+| `coalesce(a, b, ...)` | First non-null value | `coalesce(users.nick, users.name, "N/A")` |
+| `date(ts)` | Extract date part | `date(orders.created_at)` |
+| `year(ts)` | Extract year | `year(orders.created_at)` |
+| `month(ts)` | Extract month | `month(orders.created_at)` |
+| `quarter(ts)` | Extract quarter | `quarter(orders.created_at)` |
+| `now()` | Current timestamp | `now()` |
+
+### `when` Expression
+
+Multi-branch conditional. Evaluated top-to-bottom, first match wins.
+
+```smql
+col = when {
+  expr1 then value1
+  expr2 then value2
+  else  default_value
+}
+```
+
+Example:
+```smql
+discount_rate = when {
+  orders.total > 0  then orders.discount / orders.total
+  else 0.0
+}
+```
+
+### Environment Variables
+
+```smql
+env("VAR_NAME")           // required — error if missing
+env("VAR_NAME", "default") // optional with fallback
+```
+
+---
+
+## Graph References
+
+Graph references allow a pipeline to automatically discover and migrate all FK-dependent tables from the source, without declaring each as a separate pipeline. The primary `table` in `from` becomes the entry point for FK graph traversal.
+
+### Single Table vs Graph Pipeline
+
+```smql
+// Single table — table in both from and to
+from { table = "orders" }
+to   { table = "orders_copy" }
+
+// Graph pipeline — table only in from; to uses map for renaming
+from {
+  table = "orders"
+  with references { data = cascade }
+}
+to {
+  mode = "replace"
+  map  { orders = "fact_orders" }
+}
+```
+
+### with references Block
+
+Placed inside `from`. Controls graph traversal behavior.
+
+```smql
+from {
+  connection = connection.mysql_prod
+  table      = "orders"
+
+  with references {
+    data    = cascade          // cascade | schema_only (default: schema_only)
+    depth   = all              // all | 1, 2, 3... (default: all)
+    exclude = ["audit_logs", "temp_*", "*_staging"]
+  }
+}
+```
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `data` | `cascade`, `schema_only` | `schema_only` | Whether to copy row data for referenced tables |
+| `depth` | `all` or integer | `all` | How many FK levels to follow |
+| `exclude` | array of strings/patterns | `[]` | Tables to skip (supports wildcards: `audit_*`, `*_log`, `*log*`, `*`) |
+
+**Schema behavior:**
+
+| Setting | Schema created | Data copied |
+|---------|:--------------:|:-----------:|
+| `with references {}` | ✓ | ✗ |
+| `with references { data = cascade }` | ✓ | ✓ (referenced rows only) |
+
+### Destination Table Renaming
+
+Use `map` in `to` to rename tables at the destination. Unmapped tables keep their original names.
+
+```smql
+to {
+  connection = connection.warehouse_pg
+  mode       = "replace"
+
+  map {
+    orders   = "fact_orders"
+    users    = "dim_users"
+    products = "dim_products"
+    regions  = "dim_regions"
+  }
+}
+```
+
+### Field Mappings for Referenced Tables
+
+Use named `select` blocks to define field mappings per referenced table. The unnamed `select` applies to the primary table.
+
+```smql
+// Primary table
+select {
+  order_id   = orders.id
+  order_total = orders.total
+}
+
+// Referenced tables
+select "users" {
+  user_id    = users.id
+  user_name  = users.name
+  user_email = lower(trim(users.email))
+}
+
+select "products" {
+  product_id   = products.id
+  product_name = products.name
+  category     = products.category
+}
+```
+
+### Data Filtering with Cascade
+
+When `data = cascade`, the `where` clause on the primary table propagates: only rows referenced by filtered primary rows are copied, recursively up to `depth` levels.
+
+Example: `where` filters to orders 1, 2, 3 → only users referenced by those orders are copied → only regions referenced by those users are copied.
+
+### Complete Graph Example
+
+```smql
+pipeline "migrate_orders" {
+  description = "Migrate orders with all FK dependencies"
+
+  from {
+    connection = connection.mysql_prod
+    table      = "orders"
+
+    with references {
+      data    = cascade
+      depth   = 3
+      exclude = ["audit_logs", "temp_*"]
+    }
+  }
+
+  to {
+    connection = connection.postgres_warehouse
+    mode       = "replace"
+
+    map {
+      orders   = "fact_orders"
+      users    = "dim_users"
+      products = "dim_products"
+      regions  = "dim_regions"
+    }
+  }
+
+  where "recent_orders" {
+    orders.created_at >= define.cutoff_date
+  }
+
+  select {
+    order_id    = orders.id
+    customer_id = orders.user_id
+    order_total = orders.total
+    order_date  = date(orders.created_at)
+  }
+
+  select "users" {
+    user_id    = users.id
+    user_name  = users.name
+    user_email = lower(trim(users.email))
+  }
+
+  select "products" {
+    product_id   = products.id
+    product_name = products.name
+    category     = products.category
+  }
+}
 ```
 
 ---
 
 ## Complete Example
 
-Here's a comprehensive migration demonstrating all features:
+E-Commerce pipeline showing all features:
 
 ```smql
-CONNECTIONS (
-  SOURCE(MYSQL, "mysql://user:pass@localhost:3306/testdb"),
-  DESTINATION(POSTGRES, "postgres://user:pass@localhost:5432/testdb")
-);
+// ================================================================
+// Configuration
+// ================================================================
 
-MIGRATE (
-  // Complex denormalized mapping with filters and transforms
-  SOURCE(TABLE, orders) -> DEST(TABLE, orders_flat) [
-    SETTINGS(
-      INFER_SCHEMA = TRUE,
-      IGNORE_CONSTRAINTS = FALSE,
-      CREATE_MISSING_COLUMNS = TRUE,
-      COPY_COLUMNS = MAP_ONLY
-    ),
-    
-    FILTER(
-      AND(
-        orders[status] = "active",
-        orders[total] > 400,
-        users[id] < 4
-      )
-    ),
-    
-    LOAD(
-      TABLES(users, order_items, products),
-      MATCH(
-        ON(users[id] -> orders[user_id]),
-        ON(order_items[order_id] -> orders[id]),
-        ON(products[product_id] -> order_items[id])
-      )
-    ),
-    
-    MAP(
-      users[name] -> user_name,
-      users[email] -> user_email,
-      order_items[price] -> order_price,
-      products[name] -> product_name,
-      products[price] -> product_price,
-      order_items[price] * 1.4 -> order_price_with_tax,
-      CONCAT(users[name], products[name]) -> concat_lookup_test
-    ),
-    
-    OFFSET(
-      STRATEGY -> timestamp,
-      CURSOR -> updated_at,
-      TIEBREAKER -> id,
-      TIMEZONE -> UTC
-    )
-  ],
+define {
+  tax_rate      = 1.4
+  cutoff_date   = "2024-01-01"
+  active_status = "active"
+}
 
-  // Simple filtered copy
-  SOURCE(TABLE, invoices) -> DEST(TABLE, statement) [
-    SETTINGS(
-      INFER_SCHEMA = FALSE,
-      COPY_COLUMNS = ALL
-    ),
-    
-    FILTER(
-      invoices[date] >= "2024-01-01"
-    ),
-    
-    OFFSET(
-      STRATEGY -> pk,
-      CURSOR -> id
-    )
+// ================================================================
+// Connections
+// ================================================================
+
+connection "mysql_prod" {
+  driver = "mysql"
+  url    = env("source_db")
+  pool { max_size = 20 }
+}
+
+connection "postgres_warehouse" {
+  driver = "postgres"
+  url    = env("dest_db")
+  pool { max_size = 50 }
+}
+
+// ================================================================
+// Reusable transforms
+// ================================================================
+
+transform "normalize_email" {
+  input  = string
+  output = lower(trim(input))
+}
+
+// ================================================================
+// Dimensions (load first — no dependencies)
+// ================================================================
+
+pipeline "dim_customers" {
+  description = "Customer dimension"
+
+  from {
+    connection = connection.mysql_prod
+    table      = "customers"
+  }
+
+  to {
+    connection = connection.postgres_warehouse
+    table      = "dim_customers"
+    mode       = "replace"
+  }
+
+  where "active_customers" {
+    customers.status == define.active_status
+  }
+
+  select {
+    customer_key    = customers.id
+    customer_name   = customers.name
+    customer_email  = transform.normalize_email(customers.email)
+    customer_segment = customers.segment
+    created_at      = customers.created_at
+  }
+
+  validate {
+    assert "valid_email" {
+      check   = customer_email matches "^[^@]+@[^@]+\.[^@]+$"
+      message = "Invalid email format"
+      action  = skip
+    }
+  }
+
+  settings {
+    batch_size = env("batch_size")
+  }
+}
+
+pipeline "dim_products" {
+  description = "Product dimension"
+
+  from {
+    connection = connection.mysql_prod
+    table      = "products"
+  }
+
+  to {
+    connection = connection.postgres_warehouse
+    table      = "dim_products"
+    mode       = "replace"
+  }
+
+  select {
+    product_key  = products.id
+    product_name = products.name
+    category     = products.category
+    price        = products.price
+  }
+}
+
+pipeline "dim_regions" {
+  description = "Region dimension"
+
+  from {
+    connection = connection.mysql_prod
+    table      = "regions"
+  }
+
+  to {
+    connection = connection.postgres_warehouse
+    table      = "dim_regions"
+    mode       = "replace"
+  }
+
+  select {
+    region_key  = regions.id
+    region_name = regions.name
+    country     = regions.country
+  }
+}
+
+// ================================================================
+// Facts (load after dimensions)
+// ================================================================
+
+pipeline "fact_orders" {
+  description = "Orders fact table with denormalized dimensions"
+
+  after = [
+    pipeline.dim_customers,
+    pipeline.dim_products,
+    pipeline.dim_regions
   ]
-)
-WITH SETTINGS (
-  CREATE_MISSING_TABLES = TRUE,
-  BATCH_SIZE = 1000
-);
-```
 
----
+  from {
+    connection = connection.mysql_prod
+    table      = "orders"
+  }
 
-## Best Practices
+  to {
+    connection = connection.postgres_warehouse
+    table      = "fact_orders"
+    mode       = "append"
+  }
 
-### 1. Use MAP_ONLY for Denormalized Tables
+  where "valid_orders" {
+    orders.status == define.active_status
+    and orders.total > 0
+    and orders.created_at >= define.cutoff_date
+  }
 
-When creating wide, denormalized tables:
+  // Join dimension tables
+  with {
+    customers from dim_customers where customers.customer_key == orders.user_id
+    products  from dim_products  where products.product_key  == order_items.product_id
+    regions   from dim_regions   where regions.region_key    == orders.region_id
+  }
 
-```smql
-SETTINGS(
-  COPY_COLUMNS = MAP_ONLY  // Only include explicitly mapped columns
-)
-```
+  select {
+    // Keys
+    order_key     = orders.id
+    customer_key  = orders.user_id
+    product_key   = order_items.product_id
+    region_key    = orders.region_id
 
-### 2. Enable Schema Inference for New Destinations
+    // Customer dimensions
+    customer_name    = customers.customer_name
+    customer_email   = customers.customer_email
+    customer_segment = customers.customer_segment
 
-Let Stratum create tables automatically:
+    // Product dimensions
+    product_name = products.product_name
+    category     = products.category
+    list_price   = products.price
 
-```smql
-SETTINGS(
-  INFER_SCHEMA = TRUE
-)
-```
+    // Order metrics
+    quantity    = order_items.quantity
+    subtotal    = orders.subtotal
+    tax         = orders.subtotal * define.tax_rate
+    total       = orders.total
+    discount    = orders.discount
+    net_revenue = orders.total - orders.discount
 
-### 3. Use Timestamp Strategy for Incremental Updates
+    // Dates
+    order_date    = date(orders.created_at)
+    order_year    = year(orders.created_at)
+    order_month   = month(orders.created_at)
+    order_quarter = quarter(orders.created_at)
 
-For CDC-like patterns:
+    // Computed dimensions
+    revenue_tier = when {
+      orders.total > 10000  then "enterprise"
+      orders.total > 1000   then "business"
+      orders.total > 100    then "standard"
+      else "small"
+    }
 
-```smql
-OFFSET(
-  STRATEGY -> timestamp,
-  CURSOR -> updated_at,
-  TIEBREAKER -> id
-)
-```
+    discount_rate = when {
+      orders.total > 0  then orders.discount / orders.total
+      else 0.0
+    }
 
-### 4. Always Use Tiebreakers for Non-Unique Columns
+    // Audit
+    synced_at = now()
+  }
 
-When paginating by non-unique columns:
+  validate {
+    assert "positive_total" {
+      check   = orders.total >= 0
+      message = "Order total cannot be negative"
+      action  = skip
+    }
 
-```smql
-OFFSET(
-  STRATEGY -> numeric,
-  CURSOR -> priority,
-  TIEBREAKER -> id  // Ensures stable ordering
-)
-```
+    assert "valid_quantity" {
+      check   = order_items.quantity > 0
+      message = "Quantity must be positive"
+      action  = skip
+    }
 
-### 5. Filter Early for Performance
+    warn "high_discount" {
+      check   = orders.discount <= orders.total * 0.8
+      message = "Discount exceeds 80% of total"
+    }
 
-Apply filters to reduce data before joins:
+    warn "missing_customer" {
+      check   = customers.customer_key is not null
+      message = "Customer not found in dimension"
+    }
+  }
 
-```smql
-FILTER(
-  orders[created_at] >= "2024-01-01"  // Filter before loading related tables
-),
-LOAD(...)
-```
+  on_error {
+    retry {
+      max_attempts = 3
+      backoff      = "5s"
+    }
+    failed_rows {
+      table = "fact_orders_errors"
+    }
+  }
 
-### 6. Use COALESCE for Fallback Values
+  paginate {
+    using      = "timestamp"
+    column     = orders.updated_at
+    tiebreaker = orders.id
+    timezone   = "UTC"
+  }
 
-Handle NULLs gracefully:
+  before {
+    sql = [
+      "ALTER TABLE fact_orders DISABLE TRIGGER ALL",
+      "DROP INDEX IF EXISTS idx_orders_customer",
+      "DROP INDEX IF EXISTS idx_orders_date",
+      "DROP INDEX IF EXISTS idx_orders_product"
+    ]
+  }
 
-```smql
-MAP(
-  COALESCE(users[nickname], users[first_name], "Unknown") -> display_name
-)
-```
+  after {
+    sql = [
+      "CREATE INDEX CONCURRENTLY idx_orders_customer ON fact_orders(customer_key)",
+      "CREATE INDEX CONCURRENTLY idx_orders_date ON fact_orders(order_date)",
+      "CREATE INDEX CONCURRENTLY idx_orders_product ON fact_orders(product_key)",
+      "ALTER TABLE fact_orders ENABLE TRIGGER ALL",
+      "VACUUM ANALYZE fact_orders"
+    ]
+  }
 
-### 7. Test with Dry Run
-
-Always validate before executing:
-
-```bash
-stratum validate migration.smql
+  settings {
+    batch_size = env.batch_size
+    workers    = 8
+    checkpoint = every_batch
+  }
+}
 ```

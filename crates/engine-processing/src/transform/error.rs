@@ -1,4 +1,4 @@
-use connectors::sql::base::error::DbError;
+use connectors::error::{DbError, DriverError};
 use model::execution::pipeline::FileFormat;
 use thiserror::Error;
 
@@ -68,8 +68,8 @@ pub enum FailedRowWriterError {
     #[error("No destination configured")]
     NoDestination,
 
-    #[error("Adapter error: {0}")]
-    Adapter(#[from] connectors::error::AdapterError),
+    #[error("Driver error: {0}")]
+    Driver(#[from] DriverError),
 
     #[error("Connection '{0}' not found in execution context")]
     ConnectionNotFound(String),

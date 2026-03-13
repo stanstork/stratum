@@ -5,17 +5,18 @@ use crate::{
     error::CliError,
     output,
 };
+use engine_core::context::env::EnvContext;
 use engine_planner::{
-    builder::{PlanBuilder, PlanBuilderConfig},
+    builder::{ReportBuilder, ReportBuilderConfig},
     plan::sample::method::SamplingMethod,
 };
 use engine_runtime::dag::builder::DagBuilder;
 use model::core::value::Value;
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 use tracing::info;
 
 /// Executes the plan command (dry-run migration planning)
-pub async fn execute(cli: &Cli, commands: &Commands) -> Result<(), CliError> {
+pub async fn execute(cli: &Cli, commands: &Commands, env: Arc<EnvContext>) -> Result<(), CliError> {
     if let Commands::Plan {
         config,
         output: output_path,
@@ -31,7 +32,7 @@ pub async fn execute(cli: &Cli, commands: &Commands) -> Result<(), CliError> {
         info!("Running dry-run migration: {}", config_path);
 
         // Load core plan
-        let core_plan = config::load_plan(&config_path, false).await?;
+        let core_plan = config::load_plan(&config_path, false, env).await?;
 
         // Build DAG
         let dag = build_dag(&core_plan)?;
@@ -46,18 +47,18 @@ pub async fn execute(cli: &Cli, commands: &Commands) -> Result<(), CliError> {
             *exact_where,
         );
 
-        // Build detailed plan
-        let plan_builder = PlanBuilder::new(plan_config);
-        let plan = plan_builder
+        // Build detailed report
+        let report_builder = ReportBuilder::new(plan_config);
+        let report = report_builder
             .build(&core_plan, &dag, Path::new(&config_path))
             .await?;
 
         // Output results
         match output_path {
-            Some(path) => output::write_report(plan, path.to_string()).await?,
+            Some(path) => output::write_report(report, path.to_string()).await?,
             None => {
                 if !cli.quiet {
-                    output::print_report(plan).await?;
+                    output::print_report(report).await?;
                 }
             }
         }
@@ -79,7 +80,7 @@ fn build_dag(
     Ok(dag_builder.build()?)
 }
 
-/// Builds plan configuration from CLI arguments
+/// Builds report builder configuration from CLI arguments
 fn build_plan_config(
     sample: bool,
     sample_size: usize,
@@ -87,7 +88,7 @@ fn build_plan_config(
     id_column: Option<String>,
     sample_ids: Option<Vec<String>>,
     exact_where: bool,
-) -> PlanBuilderConfig {
+) -> ReportBuilderConfig {
     // Convert CLI sample method to engine SamplingMethod
     let sampling_method = match sample_method {
         SampleMethod::First => SamplingMethod::First,
@@ -109,7 +110,7 @@ fn build_plan_config(
             .collect()
     });
 
-    PlanBuilderConfig {
+    ReportBuilderConfig {
         enable_sampling: sample,
         sample_size,
         sample_method: sampling_method,

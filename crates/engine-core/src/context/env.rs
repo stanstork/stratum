@@ -1,8 +1,4 @@
 use std::collections::HashMap;
-use std::sync::RwLock;
-
-/// Global environment variable context for runtime evaluation
-static ENV_CONTEXT: RwLock<Option<EnvContext>> = RwLock::new(None);
 
 #[derive(Debug, Clone)]
 pub struct EnvContext {
@@ -53,33 +49,6 @@ impl Default for EnvContext {
     }
 }
 
-/// Initialize the global environment context
-pub fn init_env_context(context: EnvContext) {
-    let mut guard = ENV_CONTEXT.write().unwrap();
-    *guard = Some(context);
-}
-
-/// Get a value from the global environment context
-pub fn get_env(key: &str) -> Option<String> {
-    let guard = ENV_CONTEXT.read().unwrap();
-    guard.as_ref().and_then(|ctx| ctx.get(key))
-}
-
-/// Get a value from the global environment context with a default
-pub fn get_env_or(key: &str, default: &str) -> String {
-    let guard = ENV_CONTEXT.read().unwrap();
-    guard
-        .as_ref()
-        .map(|ctx| ctx.get_or(key, default))
-        .unwrap_or_else(|| default.to_string())
-}
-
-#[cfg(any(test, debug_assertions))]
-pub fn clear_env_context() {
-    let mut guard = ENV_CONTEXT.write().unwrap();
-    *guard = None;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,20 +61,5 @@ mod tests {
         assert_eq!(ctx.get("TEST_KEY"), Some("test_value".to_string()));
         assert_eq!(ctx.get("MISSING"), None);
         assert_eq!(ctx.get_or("MISSING", "default"), "default");
-    }
-
-    #[test]
-    fn test_global_context() {
-        clear_env_context();
-
-        let mut ctx = EnvContext::empty();
-        ctx.set("GLOBAL_TEST".to_string(), "value".to_string());
-        init_env_context(ctx);
-
-        assert_eq!(get_env("GLOBAL_TEST"), Some("value".to_string()));
-        assert_eq!(get_env_or("GLOBAL_TEST", "default"), "value");
-        assert_eq!(get_env_or("MISSING", "default"), "default");
-
-        clear_env_context();
     }
 }

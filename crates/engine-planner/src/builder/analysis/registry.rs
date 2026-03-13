@@ -23,7 +23,7 @@ use crate::{
 };
 
 use async_trait::async_trait;
-use engine_core::connectors::source::Source;
+use engine_processing::io::driver::SchemaDriver;
 use model::execution::pipeline::Pipeline;
 use std::{sync::Arc, time::Duration};
 
@@ -46,7 +46,6 @@ pub struct AnalysisReport {
 /// Inputs that vary per pipeline run.
 pub struct PipelineAnalysisInput {
     pub pipeline: Arc<Pipeline>,
-    pub core_source: Arc<Source>,
     pub sample_config: SampleConfig,
     pub mapped_columns_only: bool,
 }
@@ -54,13 +53,11 @@ pub struct PipelineAnalysisInput {
 impl PipelineAnalysisInput {
     pub fn new(
         pipeline: Arc<Pipeline>,
-        core_source: Arc<Source>,
         sample_config: SampleConfig,
         mapped_columns_only: bool,
     ) -> Self {
         Self {
             pipeline,
-            core_source,
             sample_config,
             mapped_columns_only,
         }
@@ -146,31 +143,31 @@ impl AnalysisState {
 
 /// Planner-style analysis stage for a pipeline.
 #[async_trait]
-pub trait PipelineAnalysisStage: Send + Sync {
+pub trait PipelineAnalysisStage<S: SchemaDriver, D: SchemaDriver>: Send + Sync {
     fn name(&self) -> &'static str;
 
     async fn run(
         &self,
         input: &PipelineAnalysisInput,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
         state: &mut AnalysisState,
     ) -> AnalyzerResult<()>;
 }
 
 /// Registry that holds and coordinates all analyzers.
-pub struct AnalyzerRegistry {
-    stages: Vec<Box<dyn PipelineAnalysisStage>>,
+pub struct AnalyzerRegistry<S: SchemaDriver, D: SchemaDriver> {
+    stages: Vec<Box<dyn PipelineAnalysisStage<S, D>>>,
 }
 
-impl AnalyzerRegistry {
+impl<S: SchemaDriver, D: SchemaDriver> AnalyzerRegistry<S, D> {
     pub fn new(
-        source_cache: Arc<MetadataCache>,
+        source_cache: Arc<MetadataCache<S>>,
         schema_plan: Arc<engine_core::schema::plan::SchemaPlan>,
         mapping: &model::transform::mapping::TransformationMetadata,
-        dest_adapter: Arc<connectors::adapter::Adapter>,
+        dest_driver: Arc<D>,
         _timeout: Duration,
     ) -> Self {
-        let stages: Vec<Box<dyn PipelineAnalysisStage>> = vec![
+        let stages: Vec<Box<dyn PipelineAnalysisStage<S, D>>> = vec![
             Box::new(SourceStage {
                 source_cache: Arc::clone(&source_cache),
             }),
@@ -194,7 +191,7 @@ impl AnalyzerRegistry {
                 analyzer: PaginationAnalyzer,
             }),
             Box::new(HooksStage {
-                analyzer: HooksAnalyzer::new(&dest_adapter),
+                analyzer: HooksAnalyzer::new(&dest_driver),
             }),
             Box::new(SchemaStage {
                 analyzer: SchemaAnalyzer,
@@ -205,14 +202,14 @@ impl AnalyzerRegistry {
         Self { stages }
     }
 
-    pub fn register_stage(&mut self, stage: Box<dyn PipelineAnalysisStage>) {
+    pub fn register_stage(&mut self, stage: Box<dyn PipelineAnalysisStage<S, D>>) {
         self.stages.push(stage);
     }
 
     pub async fn analyze_pipeline(
         &self,
         input: &PipelineAnalysisInput,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<AnalysisReport> {
         let mut state = AnalysisState::new(input.pipeline.name.clone());
 

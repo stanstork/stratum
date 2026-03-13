@@ -14,4 +14,4 @@ pub use error::{ExpressionError, Result};
 pub use eval::Evaluator;
 pub use functions::FunctionRegistry;
 pub use inference::infer_expression_type;
-pub use types::{parse_env_as_type, value_to_string};
+pub use types::parse_env_as_type;

@@ -8,7 +8,7 @@ use crate::{
     plan::hooks::{impact::HookImpact, plan::HookStatement, plan::HooksPlan},
 };
 use async_trait::async_trait;
-use connectors::adapter::Adapter;
+use engine_processing::io::driver::SchemaDriver;
 use model::execution::pipeline::Pipeline;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
@@ -32,14 +32,14 @@ fn get_msg(cat: &str, key: &str) -> String {
 }
 
 /// Analyzes lifecycle hooks (pre/post SQL statements) to determine performance and safety impact.
-pub struct HooksAnalyzer {
-    adapter: Arc<Adapter>,
+pub struct HooksAnalyzer<D: SchemaDriver> {
+    dest_driver: Arc<D>,
 }
 
-impl HooksAnalyzer {
-    pub fn new(adapter: &Adapter) -> Self {
+impl<D: SchemaDriver> HooksAnalyzer<D> {
+    pub fn new(dest_driver: &Arc<D>) -> Self {
         Self {
-            adapter: Arc::new(adapter.clone()),
+            dest_driver: Arc::clone(dest_driver),
         }
     }
 
@@ -88,13 +88,9 @@ impl HooksAnalyzer {
         let sql_trimmed = sql.trim();
         let sql_upper = sql_trimmed.to_uppercase();
 
-        // Classify the operation and determine technical impact
         let impact = self.determine_impact(sql_trimmed, &sql_upper).await?;
-
-        // Generate human-readable warnings based on the impact
         let warnings = self.generate_warnings(&sql_upper, &impact);
 
-        // Log any significant safety risks
         for warning in &warnings {
             warn!(pipeline = %pipeline.name, sql = %sql_trimmed, warning = %warning, "Hook safety risk detected");
         }
@@ -112,7 +108,6 @@ impl HooksAnalyzer {
         raw_sql: &str,
         sql_upper: &str,
     ) -> Result<HookImpact, HooksAnalyzerError> {
-        // DDL / Schema Operations
         if sql_upper.starts_with("CREATE")
             || sql_upper.starts_with("ALTER")
             || sql_upper.starts_with("DROP")
@@ -134,7 +129,6 @@ impl HooksAnalyzer {
             }
         }
 
-        // DML / Data Operations
         if ["INSERT", "UPDATE", "DELETE"]
             .iter()
             .any(|k| sql_upper.starts_with(k))
@@ -152,7 +146,6 @@ impl HooksAnalyzer {
             });
         }
 
-        // Maintenance / Utilities
         if let Some(op) = ["VACUUM", "ANALYZE", "REINDEX", "OPTIMIZE", "TRUNCATE"]
             .iter()
             .find(|&&k| sql_upper.starts_with(k))
@@ -178,7 +171,6 @@ impl HooksAnalyzer {
             .map(|s| s.join(" "))
             .unwrap_or_else(|| "TABLE OP".into());
 
-        // Find table name while skipping "IF [NOT] EXISTS"
         let mut idx = 2;
         if parts.get(idx) == Some(&"IF") {
             idx += if parts.get(idx + 1) == Some(&"NOT") {
@@ -204,12 +196,11 @@ impl HooksAnalyzer {
         }
     }
 
-    /// Attempts to fetch row estimates using EXPLAIN.
+    /// Attempts to fetch row estimates using EXPLAIN via QueryExecutor.
     async fn estimate_dml_rows(&self, sql: &str) -> Option<u64> {
         let explain_sql = format!("EXPLAIN {}", sql);
-        let results = self.adapter.get_sql().query_rows(&explain_sql).await.ok()?;
+        let results = self.dest_driver.query(&explain_sql).await.ok()?;
 
-        // Look for common row count columns in EXPLAIN output
         results.first().and_then(|row| {
             row.get_value("rows")
                 .as_i64()
@@ -255,7 +246,6 @@ impl HooksAnalyzer {
             _ => {}
         }
 
-        // Final generic safety check
         if sql_upper.contains("DROP")
             && !matches!(
                 impact,
@@ -270,7 +260,7 @@ impl HooksAnalyzer {
 }
 
 #[async_trait]
-impl PlanAnalyzer for HooksAnalyzer {
+impl<S: SchemaDriver, D: SchemaDriver> PlanAnalyzer<S, D> for HooksAnalyzer<D> {
     type Input = Pipeline;
     type Output = HooksPlan;
 
@@ -281,7 +271,7 @@ impl PlanAnalyzer for HooksAnalyzer {
     async fn analyze(
         &self,
         pipeline: &Self::Input,
-        _ctx: &AnalysisContext,
+        _ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<Self::Output> {
         self.analyze_pipeline_hooks(pipeline)
             .await

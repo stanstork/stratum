@@ -78,7 +78,7 @@ impl BatchCoordinator {
             .await
             .map_err(|e| ConsumerError::Checkpoint {
                 batch_id: batch.id.clone(),
-                source: Box::new(e),
+                source: e,
             })?;
 
         // Write to destination with retry
@@ -92,7 +92,7 @@ impl BatchCoordinator {
             .await
             .map_err(|e| ConsumerError::Checkpoint {
                 batch_id: batch.id.clone(),
-                source: Box::new(e),
+                source: e,
             })?;
 
         self.state_manager
@@ -100,7 +100,7 @@ impl BatchCoordinator {
             .await
             .map_err(|e| ConsumerError::Checkpoint {
                 batch_id: batch.id.clone(),
-                source: Box::new(e),
+                source: e,
             })?;
 
         self.metrics.increment_records(row_count as u64);
@@ -120,12 +120,7 @@ impl BatchCoordinator {
     }
 
     pub async fn load_last_checkpoint(&self) -> Result<Option<Checkpoint>, ConsumerError> {
-        self.state_manager
-            .load_checkpoint()
-            .await
-            .map_err(|e| ConsumerError::StateLoad {
-                source: Box::new(e),
-            })
+        Ok(self.state_manager.load_checkpoint().await?)
     }
 
     pub fn rows_processed(&self) -> u64 {
@@ -136,10 +131,7 @@ impl BatchCoordinator {
         Ok(self
             .state_manager
             .load_checkpoint()
-            .await
-            .map_err(|e| ConsumerError::StateLoad {
-                source: Box::new(e),
-            })?
+            .await?
             .map(|cp| cp.rows_done)
             .unwrap_or(0))
     }

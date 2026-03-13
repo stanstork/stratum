@@ -11,7 +11,7 @@ use std::collections::HashMap;
 pub fn eval_ast_expression(
     expr: &Expression,
     definitions: &HashMap<String, DefinitionInfo>,
-    env_getter: fn(&str) -> Option<String>,
+    env_getter: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Value, ExpressionError> {
     match &expr.kind {
         ExpressionKind::Literal(lit) => Ok(match lit {
@@ -51,6 +51,13 @@ pub fn eval_ast_expression(
             };
 
             registry.call(name, &args, &ctx)
+        }
+        ExpressionKind::Array(elements) => {
+            let values: Vec<Value> = elements
+                .iter()
+                .map(|elem| eval_ast_expression(elem, definitions, env_getter))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Value::Array(values))
         }
         _ => Err(ExpressionError::InvalidFunctionArgs {
             function: "eval_ast_expression".to_string(),

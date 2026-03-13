@@ -1,7 +1,7 @@
 use crate::error::CliError;
-use engine_core::plan::execution::ExecutionPlan;
+use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan};
 use smql_syntax::ast::doc::SmqlDocument;
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 use tracing::{debug, info};
 
 /// Resolves config file path from CLI argument, environment, or auto-discovery
@@ -36,7 +36,11 @@ pub fn resolve_path(config: Option<String>) -> Result<String, CliError> {
 }
 
 /// Loads and parses a migration plan from the config file
-pub async fn load_plan(path: &str, from_ast: bool) -> Result<ExecutionPlan, CliError> {
+pub async fn load_plan(
+    path: &str,
+    from_ast: bool,
+    env: Arc<EnvContext>,
+) -> Result<ExecutionPlan, CliError> {
     let source = tokio::fs::read_to_string(path).await?;
     let doc: SmqlDocument = if from_ast {
         // If `from_ast` is true, read the config file as a pre-parsed AST
@@ -45,7 +49,7 @@ pub async fn load_plan(path: &str, from_ast: bool) -> Result<ExecutionPlan, CliE
         // Otherwise, read the config file and parse it
         smql_syntax::builder::parse(&source)?
     };
-    Ok(ExecutionPlan::build(&doc)?)
+    Ok(ExecutionPlan::build(&doc, env)?)
 }
 
 /// Discovers the config file path by searching in multiple locations

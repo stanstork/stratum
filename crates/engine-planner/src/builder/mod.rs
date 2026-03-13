@@ -7,7 +7,7 @@ use crate::{
         analyzers::{connection::ConnectionAnalyzer, sample::SampleConfig},
         data_flow::DataFlowAnalyzer,
         diagnostics::diagnostic_generator::DiagnosticGenerator,
-        errors::{ConnectionError, PlanBuilderError, PlanBuilderResult, SourceAnalyzerError},
+        errors::{ConnectionError, ReportBuilderError, ReportBuilderResult, SourceAnalyzerError},
         estimator::{DurationEstimator, ResourceEstimator},
         infra::{
             pipeline_analysis::{PipelineAnalysisResources, PipelineSettingsView},
@@ -32,25 +32,31 @@ use crate::{
             retry::{BackoffConfig, RetryConfig},
         },
         execution::{
-            execution_plan::ExecutionPlan,
             execution_settings::{ExecutionSettings, ExecutionStrategy, FailureStrategy},
             execution_stage::ExecutionStage,
+            migration_report::MigrationReport,
         },
         pipeline::{plan::PipelinePlan, settings::PipelineSettings},
         sample::method::SamplingMethod,
     },
 };
-use connectors::metadata::entity::EntityMetadata;
+use connectors::traits::introspector::SchemaIntrospector;
 use engine_config::settings::{
     Settings, validated::ValidatedSettings, validator::SettingsValidator,
 };
 use engine_core::{
-    connectors::{destination::Destination, source::Source},
     context::exec::ConnectionPool,
+    dispatch_drivers,
+    drivers::DriverRef,
     plan::execution::ExecutionPlan as CoreExecutionPlan,
     retry::RetryPolicy,
-    schema::{plan::SchemaPlan, planner::SchemaPlanner},
+    schema::{
+        plan::SchemaPlan,
+        planner::SchemaPlanner,
+        type_registry::{Dialect, TypeRegistry},
+    },
 };
+use engine_processing::io::{destination::Destination, format::DataFormat, source::Source};
 use engine_runtime::dag::Dag;
 use model::execution::pipeline::RetryConfig as CoreRetryConfig;
 use model::{
@@ -85,8 +91,8 @@ pub mod infra;
 pub mod summary;
 pub mod utils;
 
-/// Configuration for plan building
-pub struct PlanBuilderConfig {
+/// Configuration for report building
+pub struct ReportBuilderConfig {
     /// Enable sample data collection (--sample flag)
     pub enable_sampling: bool,
 
@@ -121,7 +127,7 @@ pub struct PlanBuilderConfig {
     pub verbosity: u8,
 }
 
-impl Default for PlanBuilderConfig {
+impl Default for ReportBuilderConfig {
     fn default() -> Self {
         Self {
             enable_sampling: false,
@@ -139,14 +145,14 @@ impl Default for PlanBuilderConfig {
     }
 }
 
-/// Main plan builder that orchestrates all analysis
+/// Main report builder that orchestrates all analysis
 #[derive(Default)]
-pub struct PlanBuilder {
-    config: PlanBuilderConfig,
+pub struct ReportBuilder {
+    config: ReportBuilderConfig,
 }
 
-impl PlanBuilder {
-    pub fn new(config: PlanBuilderConfig) -> Self {
+impl ReportBuilder {
+    pub fn new(config: ReportBuilderConfig) -> Self {
         Self { config }
     }
 
@@ -155,7 +161,7 @@ impl PlanBuilder {
         core_plan: &CoreExecutionPlan,
         dag: &Dag,
         config_path: &Path,
-    ) -> Result<ExecutionPlan, PlanBuilderError> {
+    ) -> Result<MigrationReport, ReportBuilderError> {
         info!("Orchestrating execution plan build for {:?}", config_path);
 
         // Preparation & Metadata
@@ -182,7 +188,7 @@ impl PlanBuilder {
             ResourceEstimator::estimate(&pipelines, &execution_order, &execution_settings);
         let (is_executable, blocking_reason) = self.check_executability(&diagnostics);
 
-        Ok(ExecutionPlan {
+        Ok(MigrationReport {
             plan_id: metadata.plan_id,
             generated_at: metadata.generated_at,
             engine_version: metadata.engine_version,
@@ -207,7 +213,7 @@ impl PlanBuilder {
         core_plan: &CoreExecutionPlan,
         dag: &Dag,
         connections: &mut ConnectionPool,
-    ) -> PlanBuilderResult<Vec<PipelinePlan>> {
+    ) -> ReportBuilderResult<Vec<PipelinePlan>> {
         let mut pipelines = Vec::with_capacity(core_plan.pipelines.len());
         for pipeline in &core_plan.pipelines {
             pipelines.push(self.analyze_pipeline(pipeline, dag, connections).await?);
@@ -221,7 +227,7 @@ impl PlanBuilder {
         pipeline: &Pipeline,
         dag: &Dag,
         connections: &mut ConnectionPool,
-    ) -> PlanBuilderResult<PipelinePlan> {
+    ) -> ReportBuilderResult<PipelinePlan> {
         info!("Analyzing pipeline: {}", pipeline.name);
 
         // Prepare physical adapters and metadata caches via specialized resource container
@@ -232,7 +238,7 @@ impl PlanBuilder {
             .run_pipeline_analysis(pipeline, &resources)
             .await
             .map_err(|e| {
-                PlanBuilderError::SourceAnalyzer(SourceAnalyzerError::QueryFailed(format!(
+                ReportBuilderError::SourceAnalyzer(SourceAnalyzerError::QueryFailed(format!(
                     "Analysis failed for {}: {}",
                     pipeline.name, e.message
                 )))
@@ -250,7 +256,7 @@ impl PlanBuilder {
         dag: &Dag,
         resources: PipelineAnalysisResources,
         report: analysis::AnalysisReport,
-    ) -> PlanBuilderResult<PipelinePlan> {
+    ) -> ReportBuilderResult<PipelinePlan> {
         let settings = PipelineSettingsView::new(&resources.validated_settings);
 
         // Determine if we can use high-performance streaming (fast path)
@@ -319,48 +325,58 @@ impl PlanBuilder {
         pipeline: &Pipeline,
         resources: &PipelineAnalysisResources,
     ) -> Result<AnalysisReport, AnalyzerError> {
-        let analysis_context = AnalysisContext::new(
-            resources.source_adapter.clone(),
-            resources.dest_adapter.clone(),
-            resources.schema_plan.clone(),
-            Arc::new(resources.mapping.clone()),
-            AnalysisContextConfig {
-                metadata_timeout: self.config.metadata_timeout,
-                enable_sampling: self.config.enable_sampling,
-                sample_size: self.config.sample_size,
-                sample_method: self.config.sample_method.clone(),
-                sample_ids: self.config.sample_ids.clone(),
-                id_column: self.config.id_column.clone(),
-                auto_mask_sensitive: self.config.auto_mask_sensitive,
-                mask_columns: self.config.mask_columns.clone(),
-                use_exact_where: self.config.exact_where,
-            },
-        );
-
-        let registry = AnalyzerRegistry::new(
-            resources.source_cache.clone(),
-            resources.schema_plan.clone(),
-            &resources.mapping,
-            resources.dest_adapter.clone(),
-            self.config.metadata_timeout,
-        );
+        let config = &self.config;
+        let ctx_config = AnalysisContextConfig {
+            metadata_timeout: config.metadata_timeout,
+            enable_sampling: config.enable_sampling,
+            sample_size: config.sample_size,
+            sample_method: config.sample_method.clone(),
+            sample_ids: config.sample_ids.clone(),
+            id_column: config.id_column.clone(),
+            auto_mask_sensitive: config.auto_mask_sensitive,
+            mask_columns: config.mask_columns.clone(),
+            use_exact_where: config.exact_where,
+        };
 
         let analysis_input = PipelineAnalysisInput::new(
             Arc::new(pipeline.clone()),
-            resources.core_data_source.clone(),
             self.sample_config(),
             PipelineSettingsView::new(&resources.validated_settings).mapped_columns_only(),
         );
 
-        registry
-            .analyze_pipeline(&analysis_input, &analysis_context)
-            .await
+        let schema_plan = resources.schema_plan.clone();
+        let mapping = resources.mapping.clone();
+        let timeout = config.metadata_timeout;
+
+        dispatch_drivers!(&resources.src_driver, &resources.dst_driver, |src, dst| {
+            let analysis_context = AnalysisContext::new(
+                src.clone(),
+                resources.src_driver.dialect(),
+                dst.clone(),
+                resources.dst_driver.dialect(),
+                schema_plan.clone(),
+                Arc::new(mapping.clone()),
+                ctx_config,
+            );
+
+            let registry = AnalyzerRegistry::new(
+                analysis_context.source_cache.clone(),
+                schema_plan.clone(),
+                &mapping,
+                dst.clone(),
+                timeout,
+            );
+
+            registry
+                .analyze_pipeline(&analysis_input, &analysis_context)
+                .await
+        })
     }
 
     async fn collect_connections(
         &self,
         core_plan: &CoreExecutionPlan,
-    ) -> PlanBuilderResult<Vec<ConnectionPlan>> {
+    ) -> ReportBuilderResult<Vec<ConnectionPlan>> {
         // Determine connection roles based on pipeline usage
         let roles = Self::determine_connection_roles(core_plan);
 
@@ -368,7 +384,7 @@ impl PlanBuilder {
         let mut results = Vec::new();
         for core_conn in &core_plan.connections {
             let mut plan = analyzer.analyze(core_conn).await.map_err(|e| {
-                PlanBuilderError::Connection(ConnectionError::Failed {
+                ReportBuilderError::Connection(ConnectionError::Failed {
                     name: core_conn.name.clone(),
                     reason: e.to_string(),
                 })
@@ -417,12 +433,12 @@ impl PlanBuilder {
         &self,
         connection_plans: &[ConnectionPlan],
         core_plan: &CoreExecutionPlan,
-    ) -> PlanBuilderResult<ConnectionPool> {
+    ) -> ReportBuilderResult<ConnectionPool> {
         let mut pool = ConnectionPool::new();
         for (plan, core_conn) in connection_plans.iter().zip(&core_plan.connections) {
             if let ConnectionStatus::Connected { .. } = &plan.status {
                 pool.get_or_create(core_conn).await.map_err(|e| {
-                    PlanBuilderError::Connection(ConnectionError::Failed {
+                    ReportBuilderError::Connection(ConnectionError::Failed {
                         name: core_conn.name.clone(),
                         reason: e.to_string(),
                     })
@@ -436,7 +452,7 @@ impl PlanBuilder {
         &self,
         dag: &Dag,
         pipelines: &[PipelinePlan],
-    ) -> PlanBuilderResult<Vec<ExecutionStage>> {
+    ) -> ReportBuilderResult<Vec<ExecutionStage>> {
         let stages = dag.execution_order();
         Ok(stages
             .iter()
@@ -472,34 +488,55 @@ impl PlanBuilder {
         None
     }
 
-    async fn validate_settings(
+    pub(crate) async fn validate_settings(
         &self,
         pipeline: &Pipeline,
         source: &Source,
         dest: &Destination,
-    ) -> PlanBuilderResult<ValidatedSettings> {
+        introspector: &dyn SchemaIntrospector,
+    ) -> ReportBuilderResult<ValidatedSettings> {
         let settings = Settings::from_map(&pipeline.settings);
-        let validator = SettingsValidator::new(source, dest, true);
+        let validator = SettingsValidator::new(source, dest, introspector, true);
         validator.validate(&settings).await.map_err(|e| {
-            PlanBuilderError::Config(format!("Validation failed for {}: {}", pipeline.name, e))
+            ReportBuilderError::Config(format!("Validation failed for {}: {}", pipeline.name, e))
         })
     }
 
-    async fn build_schema_plan(
+    pub(crate) async fn build_schema_plan(
         &self,
         pipeline: &Pipeline,
-        source: &Source,
+        introspector: Arc<dyn SchemaIntrospector>,
+        source_dialect: Dialect,
         mapping: &TransformationMetadata,
         settings: &ValidatedSettings,
-    ) -> PlanBuilderResult<SchemaPlan> {
+    ) -> ReportBuilderResult<SchemaPlan> {
         let view = PipelineSettingsView::new(settings);
+        let target_dialect = DataFormat::parse(&pipeline.destination.connection.driver)
+            .map(|f| f.to_dialect())
+            .unwrap_or(Dialect::Postgres);
+        let type_registry = TypeRegistry::new(source_dialect, target_dialect);
         let planner = SchemaPlanner::new(
-            source.clone(),
+            introspector.clone(),
+            source_dialect,
             mapping.clone(),
             view.ignore_constraints(),
             view.mapped_columns_only(),
+            type_registry,
         );
-        Ok(planner.plan_schema(&pipeline.source.table).await?)
+
+        let join_tables: Vec<&str> = pipeline
+            .source
+            .joins
+            .iter()
+            .map(|j| j.table.as_str())
+            .collect();
+        let mut plan = planner.plan_schema(&pipeline.source.table).await?;
+        for &join_table in join_tables.iter() {
+            let meta = introspector.table_metadata(join_table).await?;
+            plan.add_metadata(join_table, meta);
+        }
+
+        Ok(plan)
     }
 
     fn check_executability(&self, diagnostics: &[Diagnostic]) -> (bool, Option<String>) {
@@ -644,13 +681,14 @@ impl PlanBuilder {
         }
     }
 
-    fn mask_value(value: &Value) -> Value {
-        if let Some(s) = value.as_string()
-            && MaskingPolicy::is_db_url(&s)
-        {
-            return Value::String(MaskingPolicy::mask_url(&s));
+    fn mask_value(value: &Value) -> String {
+        if let Some(s) = value.as_string() {
+            if MaskingPolicy::is_db_url(&s) {
+                return MaskingPolicy::mask_url(&s);
+            }
+            return s;
         }
-        value.clone()
+        format!("{:?}", value)
     }
 
     fn sample_config(&self) -> SampleConfig {
@@ -670,50 +708,30 @@ impl PlanBuilder {
         resources: &PipelineAnalysisResources,
         create_missing: bool,
     ) -> bool {
-        let has_capability = resources
-            .dest_adapter
-            .get_sql()
-            .capabilities()
-            .await
-            .is_ok_and(|c| c.copy_streaming);
-        has_capability
-            && Self::eval_fast_path(
-                &resources.core_data_source,
-                &resources.core_data_destination,
-                create_missing,
-                &resources.mapping,
-            )
-            .await
-    }
-
-    pub async fn eval_fast_path(
-        source: &Source,
-        destination: &Destination,
-        create_missing: bool,
-        mapping: &TransformationMetadata,
-    ) -> bool {
-        let sink = destination.sink();
-        let adapter = destination.data_dest.adapter().await;
-
+        let sink = resources.core_data_destination.sink();
         match sink.support_fast_path().await {
-            Ok(true) => match adapter.table_exists(&destination.name).await {
-                Ok(true) => match destination
-                    .data_dest
-                    .fetch_meta(destination.name.clone())
+            Ok(true) => {
+                // Check if destination table has primary keys
+                match resources
+                    .dst_driver
+                    .table_metadata(&resources.core_data_destination.name())
                     .await
                 {
                     Ok(meta) => !meta.primary_keys.is_empty(),
-                    Err(_) => false,
-                },
-                Ok(false) if create_missing => {
-                    let src_table = mapping.entities.reverse_resolve(&destination.name);
-                    match source.primary.fetch_meta(src_table.clone()).await {
-                        Ok(EntityMetadata::Table(m)) => !m.primary_keys.is_empty(),
-                        _ => false,
+                    Err(_) if create_missing => {
+                        // Check source table for primary keys
+                        let src_table = resources
+                            .mapping
+                            .entities
+                            .reverse_resolve(&resources.core_data_destination.name());
+                        match resources.src_driver.table_metadata(&src_table).await {
+                            Ok(meta) => !meta.primary_keys.is_empty(),
+                            Err(_) => false,
+                        }
                     }
+                    Err(_) => false,
                 }
-                _ => false,
-            },
+            }
             _ => false,
         }
     }

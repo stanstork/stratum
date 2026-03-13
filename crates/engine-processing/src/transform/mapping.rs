@@ -1,7 +1,7 @@
 use super::pipeline::Transform;
 use crate::transform::error::TransformError;
 use model::{
-    records::row::RowData,
+    records::Record,
     transform::mapping::{FieldTransformations, NameResolver},
 };
 
@@ -26,9 +26,9 @@ impl TableMapper {
 }
 
 impl Transform for FieldMapper {
-    fn apply(&self, row: &mut RowData) -> Result<(), TransformError> {
-        let table = row.entity.clone();
-        for column in &mut row.field_values {
+    fn apply(&self, row: &mut Record) -> Result<(), TransformError> {
+        let table = row.schema.clone();
+        for column in &mut row.fields {
             column.name = self.ns_map.resolve(&table, &column.name);
         }
         Ok(())
@@ -36,9 +36,9 @@ impl Transform for FieldMapper {
 }
 
 impl Transform for TableMapper {
-    fn apply(&self, row: &mut RowData) -> Result<(), TransformError> {
-        let original_entity = row.entity.clone();
-        row.entity = self.name_map.resolve(&original_entity);
+    fn apply(&self, row: &mut Record) -> Result<(), TransformError> {
+        let original_schema = row.schema.clone();
+        row.schema = self.name_map.resolve(&original_schema);
         Ok(())
     }
 }

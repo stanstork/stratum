@@ -29,3 +29,6 @@ rep.json
 res.json
 
 engine-tests/migration_buffer_*/
+
+CLAUDE.md
+/.claude

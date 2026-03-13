@@ -3,7 +3,8 @@ use crate::{
     plan::schema::{change::SchemaChange, types::SchemaChangeType},
 };
 use async_trait::async_trait;
-use connectors::sql::base::query::generator::QueryGenerator;
+use connectors::sql::query::generator::QueryGenerator;
+use engine_processing::io::driver::SchemaDriver;
 use model::execution::pipeline::Pipeline;
 use tracing::info;
 
@@ -13,14 +14,13 @@ pub struct SchemaAnalyzer;
 
 impl SchemaAnalyzer {
     /// Primary logic for determining schema changes based on table existence.
-    async fn analyze_pipeline_schema(
+    async fn analyze_pipeline_schema<S: SchemaDriver, D: SchemaDriver>(
         &self,
         pipeline: &Pipeline,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<Vec<SchemaChange>> {
         let dest_table = &pipeline.destination.table;
 
-        // Check if destination table exists using the context-aware metadata cache
         let dest_exists = ctx.dest_cache.table_exists(dest_table).await.map_err(|e| {
             AnalyzerError::error("schema", format!("Failed to check table existence: {}", e))
         })?;
@@ -35,10 +35,10 @@ impl SchemaAnalyzer {
     }
 
     /// Generates the full set of changes required to create a new table, including enums and constraints.
-    async fn plan_table_creation(
+    async fn plan_table_creation<S: SchemaDriver, D: SchemaDriver>(
         &self,
         dest_table: &str,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<Vec<SchemaChange>> {
         let mut changes = Vec::new();
 
@@ -63,10 +63,8 @@ impl SchemaAnalyzer {
             is_reversible: true,
         });
 
-        // Custom Enum Types
-        let enum_queries = ctx.schema_plan.enum_queries().await.map_err(|e| {
-            AnalyzerError::error("schema", format!("Enum query generation failed: {}", e))
-        })?;
+        // Custom Enum Types - enum_queries() returns a HashSet
+        let enum_queries = ctx.schema_plan.enum_queries();
 
         for (sql, column_name) in enum_queries {
             changes.push(SchemaChange {
@@ -97,14 +95,13 @@ impl SchemaAnalyzer {
     }
 
     /// Compares the planned column definitions with existing physical metadata to find missing columns.
-    async fn compare_and_modify(
+    async fn compare_and_modify<S: SchemaDriver, D: SchemaDriver>(
         &self,
         dest_table: &str,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<Vec<SchemaChange>> {
         let mut changes = Vec::new();
 
-        // Fetch current physical metadata for comparison
         let dest_metadata = ctx
             .dest_cache
             .table_metadata(dest_table)
@@ -119,8 +116,8 @@ impl SchemaAnalyzer {
         let planned_columns = ctx.schema_plan.resolved_column_defs().await;
         let existing_columns = dest_metadata.columns();
 
-        // Use the destination dialect from context to generate appropriate ALTER statements
-        let generator = QueryGenerator::new(ctx.dest_dialect.as_ref());
+        let dialect = ctx.dest_dialect.as_query_dialect();
+        let generator = QueryGenerator::new(dialect.as_ref());
 
         for planned_col in planned_columns {
             let col_name = planned_col.name();
@@ -156,7 +153,7 @@ impl SchemaAnalyzer {
 }
 
 #[async_trait]
-impl PlanAnalyzer for SchemaAnalyzer {
+impl<S: SchemaDriver, D: SchemaDriver> PlanAnalyzer<S, D> for SchemaAnalyzer {
     type Input = Pipeline;
     type Output = Vec<SchemaChange>;
 
@@ -167,7 +164,7 @@ impl PlanAnalyzer for SchemaAnalyzer {
     async fn analyze(
         &self,
         pipeline: &Self::Input,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<Self::Output> {
         self.analyze_pipeline_schema(pipeline, ctx).await
     }

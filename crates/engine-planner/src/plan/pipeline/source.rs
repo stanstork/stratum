@@ -1,6 +1,7 @@
-use crate::plan::{connection::plan::DatabaseDriver, execution::types::RowCount};
+use crate::plan::connection::plan::DatabaseDriver;
 use chrono::{DateTime, Utc};
-use connectors::sql::base::metadata::{column::ColumnMetadata, index::IndexMetadata};
+use connectors::sql::metadata::{column::ColumnMetadata, index::IndexMetadata};
+use model::execution::row_count::RowCount;
 use serde::Serialize;
 
 #[derive(Serialize, Debug, Clone)]
@@ -64,20 +65,12 @@ pub struct ColumnInfo {
 }
 
 impl ColumnInfo {
-    pub fn from_metadata(meta: &ColumnMetadata, driver: &DatabaseDriver) -> Self {
+    pub fn from_metadata(meta: &ColumnMetadata) -> Self {
         Self {
             name: meta.name.clone(),
-            data_type: match driver {
-                DatabaseDriver::Postgres => meta.data_type.postgres_name().to_string(),
-                DatabaseDriver::MySql => meta.data_type.mysql_name().to_string(),
-                _ => meta.data_type.mysql_name().to_string(),
-            },
+            data_type: meta.data_type.clone(),
             nullable: meta.is_nullable,
-            default: meta
-                .default_value
-                .as_ref()
-                .map(|v| v.as_string())
-                .unwrap_or_default(),
+            default: meta.default_value.clone(),
             max_length: meta.char_max_length,
             is_primary_key: meta.is_primary_key,
             is_auto_increment: meta.is_auto_increment,
@@ -95,9 +88,10 @@ pub struct IndexInfo {
 
 impl IndexInfo {
     pub fn from_metadata(meta: &IndexMetadata) -> Self {
+        let columns = meta.columns.iter().map(|c| c.name.clone()).collect();
         Self {
             name: meta.name.clone(),
-            columns: meta.columns.clone(),
+            columns,
             is_unique: meta.is_unique,
             is_primary: meta.is_primary,
         }

@@ -1,6 +1,6 @@
 use super::pipeline::Transform;
 use crate::transform::error::TransformError;
-use model::{records::row::RowData, transform::mapping::TransformationMetadata};
+use model::{records::Record, transform::mapping::TransformationMetadata};
 use std::collections::HashSet;
 
 /// Prunes unmapped columns from rows when copy_columns = MAP_ONLY.
@@ -15,8 +15,8 @@ impl FieldPruner {
 }
 
 impl Transform for FieldPruner {
-    fn apply(&self, row: &mut RowData) -> Result<(), TransformError> {
-        let table = row.entity.clone();
+    fn apply(&self, row: &mut Record) -> Result<(), TransformError> {
+        let table = row.schema.clone();
         let mut keep_fields = HashSet::new();
 
         // Add all target fields from field renames (mapped fields)
@@ -34,7 +34,7 @@ impl Transform for FieldPruner {
         }
 
         // Filter the row to only keep the allowed fields
-        row.field_values
+        row.fields
             .retain(|field| keep_fields.contains(&field.name.to_ascii_lowercase()));
 
         Ok(())

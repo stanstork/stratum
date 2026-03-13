@@ -38,7 +38,8 @@ impl Properties {
 
     pub fn get_usize(&self, key: &str) -> Option<usize> {
         self.inner.get(key).and_then(|v| match v {
-            Value::Usize(n) => Some(*n),
+            Value::UInt(n) => Some(*n as usize),
+            Value::Int(n) if *n >= 0 => Some(*n as usize),
             _ => None,
         })
     }

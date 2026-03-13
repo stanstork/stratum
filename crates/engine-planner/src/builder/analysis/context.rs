@@ -1,14 +1,12 @@
 use crate::builder::{
-    analyzers::sample::SampleConfig,
-    infra::metadata_cache::MetadataCache,
-    utils::{MaskingPolicy, dialect_for_adapter},
+    analyzers::sample::SampleConfig, infra::metadata_cache::MetadataCache, utils::MaskingPolicy,
 };
 use crate::plan::sample::method::SamplingMethod;
-use connectors::adapter::Adapter;
 use engine_core::schema::plan::SchemaPlan;
+use engine_core::schema::type_registry::Dialect;
+use engine_processing::io::driver::SchemaDriver;
 use model::core::value::Value;
 use model::transform::mapping::TransformationMetadata;
-use query_builder::dialect::Dialect;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -25,11 +23,11 @@ pub struct AnalysisContextConfig {
 }
 
 /// Shared context passed to all analyzers during pipeline analysis
-pub struct AnalysisContext {
-    pub source_adapter: Arc<Adapter>,
-    pub dest_adapter: Arc<Adapter>,
-    pub source_cache: Arc<MetadataCache>,
-    pub dest_cache: Arc<MetadataCache>,
+pub struct AnalysisContext<S: SchemaDriver, D: SchemaDriver> {
+    pub src_driver: Arc<S>,
+    pub dest_driver: Arc<D>,
+    pub source_cache: Arc<MetadataCache<S>>,
+    pub dest_cache: Arc<MetadataCache<D>>,
     pub schema_plan: Arc<SchemaPlan>,
     pub mapping: Arc<TransformationMetadata>,
 
@@ -44,31 +42,31 @@ pub struct AnalysisContext {
     /// Use exact COUNT for filtered rows (slower but accurate) vs EXPLAIN estimates (faster)
     pub use_exact_where: bool,
 
-    pub source_dialect: Arc<dyn Dialect>,
-    pub dest_dialect: Arc<dyn Dialect>,
+    pub source_dialect: Dialect,
+    pub dest_dialect: Dialect,
 }
 
-impl AnalysisContext {
+impl<S: SchemaDriver, D: SchemaDriver> AnalysisContext<S, D> {
     pub fn new(
-        source_adapter: Arc<Adapter>,
-        dest_adapter: Arc<Adapter>,
+        src_driver: Arc<S>,
+        src_dialect: Dialect,
+        dest_driver: Arc<D>,
+        dest_dialect: Dialect,
         schema_plan: Arc<SchemaPlan>,
         mapping: Arc<TransformationMetadata>,
         config: AnalysisContextConfig,
     ) -> Self {
         // Create metadata caches
         let source_cache = Arc::new(MetadataCache::new(
-            Arc::clone(&source_adapter),
+            Arc::clone(&src_driver),
+            src_dialect,
             config.metadata_timeout,
         ));
         let dest_cache = Arc::new(MetadataCache::new(
-            Arc::clone(&dest_adapter),
+            Arc::clone(&dest_driver),
+            dest_dialect,
             config.metadata_timeout,
         ));
-
-        // Resolve SQL dialects
-        let source_dialect = dialect_for_adapter(&source_adapter);
-        let dest_dialect = dialect_for_adapter(&dest_adapter);
 
         // Create masking policy
         let masking = MaskingPolicy::new(config.auto_mask_sensitive, config.mask_columns.clone());
@@ -85,8 +83,8 @@ impl AnalysisContext {
         };
 
         Self {
-            source_adapter,
-            dest_adapter,
+            src_driver,
+            dest_driver,
             source_cache,
             dest_cache,
             schema_plan,
@@ -95,7 +93,7 @@ impl AnalysisContext {
             sampling,
             masking,
             use_exact_where: config.use_exact_where,
-            source_dialect,
+            source_dialect: src_dialect,
             dest_dialect,
         }
     }

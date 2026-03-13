@@ -57,6 +57,15 @@ impl Render for ColumnDef {
             r.sql.push_str(" DEFAULT ");
             default.render(r);
         }
+        if let Some(expr) = self
+            .generated_expression
+            .as_deref()
+            .filter(|s| !s.is_empty())
+        {
+            let stored = if self.is_stored { "STORED" } else { "VIRTUAL" };
+            r.sql
+                .push_str(&format!(" GENERATED ALWAYS AS ({}) {}", expr, stored));
+        }
     }
 }
 
@@ -73,11 +82,21 @@ impl Render for TableConstraint {
                 r.sql.push(')');
             }
             TableConstraint::ForeignKey {
+                name,
                 columns,
                 references,
                 referenced_columns,
+                on_delete,
+                on_update,
             } => {
-                // Generate the FOREIGN KEY (col1, col2) part
+                // Optional CONSTRAINT name
+                if let Some(constraint_name) = name {
+                    r.sql.push_str("CONSTRAINT ");
+                    r.sql.push_str(&r.dialect.quote_identifier(constraint_name));
+                    r.sql.push(' ');
+                }
+
+                // FOREIGN KEY (col1, col2)
                 r.sql.push_str("FOREIGN KEY (");
                 let quoted_columns: Vec<String> = columns
                     .iter()
@@ -85,7 +104,7 @@ impl Render for TableConstraint {
                     .collect();
                 r.sql.push_str(&quoted_columns.join(", "));
 
-                // Generate the REFERENCES other_table (other_col1, other_col2) part
+                // REFERENCES other_table (other_col1, other_col2)
                 r.sql.push_str(") REFERENCES ");
                 r.sql
                     .push_str(&r.dialect.quote_identifier(&references.name));
@@ -96,6 +115,40 @@ impl Render for TableConstraint {
                     .collect();
                 r.sql.push_str(&quoted_ref_columns.join(", "));
                 r.sql.push(')');
+
+                // ON DELETE / ON UPDATE actions
+                if let Some(action) = on_delete {
+                    r.sql.push_str(" ON DELETE ");
+                    r.sql.push_str(action);
+                }
+                if let Some(action) = on_update {
+                    r.sql.push_str(" ON UPDATE ");
+                    r.sql.push_str(action);
+                }
+            }
+            TableConstraint::Unique { name, columns } => {
+                if let Some(constraint_name) = name {
+                    r.sql.push_str("CONSTRAINT ");
+                    r.sql.push_str(&r.dialect.quote_identifier(constraint_name));
+                    r.sql.push(' ');
+                }
+                r.sql.push_str("UNIQUE (");
+                let quoted: Vec<String> = columns
+                    .iter()
+                    .map(|c| r.dialect.quote_identifier(c))
+                    .collect();
+                r.sql.push_str(&quoted.join(", "));
+                r.sql.push(')');
+            }
+            TableConstraint::Check { name, expression } => {
+                if let Some(constraint_name) = name {
+                    r.sql.push_str("CONSTRAINT ");
+                    r.sql.push_str(&r.dialect.quote_identifier(constraint_name));
+                    r.sql.push(' ');
+                }
+                r.sql.push_str("CHECK (");
+                r.sql.push_str(expression);
+                r.sql.push(')');
             }
         }
     }
@@ -103,7 +156,7 @@ impl Render for TableConstraint {
 
 #[cfg(test)]
 mod tests {
-    use model::core::data_type::DataType;
+    use model::core::types::{IntSize, Type};
 
     use crate::{
         ast::{
@@ -126,19 +179,30 @@ mod tests {
             columns: vec![
                 ColumnDef {
                     name: "id".to_string(),
-                    data_type: DataType::IntUnsigned,
+                    data_type: Type::Int {
+                        bits: IntSize::I32,
+                        unsigned: true,
+                        auto_increment: false,
+                    },
                     is_primary_key: true,
                     is_nullable: false,
                     default_value: None,
                     max_length: None,
+                    generated_expression: None,
+                    is_stored: false,
                 },
                 ColumnDef {
                     name: "email".to_string(),
-                    data_type: DataType::VarChar,
+                    data_type: Type::Varchar {
+                        length: Some(255),
+                        charset: None,
+                    },
                     is_primary_key: false,
                     is_nullable: false,
                     default_value: None,
                     max_length: Some(255),
+                    generated_expression: None,
+                    is_stored: false,
                 },
             ],
             constraints: vec![TableConstraint::PrimaryKey {
@@ -152,7 +216,7 @@ mod tests {
         let (sql, _) = renderer.finish();
 
         let expected_sql = r#"CREATE TABLE IF NOT EXISTS "users" (
-	"id" int4 PRIMARY KEY NOT NULL,
+	"id" integer PRIMARY KEY NOT NULL,
 	"email" varchar(255) NOT NULL,
 	PRIMARY KEY ("id")
 );"#;

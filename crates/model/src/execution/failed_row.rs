@@ -1,9 +1,9 @@
 use crate::{
     core::{
-        data_type::DataType,
+        types::Type,
         value::{FieldValue, Value},
     },
-    records::row::RowData,
+    records::Record,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -122,13 +122,16 @@ impl FailedRow {
         }
     }
 
-    pub fn to_row_data(&self, entity: &str) -> RowData {
+    pub fn to_row_data(&self, entity: &str) -> Record {
         let storage_map = self.to_storage_map();
 
         let field_values: Vec<FieldValue> = storage_map
             .into_iter()
             .map(|(name, value)| {
-                let data_type = Self::infer_data_type(&value);
+                let data_type = Type::Varchar {
+                    length: None,
+                    charset: None,
+                }; // TODO: value.data_type();
                 FieldValue {
                     name,
                     value: Some(value),
@@ -137,7 +140,7 @@ impl FailedRow {
             })
             .collect();
 
-        RowData::new(entity, field_values)
+        Record::new(entity, field_values)
     }
 
     pub fn with_execution_context(
@@ -222,7 +225,7 @@ impl FailedRow {
         }
 
         if let Some(row_index) = self.metadata.row_index {
-            map.insert("row_index".to_string(), Value::Uint(row_index as u64));
+            map.insert("row_index".to_string(), Value::UInt(row_index as u64));
         }
 
         if let Some(source) = &self.metadata.source {
@@ -242,20 +245,6 @@ impl FailedRow {
         }
 
         map
-    }
-
-    fn infer_data_type(value: &Value) -> DataType {
-        match value {
-            Value::SmallInt(_) => DataType::Short,
-            Value::Int32(_) => DataType::Int,
-            Value::Uint(_) => DataType::LongLong,
-            Value::Float(_) => DataType::Float,
-            Value::String(_) => DataType::VarChar,
-            Value::Boolean(_) => DataType::Boolean,
-            Value::Timestamp(_) => DataType::Timestamp,
-            Value::Null => DataType::Null,
-            _ => DataType::VarChar, // Default to VarChar for unknown types
-        }
     }
 }
 
@@ -278,7 +267,7 @@ mod tests {
     #[test]
     fn test_failed_row_creation() {
         let mut original_data = HashMap::new();
-        original_data.insert("user_id".to_string(), Value::Uint(123));
+        original_data.insert("user_id".to_string(), Value::UInt(123));
         original_data.insert(
             "email".to_string(),
             Value::String("test@example.com".to_string()),
@@ -322,7 +311,7 @@ mod tests {
     #[test]
     fn test_failed_row_with_context() {
         let mut original_data = HashMap::new();
-        original_data.insert("id".to_string(), Value::Uint(1));
+        original_data.insert("id".to_string(), Value::UInt(1));
 
         let failed_row = FailedRow::new(
             "test_pipeline".to_string(),
@@ -359,7 +348,7 @@ mod tests {
     #[test]
     fn test_to_storage_map() {
         let mut original_data = HashMap::new();
-        original_data.insert("id".to_string(), Value::Uint(1));
+        original_data.insert("id".to_string(), Value::UInt(1));
         original_data.insert("name".to_string(), Value::String("Test".to_string()));
 
         let failed_row = FailedRow::new(

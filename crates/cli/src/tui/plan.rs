@@ -2,17 +2,17 @@ use crate::{
     error::CliError,
     tui::{pipeline::PipelineState, planner::initialize_pipelines_from_plan},
 };
-use engine_core::plan::execution::ExecutionPlan as CoreExecutionPlan;
-use engine_planner::{builder::PlanBuilder, plan::execution::execution_plan::ExecutionPlan};
+use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan as CoreExecutionPlan};
+use engine_planner::{builder::ReportBuilder, plan::execution::migration_report::MigrationReport};
 use engine_runtime::dag::{Dag, builder::DagBuilder};
 use smql_syntax::builder::parse;
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path, sync::Arc};
 use tracing::info;
 
 /// Context containing all plan-related data needed for TUI execution
 pub struct PlanContext {
     pub core_plan: CoreExecutionPlan,
-    pub planner_plan: ExecutionPlan,
+    pub report: MigrationReport,
     pub dag: Dag,
     pub pipelines: HashMap<String, PipelineState>,
 }
@@ -21,6 +21,7 @@ pub struct PlanContext {
 pub async fn build_plan_context(
     config_path: &str,
     exact_filter: bool,
+    env: Arc<EnvContext>,
 ) -> Result<PlanContext, CliError> {
     info!("Building execution plan from {}...", config_path);
 
@@ -29,28 +30,28 @@ pub async fn build_plan_context(
     let ast = parse(&smql_content)?;
 
     // Build core plan
-    let core_plan = CoreExecutionPlan::build(&ast)?;
+    let core_plan = CoreExecutionPlan::build(&ast, env)?;
 
     // Build DAG
     let dag = build_dag(&core_plan)?;
 
-    // Build detailed plan with exact_filter configuration
-    let plan_config = engine_planner::builder::PlanBuilderConfig {
+    // Build detailed report with exact_filter configuration
+    let report_config = engine_planner::builder::ReportBuilderConfig {
         exact_where: exact_filter,
         ..Default::default()
     };
-    let planner_plan = PlanBuilder::new(plan_config)
+    let report = ReportBuilder::new(report_config)
         .build(&core_plan, &dag, Path::new(config_path))
         .await?;
 
     // Initialize pipeline states
-    let pipelines = initialize_pipelines_from_plan(&planner_plan, &core_plan.hash());
+    let pipelines = initialize_pipelines_from_plan(&report, &core_plan.hash());
 
     info!("Plan built successfully with {} pipelines", pipelines.len());
 
     Ok(PlanContext {
         core_plan,
-        planner_plan,
+        report,
         dag,
         pipelines,
     })

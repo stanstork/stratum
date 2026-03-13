@@ -1,0 +1,78 @@
+// =============================================================================
+// Phase 2 Test 10 — Table Renaming via `map` block
+// =============================================================================
+//
+// WHAT THIS TESTS:
+//   - `map` block in `to` renames tables on the destination
+//   - source `film` → dest `dim_film`
+//   - source `language` → dest `dim_language`
+//   - source `actor` → dest `dim_actor`
+//   - FK constraints on destination use the renamed table names
+//   - Topological order still correct after rename
+//
+// EXPECTED:
+//   CREATE TABLE dim_language (...)
+//   CREATE TABLE dim_film (... language_id references dim_language ...)
+//   CREATE TABLE dim_actor (...)
+//
+// RUN:
+//   cargo run -p cli -- plan -c dev-fixtures/configs/phase2/p2-10-table-rename.smql
+//   cargo run -p cli -- apply -c dev-fixtures/configs/phase2/p2-10-table-rename.smql
+//
+// VERIFY:
+//   \dt dim_*          -- should list dim_film, dim_language, dim_actor
+//   \dt film           -- should NOT exist (renamed)
+//
+//   SELECT COUNT(*) FROM dim_film;     -- matches source film count (1000)
+//   SELECT COUNT(*) FROM dim_language; -- matches source language count (6)
+//   SELECT COUNT(*) FROM dim_actor;    -- matches source actor count (200)
+//
+//   -- FK references resolved to dim_language:
+//   SELECT conname, confrelid::regclass FROM pg_constraint
+//   WHERE conrelid = 'dim_film'::regclass AND contype = 'f';
+//   -- should reference dim_language, not language
+//
+// =============================================================================
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" {
+    driver = "mysql"
+    url    = define.mysql_url
+}
+
+connection "dst" {
+    driver = "postgres"
+    url    = define.postgres_url
+}
+
+pipeline "migrate_film_as_dim" {
+    from {
+        connection = connection.src
+        table      = "film"
+
+        with references {
+            data    = cascade
+            depth   = 1
+            exclude = ["film_actor", "film_category", "inventory"]
+        }
+    }
+
+    to {
+        connection = connection.dst
+
+        map {
+            film     = "dim_film"
+            language = "dim_language"
+            actor    = "dim_actor"
+            category = "dim_category"
+        }
+    }
+
+    settings {
+        batch_size = 500
+    }
+}

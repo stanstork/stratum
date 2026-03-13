@@ -11,11 +11,12 @@ use crate::{
     },
 };
 use async_trait::async_trait;
+use engine_processing::io::driver::SchemaDriver;
 
 pub struct JoinUsageStage;
 
 #[async_trait]
-impl PipelineAnalysisStage for JoinUsageStage {
+impl<S: SchemaDriver, D: SchemaDriver> PipelineAnalysisStage<S, D> for JoinUsageStage {
     fn name(&self) -> &'static str {
         "join_usage"
     }
@@ -23,7 +24,7 @@ impl PipelineAnalysisStage for JoinUsageStage {
     async fn run(
         &self,
         _input: &PipelineAnalysisInput,
-        _ctx: &AnalysisContext,
+        _ctx: &AnalysisContext<S, D>,
         state: &mut AnalysisState,
     ) -> AnalyzerResult<()> {
         let source_table = state.require_source()?.table.clone();

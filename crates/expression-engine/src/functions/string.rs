@@ -38,32 +38,24 @@ pub fn eval_upper(args: &[Value], _ctx: &EvalContext) -> Result<Value> {
 pub fn eval_concat(args: &[Value], _ctx: &EvalContext) -> Result<Value> {
     let concatenated = args
         .iter()
-        .map(|arg| match arg {
-            Value::String(s) => s
-                .trim_start_matches('\"')
-                .trim_end_matches('\"')
-                .to_string(),
-            Value::SmallInt(i) => i.to_string(),
-            Value::Int32(i) => i.to_string(),
-            Value::Int(i) => i.to_string(),
-            Value::Uint(u) => u.to_string(),
-            Value::Usize(u) => u.to_string(),
-            Value::Float(f) => f.to_string(),
-            Value::Decimal(d) => d.to_string(),
-            Value::Boolean(b) => b.to_string(),
-            Value::Uuid(u) => u.to_string(),
-            Value::Date(d) => d.to_string(),
-            Value::Timestamp(t) => t.to_rfc3339(),
-            Value::TimestampNaive(t) => t.to_string(),
-            Value::Bytes(b) => String::from_utf8_lossy(b).to_string(),
-            Value::Json(v) => v.to_string(),
-            Value::Null => "NULL".to_string(),
-            Value::Enum(_, v) => v.clone(),
-            Value::StringArray(v) => format!("{v:?}"),
-        })
+        .map(value_to_string)
         .collect::<Vec<_>>()
         .join("");
     Ok(Value::String(concatenated))
+}
+
+/// Convert a Value to its string representation
+fn value_to_string(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        Value::Int(i) => i.to_string(),
+        Value::UInt(u) => u.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::Decimal(d) => d.to_string(),
+        Value::Boolean(b) => b.to_string(),
+        Value::Null => String::new(),
+        other => format!("{:?}", other),
+    }
 }
 
 #[cfg(test)]
@@ -82,7 +74,7 @@ mod tests {
         let definitions = HashMap::new();
         let ctx = EvalContext::BuildTime {
             definitions: &definitions,
-            env_getter: dummy_env_getter,
+            env_getter: &dummy_env_getter,
         };
         f(&ctx)
     }

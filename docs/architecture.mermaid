@@ -1,144 +1,156 @@
 graph TB
     subgraph CLI["CLI Layer (crates/cli)"]
-        CLI_CMDS["Commands: migrate | validate<br/>source info | test-conn | progress"]
-        CLI_SIG["Signal handling<br/>SIGINT/SIGTERM"]
-        CLI_SHUT["Graceful shutdown<br/>coordination"]
+        CLI_CMDS["Commands: plan | apply | verify | test-conn"]
+        CLI_SIG["Signal handling<br/>SIGINT/SIGTERM → CancellationToken"]
+        CLI_OUT["Output modes:<br/>plain | pretty | TUI (ratatui)"]
     end
 
-    subgraph CONFIG["Configuration & Planning Layer"]
-        SMQL["SMQL Syntax<br/>Parser/AST<br/>CONNECTIONS<br/>MIGRATE"]
-        PLANNER["Planner<br/>MigrationPlan<br/>Plan hash<br/>Offset strategy"]
-        ENGINE_CFG["Engine Config<br/>Validation<br/>Settings<br/>Dry-run"]
-        
-        SMQL --> PLANNER
-        PLANNER --> ENGINE_CFG
+    subgraph PLANNING["Planning Layer"]
+        SMQL["smql-syntax<br/>pest parser → AST"]
+        ENGINE_CFG["engine-config<br/>SMQL → ExecutionPlan<br/>ValidatedSettings"]
+        PLANNER["engine-planner<br/>MetadataCache<br/>Analysis & diagnostics"]
+
+        SMQL --> ENGINE_CFG
+        ENGINE_CFG --> PLANNER
     end
 
-    subgraph EXEC["Execution Orchestration Layer<br/>(crates/engine-runtime/executor)"]
-        EXECUTOR["MigrationExecutor<br/>Manages GlobalContext (run_id, adapters)<br/>Initializes StateStore (sled embedded KV)<br/>Spawns workers for each MigrationItem"]
+    subgraph RUNTIME["Execution Layer (crates/engine-runtime)"]
+        EXECUTOR["executor.rs<br/>run() entry point"]
+        DAG["DagExecutor<br/>topological levels<br/>parallel within level"]
+        ORCH["PipelineOrchestrator<br/>schema ops + data pipeline<br/>per pipeline lifecycle"]
+
+        EXECUTOR --> DAG
+        DAG --> ORCH
     end
 
-    subgraph ACTOR["Actor Runtime Layer<br/>(crates/engine-runtime/actor)"]
-        COORD["PipelineCoordinator<br/>Orchestrates the entire snapshot + CDC pipeline lifecycle"]
-        
-        PRODUCER["ProducerActor<br/>ProducerMsg<br/>Start<br/>Stop<br/>Pause/Resume"]
-        CONSUMER["ConsumerActor<br/>ConsumerMsg<br/>Receive batch<br/>Flush<br/>Stop"]
-        EVENTBUS["EventBus<br/>Pub/Sub<br/>MigrationEvt<br/>ChangeEvent<br/>Metrics"]
-        
-        COORD --> PRODUCER
-        COORD --> CONSUMER
-        COORD --> EVENTBUS
-        
-        PROD_MB["MPSC Mailbox"]
-        CONS_MB["MPSC Mailbox"]
-        SUBS["Subscribers"]
-        
-        PRODUCER --> PROD_MB
-        CONSUMER --> CONS_MB
-        EVENTBUS --> SUBS
+    subgraph SCHEMA["Schema Layer (crates/engine-schema)"]
+        SCHEMA_PLAN["SchemaPlanner<br/>introspect → SchemaPlan"]
+        DEP_GRAPH["DependencyGraph<br/>partial_topological_order()<br/>FK cycle handling"]
+        TYPE_ENG["TypeEngine + TypeRegistry<br/>dialect type mapping<br/>Transform hints"]
+        SCHEMA_OPS["SchemaOps<br/>ordered DDL operations"]
+        GRAPH_EXP["GraphExpander<br/>build SchemaOps<br/>from SchemaPlan"]
+
+        SCHEMA_PLAN --> DEP_GRAPH
+        SCHEMA_PLAN --> TYPE_ENG
+        GRAPH_EXP --> SCHEMA_OPS
+        DEP_GRAPH --> GRAPH_EXP
     end
 
-    subgraph PIPELINE["Data Processing Pipeline Layer<br/>(crates/engine-processing)"]
+    subgraph PROCESSING["Processing Pipeline (crates/engine-processing)"]
+        CTX["PipelineContext<br/>exec_ctx, source, destination<br/>mapping, cursor, offset_strategy"]
+
         subgraph PROD_SIDE["PRODUCER SIDE"]
-            SNAPSHOT["SnapshotReader<br/>Pagination<br/>Query execution"]
-            TRANSFORM["TransformService<br/>TransformPipeline<br/>TableMapper<br/>FieldMapper<br/>ComputedTransform"]
-            BATCH_COORD["BatchCoordinator<br/>Batching<br/>Send to channel"]
-            
+            SNAPSHOT["SnapshotReader<br/>pagination (pk/numeric/timestamp)"]
+            TRANSFORM["TransformService<br/>field mapping, computed columns<br/>type coercion"]
+            BATCH_COORD["BatchCoordinator<br/>group records into batches"]
+
             SNAPSHOT --> TRANSFORM
             TRANSFORM --> BATCH_COORD
         end
-        
-        CHANNEL["MPSC Channel<br/>Batch (cap:64)"]
-        
+
+        CHANNEL["MPSC Channel<br/>capacity: 64 batches<br/>backpressure"]
+
         subgraph CONS_SIDE["CONSUMER SIDE"]
-            WRITER["BatchWriter<br/>Fast-path (COPY)<br/>Fallback (INSERT)"]
-            STATE_MGR["StateManager<br/>Checkpoint tracking<br/>WAL"]
-            
-            WRITER --> STATE_MGR
+            SINK["Sink (write_batch)<br/>PostgresSink: COPY protocol<br/>fallback: INSERT"]
+            STATE_MGR["SledStateStore<br/>checkpoint per batch<br/>WAL + crash recovery"]
+
+            SINK --> STATE_MGR
         end
-        
+
+        CB["Circuit Breaker (cb.rs)<br/>threshold: 4 failures<br/>backoff: 1s → 30s"]
+
         BATCH_COORD -.->|Batch| CHANNEL
-        CHANNEL -.-> WRITER
-        
-        STATES["States: Working → Idle → Finished"]
-        
-        CB["Circuit Breaker (cb.rs)<br/>Exponential backoff<br/>(1s, 2s, 4s, 8s, 16s, 30s)<br/>Failure threshold: 4"]
+        CHANNEL -.-> SINK
+        CTX --> PROD_SIDE
+        CTX --> CONS_SIDE
     end
 
-    subgraph ADAPTER["Adapter Layer<br/>(crates/connectors)"]
-        subgraph SRC_ADAPT["Source Adapters"]
-            SQL_SRC["SQL (sql/base/)"]
-            MYSQL_SRC["MySqlAdapter<br/>mysql_async<br/>Query exec"]
-            PG_SRC["PostgresAdapter<br/>tokio-postgres<br/>Connection pool"]
-            CSV_SRC["CsvDataSource<br/>CSV parsing"]
-            SRC_COMMON["Common:<br/>Metadata providers<br/>Query generators<br/>Filter systems"]
-            
-            SQL_SRC --> MYSQL_SRC
-            SQL_SRC --> PG_SRC
+    subgraph IO["IO Abstractions (engine-processing/io)"]
+        SOURCE["Source<br/>Arc&lt;dyn DataReader&gt;<br/>Arc&lt;dyn SchemaIntrospector&gt;"]
+        DESTINATION["Destination<br/>Arc&lt;PgDriver&gt; (typed)"]
+        FILTER["FilterCompiler<br/>SqlFilterCompiler → WHERE"]
+        FORMAT["DataFormat<br/>MySql | Postgres | Csv"]
+    end
+
+    subgraph CONNECTORS["Connector Layer (crates/connectors)"]
+        DRIVER_TRAIT["Driver trait hierarchy<br/>SchemaIntrospector<br/>DataReader | DataWriter<br/>Transactional"]
+        DRIVER_REF["DriverRef (engine-core)<br/>enum: MySqlDriver | PgDriver<br/>dispatch_driver! macro"]
+        REGISTRY["DriverRegistry (global singleton)<br/>scheme → factory mapping"]
+
+        subgraph DRIVERS["Drivers"]
+            MYSQL_DRV["MySqlDriver<br/>mysql_async<br/>TINYINT(1)→Boolean"]
+            PG_DRV["PgDriver<br/>tokio-postgres<br/>COPY protocol"]
+            CSV_DRV["CSV<br/>streaming parse"]
         end
-        
-        subgraph DEST_ADAPT["Destination Adapters"]
-            SQL_DEST["SQL (sql/base/)"]
-            PG_DEST["PgDestination<br/>COPY protocol<br/>tokio-postgres"]
-            DB_DEST["DbDataDestination<br/>INSERT/MERGE<br/>Type encoding"]
-            DEST_COMMON["Common:<br/>Type coercion<br/>Batch optimization<br/>Error handling"]
-            
-            SQL_DEST --> PG_DEST
-            SQL_DEST --> DB_DEST
+
+        subgraph METADATA["Metadata (sql/metadata/)"]
+            TABLE_META["TableMetadata<br/>columns, PKs, FKs, indexes"]
+            IDX_META["IndexMetadata / IndexColumn<br/>type, sort_order, unique"]
+            COL_META["ColumnMetadata<br/>type, nullable, full_column_type"]
         end
+
+        DRIVER_TRAIT --> DRIVERS
+        REGISTRY --> DRIVERS
+        DRIVERS --> METADATA
     end
 
-    subgraph CORE["Core Services Layer<br/>(crates/engine-core)"]
-        STORE["StateStore<br/>sled KV<br/>Checkpoints<br/>WAL<br/>Progress<br/>Resume capability"]
-        
-        CTX["Context System<br/>GlobalContext (run_id, adapters, state_store)<br/>ItemContext (source/dest, mapping, cursor)"]
-        
-        METRICS["Metrics<br/>records_processed<br/>bytes_transferred<br/>batches_processed<br/>failure_count<br/>retry_count<br/>(atomic counters)"]
-        
-        RETRY["Retry Policy<br/>& Circuit Breaker"]
-        
-        SCHEMA["Schema & Validation<br/>Schema inference<br/>Constraint detection<br/>Type coercion<br/>PKs, FKs, unique"]
-        
-        BUS["Event Bus (Type-safe Pub/Sub)<br/>subscribe<E>() → MPSC channels<br/>publish(event) → broadcast<br/>Monitoring & TUI integration"]
-        
-        PROGRESS["Progress Tracking<br/>ProgressService<br/>Stage, rows, cursor<br/>Query via CLI"]
+    subgraph CORE["Core Services (crates/engine-core)"]
+        EXEC_CTX["ExecutionContext<br/>connection_pool, run_id<br/>SledStateStore, EnvContext"]
+        PIPELINE_CTX["PipelineContext<br/>per-pipeline context<br/>builder pattern"]
+
+        NOTE["re-exports:<br/>engine_state as state<br/>engine_schema as schema<br/>engine_infra::{event_bus,metrics,progress,retry}"]
     end
 
-    subgraph EXTERNAL["External Systems & Runtime"]
-        TOKIO["Tokio Runtime<br/>async/await<br/>Task spawn<br/>Channels<br/>Timers"]
-        MYSQL_DB["MySQL DB<br/>(mysql_async)"]
-        PG_DB["PostgreSQL DB<br/>(tokio-postgres)"]
-        FS["File System<br/>CSV files<br/>~/.stratum/state/<br/>(sled DB)"]
-        
-        SIGNALS["Signal Handling: SIGINT, SIGTERM → CancellationToken → Graceful Shutdown"]
+    subgraph INFRA["Infrastructure"]
+        STATE["engine-state<br/>SledStateStore<br/>~/.stratum/state/<br/>WAL + ACID checkpoints"]
+        EVENTBUS["engine-infra / EventBus<br/>MigrationStarted<br/>BatchProcessed<br/>MigrationCompleted"]
+        METRICS["engine-infra / Metrics<br/>records_processed<br/>bytes_transferred<br/>batches_processed"]
+        RETRY["engine-infra / Retry<br/>exponential backoff"]
     end
 
-    CLI --> CONFIG
-    CONFIG --> EXEC
-    EXEC --> ACTOR
-    ACTOR --> PIPELINE
-    PIPELINE --> ADAPTER
-    ADAPTER --> CORE
-    CORE --> EXTERNAL
-    
-    PROD_MB -.-> PROD_SIDE
-    CONS_MB -.-> CONS_SIDE
-    
-    SRC_ADAPT -.-> MYSQL_DB
-    SRC_ADAPT -.-> PG_DB
-    SRC_ADAPT -.-> FS
-    DEST_ADAPT -.-> PG_DB
-    DEST_ADAPT -.-> FS
-    
-    CORE -.-> FS
-    ACTOR -.-> TOKIO
-    PIPELINE -.-> TOKIO
+    subgraph LANG["Language Layer"]
+        MODEL["model<br/>Value, CanonicalValue, Record<br/>Batch, Pipeline, Type, Transform"]
+        EXPR["expression-engine<br/>binary ops, functions<br/>null handling"]
+        QB["query-builder<br/>SQL AST + Render trait<br/>dialect-specific rendering<br/>offset strategies"]
+        SMQL_CRATE["smql-syntax<br/>pest parser → AST"]
+    end
+
+    subgraph EXTERNAL["External Systems"]
+        MYSQL_DB["MySQL DB"]
+        PG_DB["PostgreSQL DB"]
+        FS["File System<br/>CSV files<br/>~/.stratum/state/"]
+        TOKIO["Tokio Runtime<br/>multi-threaded async"]
+    end
+
+    CLI --> PLANNING
+    PLANNING --> RUNTIME
+    RUNTIME --> SCHEMA
+    RUNTIME --> PROCESSING
+    PROCESSING --> IO
+    IO --> CONNECTORS
+    SCHEMA --> CONNECTORS
+    CONNECTORS --> CORE
+    PROCESSING --> CORE
+    CORE --> INFRA
+    INFRA --> STATE
+    CONNECTORS --> LANG
+    CORE --> LANG
+
+    DRIVERS -.-> MYSQL_DB
+    DRIVERS -.-> PG_DB
+    DRIVERS -.-> FS
+    STATE -.-> FS
+    RUNTIME -.-> TOKIO
+    PROCESSING -.-> TOKIO
 
     style CLI fill:#e1f5ff
-    style CONFIG fill:#fff4e1
-    style EXEC fill:#f0e1ff
-    style ACTOR fill:#e1ffe8
-    style PIPELINE fill:#ffe1e8
-    style ADAPTER fill:#fff9e1
+    style PLANNING fill:#fff4e1
+    style RUNTIME fill:#f0e1ff
+    style SCHEMA fill:#e8ffe1
+    style PROCESSING fill:#ffe1e8
+    style IO fill:#ffeedd
+    style CONNECTORS fill:#fff9e1
     style CORE fill:#e8e1ff
+    style INFRA fill:#e1ffe8
+    style LANG fill:#f5f0ff
     style EXTERNAL fill:#f5f5f5

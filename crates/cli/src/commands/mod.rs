@@ -1,5 +1,7 @@
 use crate::{Cli, error::CliError};
 use clap::{Subcommand, ValueEnum};
+use engine_processing::EnvContext;
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 pub mod apply;
@@ -116,15 +118,19 @@ pub enum Commands {
 }
 
 /// Executes the appropriate command based on CLI arguments
-pub async fn execute_command(cli: &Cli, cancel: CancellationToken) -> Result<(), CliError> {
+pub async fn execute_command(
+    cli: &Cli,
+    cancel: CancellationToken,
+    env: Arc<EnvContext>,
+) -> Result<(), CliError> {
     match &cli.command {
-        Commands::Plan { .. } => plan::execute(cli, &cli.command).await,
+        Commands::Plan { .. } => plan::execute(cli, &cli.command, env).await,
         Commands::Apply {
             config,
             tui,
             pretty,
             exact_filter,
-        } => apply::execute(config.clone(), *tui, *pretty, *exact_filter, cancel).await,
+        } => apply::execute(config.clone(), *tui, *pretty, *exact_filter, cancel, env).await,
         Commands::Verify { config, output } => {
             verify::execute(cli, config.clone(), output.clone()).await
         }

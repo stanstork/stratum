@@ -2,7 +2,6 @@ use crate::{
     builder::analysis::{AnalysisContext, AnalyzerResult, PlanAnalyzer},
     plan::{
         connection::plan::DatabaseDriver,
-        execution::types::RowCount,
         pipeline::{
             destination::{DataImpact, DataImpactAction, DestinationPlan, WriteMode},
             source::ColumnInfo,
@@ -10,8 +9,9 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use model::execution::pipeline::DataDestination;
+use engine_processing::io::driver::SchemaDriver;
 use model::execution::pipeline::WriteMode as CoreWriteMode;
+use model::execution::{pipeline::DataDestination, row_count::RowCount};
 use tracing::{info, warn};
 
 /// Analyzes destination tables to gather metadata and determine write impact
@@ -19,11 +19,11 @@ pub struct DestinationAnalyzer;
 
 impl DestinationAnalyzer {
     /// Determine conflict keys for upsert/merge operations
-    async fn determine_conflict_keys(
+    async fn determine_conflict_keys<S: SchemaDriver, D: SchemaDriver>(
         &self,
         table: &str,
         mode: &CoreWriteMode,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> Vec<String> {
         match mode {
             CoreWriteMode::Upsert | CoreWriteMode::Update => {
@@ -84,17 +84,16 @@ impl DestinationAnalyzer {
         }
     }
 
-    async fn fetch_destination_columns(
+    async fn fetch_destination_columns<S: SchemaDriver, D: SchemaDriver>(
         &self,
         table: &str,
-        driver: &DatabaseDriver,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> Vec<ColumnInfo> {
         match ctx.dest_cache.table_metadata(table).await {
             Ok(metadata) => metadata
                 .columns()
                 .iter()
-                .map(|col| ColumnInfo::from_metadata(col, driver))
+                .map(ColumnInfo::from_metadata)
                 .collect(),
             Err(e) => {
                 warn!(table = %table, error = %e, "Failed to fetch destination columns");
@@ -105,7 +104,7 @@ impl DestinationAnalyzer {
 }
 
 #[async_trait]
-impl PlanAnalyzer for DestinationAnalyzer {
+impl<S: SchemaDriver, D: SchemaDriver> PlanAnalyzer<S, D> for DestinationAnalyzer {
     type Input = DataDestination;
     type Output = DestinationPlan;
 
@@ -116,7 +115,7 @@ impl PlanAnalyzer for DestinationAnalyzer {
     async fn analyze(
         &self,
         destination: &Self::Input,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<Self::Output> {
         info!(table = %destination.table, "Analyzing destination table");
 
@@ -130,7 +129,7 @@ impl PlanAnalyzer for DestinationAnalyzer {
         let (current_rows, columns) = if table_exists {
             let rows = ctx.dest_cache.count_rows(&destination.table, None).await;
             let cols = self
-                .fetch_destination_columns(&destination.table, &driver, ctx)
+                .fetch_destination_columns(&destination.table, ctx)
                 .await;
             (rows, cols)
         } else {

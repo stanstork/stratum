@@ -1,11 +1,11 @@
 use crate::builder::analysis::AnalyzerError;
-use connectors::{error::AdapterError, sql::base::error::DbError};
+use connectors::error::{DbError, DriverError};
 use std::time::Duration;
 use thiserror::Error;
 
-/// Top-level error for plan building operations
+/// Top-level error for report building operations
 #[derive(Error, Debug)]
-pub enum PlanBuilderError {
+pub enum ReportBuilderError {
     #[error("Connection error: {0}")]
     Connection(#[from] ConnectionError),
 
@@ -54,8 +54,14 @@ pub enum PlanBuilderError {
     #[error("Internal error: {0}")]
     Internal(String),
 
-    #[error("Adapter error: {0}")]
-    Adapter(#[from] AdapterError),
+    #[error("Driver error: {0}")]
+    DriverError(#[from] DriverError),
+
+    #[error("Unsupported driver: {0}")]
+    UnsupportedDriver(String),
+
+    #[error("Invalid driver type: {0}")]
+    InvalidDriverType(String),
 }
 
 /// Connection-related errors
@@ -76,8 +82,8 @@ pub enum ConnectionError {
     #[error("SSL/TLS error for '{name}': {reason}")]
     SslError { name: String, reason: String },
 
-    #[error("Adapter error: {0}")]
-    AdapterError(#[from] AdapterError),
+    #[error("Driver error: {0}")]
+    DriverError(#[from] DriverError),
 }
 
 /// Row counting errors
@@ -330,9 +336,9 @@ pub enum SourceAnalyzerError {
     #[error("Unsupported source type '{source_type}' for analysis")]
     UnsupportedSourceType { source_type: String },
 
-    /// Adapter error
-    #[error("Adapter error: {0}")]
-    AdapterError(#[from] AdapterError),
+    /// Driver error
+    #[error("Driver error: {0}")]
+    DriverError(#[from] DriverError),
 }
 
 impl SourceAnalyzerError {
@@ -357,5 +363,5 @@ impl SourceAnalyzerError {
     }
 }
 
-/// Result type alias for plan builder operations
-pub type PlanBuilderResult<T> = Result<T, PlanBuilderError>;
+/// Result type alias for report builder operations
+pub type ReportBuilderResult<T> = Result<T, ReportBuilderError>;

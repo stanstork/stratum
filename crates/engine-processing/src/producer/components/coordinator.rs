@@ -5,8 +5,8 @@ use crate::{
 use model::{
     pagination::cursor::Cursor,
     records::{
+        Record,
         batch::{Batch, manifest_for},
-        row::RowData,
     },
 };
 use tokio::sync::mpsc;
@@ -38,7 +38,7 @@ impl BatchCoordinator {
         &self,
         batch_id: String,
         cursor: Cursor,
-        rows: Vec<RowData>,
+        rows: Vec<Record>,
         next: Cursor,
     ) -> Result<(), ProducerError> {
         let manifest = manifest_for(&rows);

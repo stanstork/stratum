@@ -1,6 +1,7 @@
 use crate::dag::error::DagError;
-use connectors::{error::AdapterError, sql::base::error::DbError};
+use connectors::error::{DbError, DriverError};
 use engine_config::settings::error::SettingsError;
+use engine_state::error::StateStoreError;
 use thiserror::Error;
 
 /// Top‐level errors for the data migration engine.
@@ -12,7 +13,7 @@ pub enum MigrationError {
 
     /// Adapter-related error.
     #[error("Adapter error: {0}")]
-    Adapter(#[from] AdapterError),
+    DriverError(#[from] DriverError),
 
     /// An unsupported data format was requested.
     #[error("Unsupported format: {0}")]
@@ -26,8 +27,8 @@ pub enum MigrationError {
     #[error("Unexpected error: {0}")]
     Unexpected(String),
 
-    #[error("Sled error: {0}")]
-    Sled(#[from] sled::Error),
+    #[error("State store error: {0}")]
+    StateStore(#[from] StateStoreError),
 
     /// Db error.
     #[error("Database error: {0}")]
@@ -36,10 +37,6 @@ pub enum MigrationError {
     /// Setting error.
     #[error("Settings error: {0}")]
     Settings(#[from] SettingsError),
-
-    /// Unknown error.
-    #[error("Unknown error: {0}")]
-    Unknown(#[from] Box<dyn std::error::Error + Send + Sync>),
 
     /// Graceful shutdown was requested.
     #[error("Shutdown requested")]

@@ -1,4 +1,3 @@
-use engine_config::settings::validated::ValidatedSettings;
 use std::{num::NonZeroUsize, time::Duration};
 
 /// Configuration for producer behavior.
@@ -37,14 +36,6 @@ impl Default for ProducerConfig {
 }
 
 impl ProducerConfig {
-    /// Create config from SMQL settings
-    pub fn from_settings(settings: &ValidatedSettings) -> Self {
-        Self {
-            batch_size: settings.batch_size,
-            ..Default::default()
-        }
-    }
-
     pub fn with_batch_size(mut self, size: usize) -> Self {
         self.batch_size = size;
         self

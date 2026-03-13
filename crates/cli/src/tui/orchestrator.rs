@@ -11,10 +11,13 @@ use crate::{
         terminal::TerminalGuard,
     },
 };
-use engine_core::{event_bus::bus::EventBus, plan::execution::ExecutionPlan};
+use engine_core::{
+    context::env::EnvContext, event_bus::bus::EventBus, plan::execution::ExecutionPlan,
+};
 use engine_runtime::dag::Dag;
 use indicatif::{ProgressBar, ProgressStyle};
 use model::events::migration::MigrationEvent;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -31,9 +34,10 @@ pub async fn run_tui(
     config_path: String,
     exact_filter: bool,
     cancel: CancellationToken,
+    env: Arc<EnvContext>,
 ) -> Result<(), CliError> {
     // Build Plan (Outside TUI mode so errors/logs show in standard terminal)
-    let plan_context = build_plan(&config_path, exact_filter).await?;
+    let plan_context = build_plan(&config_path, exact_filter, env.clone()).await?;
 
     // Initialize Terminal Guard (Restores terminal on drop)
     let mut guard = TerminalGuard::init()?;
@@ -50,6 +54,7 @@ pub async fn run_tui(
         channels.event_tx,
         channels.command_rx,
         cancel,
+        env,
     );
 
     // Run Application
@@ -58,7 +63,7 @@ pub async fn run_tui(
         channels.command_tx,
         channels.terminal_rx,
         plan_context.pipelines,
-        plan_context.planner_plan,
+        plan_context.report,
     );
 
     app.run(guard.terminal())
@@ -72,6 +77,7 @@ pub async fn run_tui(
 async fn build_plan(
     config_path: &str,
     exact_filter: bool,
+    env: Arc<EnvContext>,
 ) -> Result<crate::tui::plan::PlanContext, CliError> {
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
@@ -92,7 +98,7 @@ async fn build_plan(
     spinner.set_message(msg);
     spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
-    let plan_context = build_plan_context(config_path, exact_filter).await?;
+    let plan_context = build_plan_context(config_path, exact_filter, env).await?;
 
     // Clear the spinner before TUI takes over
     spinner.finish_and_clear();
@@ -132,10 +138,11 @@ fn spawn_background_tasks(
     event_tx: mpsc::Sender<MigrationEvent>,
     command_rx: mpsc::Receiver<MigrationCommand>,
     cancel: CancellationToken,
+    env: Arc<EnvContext>,
 ) {
     spawn_event_forwarder(event_bus.clone(), event_tx);
     spawn_command_handler(command_rx, cancel.clone());
-    spawn_executor(event_bus, core_plan, dag, cancel);
+    spawn_executor(event_bus, core_plan, dag, cancel, env);
 }
 
 #[cfg(test)]

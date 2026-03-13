@@ -1,102 +1,80 @@
-use crate::{
-    actor::{Actor, ActorContext, ActorRef, messages::ConsumerMsg},
-    error::ActorError,
-};
-use async_trait::async_trait;
+use super::TickAction;
+use crate::actor::messages::ConsumerMsg;
+use crate::error::ActorError;
 use engine_core::{event_bus::bus::EventBus, metrics::Metrics};
 use engine_processing::{
     cb::{CircuitBreaker, CircuitBreakerState},
     consumer::{Consumer, ConsumerStatus},
+    error::ConsumerError,
 };
 use model::events::migration::MigrationEvent;
 use std::time::Duration;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum TickResponse {
-    /// Schedule another tick immediately
-    ScheduleImmediate,
-
-    /// Schedule another tick after a delay
-    ScheduleDelayed(Duration),
-
-    /// No more ticks needed (finished or stopped)
-    NoMoreTicks,
-}
-
-pub struct ConsumerActor {
+/// Encapsulates the state and logic of the running consumer.
+struct ConsumerTask {
     consumer: Consumer,
-
-    // Control state
-    running: bool,
-    cancel_token: CancellationToken,
-
-    // Resilience
     breaker: CircuitBreaker,
     metrics: Metrics,
-
-    // Configuration
-    idle_delay: Duration,
-
-    // Self-reference for scheduling ticks
-    actor_ref: Option<ActorRef<ConsumerMsg>>,
-
-    // EventBus for publishing migration events
-    event_bus: Option<EventBus>,
+    event_bus: EventBus,
+    run_id: String,
+    item_id: String,
 
     // Progress tracking
-    // TODO: Move progress tracking to Metrics
-    run_id: Option<String>,
-    item_id: Option<String>,
+    start_time: std::time::Instant,
     last_progress_report: std::time::Instant,
-    progress_report_interval: Duration,
-    start_time: Option<std::time::Instant>,
-    last_rows_processed: u64,
+    progress_interval: Duration,
 }
 
-impl ConsumerActor {
-    pub fn new(consumer: Consumer, cancel_token: CancellationToken, metrics: Metrics) -> Self {
+impl ConsumerTask {
+    fn new(
+        consumer: Consumer,
+        metrics: Metrics,
+        event_bus: EventBus,
+        run_id: String,
+        item_id: String,
+    ) -> Self {
+        let now = std::time::Instant::now();
         Self {
             consumer,
-            running: false,
-            cancel_token,
             breaker: CircuitBreaker::default_db(),
             metrics,
-            idle_delay: Duration::from_millis(100), // Default idle delay
-            actor_ref: None,
-            event_bus: None,
-            run_id: None,
-            item_id: None,
-            last_progress_report: std::time::Instant::now(),
-            progress_report_interval: Duration::from_millis(500), // Report progress every 500ms
-            start_time: None,
-            last_rows_processed: 0,
+            event_bus,
+            run_id,
+            item_id,
+            start_time: now,
+            last_progress_report: now,
+            progress_interval: Duration::from_millis(500),
         }
     }
 
-    pub fn set_actor_ref(&mut self, actor_ref: ActorRef<ConsumerMsg>) {
-        self.actor_ref = Some(actor_ref);
+    async fn tick(&mut self) -> TickAction {
+        match self.consumer.tick().await {
+            Ok(status) => self.handle_success(status).await,
+            Err(e) => self.handle_error(e).await,
+        }
     }
 
-    pub fn set_event_bus(&mut self, event_bus: EventBus) {
-        self.event_bus = Some(event_bus);
-    }
+    async fn handle_success(&mut self, status: ConsumerStatus) -> TickAction {
+        self.breaker.record_success();
+        self.report_progress().await;
 
-    fn next_action(&self, status: ConsumerStatus) -> TickResponse {
         match status {
-            ConsumerStatus::Working => TickResponse::ScheduleImmediate,
-            ConsumerStatus::Idle => TickResponse::ScheduleDelayed(self.idle_delay),
-            ConsumerStatus::Finished => TickResponse::NoMoreTicks,
+            ConsumerStatus::Working => TickAction::Continue,
+            ConsumerStatus::Idle => TickAction::Idle,
+            ConsumerStatus::Finished => {
+                info!("Consumer finished");
+                let _ = self.consumer.stop().await;
+                TickAction::Done
+            }
         }
     }
 
-    async fn handle_tick_error(
-        &mut self,
-        error: impl std::fmt::Display,
-    ) -> Result<TickResponse, ActorError> {
+    async fn handle_error(&mut self, e: ConsumerError) -> TickAction {
         self.metrics.increment_failures(1);
-        error!(error = %error, "Consumer tick failed");
+        error!(error = %e, "Consumer tick failed");
 
         match self.breaker.record_failure() {
             CircuitBreakerState::RetryAfter(delay) => {
@@ -106,243 +84,176 @@ impl ConsumerActor {
                     "Circuit breaker: backing off"
                 );
                 tokio::time::sleep(delay).await;
-
-                // Tell runtime to schedule another tick
-                Ok(TickResponse::ScheduleImmediate)
+                TickAction::Continue
             }
             CircuitBreakerState::Open => {
                 error!(
                     failures = self.breaker.consecutive_failures(),
                     "Circuit breaker open, stopping consumer"
                 );
-                self.running = false;
-                Ok(TickResponse::NoMoreTicks)
+                let _ = self.consumer.stop().await;
+                TickAction::Done
+            }
+        }
+    }
+
+    async fn handle_stop(
+        &mut self,
+        run_id: String,
+        item_id: String,
+        part_id: String,
+    ) -> TickAction {
+        info!("Consumer received stop");
+        if let Err(e) = self.consumer.stop().await {
+            error!(error = %e, "Consumer stop failed");
+            return TickAction::Failed(ActorError::Internal(e.to_string()));
+        }
+
+        let rows_written = self.consumer.rows_written();
+        self.event_bus
+            .publish(MigrationEvent::ConsumerStopped {
+                run_id,
+                item_id,
+                timestamp: chrono::Utc::now(),
+                part_id,
+                rows_written,
+            })
+            .await;
+
+        TickAction::Done
+    }
+
+    async fn report_progress(&mut self) {
+        let now = std::time::Instant::now();
+        if now.duration_since(self.last_progress_report) < self.progress_interval {
+            return;
+        }
+
+        let snapshot = self.metrics.snapshot();
+        let elapsed = now.duration_since(self.start_time).as_secs_f64();
+        let rows_per_second = if elapsed > 0.0 {
+            snapshot.records_processed as f64 / elapsed
+        } else {
+            0.0
+        };
+
+        self.event_bus
+            .publish(MigrationEvent::Progress {
+                run_id: self.run_id.clone(),
+                item_id: self.item_id.clone(),
+                rows_processed: snapshot.records_processed,
+                rows_skipped: snapshot.rows_skipped,
+                rows_failed: snapshot.rows_failed,
+                bytes_transferred: snapshot.bytes_transferred,
+                rows_per_second,
+                timestamp: chrono::Utc::now(),
+            })
+            .await;
+        self.last_progress_report = now;
+    }
+}
+
+/// Runs the consumer loop as a standalone async task.
+pub async fn run_consumer(
+    mut consumer: Consumer,
+    mut rx: mpsc::Receiver<ConsumerMsg>,
+    cancel_token: CancellationToken,
+    event_bus: EventBus,
+    metrics: Metrics,
+) -> Result<(), ActorError> {
+    // Wait for start signal
+    let (run_id, item_id) =
+        match wait_for_start(&mut consumer, &mut rx, &cancel_token, &event_bus).await? {
+            Some(ids) => ids,
+            None => return Ok(()), // Cancelled or Stopped before starting
+        };
+
+    let mut task = ConsumerTask::new(consumer, metrics, event_bus, run_id, item_id);
+    let idle_delay = Duration::from_millis(100);
+    let mut tick_interval = tokio::time::interval(Duration::from_millis(1));
+    tick_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    // Main loop: tick consumer and handle messages
+    loop {
+        tokio::select! {
+            _ = tick_interval.tick() => {
+                match task.tick().await {
+                    TickAction::Continue => tick_interval.reset_immediately(),
+                    TickAction::Idle => {
+                        tick_interval = tokio::time::interval(idle_delay);
+                        tick_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                    }
+                    TickAction::Done => return Ok(()),
+                    TickAction::Failed(e) => return Err(e),
+                }
+            }
+            msg = rx.recv() => match msg {
+                Some(ConsumerMsg::Flush { run_id, item_id }) => {
+                    info!(run_id = %run_id, item_id = %item_id, "Flushing consumer");
+                    tick_interval.reset_immediately();
+                }
+                Some(ConsumerMsg::Stop { run_id, item_id, part_id }) => {
+                    return match task.handle_stop(run_id, item_id, part_id).await {
+                        TickAction::Done => Ok(()),
+                        TickAction::Failed(e) => Err(e),
+                        _ => Ok(()),
+                    };
+                }
+                Some(_) => {}
+                None => {
+                    info!("Consumer mailbox closed, stopping");
+                    let _ = task.consumer.stop().await;
+                    return Ok(());
+                }
+            },
+            _ = cancel_token.cancelled() => {
+                info!("Consumer stopping after cancellation");
+                let _ = task.consumer.stop().await;
+                return Ok(());
             }
         }
     }
 }
 
-#[async_trait]
-impl Actor<ConsumerMsg> for ConsumerActor {
-    async fn on_start(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
-        Ok(())
-    }
+async fn wait_for_start(
+    consumer: &mut Consumer,
+    rx: &mut mpsc::Receiver<ConsumerMsg>,
+    cancel_token: &CancellationToken,
+    event_bus: &EventBus,
+) -> Result<Option<(String, String)>, ActorError> {
+    loop {
+        tokio::select! {
+            msg = rx.recv() => match msg {
+                Some(ConsumerMsg::Start { run_id, item_id, part_id }) => {
+                    if let Err(e) = consumer.start().await {
+                        error!(error = %e, "Failed to start consumer");
+                        return Err(ActorError::Internal(e.to_string()));
+                    }
+                    if let Err(e) = consumer.resume(&run_id, &item_id, &part_id).await {
+                        warn!(error = %e, "Failed to resume consumer state");
+                    }
 
-    async fn handle(&mut self, msg: ConsumerMsg, ctx: &ActorContext) -> Result<(), ActorError> {
-        match msg {
-            ConsumerMsg::SetActorRef(actor_ref) => {
-                self.set_actor_ref(actor_ref);
-                Ok(())
-            }
-
-            ConsumerMsg::SetEventBus(event_bus) => {
-                self.set_event_bus(event_bus);
-                Ok(())
-            }
-
-            ConsumerMsg::Start {
-                run_id,
-                item_id,
-                part_id,
-            } => {
-                if let Err(e) = self.consumer.start().await {
-                    error!(error = %e, "Failed to start consumer");
-                    return Err(ActorError::Internal(e.to_string()));
-                }
-
-                // Try to resume from checkpoint
-                if let Err(e) = self.consumer.resume(&run_id, &item_id, &part_id).await {
-                    warn!(error = %e, "Failed to resume consumer state");
-                }
-
-                // Store IDs for progress reporting
-                self.run_id = Some(run_id.clone());
-                self.item_id = Some(item_id.clone());
-                self.start_time = Some(std::time::Instant::now());
-
-                self.running = true;
-
-                if let Some(ref event_bus) = self.event_bus {
                     event_bus
                         .publish(MigrationEvent::ConsumerStarted {
                             run_id: run_id.clone(),
                             item_id: item_id.clone(),
-                            part_id: part_id.clone(),
-                            timestamp: chrono::Utc::now(),
-                        })
-                        .await;
-                }
-
-                // Send the first tick to start the processing loop
-                if let Some(ref actor_ref) = self.actor_ref {
-                    actor_ref.try_send(ConsumerMsg::Tick)?;
-                }
-
-                Ok(())
-            }
-
-            ConsumerMsg::Tick => {
-                // Check if shutdown requested (but allow current tick to complete)
-                let shutdown_requested = self.cancel_token.is_cancelled();
-
-                if !self.running {
-                    info!(actor = ctx.name(), "Consumer stopping");
-                    let _ = self.consumer.stop().await;
-                    // Drop self-reference to allow actor termination
-                    self.actor_ref = None;
-                    return Ok(());
-                }
-
-                // Process one tick to complete any in-flight batch
-                let response = match self.consumer.tick().await {
-                    Ok(status) => {
-                        self.breaker.record_success();
-
-                        // Publish progress events periodically
-                        let now = std::time::Instant::now();
-                        if now.duration_since(self.last_progress_report)
-                            >= self.progress_report_interval
-                            && let (Some(event_bus), Some(run_id), Some(item_id), Some(start_time)) = (
-                                &self.event_bus,
-                                &self.run_id,
-                                &self.item_id,
-                                self.start_time,
-                            )
-                        {
-                            let snapshot = self.metrics.snapshot();
-
-                            // Calculate throughput (rows per second)
-                            let elapsed = now.duration_since(start_time).as_secs_f64();
-                            let rows_per_second = if elapsed > 0.0 {
-                                snapshot.records_processed as f64 / elapsed
-                            } else {
-                                0.0
-                            };
-
-                            event_bus
-                                .publish(MigrationEvent::Progress {
-                                    run_id: run_id.clone(),
-                                    item_id: item_id.clone(),
-                                    rows_processed: snapshot.records_processed,
-                                    rows_skipped: snapshot.rows_skipped,
-                                    rows_failed: snapshot.rows_failed,
-                                    bytes_transferred: snapshot.bytes_transferred,
-                                    rows_per_second,
-                                    timestamp: chrono::Utc::now(),
-                                })
-                                .await;
-                            self.last_progress_report = now;
-                            self.last_rows_processed = snapshot.records_processed;
-                        }
-
-                        if shutdown_requested {
-                            info!(
-                                actor = ctx.name(),
-                                "Consumer stopping after completing in-flight work"
-                            );
-                            self.running = false;
-                            let _ = self.consumer.stop().await;
-                            self.actor_ref = None;
-                            return Ok(());
-                        }
-
-                        self.next_action(status)
-                    }
-                    Err(e) => self.handle_tick_error(e).await?,
-                };
-
-                match response {
-                    TickResponse::ScheduleImmediate => {
-                        if let Some(ref actor_ref) = self.actor_ref {
-                            let actor_ref = actor_ref.clone();
-                            tokio::spawn(async move {
-                                if let Err(e) = actor_ref.send(ConsumerMsg::Tick).await {
-                                    error!(error = ?e, "Failed to schedule immediate tick");
-                                }
-                            });
-                        }
-                    }
-                    TickResponse::ScheduleDelayed(delay) => {
-                        info!(delay_ms = delay.as_millis(), "Consumer idle");
-                        if let Some(ref actor_ref) = self.actor_ref {
-                            let actor_ref = actor_ref.clone();
-                            tokio::spawn(async move {
-                                tokio::time::sleep(delay).await;
-                                if let Err(e) = actor_ref.send(ConsumerMsg::Tick).await {
-                                    error!(error = ?e, "Failed to schedule delayed tick");
-                                }
-                            });
-                        }
-                    }
-                    TickResponse::NoMoreTicks => {
-                        info!(
-                            "Consumer finished - dropping self-reference to allow actor termination"
-                        );
-                        self.running = false;
-
-                        // Drop self-reference so the mailbox can close and actor can terminates
-                        self.actor_ref = None;
-                    }
-                }
-
-                Ok(())
-            }
-
-            ConsumerMsg::Flush { run_id, item_id } => {
-                info!(
-                    actor = ctx.name(),
-                    run_id = %run_id,
-                    item_id = %item_id,
-                    "Flushing consumer - processing remaining batches"
-                );
-
-                // If not already running, start ticking to process remaining batches
-                if !self.running {
-                    self.running = true;
-                    if let Some(ref actor_ref) = self.actor_ref {
-                        actor_ref.try_send(ConsumerMsg::Tick)?;
-                    }
-                }
-
-                Ok(())
-            }
-
-            ConsumerMsg::Stop {
-                run_id,
-                item_id,
-                part_id,
-            } => {
-                self.running = false;
-
-                if let Err(e) = self.consumer.stop().await {
-                    error!(error = %e, "Consumer stop failed");
-                    return Err(ActorError::Internal(e.to_string()));
-                }
-
-                if let Some(ref event_bus) = self.event_bus {
-                    let rows_written = self.consumer.rows_written();
-                    event_bus
-                        .publish(MigrationEvent::ConsumerStopped {
-                            run_id,
-                            item_id,
-                            timestamp: chrono::Utc::now(),
                             part_id,
-                            rows_written,
+                            timestamp: chrono::Utc::now(),
                         })
                         .await;
-                }
 
-                Ok(())
+                    return Ok(Some((run_id, item_id)));
+                }
+                Some(ConsumerMsg::Stop { .. }) | None => {
+                    info!("Consumer stopping before start");
+                    return Ok(None);
+                }
+                Some(_) => {}
+            },
+            _ = cancel_token.cancelled() => {
+                info!("Consumer cancelled before start");
+                return Ok(None);
             }
         }
-    }
-
-    async fn on_stop(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
-        info!("Consumer actor stopping.");
-        if let Err(e) = self.consumer.stop().await {
-            error!(?e, "Consumer stop failed");
-            return Err(ActorError::Internal(e.to_string()));
-        }
-        Ok(())
     }
 }

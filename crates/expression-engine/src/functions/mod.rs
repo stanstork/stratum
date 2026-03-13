@@ -92,7 +92,7 @@ mod tests {
         let definitions = StdHashMap::new();
         let ctx = EvalContext::BuildTime {
             definitions: &definitions,
-            env_getter: dummy_env_getter,
+            env_getter: &dummy_env_getter,
         };
 
         let args = vec![Value::String("hello".to_string())];
@@ -106,7 +106,7 @@ mod tests {
         let definitions = StdHashMap::new();
         let ctx = EvalContext::BuildTime {
             definitions: &definitions,
-            env_getter: dummy_env_getter,
+            env_getter: &dummy_env_getter,
         };
 
         let result = registry.call("unknown_func", &[], &ctx);
@@ -128,7 +128,7 @@ mod tests {
         let definitions = StdHashMap::new();
         let ctx = EvalContext::BuildTime {
             definitions: &definitions,
-            env_getter: dummy_env_getter,
+            env_getter: &dummy_env_getter,
         };
         let result = registry.call("custom", &[], &ctx);
         assert!(result.is_ok());

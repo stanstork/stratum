@@ -11,12 +11,13 @@ use crate::{
 };
 use async_trait::async_trait;
 use connectors::{
-    sql::base::{query::generator::QueryGenerator, requests::FetchRowsRequestBuilder},
+    sql::{query::generator::QueryGenerator, request::FetchRowsRequestBuilder},
     sql_filter_expr,
 };
-use engine_core::{
-    connectors::linked::build_join_clauses,
-    filter::{compiler::FilterCompiler, sql::SqlFilterCompiler},
+use engine_processing::io::{
+    driver::SchemaDriver,
+    filter::compiler::{FilterCompiler, sql::SqlFilterCompiler},
+    linked::build_join_clauses,
 };
 use expression_engine::ExpressionAnalyzer;
 use model::execution::{
@@ -33,14 +34,13 @@ pub struct ValidationAnalyzer;
 
 impl ValidationAnalyzer {
     /// Primary orchestration logic for analyzing a single validation rule.
-    async fn analyze_rule(
+    async fn analyze_rule<S: SchemaDriver, D: SchemaDriver>(
         &self,
         table: &str,
         validation: &ValidationRule,
         joins: &[Join],
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<ValidationPlan> {
-        // Extract and verify column references against the metadata graph
         let columns = ExpressionAnalyzer::extract_columns(&validation.check);
         self.verify_column_refs(&columns, ctx).map_err(|e| {
             AnalyzerError::error(
@@ -49,7 +49,6 @@ impl ValidationAnalyzer {
             )
         })?;
 
-        // Map severity levels and terminal actions
         let level = match validation.severity {
             ValidationSeverity::Assert => ValidationLevel::Assert,
             ValidationSeverity::Warn => ValidationLevel::Warn,
@@ -57,7 +56,6 @@ impl ValidationAnalyzer {
 
         let action = self.validation_action(level.clone(), &validation.action);
 
-        // Estimate failure probability using statistical sampling
         let estimated_failure_rate = self
             .estimate_probability(table, &validation.check, joins, ctx)
             .await
@@ -85,10 +83,10 @@ impl ValidationAnalyzer {
     }
 
     /// Verifies that all columns in the validation exist within the source or joined tables.
-    fn verify_column_refs(
+    fn verify_column_refs<S: SchemaDriver, D: SchemaDriver>(
         &self,
         columns: &[String],
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> Result<(), ValidationAnalyzerError> {
         let metadata_graph = ctx.schema_plan.metadata_graph();
 
@@ -101,17 +99,15 @@ impl ValidationAnalyzer {
             })?;
 
             let exists = if !parsed.table.is_empty() {
-                // Qualified: Resolve alias to physical table and check presence
                 let physical_table = ctx.mapping.entities.reverse_resolve(&parsed.table);
                 metadata_graph
                     .get(&physical_table)
-                    .map(|meta| meta.columns().iter().any(|c| c.name() == parsed.column))
+                    .map(|meta| meta.columns().iter().any(|c| c.name == parsed.column))
                     .unwrap_or(false)
             } else {
-                // Unqualified: Scan all tables in the current metadata graph
                 metadata_graph
                     .values()
-                    .any(|meta| meta.columns().iter().any(|c| c.name() == parsed.column))
+                    .any(|meta| meta.columns().iter().any(|c| c.name == parsed.column))
             };
 
             if !exists {
@@ -124,14 +120,13 @@ impl ValidationAnalyzer {
     }
 
     /// Runs a sampling query to estimate how many rows might fail this validation.
-    async fn estimate_probability(
+    async fn estimate_probability<S: SchemaDriver, D: SchemaDriver>(
         &self,
         table: &str,
         check: &CompiledExpression,
         joins: &[Join],
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> Result<f32, ValidationAnalyzerError> {
-        // Identify tables involved to filter unnecessary joins
         let physical_tables: Vec<String> = ExpressionAnalyzer::extract_tables(check)
             .iter()
             .map(|t| ctx.mapping.entities.reverse_resolve(t))
@@ -149,7 +144,6 @@ impl ValidationAnalyzer {
             Vec::new()
         };
 
-        // Compile logic into a physical SQL filter
         let sql_filter = SqlFilterCompiler::compile(check);
         let filter_expr = sql_filter
             .expr
@@ -159,17 +153,16 @@ impl ValidationAnalyzer {
                 ValidationAnalyzerError::ParseError("Failed to compile check expression".into())
             })?;
 
-        // Prepare request and generate estimation SQL using the correct source dialect
         let request = FetchRowsRequestBuilder::new(table.to_string())
             .joins(join_clauses)
             .build();
-        let generator = QueryGenerator::new(ctx.source_dialect.as_ref());
+        let dialect = ctx.source_dialect.as_query_dialect();
+        let generator = QueryGenerator::new(dialect.as_ref());
         let (sql, params) = generator.validation_estimation(&request, filter_expr, 10_000);
 
         let rows = ctx
-            .source_adapter
-            .get_sql()
-            .query_rows_params(&sql, params)
+            .src_driver
+            .query_params(&sql, &params)
             .await
             .map_err(|e| {
                 error!(target: "analyzer", error = %e, sql = %sql, "Probability estimation failed");
@@ -196,7 +189,7 @@ impl ValidationAnalyzer {
         if matches!(level, ValidationLevel::Assert) {
             Some(match model_action {
                 ModelValidationAction::Fail => ValidationAction::Fail,
-                _ => ValidationAction::Skip, // Assertions must at least skip the row
+                _ => ValidationAction::Skip,
             })
         } else {
             Some(ValidationAction::Skip)
@@ -205,7 +198,7 @@ impl ValidationAnalyzer {
 }
 
 #[async_trait]
-impl PlanAnalyzer for ValidationAnalyzer {
+impl<S: SchemaDriver, D: SchemaDriver> PlanAnalyzer<S, D> for ValidationAnalyzer {
     type Input = Pipeline;
     type Output = Vec<ValidationPlan>;
 
@@ -216,7 +209,7 @@ impl PlanAnalyzer for ValidationAnalyzer {
     async fn analyze(
         &self,
         pipeline: &Self::Input,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<Self::Output> {
         let table = &pipeline.source.table;
         let joins = &pipeline.source.joins;

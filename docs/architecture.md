@@ -4,336 +4,360 @@ This document explains Stratum's internal architecture and design principles.
 
 ## High-Level Architecture
 
-Stratum is organized into layers, each with specific responsibilities:
+Stratum is organized into 15 crates following a layered architecture:
 
 ```mermaid
 graph TB
-    CLI[CLI Layer] --> Config[Configuration Layer]
-    Config --> Executor[Execution Layer]
-    Executor --> Actor[Actor Runtime]
-    Actor --> Pipeline[Processing Pipeline]
-    Pipeline --> Adapters[Connector Adapters]
-    Adapters --> Core[Core Services]
+    CLI[CLI Layer<br/>cli] --> Planner[Planning Layer<br/>engine-planner, engine-config]
+    Planner --> Runtime[Execution Layer<br/>engine-runtime]
+    Runtime --> Processing[Processing Pipeline<br/>engine-processing]
+    Processing --> Connectors[Connector Adapters<br/>connectors]
+    Runtime --> Schema[Schema Layer<br/>engine-schema]
+    Schema --> Connectors
+    Connectors --> Core[Core & Infra<br/>engine-core, engine-state, engine-infra]
+    Processing --> Core
+    Core --> Lang[Language & Model<br/>smql-syntax, model, expression-engine, query-builder]
 ```
 
-See [architecture.mermaid](architecture.mermaid) for the complete detailed diagram.
+## Crate Map
+
+| Crate | Layer | Responsibility |
+|-------|-------|----------------|
+| `model` | Language | Core domain types (`Value`, `Pipeline`, `Record`, transformations) |
+| `smql-syntax` | Language | SMQL parser → AST (pest-based) |
+| `expression-engine` | Language | Expression evaluation (filters, computed columns, functions) |
+| `query-builder` | Language | SQL AST + dialect-aware rendering |
+| `connectors` | Data Access | MySQL, PostgreSQL, CSV drivers; unified `Driver` trait hierarchy |
+| `engine-state` | Infrastructure | Sled embedded KV — checkpoints, WAL, crash recovery |
+| `engine-infra` | Infrastructure | EventBus, Metrics, Progress, Retry utilities |
+| `engine-schema` | Schema | Type system, DDL generation, FK dependency graph, schema planning |
+| `engine-core` | Core Services | ExecutionContext, DriverRef, plan builder — re-exports state/schema/infra |
+| `engine-config` | Config | SMQL → validated settings, connection resolution |
+| `engine-planner` | Planning | Execution plan analysis, metadata cache, diagnostics |
+| `engine-processing` | Execution | Producer-consumer pipeline, transforms, Source/Sink/Destination abstractions |
+| `engine-runtime` | Execution | DAG orchestrator, PipelineOrchestrator, actor coordination |
+| `cli` | Interface | Commands (plan, apply, verify, test-conn), TUI, signal handling |
+| `engine-tests` | Testing | Integration test suite (MySQL ↔ PostgreSQL, Sakila database) |
+
+---
 
 ## Layer Breakdown
 
 ### 1. CLI Layer (`crates/cli`)
 
 **Responsibilities:**
-- Command parsing (migrate, validate, test-conn, progress)
-- Signal handling (SIGINT/SIGTERM)
+- Command parsing and dispatch
+- Signal handling (SIGINT/SIGTERM → CancellationToken)
 - Graceful shutdown coordination
+- Output modes: plain, pretty (colored), TUI (ratatui)
+
+**Commands:**
+- `plan` — dry-run analysis with optional sample data
+- `apply` — execute migration
+- `verify` — post-migration row count comparison
+- `test-conn` — test database connectivity
+
+**Global options:** `--env-file`, `--verbose`, `--quiet`, `--log-level`, `--log-file`, `--no-color`
+
+---
+
+### 2. Planning Layer (`crates/engine-planner`, `crates/engine-config`)
+
+**Responsibilities:**
+- Parse and validate SMQL configuration
+- Build `ExecutionPlan` with deterministic hash (for resume identification)
+- Resolve environment variables (`env("VAR", "default")`)
+- Analyze pipelines: estimate row counts, detect schema mismatches
 
 **Key Components:**
-- Command handlers
-- Signal traps
-- User interface
+- **`engine-config`**: Loads SMQL → `ExecutionPlan` with validated settings per pipeline
+- **`engine-planner`**: Builds analysis context, caches table metadata via `MetadataCache<D>`
 
 ---
 
-### 2. Configuration & Planning Layer
+### 3. Execution Layer (`crates/engine-runtime`)
 
 **Responsibilities:**
-- Parse SMQL syntax into AST
-- Generate migration plans with deterministic hashing
-- Validate configuration settings
-
-**Key Components:**
-- **SMQL Parser**: Converts declarative config to internal representation
-- **Planner**: Creates execution plan with offset strategies
-- **Validator**: Ensures configuration is valid before execution
-
----
-
-### 3. Execution Orchestration (`crates/engine-runtime/executor`)
-
-**Responsibilities:**
-- Initialize global context (run_id, adapters, state)
-- Set up StateStore (sled embedded KV database)
-- Spawn worker tasks for each migration item
-
-**Key Component:**
-- **MigrationExecutor**: Coordinates the entire migration lifecycle
-
----
-
-### 4. Actor Runtime Layer (`crates/engine-runtime/actor`)
-
-**Responsibilities:**
-- Orchestrate producer-consumer pipeline
-- Manage actor mailboxes (MPSC channels)
-- Publish events to subscribers
+- Build and execute the pipeline DAG
+- Initialize `ExecutionContext` (connection pool, state store, run_id)
+- Spawn `PipelineOrchestrator` per pipeline, respecting dependency order
 
 **Key Components:**
 
-#### PipelineCoordinator
-Orchestrates the snapshot lifecycle. Manages producer and consumer actors.
+#### DAG Executor (`dag/executor.rs`)
+- Builds a `Dag` from pipeline `after = [...]` declarations
+- Topological sort determines execution levels
+- Pipelines at the same level execute in parallel via `futures::stream`
+- `DagExecutor::execute()` runs levels sequentially, pipelines within a level concurrently
 
-#### ProducerActor
-- Receives messages: Start, Stop, Pause, Resume
-- Reads data from source
-- Applies transformations
-- Sends batches to MPSC channel
+#### PipelineOrchestrator (`execution/orchestrator.rs`)
+- Owns a single pipeline's lifecycle end-to-end
+- Runs schema ops (CREATE TABLE, indexes) before data migration
+- Builds `PipelineCoordinator` → spawns producer and consumer tasks
+- Monitors completion or cancellation
 
-#### ConsumerActor  
-- Receives batches from MPSC channel
-- Writes data to destination
-- Updates checkpoints
-- Reports metrics
-
-#### EventBus
-Pub/Sub system for migration events.
+#### ExecutionContext (`engine-core/context/exec.rs`)
+- Shared across all pipelines in a run
+- Holds connection pool (reuses drivers), `run_id`, `SledStateStore`, `EnvContext`
+- `run_id` is deterministic: `"run-{plan_hash[:16]}"` — same plan always resumes the same state
 
 ---
 
-### 5. Data Processing Pipeline (`crates/engine-processing`)
+### 4. Schema Layer (`crates/engine-schema`)
 
-This is where the actual data flows through the system.
+New in Phase 2. Handles schema object migration independent of data pipelines.
 
-#### Producer Side
+**Modules:**
+- **`planner.rs`** — `SchemaPlanner`: introspects source schema, builds `SchemaPlan`
+- **`plan.rs`** — `SchemaPlan`: column definitions, enum queries, dependency ordering, DDL generation
+- **`dep_graph.rs`** — `DependencyGraph`: topological sort of tables by FK dependencies; `partial_topological_order()` handles cycles deterministically
+- **`type_registry.rs`** — `TypeRegistry` + `TypeEngine`: source→destination type mapping per dialect
+- **`graph_expander.rs`** — `GraphExpander`: expands FK graphs, builds `SchemaOps` (ordered DDL operations)
+- **`schema_ops.rs`** — `SchemaOps`: ordered list of DDL ops (create table, create index, drop FK, add FK)
+- **`metadata_cache.rs`** — `MetadataCache<D>`: caches `TableMetadata` keyed by table name
+- **`row_counter.rs`** — `RowCounter<D>`: parallel row count queries
+- **`converters/`** — Type converters: `MySqlToPostgres`, etc. with `Fidelity` ratings and `Transform` hints
 
-**SnapshotReader**
-- Paginates through source data
-- Executes queries against source adapters
-- Handles cursor positioning for resume
+**Three-Phase Schema Execution:**
+```
+Phase 1: CREATE TABLE (topologically sorted, FKs omitted)
+Phase 2: Data migration (existing pipeline system)
+Phase 3: CREATE INDEX + ALTER TABLE ADD CONSTRAINT (FK creation)
+```
 
-**TransformService**
-- Table mapping (rename tables)
-- Field mapping (rename/select columns)
-- Computed transforms (expressions)
-- Type coercion
+**Re-exported** via `engine-core`: `use engine_core::schema::*`
 
-**BatchCoordinator**
-- Groups records into batches
-- Sends batches to MPSC channel (capacity: 64)
-- Provides backpressure control
+---
 
-#### MPSC Channel
-Bounded channel with capacity of 64 batches. This provides:
-- **Backpressure**: Producer slows down if consumer can't keep up
-- **Decoupling**: Producer and consumer run independently
-- **Memory control**: Limited in-flight data
+### 5. Processing Pipeline (`crates/engine-processing`)
 
-#### Consumer Side
+The data pipeline. Runs one producer task and one consumer task per pipeline, communicating via a bounded MPSC channel.
 
-**BatchWriter**
-- **Fast-path**: Uses PostgreSQL COPY protocol when possible
-- **Fallback**: Uses INSERT/MERGE if fast-path not available
-- Handles type encoding for destination
+```
+Source (SnapshotReader)
+  → TransformService
+  → BatchCoordinator
+  ↓ MPSC channel (capacity: 64 batches, backpressure)
+Sink (BatchWriter)
+  → StateManager (checkpoint per batch)
+  → Metrics
+```
 
-**StateManager**
-- Tracks checkpoints after each successful batch
-- Maintains write-ahead log (WAL)
-- Enables crash recovery and resume
+#### IO Abstractions (`io/`)
+
+| Module | Description |
+|--------|-------------|
+| `io/source/` | `Source` wraps `Arc<dyn DataReader>` + `Arc<dyn SchemaIntrospector>`; `DbSourceReader` handles pagination |
+| `io/sink/` | `Sink` trait with `write_batch()`; `PostgresSink` uses COPY protocol |
+| `io/destination.rs` | `Destination` wraps typed `Arc<PgDriver>` or future driver types |
+| `io/driver.rs` | `SchemaDriver` trait alias used by planner analyzers |
+| `io/filter/` | `FilterCompiler` trait; `SqlFilterCompiler` emits WHERE clauses |
+| `io/format.rs` | `DataFormat` enum (MySql, Postgres, Csv) |
+| `io/linked.rs` | `LinkedSource` for JOIN-resolved related tables |
+
+#### PipelineContext (`context.rs`)
+Per-pipeline execution context. Builder pattern. Holds:
+- `exec_ctx: Arc<ExecutionContext>` — shared global context
+- `source: Source`, `destination: Destination`
+- `pipeline: Pipeline`, `mapping: TransformationMetadata`
+- `offset_strategy`, `cursor` — for pagination and resume
+
+#### Producer (`producer/`)
+- `run_producer()` — standalone async function (not an actor struct)
+- Reads pages via `SnapshotReader` with offset strategy (pk / numeric / timestamp)
+- Applies `TransformService` (field mapping, computed columns, type coercion)
+- Sends `Batch` values to MPSC channel
+
+#### Consumer (`consumer/`)
+- `run_consumer()` — standalone async function
+- Receives batches, routes to appropriate `Sink`
+- Writes checkpoint to `SledStateStore` after each batch
+- Tracks metrics via `Metrics`
 
 #### Circuit Breaker (`cb.rs`)
-Protects against cascading failures:
-- Exponential backoff: 1s → 2s → 4s → 8s → 16s → 30s (max)
-- Failure threshold: 4 consecutive failures
-- Opens circuit to prevent resource exhaustion
-
-#### State Machine
-Each pipeline transitions through states:
-```
-Working → Idle → Finished
-```
-
-### 6. Adapter Layer (`crates/connectors`)
-
-Adapters provide a uniform interface to different data sources.
-
-#### Source Adapters
-- **MySqlAdapter**: Uses `mysql_async` for query execution
-- **PostgresAdapter**: Uses `tokio-postgres` with connection pooling
-- **CsvDataSource**: Parses CSV files with streaming
-
-**Common Functionality:**
-- Metadata introspection (schemas, tables, columns)
-- Query generation with filters
-- Cursor-based pagination
-
-#### Destination Adapters
-- **PgDestination**: PostgreSQL with COPY protocol (fastest)
-- **DbDataDestination**: Generic SQL with INSERT/MERGE
-
-**Common Functionality:**
-- Type coercion and encoding
-- Batch optimization
-- Transaction management
-- Error handling
+- Threshold: 4 consecutive failures
+- Backoff: 1s → 2s → 4s → 8s → 16s → 30s (max)
+- Resets on success
 
 ---
 
-### 7. Core Services Layer (`crates/engine-core`)
+### 6. Connector Layer (`crates/connectors`)
 
-Foundation services used across all layers.
+Provides a unified driver interface over MySQL, PostgreSQL, and CSV.
 
-#### StateStore (sled KV)
-Embedded key-value database stored in `~/.stratum/state/`
-- Checkpoint tracking (cursor position, row counts)
-- Write-ahead log (WAL)
-- Migration progress
-- Resume capability after crashes
+#### Driver Trait Hierarchy
 
-#### Context System
-- **GlobalContext**: Shared across all migrations (run_id, adapters, state_store)
-- **ItemContext**: Per-migration context (source, destination, mappings, cursor)
+```
+Driver (Send + Sync + 'static)
+├── SchemaIntrospector: Driver  — table/index/FK metadata
+├── DataReader: Driver          — row fetching with filters
+├── DataWriter: Driver          — row insertion (copy_rows, write_batch)
+└── Transactional: Driver       — begin/commit/rollback
+```
 
-#### Metrics
-Atomic counters tracked in real-time:
-- `records_processed`
-- `bytes_transferred`
-- `batches_processed`
-- `failure_count`
-- `retry_count`
+`DynIntrospector` — object-safe wrapper for `SchemaIntrospector` when needed as `dyn`.
 
-#### Retry Policy & Circuit Breaker
-Configurable retry behavior with exponential backoff.
+`DriverRef` (in `engine-core`) — enum wrapping `Arc<MySqlDriver>` or `Arc<PgDriver>`; resolved via `dispatch_driver!` macro.
 
-#### Schema & Validation
-- Schema inference from source databases
-- Constraint detection (PKs, FKs, unique indexes)
-- Type compatibility checking
-- Coercion rules
+#### Available Drivers
 
-#### Progress Tracking
-- ProgressService queries StateStore
-- Reports current stage, rows processed, cursor position
-- Accessible via `stratum progress` CLI command
+| Driver | Read | Write | Schema | Notes |
+|--------|------|-------|--------|-------|
+| `MySqlDriver` | ✅ | ✅ | ✅ | `mysql_async`, TINYINT(1)→Boolean |
+| `PgDriver` | ✅ | ✅ | ✅ | `tokio-postgres`, COPY protocol |
+| CSV | ✅ | — | limited | streaming parse |
+
+#### Metadata Structures (`sql/metadata/`)
+- `TableMetadata` — columns, PKs, FKs, indexes, row count
+- `ColumnMetadata` — name, type, nullable, default, full_column_type
+- `IndexMetadata` / `IndexColumn` — index type, sort order, uniqueness
+- `ForeignKeyMetadata` — composite FK support, ON DELETE/UPDATE actions
+
+#### Type System (`drivers/{mysql,postgres}/types.rs`)
+Each driver implements `IntoCanonical` producing `TypeMapping { canonical: Type, fidelity: Fidelity, value_transform: Option<Transform>, warnings }`.
+
+Special conversions:
+- MySQL `TINYINT(1)` → `Type::Boolean` (via `Transform::IntToBool`)
+- MySQL `ENUM` → `Type::Varchar` + pre-DDL `CREATE TYPE` op
+- `BIGINT UNSIGNED` → `Type::Int64` with overflow warning
+
+#### DriverRegistry (`registry.rs`)
+Global singleton (`DriverRegistry::global()`) mapping URL schemes to driver factories. Built-in drivers registered at startup.
 
 ---
 
-### 8. External Systems & Runtime
+### 7. Infrastructure Layer (`crates/engine-state`, `crates/engine-infra`)
 
-#### Tokio Runtime
-Async runtime providing:
-- Task spawning for concurrent operations
-- MPSC channels for message passing
-- Timers for retries and timeouts
+Extracted from `engine-core` to keep it slim. Re-exported via `engine-core`:
+```rust
+pub use engine_state as state;
+pub use engine_infra::{event_bus, metrics, progress, retry};
+```
 
-#### Signal Handling
-```
-SIGINT/SIGTERM → CancellationToken → Graceful Shutdown
-```
-All actors receive shutdown signal and complete current batch before exiting.
+#### StateStore (`engine-state`)
+Sled embedded KV database at `~/.stratum/state/`:
+- `SledStateStore` — ACID checkpoints with WAL
+- Checkpoint stores: cursor position, row counts, timestamps
+- Resume: on restart, load checkpoint and skip processed rows
+- `WalEntry` model for write-ahead log entries
+
+#### EventBus (`engine-infra/event_bus/`)
+Pub/Sub for migration events:
+- `MigrationStarted`, `BatchProcessed`, `MigrationCompleted`, `Error`
+- Used by TUI and logging subscribers
+
+#### Metrics (`engine-infra/metrics.rs`)
+Atomic counters per pipeline:
+- `records_processed`, `bytes_transferred`, `batches_processed`
+- `failure_count`, `retry_count`
+
+#### Retry (`engine-infra/retry.rs`)
+Configurable retry policy with exponential backoff, used by circuit breaker.
+
+---
+
+### 8. Language Layer
+
+| Crate | Description |
+|-------|-------------|
+| `smql-syntax` | pest-based parser → AST (`PipelineBlock`, `ConnectionBlock`, etc.) |
+| `model` | `Value`, `CanonicalValue`, `Record`, `Batch`, `Pipeline`, `Type`, `Transform`, execution types |
+| `expression-engine` | Expression evaluator: binary ops, string/date/math functions, null handling |
+| `query-builder` | SQL AST nodes + `Render` trait; dialect-specific rendering (MySQL, PostgreSQL); offset strategies |
 
 ---
 
 ## Data Flow
 
-See [data-flow.mermaid](data-flow.mermaid) for the complete execution flow diagram.
+### Typical Migration
 
-### Typical Migration Flow
+```
+1. Parse SMQL  →  AST  (smql-syntax)
+2. Build plan  →  ExecutionPlan + hash  (engine-config, engine-core)
+3. Analyze     →  MetadataCache, row counts, diagnostics  (engine-planner)
+4. Initialize  →  ExecutionContext (connection pool, SledStateStore, run_id)
+5. Build DAG   →  topological levels from after=[...] declarations
+6. Per level (parallel):
+   For each pipeline:
+     a. Schema ops  →  CREATE TABLE (phase 1)
+     b. Data migration:
+          Producer: paginate → transform → batch → MPSC channel
+          Consumer: receive → write → checkpoint
+     c. Schema ops  →  CREATE INDEX + ADD FK (phase 3)
+7. Completion  →  final metrics, shutdown
+```
 
-1. **User Request** → Parse SMQL config
-2. **Parse** → Generate AST
-3. **Plan** → Create MigrationPlan with hash
-4. **Initialize** → Set up GlobalContext + StateStore
-5. **For each MigrationItem:**
-   - Create ItemContext (source, destination, mappings)
-   - Load metadata (introspect schemas)
-   - Validate settings
-   - Spawn Pipeline (ProducerActor + ConsumerActor)
-6. **Processing Loop:**
-   - Producer reads → transforms → sends batches
-   - Consumer receives → writes → checkpoints
-   - Progress tracked via EventBus
-7. **Completion** → All items processed → Shutdown
+### Resume After Crash
+
+```
+1. Load ExecutionPlan (same hash → same run_id)
+2. For each pipeline: load checkpoint from SledStateStore
+3. Skip already-processed rows (cursor position)
+4. Continue from last checkpoint
+```
 
 ---
 
 ## Key Design Decisions
 
-### Why Actor Model?
-- **Isolation**: Actors have private state, communicate via messages
-- **Concurrency**: Each actor runs in its own Tokio task
-- **Supervision**: Failed actors can be restarted independently
-- **Backpressure**: MPSC channels naturally provide flow control
+### Standalone Async Functions Instead of Actor Structs
+Producer and consumer are `run_producer()`/`run_consumer()` async functions using `tokio::select!` rather than actor structs with mailboxes. This simplifies the code while retaining the same concurrency and cancellation properties.
 
-### Why MPSC Channel with Capacity 64?
-- **Memory bounded**: Prevents OOM from fast producers
-- **Backpressure**: Producer blocks when channel is full
-- **Latency vs throughput**: 64 balances response time with batch efficiency
-- **Tunable**: Can be adjusted based on workload
+### DAG-Based Parallelism
+Pipelines declare dependencies via `after = [...]`. Topological sort produces execution levels; all pipelines within a level run in parallel. Independent pipelines get maximum throughput; dependent pipelines are automatically serialized.
 
-### Why Sled for StateStore?
-- **Embedded**: No external database required
-- **Transactional**: ACID guarantees for checkpoints
-- **Fast**: B+ tree with lock-free reads
-- **Crash-safe**: Handles process crashes gracefully
+### Two-Phase FK Creation
+FKs are created after data migration to prevent constraint violations during bulk insert. Schema ops use three phases: create tables → migrate data → create indexes and FKs.
 
-### Why Separate Producer/Consumer?
-- **Decoupling**: Source and destination can have different performance characteristics
-- **Resilience**: Destination failures don't affect source reads
-- **Observability**: Clear metrics for each side
-- **Optimization**: Can tune batch sizes independently
+### Deterministic `partial_topological_order()` for FK Cycles
+When FK dependencies form a cycle (mutual references, self-references), a BFS-based `partial_topological_order()` places acyclic tables first, then cycle members alphabetically. This produces deterministic DDL regardless of `HashMap` iteration order.
+
+### Bounded MPSC Channel (capacity: 64)
+Provides natural backpressure — producer blocks when consumer can't keep up. Bounds memory regardless of source speed. Capacity is a tuning parameter.
+
+### Sled for StateStore
+Embedded, no external dependency, ACID-transactional, B+ tree with lock-free reads, crash-safe WAL. Checkpoints are written after every batch so crash recovery loses at most one batch.
+
+### DriverRef + dispatch_driver! Macro
+Instead of `Arc<dyn Driver>` (which loses type information), `DriverRef` is an enum over concrete driver types. The `dispatch_driver!` macro generates match arms, allowing monomorphic dispatch without dynamic dispatch overhead on hot paths.
 
 ---
 
 ## Performance Characteristics
 
-### Throughput
-- **MySQL/PostgreSQL**: 10K-50K rows/sec (depends on network, row size)
-- **CSV**: 50K-100K rows/sec (local disk)
-- **Bottleneck**: Usually the destination write speed
-
-### Memory Usage
-- **Baseline**: ~50MB for runtime
-- **Per migration**: ~10-30MB (depends on batch size)
-- **StateStore**: ~1-5MB (depends on checkpoint frequency)
-
-### Latency
-- **Checkpoint interval**: Every batch (configurable)
-- **Retry backoff**: 1s → 30s exponential
-- **Graceful shutdown**: <5s to drain in-flight batches
+| Metric | Value |
+|--------|-------|
+| MySQL/PostgreSQL throughput | 10K–50K rows/sec (network-bound) |
+| CSV throughput | 50K–100K rows/sec (disk-bound) |
+| Baseline memory | ~50MB |
+| Per-pipeline memory | ~10–30MB (batch-size dependent) |
+| MPSC channel capacity | 64 batches |
+| Checkpoint interval | Every batch |
+| Retry backoff | 1s → 30s exponential |
+| Graceful shutdown | <5s to drain in-flight batches |
 
 ---
 
 ## Reliability Features
 
 ### Checkpoint & Resume
-After each successful batch:
-1. Update cursor position in StateStore
-2. Record row count and timestamp
-3. Commit transaction
-
-On restart:
-1. Load checkpoint from StateStore
-2. Resume from last cursor position
-3. Skip already-processed rows
+After each successful batch: cursor position + row counts committed to Sled. On restart: same `run_id` (deterministic from plan hash) → load checkpoint → resume from cursor.
 
 ### Circuit Breaker
-Prevents cascading failures:
-- Opens after 4 consecutive failures
-- Exponential backoff up to 30s
-- Resets on successful operation
+4 consecutive failures → circuit opens. Exponential backoff (1s…30s). Resets on next success. Prevents resource exhaustion from flapping destinations.
 
 ### Graceful Shutdown
-On SIGINT/SIGTERM:
-1. Stop accepting new work
-2. Drain in-flight batches
-3. Write final checkpoint
-4. Close connections
-5. Exit cleanly
+SIGINT/SIGTERM → `CancellationToken::cancel()` → all `tokio::select!` arms wake → current batch drains → final checkpoint → clean exit (code 130 for SIGINT).
 
 ---
 
 ## Monitoring & Observability
 
-### Built-in Metrics
-Accessible via `stratum progress`:
-- Current stage (snapshot/CDC)
-- Records processed
-- Bytes transferred
-- Success/failure counts
-- Current cursor position
+### Structured Logging
+`tracing` crate with configurable level (`--log-level`). Log to stderr or file (`--log-file`). `RUST_LOG` env var also respected.
+
+### Metrics
+Per-pipeline atomic counters accessible via `EventBus` subscribers. TUI (`--tui`) renders live progress bars. `--pretty` mode prints colored progress to stdout.
 
 ### Event Bus
-Subscribe to real-time events:
-- `MigrationStarted`
-- `BatchProcessed`
-- `MigrationCompleted`
-- `Error` events
+Real-time events: `MigrationStarted`, `BatchProcessed`, `MigrationCompleted`, `PipelineError`. Subscribers registered before execution; TUI and logger are built-in subscribers.

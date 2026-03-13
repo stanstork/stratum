@@ -16,9 +16,10 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use connectors::sql::base::query::generator::QueryGenerator;
-use engine_core::connectors::source::{DataSource, Source};
+use connectors::sql::{query::generator::QueryGenerator, request::FetchRowsRequestBuilder};
+use engine_processing::io::driver::SchemaDriver;
 use engine_processing::{
+    EnvContext,
     producer::build_transform_pipeline,
     transform::{
         error::TransformError,
@@ -26,10 +27,7 @@ use engine_processing::{
     },
 };
 use model::{
-    core::{data_type::SqlDialect, value::Value},
-    execution::pipeline::Pipeline,
-    pagination::cursor::Cursor,
-    records::row::RowData,
+    core::value::Value, execution::pipeline::Pipeline, records::Record,
     transform::mapping::TransformationMetadata,
 };
 use std::{collections::HashMap, fmt::Write, sync::Arc, time::Instant};
@@ -64,8 +62,8 @@ impl Default for SampleConfig {
 
 /// Orchestrates the collection, transformation, and validation of data samples
 /// to provide a "dry-run" preview of the pipeline's behavior.
-pub struct SampleCollector {
-    data_source: Arc<Source>,
+pub struct SampleCollector<S: SchemaDriver> {
+    src_driver: Arc<S>,
     config: SampleConfig,
 }
 
@@ -76,37 +74,37 @@ struct ValidationContext<'a> {
     results: &'a mut Vec<SampleValidationResult>,
 }
 
-impl SampleCollector {
-    pub fn new(data_source: Arc<Source>, config: SampleConfig) -> Self {
-        Self {
-            data_source,
-            config,
-        }
+impl<S: SchemaDriver> SampleCollector<S> {
+    pub fn new(src_driver: Arc<S>, config: SampleConfig) -> Self {
+        Self { src_driver, config }
     }
 
-    pub async fn collect(
+    pub async fn collect<D: SchemaDriver>(
         &self,
         pipeline: &Pipeline,
         mapping: &TransformationMetadata,
         validations: &[ValidationPlan],
         mapped_columns_only: bool,
         masking: &MaskingPolicy,
+        ctx: &AnalysisContext<S, D>,
     ) -> Result<SampleDataPreview, SampleCollectorError> {
         let start = Instant::now();
 
-        // Fetch raw data from the physical source
-        let (mut source_rows, query) = self.fetch_sample(pipeline, masking).await?;
+        let (mut source_rows, query) = self.fetch_sample(pipeline, masking, ctx).await?;
         if source_rows.is_empty() {
             return Ok(self.empty_preview(start, query));
         }
 
-        // Tag rows with entity name for context
         source_rows
             .iter_mut()
-            .for_each(|r| r.entity = pipeline.source.table.clone());
+            .for_each(|r| r.schema = pipeline.source.table.clone());
 
-        // Process rows through the transformation and validation engine
-        let transform_pipeline = build_transform_pipeline(pipeline, mapping, mapped_columns_only);
+        let transform_pipeline = build_transform_pipeline(
+            pipeline,
+            mapping,
+            mapped_columns_only,
+            Arc::new(EnvContext::empty()),
+        );
         let mut sample_rows = Vec::with_capacity(source_rows.len());
         let mut val_stats: HashMap<String, (usize, usize)> = HashMap::new();
 
@@ -123,7 +121,6 @@ impl SampleCollector {
 
         info!(table = %pipeline.source.table, count = sample_rows.len(), "Collected sample rows");
 
-        // Assemble the final preview report
         Ok(SampleDataPreview {
             enabled: true,
             sampled_at: Some(chrono::Utc::now()),
@@ -144,13 +141,13 @@ impl SampleCollector {
     fn process_sample_row(
         &self,
         idx: usize,
-        row: &mut RowData,
+        row: &mut Record,
         pipeline: &TransformPipeline,
         validations: &[ValidationPlan],
         mapping: &TransformationMetadata,
         val_stats: &mut HashMap<String, (usize, usize)>,
     ) -> SampleRow {
-        let input_values = self.map_to_sample_values(row, SqlDialect::MySql);
+        let input_values = self.map_to_sample_values(row);
         let source_id = self.extract_identifier(row);
 
         let mut status = SampleRowStatus::Ok;
@@ -160,11 +157,11 @@ impl SampleCollector {
 
         match pipeline.apply(row) {
             Ok(ApplyOutcome::Success) => {
-                output = Some(self.map_to_sample_values(row, SqlDialect::Postgres));
+                output = Some(self.map_to_sample_values(row));
                 self.record_passed(validations, val_stats, &mut validation_results);
             }
             Ok(ApplyOutcome::Warning { warnings }) => {
-                output = Some(self.map_to_sample_values(row, SqlDialect::Postgres));
+                output = Some(self.map_to_sample_values(row));
                 status = SampleRowStatus::Warning;
                 self.handle_validation_warnings(
                     idx,
@@ -215,7 +212,6 @@ impl SampleCollector {
         }
     }
 
-    /// Records successful passes for all validations that weren't triggered as failures.
     fn record_passed(
         &self,
         validations: &[ValidationPlan],
@@ -234,11 +230,10 @@ impl SampleCollector {
         }
     }
 
-    /// Processes specific validation warnings into row-level diagnostics.
     fn handle_validation_warnings(
         &self,
         idx: usize,
-        row: &RowData,
+        row: &Record,
         warnings: &[ValidationWarning],
         val_ctx: &mut ValidationContext,
         issues: &mut Vec<SampleIssue>,
@@ -281,7 +276,6 @@ impl SampleCollector {
             });
         }
 
-        // Mark remainder as passed
         for v in val_ctx
             .validations
             .iter()
@@ -302,7 +296,7 @@ impl SampleCollector {
         &self,
         idx: usize,
         err: TransformError,
-        row: &RowData,
+        row: &Record,
         val_ctx: &mut ValidationContext,
     ) -> (SampleRowStatus, SampleIssue) {
         match err {
@@ -351,70 +345,59 @@ impl SampleCollector {
         }
     }
 
-    async fn fetch_sample(
+    async fn fetch_sample<D: SchemaDriver>(
         &self,
         pipeline: &Pipeline,
         masking: &MaskingPolicy,
-    ) -> Result<(Vec<RowData>, Option<SampleQuery>), SampleCollectorError> {
-        match &self.data_source.primary {
-            DataSource::Database(mutex) => {
-                let db = mutex.lock().await;
-                let mut request = db
-                    .build_fetch_rows_requests(self.config.size, Cursor::None)
-                    .into_iter()
-                    .next()
-                    .ok_or_else(|| SampleCollectorError::NoRows {
-                        table: pipeline.source.table.clone(),
-                    })?;
+        ctx: &AnalysisContext<S, D>,
+    ) -> Result<(Vec<Record>, Option<SampleQuery>), SampleCollectorError> {
+        let mut request = FetchRowsRequestBuilder::new(pipeline.source.table.clone())
+            .limit(self.config.size)
+            .build();
 
-                match self.config.method {
-                    SamplingMethod::Random => request.order_random = true,
-                    SamplingMethod::ById => {
-                        let ids = self.config.sample_ids.as_ref().ok_or(
-                            SampleCollectorError::MissingRequiredConfig {
-                                field: "sample_ids".into(),
-                                method: "ById".into(),
-                            },
-                        )?;
-                        request.in_clause = Some((self.config.id_column.clone(), ids.clone()));
-                    }
-                    SamplingMethod::Stratified => {
-                        return Err(SampleCollectorError::UnsupportedSamplingMethod {
-                            method: "Stratified".into(),
-                        });
-                    }
-                    SamplingMethod::First => {} // Default
-                }
-
-                let dialect = self.data_source.dialect();
-                let generator = QueryGenerator::new(dialect.as_ref());
-                let (sql, params) = generator.select(&request);
-                let query = Some(SampleQuery {
-                    sql: sql.clone(),
-                    params: self.format_query_params(&params, masking),
-                });
-
-                let rows = db
-                    .adapter()
-                    .query_rows_params(&sql, params)
-                    .await
-                    .map_err(|e| SampleCollectorError::QueryExecutionFailed {
-                        table: pipeline.source.table.clone(),
-                        error: e.to_string(),
-                    })?;
-
-                Ok((rows, query))
+        match self.config.method {
+            SamplingMethod::Random => request.order_random = true,
+            SamplingMethod::ById => {
+                let ids = self.config.sample_ids.as_ref().ok_or(
+                    SampleCollectorError::MissingRequiredConfig {
+                        field: "sample_ids".into(),
+                        method: "ById".into(),
+                    },
+                )?;
+                request.in_clause = Some((self.config.id_column.clone(), ids.clone()));
             }
-            DataSource::File(_) => Err(SampleCollectorError::UnsupportedSourceType {
-                source_type: "File".into(),
-            }),
+            SamplingMethod::Stratified => {
+                return Err(SampleCollectorError::UnsupportedSamplingMethod {
+                    method: "Stratified".into(),
+                });
+            }
+            SamplingMethod::First => {}
         }
+
+        let dialect = ctx.source_dialect.as_query_dialect();
+        let generator = QueryGenerator::new(dialect.as_ref());
+        let (sql, params) = generator.select(&request);
+        let query = Some(SampleQuery {
+            sql: sql.clone(),
+            params: self.format_query_params(&params, masking),
+        });
+
+        let rows = self
+            .src_driver
+            .query_params(&sql, &params)
+            .await
+            .map_err(|e| SampleCollectorError::QueryExecutionFailed {
+                table: pipeline.source.table.clone(),
+                error: e.to_string(),
+            })?;
+
+        Ok((rows, query))
     }
 
     /// Resolves column values from the current row, accounting for table aliases in joins.
     fn resolve_val(
         &self,
-        row: &RowData,
+        row: &Record,
         col_ref: &str,
         mapping: &TransformationMetadata,
     ) -> Option<Value> {
@@ -445,7 +428,7 @@ impl SampleCollector {
 
     fn format_val_context(
         &self,
-        row: &RowData,
+        row: &Record,
         cols: &[String],
         mapping: &TransformationMetadata,
     ) -> String {
@@ -467,13 +450,9 @@ impl SampleCollector {
         buf
     }
 
-    fn map_to_sample_values(
-        &self,
-        row: &RowData,
-        dialect: SqlDialect,
-    ) -> HashMap<String, SampleValue> {
+    fn map_to_sample_values(&self, row: &Record) -> HashMap<String, SampleValue> {
         const MAX_DISPLAY: usize = 120;
-        row.field_values
+        row.fields
             .iter()
             .map(|f| {
                 let (display, is_null, truncated, len) = match &f.value {
@@ -496,7 +475,7 @@ impl SampleCollector {
                     f.name.clone(),
                     SampleValue {
                         display,
-                        value_type: f.data_type.name(dialect).to_string(),
+                        value_type: format!("{:?}", f.data_type),
                         is_null,
                         truncated,
                         original_length: len,
@@ -547,14 +526,10 @@ impl SampleCollector {
         stats
     }
 
-    fn extract_identifier(&self, row: &RowData) -> Option<String> {
+    fn extract_identifier(&self, row: &Record) -> Option<String> {
         ["id", "_id", "uuid", "pk", &self.config.id_column]
             .iter()
-            .find_map(|&c| {
-                row.field_values
-                    .iter()
-                    .find(|f| f.name.eq_ignore_ascii_case(c))
-            })
+            .find_map(|&c| row.fields.iter().find(|f| f.name.eq_ignore_ascii_case(c)))
             .and_then(|f| f.value.as_ref().map(|v| format!("{:?}", v)))
     }
 
@@ -608,7 +583,7 @@ impl SampleCollector {
     }
 
     fn format_query_param(&self, value: &Value, masking: &MaskingPolicy) -> String {
-        let raw = value.as_string().unwrap_or_else(|| value.to_string());
+        let raw = value.as_string().unwrap_or_else(|| format!("{:?}", value));
 
         if MaskingPolicy::is_db_url(&raw) {
             return MaskingPolicy::mask_url(&raw);
@@ -618,24 +593,17 @@ impl SampleCollector {
             return raw;
         }
 
+        // Mask string-like values that might contain sensitive data
         match value {
-            Value::String(_)
-            | Value::Json(_)
-            | Value::Uuid(_)
-            | Value::Bytes(_)
-            | Value::Date(_)
-            | Value::Timestamp(_)
-            | Value::TimestampNaive(_)
-            | Value::Enum(_, _)
-            | Value::StringArray(_) => masking.mask_value(&raw),
+            Value::String(_) | Value::Null => masking.mask_value(&raw),
             _ => raw,
         }
     }
 }
 
 #[async_trait]
-impl PlanAnalyzer for SampleCollector {
-    type Input = (Pipeline, TransformationMetadata, Vec<ValidationPlan>, bool); // (pipeline, mapping, validations, mapped_columns_only)
+impl<S: SchemaDriver, D: SchemaDriver> PlanAnalyzer<S, D> for SampleCollector<S> {
+    type Input = (Pipeline, TransformationMetadata, Vec<ValidationPlan>, bool);
     type Output = SampleDataPreview;
 
     fn name(&self) -> &'static str {
@@ -645,7 +613,7 @@ impl PlanAnalyzer for SampleCollector {
     async fn analyze(
         &self,
         input: &Self::Input,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<Self::Output> {
         let (pipeline, mapping, validations, mapped_columns_only) = input;
 
@@ -656,6 +624,7 @@ impl PlanAnalyzer for SampleCollector {
                 validations,
                 *mapped_columns_only,
                 &ctx.masking,
+                ctx,
             )
             .await
             .map_err(|e| AnalyzerError::error("sample", e.to_string()))?;

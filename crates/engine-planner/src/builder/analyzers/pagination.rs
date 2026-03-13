@@ -7,6 +7,7 @@ use crate::{
     plan::pagination::{cursor::CursorColumn, plan::PaginationPlan, strategy::PaginationStrategy},
 };
 use async_trait::async_trait;
+use engine_processing::io::driver::SchemaDriver;
 use model::execution::pipeline::Pagination;
 use tracing::{info, warn};
 
@@ -15,20 +16,16 @@ pub struct PaginationAnalyzer;
 
 impl PaginationAnalyzer {
     /// Primary logic for analyzing a configured pagination strategy.
-    async fn analyze_pagination_config(
+    async fn analyze_pagination_config<S: SchemaDriver, D: SchemaDriver>(
         &self,
         table: &str,
         pagination: &Pagination,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> Result<PaginationPlan, PaginationAnalyzerError> {
-        // Resolve the pagination strategy (cursor vs offset)
         let strategy = self.map_strategy_type(&pagination.strategy)?;
-
-        // Resolve and validate the primary cursor column
         let cursor_column = self.resolve_cursor_ref(&pagination.column, table)?;
         self.verify_column_metadata(&cursor_column, ctx)?;
 
-        // Resolve and validate the optional tiebreaker column
         let tiebreaker = if let Some(tb) = &pagination.tiebreaker {
             let tb_col = self.resolve_cursor_ref(tb, table)?;
             self.verify_column_metadata(&tb_col, ctx)?;
@@ -37,7 +34,6 @@ impl PaginationAnalyzer {
             None
         };
 
-        // Performance Analysis: Verify indexing for the cursor
         let column_indexed = ctx
             .source_cache
             .is_column_indexed(&cursor_column.table, &cursor_column.column)
@@ -48,7 +44,7 @@ impl PaginationAnalyzer {
                 target: "analyzer",
                 table = %cursor_column.table,
                 column = %cursor_column.column,
-                "Pagination Performance Risk: Cursor column is not indexed. Scanning large datasets will be slow."
+                "Pagination Performance Risk: Cursor column is not indexed."
             );
         }
 
@@ -110,23 +106,24 @@ impl PaginationAnalyzer {
         })
     }
 
-    fn verify_column_metadata(
+    fn verify_column_metadata<S: SchemaDriver, D: SchemaDriver>(
         &self,
         cursor: &CursorColumn,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> Result<(), PaginationAnalyzerError> {
-        let table_meta = ctx.schema_plan
+        let table_meta = ctx
+            .schema_plan
             .metadata_graph()
             .get(&cursor.table)
             .ok_or_else(|| PaginationAnalyzerError::MetadataError {
                 table: cursor.table.clone(),
-                reason: "Table metadata not found in plan graph. Ensure the table is part of the source or joins.".into(),
+                reason: "Table metadata not found in plan graph.".into(),
             })?;
 
         let column_exists = table_meta
             .columns()
             .iter()
-            .any(|col| col.name() == cursor.column);
+            .any(|col| col.name == cursor.column);
 
         if !column_exists {
             return Err(PaginationAnalyzerError::CursorColumnNotFound {
@@ -140,8 +137,8 @@ impl PaginationAnalyzer {
 }
 
 #[async_trait]
-impl PlanAnalyzer for PaginationAnalyzer {
-    type Input = (String, Option<Pagination>); // (table_name, pagination_config)
+impl<S: SchemaDriver, D: SchemaDriver> PlanAnalyzer<S, D> for PaginationAnalyzer {
+    type Input = (String, Option<Pagination>);
     type Output = Option<PaginationPlan>;
 
     fn name(&self) -> &'static str {
@@ -151,7 +148,7 @@ impl PlanAnalyzer for PaginationAnalyzer {
     async fn analyze(
         &self,
         input: &Self::Input,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<Self::Output> {
         let (table_name, config) = input;
 

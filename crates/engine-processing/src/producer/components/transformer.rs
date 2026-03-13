@@ -9,7 +9,7 @@ use model::{
         failed_row::{FailedRow, ProcessingStage},
         pipeline::ErrorHandling,
     },
-    records::row::RowData,
+    records::Record,
 };
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -18,7 +18,7 @@ use tracing::{info, warn};
 #[derive(Debug, Clone)]
 pub struct TransformResult {
     /// Successfully transformed rows
-    pub rows: Vec<RowData>,
+    pub rows: Vec<Record>,
     /// Number of rows filtered/skipped during transformation
     pub rows_skipped: u64,
     /// Number of rows that failed transformation
@@ -64,7 +64,7 @@ impl TransformService {
         &self,
         run_id: &str,
         batch_id: &str,
-        rows: Vec<RowData>,
+        rows: Vec<Record>,
     ) -> Result<TransformResult, TransformError> {
         let (successful, filtered, failed_rows, has_fatal) =
             self.transform_batch(run_id, batch_id, rows).await;
@@ -91,8 +91,8 @@ impl TransformService {
         &self,
         run_id: &str,
         batch_id: &str,
-        rows: Vec<RowData>,
-    ) -> (Vec<RowData>, Vec<RowData>, Vec<FailedRow>, bool) {
+        rows: Vec<Record>,
+    ) -> (Vec<Record>, Vec<Record>, Vec<FailedRow>, bool) {
         let mut successful = Vec::new();
         let mut filtered = Vec::new();
         let mut failed_rows = Vec::new();
@@ -148,7 +148,7 @@ impl TransformService {
         &self,
         run_id: &str,
         batch_id: &str,
-        row: &RowData,
+        row: &Record,
         error: TransformError,
     ) -> FailedRow {
         let stage = match &error {
@@ -165,7 +165,7 @@ impl TransformService {
             error.to_string(),      // Error message
         )
         .with_execution_context(run_id.to_string(), Some(batch_id.to_string()), None)
-        .with_table(row.entity.clone())
+        .with_table(row.schema.clone())
         .with_retryable(is_retryable)
     }
 

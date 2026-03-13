@@ -1,31 +1,21 @@
 use crate::transform::error::FailedRowWriterError;
-use connectors::sql::base::metadata::table::TableMetadata;
-use engine_core::{connectors::destination::Destination, context::exec::ExecutionContext};
+use connectors::traits::{introspector::SchemaIntrospector, writer::DataWriter};
+use engine_core::context::exec::ExecutionContext;
 use model::{
     execution::{
         connection::Connection,
         failed_row::FailedRow,
         pipeline::{FailedRowsDestination, FileFormat},
     },
-    records::row::RowData,
+    records::Record,
 };
 use std::{fs::OpenOptions, io::Write, path::Path, sync::Arc};
-use tokio::sync::OnceCell;
 use tracing::{debug, error, info};
 
-/// Cached database destination with metadata
-struct CachedDbDestination {
-    destination: Destination,
-    table_name: String,
-    metadata: TableMetadata,
-}
-
-/// Writer for failed rows to various destinations
+/// Writer for failed rows to various destinations.
 pub struct FailedRowWriter {
     destination: FailedRowsDestination,
     context: Arc<ExecutionContext>,
-    /// Cached database destination (lazy-initialized on first write)
-    cached_db_dest: OnceCell<CachedDbDestination>,
 }
 
 impl FailedRowWriter {
@@ -33,7 +23,6 @@ impl FailedRowWriter {
         Self {
             destination,
             context,
-            cached_db_dest: OnceCell::new(),
         }
     }
 
@@ -81,37 +70,48 @@ impl FailedRowWriter {
             table.to_string()
         };
 
-        // Get or initialize cached destination
-        let data_dest = self
-            .cached_db_dest
-            .get_or_try_init(|| async {
-                // Initialize on first use
-                let adapter = self.context.get_adapter(connection).await?;
-                let destination = Destination::new(adapter, &table_name, connection).await?;
-                let metadata = destination.data_dest.fetch_meta(table_name.clone()).await?;
+        // Get typed driver based on connection type and write
+        match connection.driver.as_str() {
+            "postgres" | "postgresql" => {
+                let driver = self.context.get_pg_driver(connection).await?;
+                self.write_with_driver(&*driver, failed_rows, &table_name)
+                    .await
+            }
+            "mysql" => {
+                let driver = self.context.get_mysql_driver(connection).await?;
+                self.write_with_driver(&*driver, failed_rows, &table_name)
+                    .await
+            }
+            _ => Err(FailedRowWriterError::NoDestination),
+        }
+    }
 
-                Ok::<CachedDbDestination, FailedRowWriterError>(CachedDbDestination {
-                    destination,
-                    table_name: table_name.clone(),
-                    metadata,
-                })
-            })
-            .await?;
+    /// Generic write method that works with any driver implementing the required traits.
+    async fn write_with_driver<D>(
+        &self,
+        driver: &D,
+        failed_rows: &[FailedRow],
+        table_name: &str,
+    ) -> Result<(), FailedRowWriterError>
+    where
+        D: SchemaIntrospector + DataWriter,
+    {
+        // Fetch table metadata
+        let metadata = driver.table_metadata(table_name).await?;
 
-        let rows: Vec<RowData> = failed_rows
+        // Convert failed rows to RowData
+        let rows: Vec<Record> = failed_rows
             .iter()
-            .map(|fr| fr.to_row_data(&data_dest.table_name))
+            .map(|fr| fr.to_row_data(table_name))
             .collect();
 
-        data_dest
-            .destination
-            .write_batch(&data_dest.metadata, &rows)
-            .await?;
+        // Write batch using driver's write_batch method
+        driver.write_batch(&metadata, &rows).await?;
 
         info!(
             "Wrote {} failed rows to table {}",
             failed_rows.len(),
-            data_dest.table_name
+            table_name
         );
         Ok(())
     }
@@ -165,7 +165,7 @@ mod tests {
 
     fn create_test_failed_row() -> FailedRow {
         let mut original_data = HashMap::new();
-        original_data.insert("user_id".to_string(), Value::Uint(123));
+        original_data.insert("user_id".to_string(), Value::Int(123));
         original_data.insert(
             "email".to_string(),
             Value::String("test@example.com".to_string()),
@@ -181,6 +181,7 @@ mod tests {
     }
 
     async fn create_test_context() -> Arc<ExecutionContext> {
+        use engine_core::context::env::EnvContext;
         use smql_syntax::ast::{doc::SmqlDocument, span::Span};
 
         let doc = SmqlDocument {
@@ -190,9 +191,10 @@ mod tests {
             pipelines: vec![],
             span: Span::new(0, 0, 0, 0),
         };
-        let plan = ExecutionPlan::build(&doc).unwrap();
+        let env = Arc::new(EnvContext::empty());
+        let plan = ExecutionPlan::build(&doc, env.clone()).unwrap();
         let state = Arc::new(SledStateStore::open(tempfile::tempdir().unwrap().path()).unwrap());
-        Arc::new(ExecutionContext::new(&plan, state).await.unwrap())
+        Arc::new(ExecutionContext::new(&plan, state, env).await.unwrap())
     }
 
     #[tokio::test]

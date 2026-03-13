@@ -6,13 +6,14 @@ use crate::builder::{
     analyzers::destination::DestinationAnalyzer,
 };
 use async_trait::async_trait;
+use engine_processing::io::driver::SchemaDriver;
 
 pub struct DestinationStage {
     pub analyzer: DestinationAnalyzer,
 }
 
 #[async_trait]
-impl PipelineAnalysisStage for DestinationStage {
+impl<S: SchemaDriver, D: SchemaDriver> PipelineAnalysisStage<S, D> for DestinationStage {
     fn name(&self) -> &'static str {
         "destination"
     }
@@ -20,7 +21,7 @@ impl PipelineAnalysisStage for DestinationStage {
     async fn run(
         &self,
         input: &PipelineAnalysisInput,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
         state: &mut AnalysisState,
     ) -> AnalyzerResult<()> {
         let destination_plan =

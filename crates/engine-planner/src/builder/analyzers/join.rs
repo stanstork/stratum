@@ -7,8 +7,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use connectors::join_on_expr;
-use connectors::sql::base::join::clause::{JoinClause, JoinCondition as CoreJoinCondition};
-use engine_core::connectors::linked::build_join_clauses;
+use connectors::sql::join::clause::{JoinClause, JoinCondition as CoreJoinCondition};
+use engine_processing::io::{driver::SchemaDriver, linked::build_join_clauses};
 use model::execution::pipeline::Join;
 use query_builder::renderer::{Render, Renderer};
 use tracing::info;
@@ -18,10 +18,10 @@ pub struct JoinAnalyzer;
 
 impl JoinAnalyzer {
     /// Orchestrates the analysis of a single join within a pipeline.
-    pub async fn analyze_single_join(
+    pub async fn analyze_single_join<S: SchemaDriver, D: SchemaDriver>(
         &self,
         join: &Join,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> Result<JoinPlan, JoinAnalyzerError> {
         let table = &join.table;
         let alias = join.alias.clone();
@@ -69,11 +69,11 @@ impl JoinAnalyzer {
     }
 
     /// Verifies if the joined columns on the target table are covered by an index.
-    async fn verify_index_coverage(
+    async fn verify_index_coverage<S: SchemaDriver, D: SchemaDriver>(
         &self,
         table: &str,
         clause: &JoinClause,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> bool {
         let join_columns: Vec<String> = clause
             .conditions
@@ -87,10 +87,15 @@ impl JoinAnalyzer {
     }
 
     /// Renders the JOIN ON expression into SQL using the context's source dialect.
-    fn render_join_sql(&self, clause: &JoinClause, ctx: &AnalysisContext) -> String {
+    fn render_join_sql<S: SchemaDriver, D: SchemaDriver>(
+        &self,
+        clause: &JoinClause,
+        ctx: &AnalysisContext<S, D>,
+    ) -> String {
         match join_on_expr!(clause) {
             Ok(expr) => {
-                let mut renderer = Renderer::new(ctx.source_dialect.as_ref());
+                let dialect = ctx.source_dialect.as_query_dialect();
+                let mut renderer = Renderer::new(dialect.as_ref());
                 expr.render(&mut renderer);
                 renderer.finish().0
             }
@@ -111,11 +116,11 @@ impl JoinAnalyzer {
             .iter()
             .map(|c| JoinCondition {
                 left: JoinColumn {
-                    table: c.left.alias.clone(), // Source table from join condition
+                    table: c.left.alias.clone(),
                     column: c.left.column.clone(),
                 },
                 right: JoinColumn {
-                    table: c.right.alias.clone(), // Joined table from join condition
+                    table: c.right.alias.clone(),
                     column: c.right.column.clone(),
                 },
                 expression: expression.to_string(),
@@ -124,9 +129,8 @@ impl JoinAnalyzer {
             .collect()
     }
 
-    /// Provides simple match rate heuristics (could be expanded with statistical analysis).
+    /// Provides simple match rate heuristics.
     async fn estimate_match_rate(&self, _conditions: &[CoreJoinCondition]) -> Option<f32> {
-        // Future implementation: Use histogram data from cache to refine this
         Some(0.95)
     }
 
@@ -146,7 +150,7 @@ impl JoinAnalyzer {
 }
 
 #[async_trait]
-impl PlanAnalyzer for JoinAnalyzer {
+impl<S: SchemaDriver, D: SchemaDriver> PlanAnalyzer<S, D> for JoinAnalyzer {
     type Input = Vec<Join>;
     type Output = Vec<JoinPlan>;
 
@@ -154,11 +158,10 @@ impl PlanAnalyzer for JoinAnalyzer {
         "join"
     }
 
-    /// Entry point for the PlanBuilder analyzer registry.
     async fn analyze(
         &self,
         joins: &Self::Input,
-        ctx: &AnalysisContext,
+        ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<Self::Output> {
         let mut plans = Vec::with_capacity(joins.len());
 

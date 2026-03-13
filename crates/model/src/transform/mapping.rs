@@ -64,7 +64,17 @@ impl FieldTransformations {
     /// Extracts field mappings from a pipeline's transformations.
     pub fn from_pipeline(pipeline: &Pipeline) -> Self {
         let mut entity_map = Self::new();
-        let entity = pipeline.destination.table.to_ascii_lowercase();
+        let src = pipeline.source.table.to_ascii_lowercase();
+        let entity = if !pipeline.destination.table.is_empty() {
+            pipeline.destination.table.to_ascii_lowercase()
+        } else {
+            pipeline
+                .destination
+                .table_map
+                .get(&src)
+                .cloned()
+                .unwrap_or_else(|| src.clone())
+        };
 
         let source_table = pipeline.source.table.to_ascii_lowercase();
 
@@ -102,6 +112,47 @@ impl FieldTransformations {
         entity_map.add_mapping(&entity, field_map);
         entity_map.add_computed(&entity, computed_fields);
 
+        // Named selects: field mappings for referenced (cascade) tables.
+        // Keys in named_transformations are source table names; resolve to destination names.
+        for (src_table, transforms) in &pipeline.named_transformations {
+            let dest_table = pipeline
+                .destination
+                .table_map
+                .get(src_table)
+                .cloned()
+                .unwrap_or_else(|| src_table.clone());
+
+            let mut named_field_map = HashMap::new();
+            let mut named_computed = Vec::new();
+
+            for transform in transforms {
+                match &transform.expression {
+                    CompiledExpression::Identifier(field) => {
+                        named_field_map.insert(
+                            transform.target_field.to_ascii_lowercase(),
+                            field.to_ascii_lowercase(),
+                        );
+                    }
+                    CompiledExpression::DotPath(segments)
+                        if segments.len() == 2
+                            && segments[0].to_ascii_lowercase() == *src_table =>
+                    {
+                        named_field_map.insert(
+                            transform.target_field.to_ascii_lowercase(),
+                            segments[1].to_ascii_lowercase(),
+                        );
+                    }
+                    other_expr => {
+                        named_computed
+                            .push(ComputedField::new(&transform.target_field, other_expr));
+                    }
+                }
+            }
+
+            entity_map.add_mapping(&dest_table, named_field_map);
+            entity_map.add_computed(&dest_table, named_computed);
+        }
+
         entity_map
     }
 
@@ -122,16 +173,16 @@ impl FieldTransformations {
         self.computed_fields.get(entity)
     }
 
-    pub fn resolve(&self, entity: &str, name: &str) -> String {
-        if let Some(name_map) = self.field_renames.get(entity) {
+    pub fn resolve(&self, schema: &str, name: &str) -> String {
+        if let Some(name_map) = self.field_renames.get(schema) {
             name_map.resolve(name)
         } else {
             name.to_string()
         }
     }
 
-    pub fn reverse_resolve(&self, entity: &str, name: &str) -> String {
-        if let Some(name_map) = self.field_renames.get(entity) {
+    pub fn reverse_resolve(&self, schema: &str, name: &str) -> String {
+        if let Some(name_map) = self.field_renames.get(schema) {
             name_map.reverse_resolve(name)
         } else {
             name.to_string()
@@ -142,8 +193,8 @@ impl FieldTransformations {
         self.field_renames.is_empty() && self.computed_fields.is_empty()
     }
 
-    pub fn contains(&self, entity: &str) -> bool {
-        self.field_renames.contains_key(entity)
+    pub fn contains(&self, schema: &str) -> bool {
+        self.field_renames.contains_key(schema)
     }
 }
 
@@ -201,8 +252,19 @@ impl NameResolver {
         let src = pipeline.source.table.to_ascii_lowercase();
         let dst = pipeline.destination.table.to_ascii_lowercase();
 
-        // For the main table: destination (target) -> source
-        target_to_source_map.insert(dst, src);
+        // For the main table: destination (target) -> source.
+        // Skip when destination table is empty (schema_only / graph-reference pipelines).
+        if !dst.is_empty() {
+            target_to_source_map.insert(dst, src);
+        }
+
+        // Table renames from the `map { }` block: source_table -> dest_table.
+        // Insert as dest -> source so resolve("film") -> "dim_film".
+        for (src_table, dst_table) in &pipeline.destination.table_map {
+            let src_lower = src_table.to_ascii_lowercase();
+            let dst_lower = dst_table.to_ascii_lowercase();
+            target_to_source_map.insert(dst_lower, src_lower);
+        }
 
         // For joined tables, alias maps to the actual table name
         for join in &pipeline.source.joins {
@@ -266,6 +328,26 @@ impl TransformationMetadata {
     /// Returns the entity name resolver (source <-> destination table names).
     pub fn entity_names(&self) -> &NameResolver {
         &self.entities
+    }
+
+    /// Returns a clone with identity entries added for any table in `tables` not already mapped.
+    /// Used by graph expansion so FK filters treat all discovered tables as in-scope.
+    pub fn with_extra_sources(&self, tables: &[String]) -> Self {
+        let mut augmented = self.clone();
+        for t in tables {
+            let lower = t.to_ascii_lowercase();
+            augmented
+                .entities
+                .source_to_target
+                .entry(lower.clone())
+                .or_insert_with(|| lower.clone());
+            augmented
+                .entities
+                .target_to_source
+                .entry(lower.clone())
+                .or_insert_with(|| lower.clone());
+        }
+        augmented
     }
 
     /// Returns the field transformations.
@@ -428,6 +510,7 @@ mod tests {
                     },
                 ],
                 pagination: None,
+                graph_references: None,
             },
             destination: DataDestination {
                 connection: Connection {
@@ -438,6 +521,7 @@ mod tests {
                 },
                 table: "customers_clean".to_string(),
                 mode: WriteMode::Insert,
+                table_map: HashMap::new(),
             },
             transformations: vec![
                 // Simple field rename: id = id
@@ -480,10 +564,11 @@ mod tests {
                     },
                 },
             ],
+            named_transformations: HashMap::new(),
             validations: vec![],
             lifecycle: None,
             error_handling: None,
-            settings: std::collections::HashMap::new(),
+            settings: HashMap::new(),
         }
     }
 

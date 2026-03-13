@@ -1,0 +1,32 @@
+SELECT
+    rc.CONSTRAINT_NAME AS constraint_name,
+    kcu.TABLE_NAME AS table_name,
+    kcu.TABLE_SCHEMA AS schema_name,
+    GROUP_CONCAT(kcu.COLUMN_NAME ORDER BY kcu.ORDINAL_POSITION) AS columns,
+    kcu.REFERENCED_TABLE_NAME AS referenced_table,
+    kcu.REFERENCED_TABLE_SCHEMA AS referenced_schema,
+    GROUP_CONCAT(kcu.REFERENCED_COLUMN_NAME ORDER BY kcu.ORDINAL_POSITION) AS referenced_columns,
+    rc.DELETE_RULE AS on_delete,
+    rc.UPDATE_RULE AS on_update,
+    c.IS_NULLABLE as is_nullable
+FROM information_schema.KEY_COLUMN_USAGE kcu
+JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
+    ON kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
+    AND kcu.TABLE_NAME = rc.TABLE_NAME
+JOIN information_schema.COLUMNS c
+	ON c.COLUMN_NAME = kcu.COLUMN_NAME
+	AND c.TABLE_NAME = kcu.TABLE_NAME
+	AND c.TABLE_SCHEMA = kcu.TABLE_SCHEMA
+WHERE kcu.TABLE_NAME = ?
+    AND kcu.TABLE_SCHEMA = DATABASE()
+    AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
+GROUP BY
+    rc.CONSTRAINT_NAME,
+    kcu.TABLE_NAME,
+    kcu.TABLE_SCHEMA,
+    kcu.REFERENCED_TABLE_NAME,
+    kcu.REFERENCED_TABLE_SCHEMA,
+    rc.DELETE_RULE,
+    rc.UPDATE_RULE,
+    c.IS_NULLABLE 
+ORDER BY rc.CONSTRAINT_NAME;

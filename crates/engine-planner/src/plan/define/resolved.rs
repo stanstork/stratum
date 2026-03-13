@@ -1,5 +1,4 @@
 use crate::plan::define::env_vars::{EnvVarUsage, ValueSource};
-use model::core::value::Value;
 use serde::Serialize;
 
 #[derive(Serialize, Debug, Clone, Default)]
@@ -11,6 +10,6 @@ pub struct ResolvedDefines {
 #[derive(Serialize, Debug, Clone)]
 pub struct ResolvedConstant {
     pub name: String,
-    pub value: Value,
+    pub value: String,
     pub source: ValueSource,
 }

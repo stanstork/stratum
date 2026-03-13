@@ -2,7 +2,7 @@ use crate::transform::{
     error::TransformError,
     validation::{ValidationAction, ValidationResult},
 };
-use model::records::row::RowData;
+use model::records::Record;
 use std::sync::Arc;
 use tracing::warn;
 
@@ -33,16 +33,16 @@ pub struct ValidationWarning {
 }
 
 pub trait Transform: Send + Sync {
-    fn apply(&self, row: &mut RowData) -> Result<(), TransformError>;
+    fn apply(&self, row: &mut Record) -> Result<(), TransformError>;
 }
 
 /// Trait for filter-like transforms that decide whether to keep a row.
 pub trait Filter: Send + Sync {
-    fn should_keep(&self, row: &RowData) -> bool;
+    fn should_keep(&self, row: &Record) -> bool;
 }
 
 pub trait Validator: Send + Sync {
-    fn validate(&self, row: &RowData) -> Result<ValidationResult, TransformError>;
+    fn validate(&self, row: &Record) -> Result<ValidationResult, TransformError>;
 }
 
 pub trait TransformPipelineExt {
@@ -80,7 +80,7 @@ impl TransformPipeline {
     }
 
     /// Apply pipeline to a single row in-place.
-    pub fn apply(&self, row: &mut RowData) -> Result<ApplyOutcome, TransformError> {
+    pub fn apply(&self, row: &mut Record) -> Result<ApplyOutcome, TransformError> {
         let mut warnings = Vec::new();
 
         for stage in &self.stages {
@@ -110,8 +110,8 @@ impl TransformPipeline {
 
     pub fn apply_batch(
         &self,
-        mut rows: Vec<RowData>,
-    ) -> (Vec<RowData>, Vec<RowData>, Vec<(RowData, TransformError)>) {
+        mut rows: Vec<Record>,
+    ) -> (Vec<Record>, Vec<Record>, Vec<(Record, TransformError)>) {
         let mut successful = Vec::new();
         let mut filtered = Vec::new();
         let mut failed = Vec::new();
@@ -152,7 +152,7 @@ impl TransformPipeline {
 
     fn validate(
         &self,
-        row: &mut RowData,
+        row: &mut Record,
         validator: &Arc<dyn Validator>,
         warnings: &mut Vec<ValidationWarning>,
     ) -> Result<Option<ApplyOutcome>, TransformError> {
