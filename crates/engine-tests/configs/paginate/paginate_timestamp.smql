@@ -1,0 +1,39 @@
+// Pagination: TIMESTAMP strategy on a DATETIME column with a tie-breaker
+//
+// Uses the composite WHERE clause:
+//   (payment_date > :ts) OR (payment_date = :ts AND payment_id > :last_id)
+//   ORDER BY payment_date ASC, payment_id ASC LIMIT n
+//
+// Sakila payment.payment_date is a DATETIME column (values from 2005-05-24 to 2006-02-14).
+// Many payments share the same payment_date second - the tie-breaker (payment_id)
+// ensures no rows are skipped or duplicated at page boundaries.
+//
+// timezone = "UTC": MySQL DATETIME values are treated as UTC; the cursor stores
+// UTC microseconds and converts back to UTC strings for the WHERE clause.
+//
+// 16,044 rows, batch_size=500 -> 33 pages, each boundary landing mid-second.
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "paginate_payment_timestamp" {
+    from { connection = connection.src  table = "payment" }
+    to   { connection = connection.dst  table = "payment" }
+
+    paginate {
+        strategy   = "timestamp"
+        cursor     = "payment.payment_date"
+        tiebreaker = "payment.payment_id"
+        timezone   = "UTC"
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 500
+    }
+}

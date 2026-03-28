@@ -1,0 +1,63 @@
+// Verify: rental enriched with JOIN + WHERE filter + TIMESTAMP pagination
+//
+// Main table: rental (16,044 rows)
+// Join:       customer (1:1 lookup -> customer_name computed column)
+// Filter:     rental.staff_id == 1  (~8,000 rows after filter)
+// Paginate:   TIMESTAMP on rental_date + tiebreaker rental_id, batch=200
+//
+// Tests that verify correctly handles:
+//   - computed columns (customer_name = concat) in the receipt hashes
+//   - a filtered source (receipt covers only staff_id=1 rows)
+//   - non-PK (timestamp) cursor with tiebreaker across many pages
+//   - ignore_constraints avoids FK failures against non-existent tables
+//
+// Note: destination table is named "rental" (same as source) so that the
+// verifier's offset strategy can resolve column qualifiers against the PG table.
+//
+// Verify checks "destination == receipt" - it does not re-apply the filter
+// or the join, it just reads what was written and compares hashes batch-by-batch.
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "verify_rental_join_filter" {
+    from { connection = connection.src  table = "rental" }
+    to   { connection = connection.dst  table = "rental" }
+
+    with {
+        cust from customer where cust.customer_id == rental.customer_id
+    }
+
+    where "staff_one" {
+        rental.staff_id == 1
+    }
+
+    paginate {
+        strategy   = "timestamp"
+        cursor     = "rental.rental_date"
+        tiebreaker = "rental.rental_id"
+        timezone   = "UTC"
+    }
+
+    select {
+        rental_id     = rental.rental_id
+        rental_date   = rental.rental_date
+        inventory_id  = rental.inventory_id
+        customer_id   = rental.customer_id
+        return_date   = rental.return_date
+        staff_id      = rental.staff_id
+        last_update   = rental.last_update
+        customer_name = concat(cust.first_name, " ", cust.last_name)
+    }
+
+    settings {
+        create_missing_tables = true
+        ignore_constraints    = true
+        batch_size            = 200
+    }
+}

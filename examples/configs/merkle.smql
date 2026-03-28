@@ -1,0 +1,61 @@
+// merkle.smql - Merkle-tree integrity verification
+//
+// Stratum can compute a cryptographic receipt for every migration and later
+// verify that the destination matches it exactly. The workflow is:
+//
+//   1. Apply with integrity flag - migrates data and writes a receipt:
+//        stratum apply -c merkle.smql --integrity
+//
+//   2. Verify at any later point - re-reads the destination and compares
+//      row hashes against the stored receipt:
+//        stratum verify -c merkle.smql
+//
+// How it works
+// ────────────
+// During apply, each batch of rows is hashed (SHA-256 per row, then a
+// Merkle subtree root per batch). The roots are stored in a local sled
+// key-value store (~/.stratum/state/).
+//
+// During verify, the same rows are re-read from the destination in
+// identical batch order, re-hashed, and compared against the stored roots.
+// Any modification, deletion, or insertion since apply is detected.
+//
+// This example uses the actor and payment tables so both a small table
+// and a large paginated table are covered in one verify run.
+
+define {
+    mysql_url    = env("MYSQL_URL",    "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+// Small table - all 200 rows in a single receipt batch.
+pipeline "migrate_actor" {
+    from { connection = connection.src  table = "actor" }
+    to   { connection = connection.dst  table = "actor" }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 200
+    }
+}
+
+// Large table - 16,044 rows across many batches with a keyset cursor.
+// The receipt stores one subtree root per batch, so any tampered row
+// changes exactly the batch root that covers it.
+pipeline "migrate_payment" {
+    from { connection = connection.src  table = "payment" }
+    to   { connection = connection.dst  table = "payment" }
+
+    paginate {
+        strategy = "pk"
+        cursor   = "payment.payment_id"
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 1000
+    }
+}

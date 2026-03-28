@@ -1,0 +1,34 @@
+// Verify: payment table with NUMERIC pagination, no cascade
+//
+// Distinct from payment_cascade_numeric.smql: no cascade, plain single-table
+// migration. Exercises the numeric cursor (composite staff_id + payment_id)
+// on a flat table, confirming verify replays the same composite boundaries.
+//
+// staff_id has only 2 distinct values (1, 2) so every page boundary after
+// the first lands inside a duplicate-value run - tiebreaker fires on every page.
+//
+// payment: 16,044 rows, batch_size=500 -> ~32 pages.
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "verify_payment_numeric_plain" {
+    from { connection = connection.src  table = "payment" }
+    to   { connection = connection.dst  table = "payment" }
+
+    paginate {
+        strategy   = "numeric"
+        cursor     = "payment.staff_id"
+        tiebreaker = "payment.payment_id"
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 500
+    }
+}

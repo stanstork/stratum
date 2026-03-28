@@ -3,13 +3,14 @@ use crate::{
     error::MigrationError,
 };
 use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan};
+use model::execution::flags::ExecutionFlags;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 pub async fn run(
     plan: ExecutionPlan,
-    dry_run: bool,
+    flags: ExecutionFlags,
     cancel: CancellationToken,
     env: Arc<EnvContext>,
 ) -> Result<(), MigrationError> {
@@ -32,7 +33,7 @@ pub async fn run(
         info!("  Level {}: {:?}", level_idx + 1, level);
     }
 
-    DagExecutor::new(plan, dry_run, cancel, env)
+    DagExecutor::new(plan, flags, cancel, env)
         .await?
         .execute(dag)
         .await

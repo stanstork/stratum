@@ -52,3 +52,4 @@ SMQL → ExecutionPlan → DAG Executor
 |----------|-------------|
 | [architecture.md](architecture.md) | Full crate map, layer breakdown, design decisions |
 | [smql-reference.md](smql-reference.md) | SMQL v2.1 language reference with examples |
+| [verification.md](verification.md) | Cryptographic verification — Merkle trees, proof storage, verify command |

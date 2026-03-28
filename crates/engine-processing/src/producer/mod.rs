@@ -18,6 +18,7 @@ use crate::{
     },
 };
 use engine_core::{context::env::EnvContext, retry::RetryPolicy};
+use engine_state::MerkleStore;
 use model::{
     execution::pipeline::Pipeline, pagination::cursor::Cursor, records::batch::Batch,
     transform::mapping::TransformationMetadata,
@@ -81,6 +82,7 @@ pub struct Producer {
     coordinator: BatchCoordinator,
 
     // State
+    pipeline_name: String,
     cursor: Cursor,
     mode: ProducerMode,
     ids: ItemId,
@@ -93,7 +95,7 @@ impl Producer {
     pub async fn new(
         ctx: &PipelineContext,
         batch_tx: mpsc::Sender<Batch>,
-        config: ProducerConfig,
+        mut config: ProducerConfig,
         mapped_columns_only: bool,
     ) -> Self {
         let exec_ctx = ctx.exec_ctx.clone();
@@ -124,12 +126,16 @@ impl Producer {
         let transformer = TransformService::new(
             exec_ctx,
             transform_pipeline,
-            pipeline.name,
+            pipeline.name.clone(),
             pipeline.error_handling.clone(),
         );
 
-        let state_manager = StateManager::new(ids.clone(), state_store);
-        let coordinator = BatchCoordinator::new(batch_tx, state_manager);
+        let state_manager = StateManager::new(ids.clone(), state_store.clone());
+        let mut coordinator = BatchCoordinator::new(batch_tx, state_manager);
+        if let Some(integrity) = config.integrity.take() {
+            let merkle_store = state_store as Arc<dyn MerkleStore>;
+            coordinator = coordinator.enable_integrity(integrity, merkle_store);
+        }
 
         Self {
             reader,
@@ -139,6 +145,7 @@ impl Producer {
             mode: ProducerMode::Idle,
             ids,
             config,
+            pipeline_name: pipeline.name.clone(),
         }
     }
 
@@ -173,7 +180,15 @@ impl Producer {
         match self.mode {
             ProducerMode::Idle => Ok(ProducerStatus::Idle),
             ProducerMode::Finished => Ok(ProducerStatus::Finished),
-            ProducerMode::Snapshot => self.process_snapshot_batch().await,
+            ProducerMode::Snapshot => {
+                let status = self.process_snapshot_batch().await?;
+                if status == ProducerStatus::Finished {
+                    self.coordinator
+                        .finalize_integrity(&self.pipeline_name)
+                        .await?;
+                }
+                Ok(status)
+            }
             ProducerMode::Cdc => {
                 // CDC logic here
                 tokio::time::sleep(self.config.idle_poll_interval).await;

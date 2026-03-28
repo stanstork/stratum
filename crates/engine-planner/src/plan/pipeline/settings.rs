@@ -1,4 +1,5 @@
 use engine_config::settings::{CopyColumns, validated::ValidatedSettings};
+use model::execution::flags::IntegrityMode;
 use serde::Serialize;
 
 // Helper functions for skip_serializing_if
@@ -57,6 +58,7 @@ impl PipelineSettings {
             create_missing_columns: self.create_missing_columns,
             ignore_constraints: self.ignore_constraints,
             dry_run: self.dry_run,
+            integrity: IntegrityMode::Off,
         }
     }
 }

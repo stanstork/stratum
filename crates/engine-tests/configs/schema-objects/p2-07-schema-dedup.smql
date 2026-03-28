@@ -1,0 +1,89 @@
+// =============================================================================
+// Phase 2 Test 07 - Schema Op Deduplication Across Pipelines
+// =============================================================================
+//
+// WHAT THIS TESTS:
+//   - Two pipelines both expand to include `language` and `actor` tables
+//   - DagExecutor.done_ops set ensures CREATE TABLE language and
+//     CREATE TABLE actor are executed exactly once
+//   - No "table already exists" errors even with parallel execution
+//   - Both pipelines complete successfully
+//
+// PIPELINE 1: film       -> discovers language, actor, category, film_*
+// PIPELINE 2: film_actor -> discovers film (-> language), actor
+//
+// SHARED TABLES that would be duplicated without dedup:
+//   language, actor, film (film_actor depends on film, film pipeline also creates it)
+//
+// RUN (sequential to make dedup logging visible):
+//   cargo run -p cli -- apply -c dev-fixtures/configs/phase2/p2-07-schema-dedup.smql --pretty
+//
+// VERIFY:
+//   -- Log output should contain "Skipping already-executed schema op: Create table 'language'"
+//   -- Log output should contain "Skipping already-executed schema op: Create table 'actor'"
+//
+//   -- Tables created exactly once (no duplicate data):
+//   SELECT COUNT(*) FROM language; -- matches source (6 rows)
+//   SELECT COUNT(*) FROM actor;    -- matches source (200 rows)
+//
+// =============================================================================
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" {
+    driver = "mysql"
+    url    = define.mysql_url
+}
+
+connection "dst" {
+    driver = "postgres"
+    url    = define.postgres_url
+}
+
+// Pipeline 1: film - expands to language, actor, category, film_actor, film_category
+pipeline "migrate_film" {
+    from {
+        connection = connection.src
+        table      = "film"
+
+        with references {
+            data  = schema_only
+            depth = 1
+        }
+    }
+
+    to {
+        connection = connection.dst
+    }
+
+    settings {
+        batch_size = 500
+    }
+}
+
+// Pipeline 2: film_actor - expands to film (-> language) and actor
+// language and film tables would be duplicated without dedup
+pipeline "migrate_film_actor" {
+    after = [pipeline.migrate_film]
+
+    from {
+        connection = connection.src
+        table      = "film_actor"
+
+        with references {
+            data  = schema_only
+            depth = 1
+        }
+    }
+
+    to {
+        connection = connection.dst
+    }
+
+    settings {
+        batch_size = 500
+    }
+}

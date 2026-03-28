@@ -1,8 +1,31 @@
+use bytes::BytesMut;
 use chrono::{DateTime, TimeZone, Utc};
 use model::core::value::Value;
 use rust_decimal::Decimal as RustDecimal;
 use std::str::FromStr;
-use tokio_postgres::types::{Json as PgJson, ToSql};
+use tokio_postgres::types::{IsNull, Json as PgJson, ToSql, Type, to_sql_checked};
+
+/// Integer parameter that accepts any PG integer column type (INT2/INT4/INT8).
+#[derive(Debug)]
+struct FlexInt(i64);
+
+impl ToSql for FlexInt {
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
+        match *ty {
+            Type::INT2 => (self.0 as i16).to_sql(ty, out),
+            Type::INT4 => (self.0 as i32).to_sql(ty, out),
+            _ => self.0.to_sql(ty, out),
+        }
+    }
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::INT2 | Type::INT4 | Type::INT8)
+    }
+    to_sql_checked!();
+}
 
 pub struct PgParam(Box<dyn ToSql + Sync + Send>);
 
@@ -12,8 +35,8 @@ impl PgParam {
             Value::Null => PgParam(Box::new(Option::<String>::None)),
 
             // Numeric types
-            Value::Int(i) => PgParam(Box::new(*i)),
-            Value::UInt(u) => PgParam(Box::new(*u as i64)),
+            Value::Int(i) => PgParam(Box::new(FlexInt(*i))),
+            Value::UInt(u) => PgParam(Box::new(FlexInt(*u as i64))),
             Value::Float(f) => PgParam(Box::new(*f)),
             Value::Decimal(d) => {
                 let decimal = RustDecimal::from_str(&d.to_string()).unwrap_or_default();

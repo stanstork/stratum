@@ -1,0 +1,71 @@
+// =============================================================================
+// Phase 2 Test 12 - Index Migration
+// =============================================================================
+//
+// WHAT THIS TESTS:
+//   - All MySQL indexes on `film` and `actor` are introspected
+//   - Non-unique indexes created post-data (IndexCreationStrategy::AfterData)
+//   - Unique indexes created post-data as well
+//   - FULLTEXT indexes: skipped or mapped to PG GIN (verify handling)
+//   - Multi-column indexes preserve column order
+//
+// MYSQL INDEXES ON film (Sakila):
+//   PRIMARY KEY (film_id)
+//   INDEX idx_title (title)
+//   INDEX idx_fk_language_id (language_id)
+//   FULLTEXT idx_ft_description (description)  <- may be skipped on PG
+//
+// MYSQL INDEXES ON actor:
+//   PRIMARY KEY (actor_id)
+//   INDEX idx_actor_last_name (last_name)
+//
+// RUN:
+//   cargo run -p cli -- plan -c dev-fixtures/configs/phase2/p2-12-indexes.smql
+//   -- plan output should list CREATE INDEX ops in post-migration section --
+//   cargo run -p cli -- apply -c dev-fixtures/configs/phase2/p2-12-indexes.smql
+//
+// VERIFY:
+//   SELECT indexname, indexdef FROM pg_indexes
+//   WHERE tablename IN ('film', 'actor')
+//   ORDER BY tablename, indexname;
+//   -- should show idx_title on film, idx_actor_last_name on actor
+//   -- should show idx_fk_language_id on film
+//   -- FULLTEXT: either absent or mapped to GIN (note in output)
+//
+// =============================================================================
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" {
+    driver = "mysql"
+    url    = define.mysql_url
+}
+
+connection "dst" {
+    driver = "postgres"
+    url    = define.postgres_url
+}
+
+pipeline "migrate_film_with_indexes" {
+    from {
+        connection = connection.src
+        table      = "film"
+
+        with references {
+            data    = cascade
+            depth   = 1
+            exclude = ["film_actor", "film_category", "inventory"]
+        }
+    }
+
+    to {
+        connection = connection.dst
+    }
+
+    settings {
+        batch_size = 500
+    }
+}

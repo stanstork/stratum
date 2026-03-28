@@ -1,5 +1,6 @@
 use crate::{
-    context::env::EnvContext, plan::execution::ExecutionPlan, state::sled_store::SledStateStore,
+    context::env::EnvContext, drivers::DriverRef, plan::execution::ExecutionPlan,
+    state::sled_store::SledStateStore,
 };
 use connectors::{
     drivers::{mysql::driver::MySqlDriver, postgres::driver::PgDriver},
@@ -62,6 +63,12 @@ impl ExecutionContext {
     ) -> Result<Arc<MySqlDriver>, DriverError> {
         let mut pool = self.connection_pool.write().await;
         pool.get_or_create_mysql(conn).await
+    }
+
+    /// Resolve a connection to a typed `DriverRef`, reusing pooled connections.
+    pub async fn resolve_driver(&self, conn: &Connection) -> Result<DriverRef, DriverError> {
+        let mut pool = self.connection_pool.write().await;
+        DriverRef::resolve(&conn.driver, conn, &mut pool).await
     }
 }
 

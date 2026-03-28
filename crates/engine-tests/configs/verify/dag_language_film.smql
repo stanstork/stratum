@@ -1,0 +1,42 @@
+// Verify: DAG config - two pipelines with an explicit dependency
+//
+// language (6 rows, no FKs) runs first.
+// film (1,000 rows) runs after language via after = [...].
+//
+// Tests that run_verify_smql iterates ALL pipelines in a multi-pipeline
+// config and verifies each receipt independently. Both pipelines must
+// produce a passing verify result for the overall verify to succeed.
+//
+// ignore_constraints on film avoids FK enforcement complications
+// (original_language_id is nullable and may reference nothing).
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "migrate_language" {
+    from { connection = connection.src  table = "language" }
+    to   { connection = connection.dst  table = "language" }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 20
+    }
+}
+
+pipeline "migrate_film" {
+    from { connection = connection.src  table = "film" }
+    to   { connection = connection.dst  table = "film" }
+
+    after = ["migrate_language"]
+
+    settings {
+        create_missing_tables = true
+        ignore_constraints    = true
+        batch_size            = 200
+    }
+}

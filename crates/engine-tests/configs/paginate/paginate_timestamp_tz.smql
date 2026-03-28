@@ -1,0 +1,40 @@
+// Pagination: TIMESTAMP strategy on a MySQL TIMESTAMP column (native UTC storage)
+//             with explicit timezone = "US/Eastern"
+//
+// MySQL TIMESTAMP columns store values in UTC and display in the connection timezone.
+// Using timezone = "US/Eastern" exercises the utc_to_local_sql() conversion path:
+//   cursor stored as UTC microseconds -> converted to US/Eastern local time string
+//   for the WHERE clause -> compared against MySQL TIMESTAMP (returned in UTC by default).
+//
+// actor.last_update is a TIMESTAMP column; all 200 rows share a single timestamp
+// value (2006-02-15 04:34:33 UTC). This makes every batch boundary land in the
+// middle of a tie-breaking run, exercising the:
+//   (last_update = :ts AND actor_id > :id)
+// branch on every page after the first.
+//
+// 200 actor rows, batch_size=50 -> 4 pages, all with tie-breaker active after page 1.
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "paginate_actor_ts_tz" {
+    from { connection = connection.src  table = "actor" }
+    to   { connection = connection.dst  table = "actor" }
+
+    paginate {
+        strategy   = "timestamp"
+        cursor     = "actor.last_update"
+        tiebreaker = "actor.actor_id"
+        timezone   = "US/Eastern"
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 50
+    }
+}

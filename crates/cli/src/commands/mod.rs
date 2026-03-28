@@ -1,6 +1,7 @@
 use crate::{Cli, error::CliError};
 use clap::{Subcommand, ValueEnum};
 use engine_processing::EnvContext;
+use model::execution::flags::IntegrityMode;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -82,6 +83,17 @@ pub enum Commands {
         /// Use exact COUNT for filtered rows (slower but accurate). By default uses EXPLAIN estimates (faster)
         #[arg(long)]
         exact_filter: bool,
+
+        #[arg(long, help = "Compute integrity hashes and receipts during migration")]
+        integrity: bool,
+
+        #[arg(
+            long,
+            help = "Store individual row hashes in the receipt (implies --integrity). \
+                    Enables row-level mismatch reporting during `verify` at the cost of \
+                    ~32 bytes per row of additional storage."
+        )]
+        full_integrity: bool,
     },
     /// Verify migrated data matches source data
     Verify {
@@ -130,9 +142,29 @@ pub async fn execute_command(
             tui,
             pretty,
             exact_filter,
-        } => apply::execute(config.clone(), *tui, *pretty, *exact_filter, cancel, env).await,
+            integrity,
+            full_integrity,
+        } => {
+            let integrity_mode = if *full_integrity {
+                IntegrityMode::FullHashes
+            } else if *integrity {
+                IntegrityMode::BatchHashes
+            } else {
+                IntegrityMode::Off
+            };
+            apply::execute(
+                config.clone(),
+                *tui,
+                *pretty,
+                *exact_filter,
+                integrity_mode,
+                cancel,
+                env,
+            )
+            .await
+        }
         Commands::Verify { config, output } => {
-            verify::execute(cli, config.clone(), output.clone()).await
+            verify::execute(config.clone(), output.clone(), env.clone()).await
         }
         Commands::TestConn { url, format } => {
             test_conn::execute(cli, url.clone(), format.clone()).await

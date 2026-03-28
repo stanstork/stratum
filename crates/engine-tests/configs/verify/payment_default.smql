@@ -1,0 +1,25 @@
+// Verify: payment table with DEFAULT (OFFSET/LIMIT) pagination
+//
+// Tests verify at scale with the simplest pagination strategy.
+// OFFSET-based batches have no cursor state - the receipt records
+// row counts per batch and verify replays pages by batch index.
+//
+// payment: 16,044 rows, batch_size=500 -> 33 pages (32 full + 1 partial).
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "verify_payment_default" {
+    from { connection = connection.src  table = "payment" }
+    to   { connection = connection.dst  table = "payment" }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 500
+    }
+}

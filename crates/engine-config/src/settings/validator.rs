@@ -5,6 +5,7 @@ use crate::settings::{
 };
 use connectors::traits::introspector::SchemaIntrospector;
 use engine_processing::io::{destination::Destination, format::DataFormat, source::Source};
+use model::execution::flags::IntegrityMode;
 use tracing::{info, warn};
 
 /// Validates migration settings before they are applied.
@@ -13,6 +14,7 @@ pub struct SettingsValidator<'a> {
     destination: &'a Destination,
     introspector: &'a dyn SchemaIntrospector,
     dry_run: bool,
+    integrity: IntegrityMode,
 }
 
 impl<'a> SettingsValidator<'a> {
@@ -21,19 +23,21 @@ impl<'a> SettingsValidator<'a> {
         destination: &'a Destination,
         introspector: &'a dyn SchemaIntrospector,
         dry_run: bool,
+        integrity: IntegrityMode,
     ) -> Self {
         Self {
             source,
             destination,
             introspector,
             dry_run,
+            integrity,
         }
     }
 
     pub async fn validate(&self, settings: &Settings) -> Result<ValidatedSettings, SettingsError> {
         info!("Validating settings: {settings:#?}");
 
-        let mut builder = ValidatedSettingsBuilder::new(self.dry_run);
+        let mut builder = ValidatedSettingsBuilder::new(self.dry_run, self.integrity);
         let mut errors: Vec<String> = Vec::new();
 
         self.validate_batch_size(settings, &mut builder);

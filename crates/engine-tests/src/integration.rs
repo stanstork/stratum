@@ -49,7 +49,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
         assert_table_exists("actor", false).await;
     }
 
@@ -87,7 +87,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         assert_table_exists("actor", true).await;
         assert_row_count("actor", "sakila", "actor").await;
@@ -136,7 +136,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         assert_table_exists("actor", true).await;
         assert_row_count("actor", "sakila", "actor").await;
@@ -185,7 +185,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         let dest_columns = get_column_names(DbType::Postgres, "orders", "orders_flat")
             .await
@@ -236,7 +236,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
         assert_row_count("actor", "sakila", "actor").await;
     }
 
@@ -283,7 +283,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         assert_row_count("actor", "sakila", "actor").await;
         assert_column_exists("actor", "full_name", true).await;
@@ -339,7 +339,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
         assert_row_count("orders", "orders", "orders_flat").await;
 
         let src_cols = get_column_names(DbType::MySql, "orders", "users")
@@ -411,7 +411,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         //  Assert that the mapped columns exist in the destination
         for col in &["user_email", "order_price", "product_name"] {
@@ -472,7 +472,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         let query = "SELECT COUNT(*) cnt FROM orders WHERE total > 400";
         let src_cnt = get_cell_as_usize(query, "orders", DbType::MySql, "cnt").await;
@@ -538,7 +538,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         // Fetch from source and count in dest
         let src_rows = fetch_rows(ORDERS_FLAT_FILTER_QUERY, "orders", DbType::MySql)
@@ -760,7 +760,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         // Pipeline 1: Verify payments with SKIP validation
         // Validation: amount > 0 AND amount <= 5.00
@@ -986,7 +986,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         // Pipeline 1: Verify film_actor_details with joined validations
         // Validation: film.rental_rate <= 2.99 AND film.replacement_cost <= 20.00
@@ -1130,7 +1130,7 @@ mod tests {
         "#;
 
         // Run the migration with fail validation
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         // Verify that the table was created (pipeline starts execution)
         assert_table_exists("actors_validated", true).await;
@@ -1232,7 +1232,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         // Verify destination table was created
         assert_table_exists("actors_validated_strict", true).await;
@@ -1337,7 +1337,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         // Verify destination table has data
         assert_table_exists("payments_file_dlq", true).await;
@@ -1458,7 +1458,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         assert_table_exists("actor", true).await;
         assert_row_count("actor", "sakila", "actor").await;
@@ -1522,7 +1522,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         assert_table_exists("actor", true).await;
         assert_row_count("actor", "sakila", "actor").await;
@@ -1597,7 +1597,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         assert_table_exists("actor", true).await;
         assert_row_count("actor", "sakila", "actor").await;

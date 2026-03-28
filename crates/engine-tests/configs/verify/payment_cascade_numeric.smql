@@ -1,0 +1,51 @@
+// Verify: cascade migration of payment with NUMERIC pagination
+//
+// Root table:  payment (16,044 rows)
+// Cascade:     depth=1 -> customer, staff, rental pulled alongside each batch
+// Paginate:    NUMERIC on payment.staff_id + tiebreaker payment.payment_id
+//   staff_id has only 2 values (1, 2) -> every page boundary falls inside a
+//   duplicate-value run, exercising the composite cursor on every page.
+//
+// Tests that verify correctly handles:
+//   - cascade tables (customer, staff, rental) with sorted_hashes=true receipts
+//   - non-PK (numeric composite) cursor on the root table
+//   - row counts per cascade table vary per batch (FK-dependent rows)
+//   - the root pagination does not affect the cascade FK resolution logic
+//
+// The receipt stores one entry per cascade table per batch:
+//   batch 0 -> { payment: N, customer: K, staff: J, rental: M }
+//   batch 1 -> { payment: N, customer: K', staff: J', rental: M' }
+// Verify replays those exact batch boundaries to reproduce identical counts.
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "verify_payment_cascade_numeric" {
+    from {
+        connection = connection.src
+        table      = "payment"
+
+        with references {
+            data  = cascade
+            depth = 1
+        }
+    }
+
+    to { connection = connection.dst }
+
+    paginate {
+        strategy   = "numeric"
+        cursor     = "payment.staff_id"
+        tiebreaker = "payment.payment_id"
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 500
+    }
+}

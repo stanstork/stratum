@@ -1,0 +1,75 @@
+// =============================================================================
+// Phase 2 Test 08 - ENUM Migration: MySQL ENUM -> PostgreSQL TYPE ... AS ENUM
+// =============================================================================
+//
+// WHAT THIS TESTS:
+//   - MySQL `film.rating` is ENUM('G','PG','PG-13','R','NC-17')
+//   - SchemaPlanner detects ENUM columns via TypeEngine.extract_enums()
+//   - SchemaPlan.build_ops() emits CREATE TYPE before CREATE TABLE
+//   - PostgreSQL column uses the custom ENUM type, not VARCHAR
+//
+// SOURCE (MySQL):
+//   film.rating  ENUM('G','PG','PG-13','R','NC-17')
+//
+// EXPECTED DDL ORDER ON DESTINATION:
+//   1. CREATE TYPE rating AS ENUM ('G', 'PG', 'PG-13', 'R', 'NC-17')   -- pre-DDL
+//   2. CREATE TABLE language (...)
+//   3. CREATE TABLE film (... rating rating ...)                         -- uses type
+//   4. (data migration)
+//   5. CREATE INDEX ..., ADD FK ...                                      -- post-DDL
+//
+// RUN:
+//   cargo run -p cli -- plan -c dev-fixtures/configs/phase2/p2-08-enum-migration.smql
+//   -- inspect plan output for CREATE TYPE before CREATE TABLE --
+//   cargo run -p cli -- apply -c dev-fixtures/configs/phase2/p2-08-enum-migration.smql
+//
+// VERIFY:
+//   SELECT typname, typcategory FROM pg_type WHERE typname = 'rating';
+//   -- should return 1 row with typcategory = 'E' (enum)
+//
+//   SELECT enumlabel FROM pg_enum
+//   JOIN pg_type ON pg_enum.enumtypid = pg_type.oid
+//   WHERE pg_type.typname = 'rating'
+//   ORDER BY enumsortorder;
+//   -- expected: G, PG, PG-13, R, NC-17
+//
+//   SELECT rating, COUNT(*) FROM film GROUP BY rating;
+//   -- should show distribution matching source
+//
+// =============================================================================
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" {
+    driver = "mysql"
+    url    = define.mysql_url
+}
+
+connection "dst" {
+    driver = "postgres"
+    url    = define.postgres_url
+}
+
+pipeline "migrate_film_with_enum" {
+    from {
+        connection = connection.src
+        table      = "film"
+
+        with references {
+            data    = cascade
+            depth   = 1
+            exclude = ["film_actor", "film_category", "inventory"]
+        }
+    }
+
+    to {
+        connection = connection.dst
+    }
+
+    settings {
+        batch_size = 500
+    }
+}

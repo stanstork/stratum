@@ -144,6 +144,7 @@ mod tests {
         ident_q,
         offsets::OffsetStrategyFactory,
     };
+    use chrono::NaiveDateTime;
     use model::{
         core::value::Value,
         pagination::cursor::{Cursor, QualCol},
@@ -380,7 +381,16 @@ mod tests {
         };
         assert_eq!(op_or, BinaryOperator::Or);
 
-        // cond1: (created_at > 123...)
+        // ts = 13_3456789 µs UTC -> UTC naive local = "1970-01-01 00:02:13.456789"
+        let expected_ndt =
+            NaiveDateTime::parse_from_str("1970-01-01 00:02:13.456789", "%Y-%m-%d %H:%M:%S%.f")
+                .expect("parse expected_ndt");
+        let expected_ts_value = Value::Timestamp {
+            value: expected_ndt,
+            offset_secs: None,
+        };
+
+        // cond1: (created_at > <timestamp>)
         assert_eq!(
             cond1,
             Expr::BinaryOp(Box::new(BinaryOp {
@@ -389,11 +399,11 @@ mod tests {
                     column: "created_at".to_string(),
                 }),
                 op: BinaryOperator::Gt,
-                right: value(Value::String("1970-01-01 00:02:13".to_string())),
+                right: value(expected_ts_value.clone()),
             }))
         );
 
-        // cond2: (created_at = 123... AND id > 42)
+        // cond2: (created_at = <timestamp> AND id > 42)
         let (cond2_left, op_and, cond2_right) = match cond2 {
             Expr::BinaryOp(op) => (op.left, op.op, op.right),
             _ => panic!("Expected inner-right BinaryOp(AND)"),
@@ -408,7 +418,7 @@ mod tests {
                     column: "created_at".to_string(),
                 }),
                 op: BinaryOperator::Eq,
-                right: value(Value::String("1970-01-01 00:02:13".to_string())),
+                right: value(expected_ts_value),
             }))
         );
         assert_eq!(

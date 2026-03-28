@@ -1,0 +1,29 @@
+// Verify: single-row migration with batch_size=1
+//
+// Filters to exactly one actor (actor_id = 1) with batch_size=1.
+// The first batch is simultaneously the last batch - exercises the
+// boundary where every batch edge coincides: start = end = only batch.
+//
+// Also confirms that a receipt with a single batch entry verifies correctly.
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "verify_actor_single_row" {
+    from { connection = connection.src  table = "actor" }
+    to   { connection = connection.dst  table = "actor" }
+
+    where "first_actor_only" {
+        actor.actor_id == 1
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 1
+    }
+}

@@ -9,7 +9,7 @@ use engine_core::{
     dispatch_driver, dispatch_drivers,
     drivers::DriverRef,
     event_bus::bus::EventBus,
-    plan::execution::ExecutionPlan,
+    plan::{cascade::resolve_cascade_tables, execution::ExecutionPlan},
     schema::{
         graph_expander::GraphExpander,
         schema_ops::SchemaOps,
@@ -26,8 +26,8 @@ use futures::stream::{self, StreamExt};
 use model::{
     events::migration::MigrationEvent,
     execution::{
-        connection::Connection,
         execution_config::{ExecutionConfig, ExecutionStrategy, FailureStrategy},
+        flags::ExecutionFlags,
         pipeline::Pipeline,
         references::{DataMode, GraphReferences},
     },
@@ -44,7 +44,7 @@ use tracing::{error, info, warn};
 
 pub struct DagExecutor {
     plan: ExecutionPlan,
-    dry_run: bool,
+    flags: ExecutionFlags,
     cancel: CancellationToken,
     exec_ctx: ExecutionContext,
     exec_config: ExecutionConfig,
@@ -56,25 +56,24 @@ impl DagExecutor {
     /// Create executor without event bus (headless mode)
     pub async fn new(
         plan: ExecutionPlan,
-        dry_run: bool,
+        flags: ExecutionFlags,
         cancel: CancellationToken,
         env: Arc<EnvContext>,
     ) -> Result<Self, MigrationError> {
-        // Create default event bus for internal monitoring
         let event_bus = EventBus::new();
         Self::subscribe_to_events(&event_bus).await;
-        Self::init(plan, dry_run, cancel, event_bus, env).await
+        Self::init(plan, flags, cancel, event_bus, env).await
     }
 
     /// Create executor with event bus for external monitoring (TUI/Pretty mode)
     pub async fn with_event_bus(
         plan: ExecutionPlan,
-        dry_run: bool,
+        flags: ExecutionFlags,
         cancel: CancellationToken,
         event_bus: EventBus,
         env: Arc<EnvContext>,
     ) -> Result<Self, MigrationError> {
-        Self::init(plan, dry_run, cancel, event_bus, env).await
+        Self::init(plan, flags, cancel, event_bus, env).await
     }
 
     pub async fn execute(self, dag: Dag) -> Result<(), MigrationError> {
@@ -126,7 +125,7 @@ impl DagExecutor {
 
     async fn init(
         plan: ExecutionPlan,
-        dry_run: bool,
+        flags: ExecutionFlags,
         cancel: CancellationToken,
         event_bus: EventBus,
         env: Arc<EnvContext>,
@@ -145,7 +144,7 @@ impl DagExecutor {
 
         Ok(Self {
             plan,
-            dry_run,
+            flags,
             cancel,
             exec_ctx,
             exec_config,
@@ -280,8 +279,12 @@ impl DagExecutor {
         info!("Starting migration pipeline {}", pipeline.destination.table);
 
         // Resolve drivers and core mapping components
-        let src_driver = self.resolve_driver(&pipeline.source.connection).await?;
+        let src_driver = self
+            .exec_ctx
+            .resolve_driver(&pipeline.source.connection)
+            .await?;
         let dst_driver = self
+            .exec_ctx
             .resolve_driver(&pipeline.destination.connection)
             .await?;
         let mapping = TransformationMetadata::new(pipeline);
@@ -349,7 +352,7 @@ impl DagExecutor {
         let (expanded_schema_ops, cascade_meta) = self
             .get_graph_expansion(pipeline, src_driver, mapping)
             .await?;
-        let cascade_tables = self.resolve_cascade_tables(pipeline, mapping, &cascade_meta);
+        let cascade_tables = resolve_cascade_tables(pipeline, mapping, &cascade_meta);
 
         let source = dispatch_driver!(src_driver, |d| {
             Source::with_cascade(d.clone(), pipeline, mapping, offset_strategy, cascade_meta).await
@@ -372,24 +375,6 @@ impl DagExecutor {
         } else {
             Ok((None, None))
         }
-    }
-
-    fn resolve_cascade_tables(
-        &self,
-        pipeline: &Pipeline,
-        mapping: &TransformationMetadata,
-        cascade_meta: &Option<HashMap<String, TableMetadata>>,
-    ) -> Vec<String> {
-        if let Some(refs) = &pipeline.source.graph_references
-            && matches!(refs.data_mode, DataMode::Cascade)
-            && let Some(meta) = cascade_meta
-        {
-            return Self::topological_sort_tables(meta)
-                .into_iter()
-                .map(|src_name| mapping.entities.resolve(&src_name))
-                .collect();
-        }
-        vec![]
     }
 
     /// Initializes the `PipelineContext` and commits the initialization event to the WAL.
@@ -424,25 +409,6 @@ impl DagExecutor {
             .await?;
 
         Ok(pipeline_ctx)
-    }
-
-    /// Resolve a connection config into a concrete driver handle.
-    async fn resolve_driver(&self, connection: &Connection) -> Result<DriverRef, MigrationError> {
-        match connection.driver.as_str() {
-            "postgres" | "postgresql" => {
-                let driver = self.exec_ctx.get_pg_driver(connection).await?;
-                Ok(DriverRef::Postgres(driver))
-            }
-            "mysql" => {
-                let driver = self.exec_ctx.get_mysql_driver(connection).await?;
-                Ok(DriverRef::MySql(driver))
-            }
-            other => Err(DriverError::UnsupportedScheme(format!(
-                "Driver '{}' not supported",
-                other
-            ))
-            .into()),
-        }
     }
 
     /// Create a destination sink for the given driver.
@@ -486,7 +452,8 @@ impl DagExecutor {
                 src.clone(),
                 dst.clone(),
                 &pipeline.settings,
-                self.dry_run,
+                self.flags.dry_run,
+                self.flags.integrity,
             )
             .await?
         });
@@ -525,28 +492,6 @@ impl DagExecutor {
         };
 
         Ok((Some(result.schema_ops), cascade_meta))
-    }
-
-    /// Topologically sort cascade tables so referenced tables come before the tables that
-    /// reference them. This ensures FK constraints are satisfied during batch writes.
-    fn topological_sort_tables(tables: &HashMap<String, TableMetadata>) -> Vec<String> {
-        use engine_core::schema::dep_graph::DependencyGraph;
-
-        let mut graph = DependencyGraph::new();
-        for (name, meta) in tables {
-            graph.add_table(name.clone());
-            for fk in &meta.foreign_keys {
-                if tables.contains_key(&fk.referenced_table) {
-                    graph.add_dependency(name.clone(), fk.referenced_table.clone());
-                }
-            }
-        }
-
-        // topological_order puts dependencies before dependents; falls back to arbitrary on cycle
-        graph
-            .without_self_references()
-            .topological_order()
-            .unwrap_or_else(|_| tables.keys().cloned().collect())
     }
 
     async fn subscribe_to_events(event_bus: &EventBus) {

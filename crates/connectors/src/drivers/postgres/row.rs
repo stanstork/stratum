@@ -1,6 +1,6 @@
 use crate::traits::row_decoder::RowDecoder;
 use bigdecimal::BigDecimal;
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use model::{
     core::{
         types::Type,
@@ -203,8 +203,17 @@ fn extract_value(row: &PgRow, idx: usize, pg_type: &PgType) -> Option<Value> {
             .ok()
             .map(|d| Value::Decimal(BigDecimal::from_str(&d.to_string()).unwrap_or_default())),
 
-        // String types
-        PgType::VARCHAR | PgType::CHAR | PgType::BPCHAR | PgType::TEXT | PgType::NAME => {
+        // String types.
+        // BPCHAR (CHAR(n)) is blank-padded to the declared length on storage and
+        // returned with trailing spaces by the wire protocol. Trim them so that the
+        // logical value matches what MySQL (and every other engine) returns for
+        // fixed-length CHAR columns. This keeps canonical hashes consistent across
+        // source and destination.
+        PgType::BPCHAR => row
+            .try_get::<_, String>(idx)
+            .ok()
+            .map(|s| Value::String(s.trim_end_matches(' ').to_string())),
+        PgType::VARCHAR | PgType::CHAR | PgType::TEXT | PgType::NAME => {
             row.try_get::<_, String>(idx).ok().map(Value::String)
         }
 
@@ -229,10 +238,10 @@ fn extract_value(row: &PgRow, idx: usize, pg_type: &PgType) -> Option<Value> {
                 offset_secs: None,
             }),
         PgType::TIMESTAMPTZ => {
-            row.try_get::<_, NaiveDateTime>(idx)
+            row.try_get::<_, DateTime<Utc>>(idx)
                 .ok()
                 .map(|v| Value::Timestamp {
-                    value: v,
+                    value: v.naive_utc(),
                     offset_secs: Some(0),
                 })
         }

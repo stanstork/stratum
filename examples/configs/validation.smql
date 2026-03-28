@@ -1,139 +1,138 @@
-connection "mysql_source" {
-    driver = "mysql"
-    url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
-}
-connection "pg_destination" {
-    driver = "postgres"
-    url    = "postgres://user:password@localhost:5432/testdb"
+// validation.smql - Row-level validation: skip, warn, and fail
+//
+// Stratum can validate each row before writing it to the destination.
+// Three actions are available:
+//
+//   action = skip   - Row is silently excluded from the destination.
+//                     The receipt (if using --integrity) does not include it.
+//
+//   warn "name" {}  - Row is written but a warning is logged. Useful for
+//                     surfacing data-quality issues without blocking the migration.
+//
+//   action = fail   - Row is rejected and (if on_error is configured) routed
+//                     to a Dead Letter Queue. See dlq.smql for a DLQ example.
+//
+// Run:
+//   stratum apply -c validation.smql
+
+define {
+    mysql_url    = env("MYSQL_URL",    "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
 }
 
-// Pipeline: Test validation with joined tables and transformed fields
-pipeline "migrate_film_actors" {
-    from {
-        connection = connection.mysql_source
-        table = "film_actor"
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+// ── action = skip: filtered rows never reach the destination ─────────────
+
+// Migrates only payments with a positive, non-excessive amount.
+// Rows outside that range are silently dropped - the destination will have
+// fewer rows than the source, which is intentional.
+pipeline "migrate_payments_clean" {
+    from { connection = connection.src  table = "payment" }
+    to   { connection = connection.dst  table = "payment_clean" }
+
+    validate {
+        assert "positive_amount" {
+            check   = payment.amount > 0
+            message = "Zero or negative amounts are invalid"
+            action  = skip
+        }
+        assert "reasonable_amount" {
+            check   = payment.amount <= 10.00
+            message = "Amount exceeds ceiling of 10.00 - possible data error"
+            action  = skip
+        }
     }
 
-    to {
-        connection = connection.pg_destination
-        table = "film_actor_details"
+    select {
+        payment_id   = payment.payment_id
+        customer_id  = payment.customer_id
+        staff_id     = payment.staff_id
+        amount       = payment.amount
+        payment_date = payment.payment_date
     }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 500
+    }
+}
+
+// ── warn: all rows migrate, quality issues are surfaced in logs ──────────
+
+// Migrates all films. Films with unusual rental economics trigger a warning
+// but are still written to the destination unchanged.
+pipeline "migrate_films_with_warnings" {
+    from { connection = connection.src  table = "film" }
+    to   { connection = connection.dst  table = "film" }
+
+    validate {
+        warn "long_rental_duration" {
+            check   = film.rental_duration <= 7
+            message = "Rental duration exceeds 7 days - review pricing"
+        }
+        warn "high_replacement_cost" {
+            check   = film.replacement_cost <= 25.00
+            message = "Replacement cost is unusually high"
+        }
+    }
+
+    select {
+        film_id          = film.film_id
+        title            = film.title
+        rental_duration  = film.rental_duration
+        rental_rate      = film.rental_rate
+        replacement_cost = film.replacement_cost
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 200
+    }
+}
+
+// ── Combining skip + warn on joined data ─────────────────────────────────
+
+// Migrates a denormalised film_actor record enriched with actor and film
+// details. skip drops rows with high-cost films; warn flags incomplete data.
+pipeline "migrate_film_actor_details" {
+    from { connection = connection.src  table = "film_actor" }
+    to   { connection = connection.dst  table = "film_actor_details" }
 
     with {
         actor from actor where actor.actor_id == film_actor.actor_id
-        film  from film  where film.film_id == film_actor.film_id
-    }
-
-    settings {
-        create_missing_tables = true
-        ignore_constraints = true
-        batch_size = 500
-        copy_columns = "MAP_ONLY"
-    }
-
-    select {
-        actor_id = film_actor.actor_id
-        film_id = film_actor.film_id
-        actor_full_name = concat(actor.first_name, " ", actor.last_name)
-        film_title = film.title
-        film_rental_rate = film.rental_rate
-        film_rental_duration = film.rental_duration
-        film_replacement_cost = film.replacement_cost
-        estimated_weekly_cost = film.rental_rate * 7
+        film  from film  where film.film_id   == film_actor.film_id
     }
 
     validate {
-        // SKIP: Validate joined table field - skip films with high rental rates (> 2.99)
-        assert "reasonable_rental_rate" {
-            check   = film.rental_rate <= 2.99
-            message = "Film rental rate is too high"
-            action  = skip
-        }
-
-        // SKIP: Validate joined table field - skip expensive replacements (> 20.00)
-        assert "reasonable_replacement_cost" {
+        // Skip films with a high replacement cost - those records are
+        // handled by a separate pipeline with additional checks.
+        assert "standard_replacement_cost" {
             check   = film.replacement_cost <= 20.00
-            message = "Film has high replacement cost"
+            message = "High-cost film handled by separate pipeline"
             action  = skip
         }
 
-        // WARN: Validate transformed field (source fields) - warn about actor name completeness
+        // Warn when actor name data is incomplete.
         warn "complete_actor_name" {
             check   = actor.first_name != "" && actor.last_name != ""
-            message = "Actor should have complete name"
-        }
-
-        // WARN: Validate transformed field directly - warn about actor full name
-        warn "actor_full_name_valid" {
-            check   = actor_full_name != " "
-            message = "Actor full name should not be just a space"
+            message = "Actor record has an empty first or last name"
         }
     }
-}
 
-// Pipeline 2: Test validation with transformed fields and expressions
-pipeline "migrate_customer_summary" {
-    from {
-        connection = connection.mysql_source
-        table = "customer"
-    }
-
-    to {
-        connection = connection.pg_destination
-        table = "customer_summary"
-    }
-
-    with {
-        address from address where address.address_id == customer.address_id
-        city    from city    where city.city_id == address.city_id
+    select {
+        actor_id             = film_actor.actor_id
+        film_id              = film_actor.film_id
+        actor_full_name      = concat(actor.first_name, " ", actor.last_name)
+        film_title           = film.title
+        film_rental_rate     = film.rental_rate
+        film_replacement_cost = film.replacement_cost
     }
 
     settings {
         create_missing_tables = true
-        ignore_constraints = true
-        batch_size = 500
-        copy_columns = "MAP_ONLY"
-    }
-
-    select {
-        customer_id = customer.customer_id
-        full_name = concat(customer.first_name, " ", customer.last_name)
-        email = customer.email
-        full_address = concat(address.address, ", ", city.city)
-        store_id = customer.store_id
-        is_active = customer.active
-    }
-
-    validate {
-        // WARN: Validate transformed field - warn if customer identifier is too short
-        warn "valid_customer_identifier" {
-            check   = customer.first_name != "" && customer.email != ""
-            message = "Customer should have both name and email for identification"
-        }
-
-        // WARN: Check store assignment from joined context
-        warn "valid_store" {
-            check   = customer.store_id > 0
-            message = "Customer store assignment should be verified"
-        }
-
-        // WARN: Validate joined field - warn about address completeness
-        warn "check_address_complete" {
-            check   = address.address != "" && city.city != ""
-            message = "Address or city information may be incomplete"
-        }
-
-        // SKIP: Validate the transformed full_name field directly
-        assert "full_name_length" {
-            check   = full_name != " "
-            message = "Full name must not be just a space"
-            action  = skip
-        }
-
-        // WARN: Validate the transformed full_address field directly
-        warn "full_address_reasonable" {
-            check   = full_address != ", "
-            message = "Full address appears to be incomplete"
-        }
+        ignore_constraints    = true
+        batch_size            = 500
     }
 }

@@ -1,0 +1,22 @@
+// Verify: actor with batch_size == row count (exact boundary)
+//
+// Sakila actor has 200 rows. batch_size=200 produces exactly 1 batch with
+// no remainder - tests that a single full batch verifies correctly.
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "migrate_actor" {
+    from { connection = connection.src  table = "actor" }
+    to   { connection = connection.dst  table = "actor" }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 200
+    }
+}

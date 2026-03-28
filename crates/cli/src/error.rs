@@ -1,5 +1,6 @@
 use engine_planner::builder::errors::{ConnectionError, ReportBuilderError};
 use engine_runtime::{dag::error::DagError, error::MigrationError};
+use engine_verify::error::VerifyError;
 use model::execution::errors::ConvertError;
 use smql_syntax::errors::{BuildError, SmqlError};
 use thiserror::Error;
@@ -17,6 +18,9 @@ pub enum CliError {
 
     #[error("Failed to run the migration plan: {0}")]
     Runner(#[from] MigrationError),
+
+    #[error("Verification error: {0}")]
+    Verification(#[from] VerifyError),
 
     #[error("Invalid connection format provided: {0}")]
     InvalidConnectionFormat(String),

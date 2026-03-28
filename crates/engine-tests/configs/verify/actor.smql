@@ -1,0 +1,24 @@
+// Verify: simple table - actor
+//
+// Sakila actor: actor_id (SMALLINT PK), first_name (VARCHAR), last_name (VARCHAR),
+//               last_update (TIMESTAMP WITH TIME ZONE)
+//
+// Good baseline: no FKs, small row count (~200 rows), straightforward types.
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "migrate_actor" {
+    from { connection = connection.src  table = "actor" }
+    to   { connection = connection.dst  table = "actor" }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 50
+    }
+}

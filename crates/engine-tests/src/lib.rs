@@ -10,15 +10,18 @@ use tracing::{error, warn};
 
 pub mod dag_integration;
 pub mod integration;
-pub mod phase2;
+pub mod paginate;
+pub mod schema_objects;
 pub mod utils;
+pub mod verify;
+pub mod verify_schema_objects;
 
 // Test database URLs
 const TEST_MYSQL_URL_SAKILA: &str = "mysql://sakila_user:qwerty123@localhost:3306/sakila";
 const TEST_MYSQL_URL_ORDERS: &str = "mysql://user:password@localhost:3306/testdb";
 const TEST_PG_URL: &str = "postgres://user:password@localhost:5432/testdb";
 
-async fn mysql_pool(source_db: &str) -> Pool {
+pub(crate) async fn mysql_pool(source_db: &str) -> Pool {
     Pool::from_url(match source_db {
         "sakila" => TEST_MYSQL_URL_SAKILA,
         "orders" => TEST_MYSQL_URL_ORDERS,

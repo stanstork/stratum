@@ -1,3 +1,4 @@
+use model::integrity::config::IntegrityConfig;
 use std::{num::NonZeroUsize, time::Duration};
 
 /// Configuration for producer behavior.
@@ -20,6 +21,10 @@ pub struct ProducerConfig {
 
     /// Delay between retries
     pub retry_delay: Duration,
+
+    /// When `Some`, the producer hashes each batch and writes a `VerificationReceipt`
+    /// to sled on completion. `None` means zero overhead - no hashing occurs.
+    pub integrity: Option<IntegrityConfig>,
 }
 
 impl Default for ProducerConfig {
@@ -31,6 +36,7 @@ impl Default for ProducerConfig {
             sample_size: 10,
             max_retries: 3,
             retry_delay: Duration::from_secs(1),
+            integrity: None,
         }
     }
 }
@@ -48,6 +54,11 @@ impl ProducerConfig {
 
     pub fn with_concurrency(mut self, concurrency: NonZeroUsize) -> Self {
         self.transform_concurrency = concurrency;
+        self
+    }
+
+    pub fn with_integrity(mut self, config: IntegrityConfig) -> Self {
+        self.integrity = Some(config);
         self
     }
 }

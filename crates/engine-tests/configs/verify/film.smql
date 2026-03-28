@@ -1,0 +1,36 @@
+// Verify: type-rich table - film
+//
+// Sakila film columns (exercising many canonical types):
+//   film_id         SMALLINT PK
+//   title           VARCHAR
+//   description     TEXT (nullable)
+//   release_year    YEAR
+//   language_id     TINYINT (FK)
+//   rental_duration TINYINT UNSIGNED
+//   rental_rate     DECIMAL(4,2)
+//   length          SMALLINT (nullable)
+//   replacement_cost DECIMAL(5,2)
+//   rating          ENUM('G','PG','PG-13','R','NC-17')
+//   special_features SET(...)
+//   last_update     TIMESTAMP
+//
+// Only film itself is migrated (no FKs followed).
+// Tests ENUM -> varchar, SET -> text, DECIMAL, YEAR, nullable columns.
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "migrate_film" {
+    from { connection = connection.src  table = "film" }
+    to   { connection = connection.dst  table = "film" }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 100
+    }
+}

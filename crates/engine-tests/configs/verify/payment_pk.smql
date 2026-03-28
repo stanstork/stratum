@@ -1,0 +1,30 @@
+// Verify: payment table with PK keyset pagination
+//
+// Tests that verify works correctly with PK strategy, the most common
+// real-world pagination mode. Receipt batches are keyed by payment_id
+// cursor position; verify replays identical page boundaries.
+//
+// payment: 16,044 rows, batch_size=1000 -> 16 full pages + 1 partial (44 rows).
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "verify_payment_pk" {
+    from { connection = connection.src  table = "payment" }
+    to   { connection = connection.dst  table = "payment" }
+
+    paginate {
+        strategy = "pk"
+        cursor   = "payment.payment_id"
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 1000
+    }
+}

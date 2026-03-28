@@ -1,0 +1,31 @@
+// Pagination: PK (keyset) strategy on a SMALLINT UNSIGNED auto-increment column
+//
+// Uses WHERE actor_id > :last_id ORDER BY actor_id ASC LIMIT n.
+// O(1) per batch (index seek on PK), no re-scan of already-fetched rows.
+//
+// Sakila actor table:
+//   actor_id  SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT  PK
+//   200 rows total - batch_size=50 -> 4 full pages
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "paginate_actor_pk" {
+    from { connection = connection.src  table = "actor" }
+    to   { connection = connection.dst  table = "actor" }
+
+    paginate {
+        strategy = "pk"
+        cursor   = "actor.actor_id"
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 50
+    }
+}

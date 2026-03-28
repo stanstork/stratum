@@ -4,7 +4,7 @@ use engine_core::{
     plan::execution::ExecutionPlan as CoreExecutionPlan,
 };
 use engine_runtime::dag::{Dag, executor::DagExecutor};
-use model::events::migration::MigrationEvent;
+use model::{events::migration::MigrationEvent, execution::flags::ExecutionFlags};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -48,6 +48,7 @@ pub fn spawn_command_handler(
 
 /// Manages the background execution of the migration DAG
 pub fn spawn_executor(
+    flags: ExecutionFlags,
     bus: EventBus,
     plan: CoreExecutionPlan,
     graph: Dag,
@@ -58,7 +59,7 @@ pub fn spawn_executor(
         // Debounce start to let TUI paint first frame
         tokio::time::sleep(Duration::from_millis(500)).await;
 
-        let result = DagExecutor::with_event_bus(plan, false, cancel, bus, env).await;
+        let result = DagExecutor::with_event_bus(plan, flags, cancel, bus, env).await;
 
         match result {
             Ok(executor) => {

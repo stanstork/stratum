@@ -1,0 +1,58 @@
+// Pagination: PK strategy with JOIN and WHERE filter
+//
+// Tests that pagination, join, computed columns, and row filtering all compose
+// correctly when paginating a large dataset.
+//
+// Strategy: PK keyset on rental.rental_id
+//   WHERE rental_id > :last_id  ORDER BY rental_id ASC  LIMIT 500
+//
+// Join: customer (1:1 lookup via customer_id) -> customer_name computed column
+//
+// Filter: rental.staff_id == 1  (~8,000 of 16,044 rows)
+//   Each page fetch emits the filter predicate alongside the keyset cursor,
+//   so pagination correctly skips staff_id=2 rows at the SQL level.
+//
+// Result: rental_enriched table with rental data + customer_name
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "paginate_rental_enriched" {
+    from { connection = connection.src  table = "rental" }
+    to   { connection = connection.dst  table = "rental_enriched" }
+
+    with {
+        cust from customer where cust.customer_id == rental.customer_id
+    }
+
+    where "staff_one_only" {
+        rental.staff_id == 1
+    }
+
+    paginate {
+        strategy = "pk"
+        cursor   = "rental.rental_id"
+    }
+
+    select {
+        rental_id     = rental.rental_id
+        rental_date   = rental.rental_date
+        inventory_id  = rental.inventory_id
+        customer_id   = rental.customer_id
+        return_date   = rental.return_date
+        staff_id      = rental.staff_id
+        last_update   = rental.last_update
+        customer_name = concat(cust.first_name, " ", cust.last_name)
+    }
+
+    settings {
+        create_missing_tables = true
+        ignore_constraints    = true
+        batch_size            = 500
+    }
+}

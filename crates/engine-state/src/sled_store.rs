@@ -1,7 +1,9 @@
 use crate::error::StateStoreError;
+use crate::merkle_store::MerkleStore;
 use crate::models::{Checkpoint, WalEntry};
 use crate::store::StateStore;
 use async_trait::async_trait;
+use model::integrity::receipt::VerificationReceipt;
 use sled::transaction::{ConflictableTransactionError, TransactionError};
 use std::path::Path;
 
@@ -122,6 +124,51 @@ impl StateStore for SledStateStore {
         }
 
         Ok(entries)
+    }
+}
+
+#[async_trait]
+impl MerkleStore for SledStateStore {
+    async fn save_receipt(&self, receipt: &VerificationReceipt) -> Result<(), StateStoreError> {
+        let key = format!("receipt:{}:{}", receipt.pipeline_name, receipt.table_name);
+        let value = serde_json::to_vec(receipt)
+            .map_err(|e| StateStoreError::Serialization(e.to_string()))?;
+        self.db
+            .insert(key, value)
+            .map_err(|e| StateStoreError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn load_receipt(
+        &self,
+        pipeline_name: &str,
+        table_name: &str,
+    ) -> Result<Option<VerificationReceipt>, StateStoreError> {
+        let key = format!("receipt:{}:{}", pipeline_name, table_name);
+        match self
+            .db
+            .get(key)
+            .map_err(|e| StateStoreError::Storage(e.to_string()))?
+        {
+            Some(bytes) => {
+                Ok(Some(serde_json::from_slice(&bytes).map_err(|e| {
+                    StateStoreError::Serialization(e.to_string())
+                })?))
+            }
+            None => Ok(None),
+        }
+    }
+
+    async fn list_receipts(&self) -> Result<Vec<VerificationReceipt>, StateStoreError> {
+        let prefix = "receipt:";
+        let mut receipts = Vec::new();
+        for item in self.db.scan_prefix(prefix) {
+            let (_key, value) = item.map_err(|e| StateStoreError::Storage(e.to_string()))?;
+            let receipt: VerificationReceipt = serde_json::from_slice(&value)
+                .map_err(|e| StateStoreError::Serialization(e.to_string()))?;
+            receipts.push(receipt);
+        }
+        Ok(receipts)
     }
 }
 

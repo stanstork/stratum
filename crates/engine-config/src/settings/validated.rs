@@ -1,4 +1,5 @@
 use crate::settings::CopyColumns;
+use model::execution::flags::IntegrityMode;
 use serde::Serialize;
 
 /// Immutable, validated configuration used throughout the migration.
@@ -18,6 +19,8 @@ pub struct ValidatedSettings {
     pub ignore_constraints: bool,
     /// Whether this is a dry run (no changes applied)
     pub dry_run: bool,
+    /// Integrity hashing mode for this migration run.
+    pub integrity: IntegrityMode,
 }
 
 impl ValidatedSettings {
@@ -30,6 +33,7 @@ impl ValidatedSettings {
             create_missing_columns: false,
             ignore_constraints: false,
             dry_run,
+            integrity: IntegrityMode::Off,
         }
     }
 
@@ -42,6 +46,7 @@ impl ValidatedSettings {
             create_missing_columns: builder.create_missing_columns.unwrap_or(false),
             ignore_constraints: builder.ignore_constraints.unwrap_or(false),
             dry_run: builder.dry_run,
+            integrity: builder.integrity,
         }
     }
 
@@ -80,6 +85,10 @@ impl ValidatedSettings {
     pub fn mapped_columns_only(&self) -> bool {
         matches!(self.copy_columns, CopyColumns::MapOnly)
     }
+
+    pub fn integrity(&self) -> IntegrityMode {
+        self.integrity
+    }
 }
 
 #[derive(Debug, Default)]
@@ -91,12 +100,14 @@ pub struct ValidatedSettingsBuilder {
     pub create_missing_columns: Option<bool>,
     pub ignore_constraints: Option<bool>,
     pub dry_run: bool,
+    pub integrity: IntegrityMode,
 }
 
 impl ValidatedSettingsBuilder {
-    pub fn new(dry_run: bool) -> Self {
+    pub fn new(dry_run: bool, integrity: IntegrityMode) -> Self {
         Self {
             dry_run,
+            integrity,
             ..Default::default()
         }
     }
@@ -150,7 +161,7 @@ mod tests {
 
     #[test]
     fn test_builder() {
-        let settings = ValidatedSettingsBuilder::new(true)
+        let settings = ValidatedSettingsBuilder::new(true, IntegrityMode::BatchHashes)
             .batch_size(500)
             .infer_schema(true)
             .create_missing_tables(true)

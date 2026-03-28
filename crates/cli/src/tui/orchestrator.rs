@@ -11,12 +11,12 @@ use crate::{
         terminal::TerminalGuard,
     },
 };
-use engine_core::{
-    context::env::EnvContext, event_bus::bus::EventBus, plan::execution::ExecutionPlan,
-};
-use engine_runtime::dag::Dag;
+use engine_core::{context::env::EnvContext, event_bus::bus::EventBus};
 use indicatif::{ProgressBar, ProgressStyle};
-use model::events::migration::MigrationEvent;
+use model::{
+    events::migration::MigrationEvent,
+    execution::flags::{ExecutionFlags, IntegrityMode},
+};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -33,6 +33,7 @@ use tokio_util::sync::CancellationToken;
 pub async fn run_tui(
     config_path: String,
     exact_filter: bool,
+    integrity: IntegrityMode,
     cancel: CancellationToken,
     env: Arc<EnvContext>,
 ) -> Result<(), CliError> {
@@ -45,14 +46,16 @@ pub async fn run_tui(
     // Setup Communication Channels
     let channels = setup_channels();
 
-    // Start Background Tasks
+    // Start background tasks
+    let flags = ExecutionFlags::new(false, integrity);
     let event_bus = EventBus::new();
-    spawn_background_tasks(
+    spawn_event_forwarder(event_bus.clone(), channels.event_tx);
+    spawn_command_handler(channels.command_rx, cancel.clone());
+    spawn_executor(
+        flags,
         event_bus,
         plan_context.core_plan,
         plan_context.dag,
-        channels.event_tx,
-        channels.command_rx,
         cancel,
         env,
     );
@@ -128,21 +131,6 @@ fn setup_channels() -> Channels {
         command_rx,
         terminal_rx,
     }
-}
-
-/// Spawns all background tasks
-fn spawn_background_tasks(
-    event_bus: EventBus,
-    core_plan: ExecutionPlan,
-    dag: Dag,
-    event_tx: mpsc::Sender<MigrationEvent>,
-    command_rx: mpsc::Receiver<MigrationCommand>,
-    cancel: CancellationToken,
-    env: Arc<EnvContext>,
-) {
-    spawn_event_forwarder(event_bus.clone(), event_tx);
-    spawn_command_handler(command_rx, cancel.clone());
-    spawn_executor(event_bus, core_plan, dag, cancel, env);
 }
 
 #[cfg(test)]

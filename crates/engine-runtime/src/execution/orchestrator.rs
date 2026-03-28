@@ -1,5 +1,6 @@
 use crate::{actor::coordinator::PipelineCoordinator, error::MigrationError};
 use chrono;
+use connectors::sql::metadata::table::TableMetadata;
 use engine_config::settings::{self, validated::ValidatedSettings};
 use engine_core::{
     dispatch_driver, drivers::DriverRef, event_bus::bus::EventBus, metrics::Metrics,
@@ -11,6 +12,7 @@ use engine_processing::{
     hooks::executor::HookExecutor,
     producer::{Producer, config::ProducerConfig},
 };
+use model::integrity::{algorithm::HashAlgorithm, config::IntegrityConfig};
 use model::{
     events::migration::MigrationEvent,
     execution::{pipeline::Pipeline, references::DataMode},
@@ -182,8 +184,9 @@ impl PipelineOrchestrator {
         let (batch_tx, batch_rx) = mpsc::channel::<Batch>(BATCH_CHANNEL_CAPACITY);
         let metrics = Metrics::new();
 
-        // Setup Producer
-        let config = ProducerConfig::default().with_batch_size(self.settings.batch_size);
+        let dest_metas = self.fetch_destination_metadata().await?;
+        let config = self.build_producer_config(&dest_metas);
+
         let producer = Producer::new(
             &self.ctx,
             batch_tx,
@@ -191,35 +194,6 @@ impl PipelineOrchestrator {
             self.settings.mapped_columns_only(),
         )
         .await;
-
-        // Setup Consumer: fetch destination table metadata.
-        // In cascade mode, fetch metadata for all discovered tables; otherwise just the single dest table.
-        let dest_metas: Vec<_> = if !self.cascade_tables.is_empty() {
-            let mut metas = Vec::with_capacity(self.cascade_tables.len());
-            for table in &self.cascade_tables {
-                let meta = self.dst_driver.table_metadata(table).await.map_err(|e| {
-                    MigrationError::PipelineFailed(format!(
-                        "Failed to get cascade destination metadata for '{}': {}",
-                        table, e
-                    ))
-                })?;
-                metas.push(meta);
-            }
-            metas
-        } else {
-            let dest_table = &self.ctx.destination.name;
-            let meta = self
-                .dst_driver
-                .table_metadata(dest_table)
-                .await
-                .map_err(|e| {
-                    MigrationError::PipelineFailed(format!(
-                        "Failed to get destination metadata: {}",
-                        e
-                    ))
-                })?;
-            vec![meta]
-        };
 
         let consumer = Consumer::new(
             &self.ctx,
@@ -239,6 +213,71 @@ impl PipelineOrchestrator {
         );
 
         Ok((coordinator, metrics))
+    }
+
+    /// Fetches destination table metadata.
+    /// In cascade mode, fetches metadata for all discovered tables.
+    /// Otherwise, just the single destination table.
+    async fn fetch_destination_metadata(&self) -> Result<Vec<TableMetadata>, MigrationError> {
+        if self.cascade_tables.is_empty() {
+            let dest_table = &self.ctx.destination.name;
+            let meta = self
+                .dst_driver
+                .table_metadata(dest_table)
+                .await
+                .map_err(|e| {
+                    MigrationError::PipelineFailed(format!(
+                        "Failed to get destination metadata: {}",
+                        e
+                    ))
+                })?;
+            return Ok(vec![meta]);
+        }
+
+        let mut metas = Vec::with_capacity(self.cascade_tables.len());
+        for table in &self.cascade_tables {
+            let meta = self.dst_driver.table_metadata(table).await.map_err(|e| {
+                MigrationError::PipelineFailed(format!(
+                    "Failed to get cascade destination metadata for '{}': {}",
+                    table, e
+                ))
+            })?;
+            metas.push(meta);
+        }
+
+        Ok(metas)
+    }
+
+    fn build_producer_config(&self, dest_metas: &[TableMetadata]) -> ProducerConfig {
+        let mut config = ProducerConfig::default().with_batch_size(self.settings.batch_size);
+
+        if self.settings.integrity().is_enabled() {
+            let tables = dest_metas
+                .iter()
+                .map(|m| (m.name.clone(), m.columns.keys().cloned().collect()))
+                .collect();
+
+            let column_types = dest_metas
+                .iter()
+                .map(|m| {
+                    let col_types = m
+                        .columns
+                        .values()
+                        .map(|c| (c.name.clone(), c.data_type.clone()))
+                        .collect();
+                    (m.name.clone(), col_types)
+                })
+                .collect();
+
+            let integrity =
+                IntegrityConfig::new(HashAlgorithm::Sha256, tables, &self.ctx.destination.name)
+                    .with_column_types(column_types)
+                    .with_store_row_hashes(self.settings.integrity().store_row_hashes());
+
+            config = config.with_integrity(integrity);
+        }
+
+        config
     }
 
     async fn await_completion_or_cancel(

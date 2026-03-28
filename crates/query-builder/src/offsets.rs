@@ -8,7 +8,6 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
-use chrono_tz::Tz;
 use model::{
     core::value::Value,
     execution::pipeline::Pagination,
@@ -187,14 +186,21 @@ impl OffsetStrategy for NumericOffset {
         let num_v = row.get_value(&self.col.column);
         let pk_v = row.get_value(&self.pk.column);
 
-        match (extract_numeric_value(&num_v), pk_v) {
-            (Some(val), Value::Int(id)) => Cursor::CompositeNumPk {
+        let pk_id: Option<u64> = match &pk_v {
+            Value::UInt(id) => Some(*id),
+            Value::Int(i) if *i >= 0 => Some(*i as u64),
+            Value::String(s) => s.parse::<u64>().ok(),
+            _ => None,
+        };
+
+        match (extract_numeric_value(&num_v), pk_id) {
+            (Some(val), Some(id)) => Cursor::CompositeNumPk {
                 num_col: self.col.clone(),
                 pk_col: self.pk.clone(),
                 val,
-                id: id as u64,
+                id,
             },
-            _ => Cursor::Default { offset: 0 }, // TODO: better fallback
+            _ => Cursor::Default { offset: 0 },
         }
     }
 
@@ -253,18 +259,23 @@ impl OffsetStrategy for TimestampOffset {
     ) -> SelectBuilder<FromState> {
         // Add WHERE clause based on cursor
         if let Cursor::CompositeTsPk { ts, id, .. } = cursor {
-            let ts_sql = utc_to_local_sql(*ts, &self.tz);
+            let dt_local = Utc
+                .timestamp_micros(*ts)
+                .unwrap()
+                .with_timezone(&self.tz)
+                .naive_local();
+            let ts_value = Value::Timestamp {
+                value: dt_local,
+                offset_secs: None,
+            };
             // WHERE (ts > ?) OR (ts = ? AND pk > ?)
             let cond1 = binary_expr(
                 ident_q(&self.ts_col),
                 BinaryOperator::Gt,
-                value(Value::String(ts_sql.clone())),
+                value(ts_value.clone()),
             );
-            let cond2_left = binary_expr(
-                ident_q(&self.ts_col),
-                BinaryOperator::Eq,
-                value(Value::String(ts_sql)),
-            );
+            let cond2_left =
+                binary_expr(ident_q(&self.ts_col), BinaryOperator::Eq, value(ts_value));
             let cond2_right = binary_expr(ident_q(&self.pk), BinaryOperator::Gt, uint_literal(*id));
             let cond2 = binary_expr(cond2_left, BinaryOperator::And, cond2_right);
             let where_cond = binary_expr(cond1, BinaryOperator::Or, cond2);
@@ -526,10 +537,4 @@ fn extract_numeric_value(val: &Value) -> Option<i128> {
         Value::String(s) => s.parse::<i128>().ok(),
         _ => None,
     }
-}
-
-fn utc_to_local_sql(ts_utc: i64, user_tz: &Tz) -> String {
-    let dt_utc = Utc.timestamp_micros(ts_utc).unwrap();
-    let dt_local = dt_utc.with_timezone(user_tz);
-    format!("{}", dt_local.format("%Y-%m-%d %H:%M:%S"))
 }

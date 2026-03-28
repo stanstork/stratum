@@ -1,0 +1,32 @@
+// Verify: payment filtered by staff_id - subset migration
+//
+// `where` pushes a SQL condition to the source query: only payments assigned
+// to staff_id=1 (~half of 16,044 rows) enter the pipeline. The receipt is
+// built from that filtered subset. Verify reads the destination as-is (no
+// re-application of the filter) and confirms it matches the receipt.
+//
+// Key insight: verify checks "destination == receipt", not "destination == source".
+// A filtered migration is fully verifiable even though the destination is a
+// subset of the source.
+//
+// Also used by: verify_filtered_detects_tampering (tampers a row after apply).
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "migrate_payment_staff1" {
+    from { connection = connection.src  table = "payment" }
+    to   { connection = connection.dst  table = "payment" }
+
+    where "staff_one" { payment.staff_id == 1 }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 200
+    }
+}

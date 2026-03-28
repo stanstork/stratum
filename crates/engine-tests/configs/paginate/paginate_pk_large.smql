@@ -1,0 +1,33 @@
+// Pagination: PK strategy on a large table (INT UNSIGNED auto-increment PK)
+//
+// Same keyset logic as paginate_pk.smql but against the payment table:
+//   payment_id  SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT  PK
+//   16,044 rows total - batch_size=1000 -> 17 pages (last batch partial)
+//
+// Tests:
+//   - Many-page traversal (16 full + 1 partial)
+//   - Partial-last-batch detection
+//   - INT-range PK cursor
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "paginate_payment_pk" {
+    from { connection = connection.src  table = "payment" }
+    to   { connection = connection.dst  table = "payment" }
+
+    paginate {
+        strategy = "pk"
+        cursor   = "payment.payment_id"
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 1000
+    }
+}

@@ -1,0 +1,37 @@
+// Verify: payment with WHERE filter AND skip validation combined
+//
+// Two independent exclusion mechanisms stack:
+//   1. `where` pushes staff_id=1 to the source SQL query (filter at source)
+//   2. `assert ... action = skip` drops rows that pass the filter but fail
+//      the amount check (filter in-process)
+//
+// The destination is the intersection of both conditions. The receipt records
+// only rows that survived both. Verify confirms the destination matches.
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "migrate_payment_combined" {
+    from { connection = connection.src  table = "payment" }
+    to   { connection = connection.dst  table = "payment" }
+
+    where "staff_one" { payment.staff_id == 1 }
+
+    validate {
+        assert "max_amount" {
+            check   = payment.amount <= 5.00
+            message = "Skip high-value payments from staff 1"
+            action  = skip
+        }
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 200
+    }
+}

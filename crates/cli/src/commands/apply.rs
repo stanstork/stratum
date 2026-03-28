@@ -8,6 +8,7 @@ use engine_runtime::{
     error::MigrationError,
     execution::executor,
 };
+use model::execution::flags::{ExecutionFlags, IntegrityMode};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -18,6 +19,7 @@ pub async fn execute(
     tui: bool,
     pretty: bool,
     exact_filter: bool,
+    integrity: IntegrityMode,
     cancel: CancellationToken,
     env: Arc<EnvContext>,
 ) -> Result<(), CliError> {
@@ -30,27 +32,31 @@ pub async fn execute(
         ));
     }
 
+    let flags = ExecutionFlags::new(false, integrity);
+
     match (tui, pretty) {
-        (true, _) => run_tui_mode(config_path, exact_filter, cancel, env).await,
-        (_, true) => run_pretty_mode(config_path, exact_filter, cancel, env).await,
-        _ => run_headless_mode(config_path, cancel, env).await,
+        (true, _) => run_tui_mode(config_path, flags, exact_filter, cancel, env).await,
+        (_, true) => run_pretty_mode(config_path, flags, exact_filter, cancel, env).await,
+        _ => run_headless_mode(config_path, flags, cancel, env).await,
     }
 }
 
 /// Runs migration in TUI mode
 async fn run_tui_mode(
     config_path: String,
+    flags: ExecutionFlags,
     exact_filter: bool,
     cancel: CancellationToken,
     env: Arc<EnvContext>,
 ) -> Result<(), CliError> {
     info!("Running migration with TUI: {}", config_path);
-    run_tui(config_path, exact_filter, cancel, env).await
+    run_tui(config_path, exact_filter, flags.integrity, cancel, env).await
 }
 
 /// Runs migration with pretty output
 async fn run_pretty_mode(
     config_path: String,
+    flags: ExecutionFlags,
     exact_filter: bool,
     cancel: CancellationToken,
     env: Arc<EnvContext>,
@@ -72,7 +78,7 @@ async fn run_pretty_mode(
 
     // Build DAG and execute
     let dag = build_dag(&plan)?;
-    let executor = create_executor(plan, cancel.clone(), event_bus, env).await?;
+    let executor = create_executor(flags, plan, cancel.clone(), event_bus, env).await?;
     let result = executor.execute(dag).await;
 
     // Wait for printer to finish
@@ -84,13 +90,14 @@ async fn run_pretty_mode(
 /// Runs migration in headless mode (no TUI, no pretty output)
 async fn run_headless_mode(
     config_path: String,
+    flags: ExecutionFlags,
     cancel: CancellationToken,
     env: Arc<EnvContext>,
 ) -> Result<(), CliError> {
     info!("Executing migration: {}", config_path);
 
     let plan = config::load_plan(&config_path, false, env.clone()).await?;
-    let result = executor::run(plan, false, cancel, env).await;
+    let result = executor::run(plan, flags, cancel, env).await;
 
     handle_execution_result(result)
 }
@@ -112,12 +119,13 @@ fn build_dag(plan: &ExecutionPlan) -> Result<Dag, CliError> {
 
 /// Creates executor with event bus
 async fn create_executor(
+    flags: ExecutionFlags,
     plan: ExecutionPlan,
     cancel: CancellationToken,
     event_bus: EventBus,
     env: Arc<EnvContext>,
 ) -> Result<DagExecutor, CliError> {
-    DagExecutor::with_event_bus(plan, false, cancel, event_bus, env)
+    DagExecutor::with_event_bus(plan, flags, cancel, event_bus, env)
         .await
         .map_err(CliError::Migration)
 }

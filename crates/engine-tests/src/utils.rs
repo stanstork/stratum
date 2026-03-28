@@ -8,7 +8,11 @@ use connectors::{
 };
 use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan};
 use engine_runtime::{error::MigrationError, execution::executor::run};
-use model::records::Record;
+use engine_verify::error::VerifyError;
+use model::{
+    execution::flags::{ExecutionFlags, IntegrityMode},
+    records::Record,
+};
 use mysql_async::Row as MySqlRow;
 use mysql_async::prelude::Queryable;
 use smql_syntax::builder::parse;
@@ -108,16 +112,55 @@ pub enum DbType {
 pub async fn run_smql_file(path: &str) -> Result<(), MigrationError> {
     let smql = std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("failed to read SMQL file '{path}': {e}"));
-    run_smql(&smql).await
+    run_smql(&smql, false).await
 }
 
 /// Parse & run the SMQL plan, panicking on any error
-pub async fn run_smql(smql: &str) -> Result<(), MigrationError> {
+pub async fn run_smql(smql: &str, integrity: bool) -> Result<(), MigrationError> {
     let doc = parse(smql).expect("parse smql");
     let env = Arc::new(EnvContext::empty());
     let plan = ExecutionPlan::build(&doc, env.clone()).expect("build execution plan");
     let cancel = CancellationToken::new();
-    run(plan, false, cancel, env).await
+    let mode = if integrity {
+        IntegrityMode::BatchHashes
+    } else {
+        IntegrityMode::Off
+    };
+    run(plan, ExecutionFlags::new(false, mode), cancel, env).await
+}
+
+/// Like `run_smql` but also stores individual row hashes in the receipt
+/// (`--full-integrity` mode). Enables row-level mismatch reporting in verify.
+pub async fn run_smql_full_integrity(smql: &str) -> Result<(), MigrationError> {
+    let doc = parse(smql).expect("parse smql");
+    let env = Arc::new(EnvContext::empty());
+    let plan = ExecutionPlan::build(&doc, env.clone()).expect("build execution plan");
+    let cancel = CancellationToken::new();
+    run(
+        plan,
+        ExecutionFlags::new(false, IntegrityMode::FullHashes),
+        cancel,
+        env,
+    )
+    .await
+}
+
+pub async fn run_verify_smql(smql: &str) -> Result<(), VerifyError> {
+    let doc = parse(smql).expect("parse smql");
+    let env = Arc::new(EnvContext::empty());
+    let plan = ExecutionPlan::build(&doc, env.clone()).expect("build execution plan");
+    let results = engine_verify::verifier::verify(plan, env).await?;
+    let has_mismatch = results.iter().any(|r| {
+        matches!(
+            r,
+            model::integrity::result::VerificationResult::Mismatch { .. }
+        )
+    });
+    if has_mismatch {
+        Err(VerifyError::Mismatch)
+    } else {
+        Ok(())
+    }
 }
 
 /// Assert that a table exists (or not) in Postgres

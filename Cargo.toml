@@ -15,6 +15,7 @@ members = [
     "crates/cli",
     "crates/engine-planner",
     "crates/engine-schema",
+    "crates/engine-verify",
 ]
 
 resolver = "2"

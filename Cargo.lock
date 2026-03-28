@@ -456,6 +456,7 @@ dependencies = [
  "engine-planner",
  "engine-processing",
  "engine-runtime",
+ "engine-verify",
  "futures-util",
  "indicatif",
  "model",
@@ -986,6 +987,7 @@ dependencies = [
  "chrono",
  "model",
  "serde",
+ "serde_json",
  "sled",
  "tempfile",
  "thiserror 2.0.12",
@@ -1006,6 +1008,7 @@ dependencies = [
  "engine-planner",
  "engine-processing",
  "engine-runtime",
+ "engine-verify",
  "futures",
  "model",
  "mysql_async",
@@ -1022,6 +1025,19 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
+]
+
+[[package]]
+name = "engine-verify"
+version = "0.1.0"
+dependencies = [
+ "connectors",
+ "dirs",
+ "engine-core",
+ "engine-state",
+ "model",
+ "query-builder",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -1921,6 +1937,7 @@ dependencies = [
  "lazy_static",
  "serde",
  "serde_json",
+ "sha2",
  "smql-syntax",
  "thiserror 2.0.12",
  "uuid",

@@ -1,0 +1,33 @@
+// Verify: payment with skip validation - high-value rows excluded
+//
+// `action = skip` silently drops rows that fail the check: they never reach
+// the destination and are not included in the receipt. Verify sees a smaller
+// destination but the receipt matches exactly what was written.
+//
+// Condition: skip payments with amount > 5.00 (high-value rentals).
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "migrate_payment_low" {
+    from { connection = connection.src  table = "payment" }
+    to   { connection = connection.dst  table = "payment" }
+
+    validate {
+        assert "max_amount" {
+            check   = payment.amount <= 5.00
+            message = "Skip high-value payments"
+            action  = skip
+        }
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 200
+    }
+}

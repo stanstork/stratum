@@ -8,7 +8,7 @@ use crate::settings::SchemaSettingContext;
 use connectors::traits::introspector::SchemaIntrospector;
 use engine_core::schema::schema_ops::SchemaOps;
 use engine_processing::context::PipelineContext;
-use model::core::value::Value;
+use model::{core::value::Value, execution::flags::IntegrityMode};
 use std::{collections::HashMap, sync::Arc};
 
 /// Validate settings and collect schema operations without executing DDL.
@@ -21,6 +21,7 @@ pub async fn validate_and_plan<S, D>(
     dst_driver: Arc<D>,
     settings: &HashMap<String, Value>,
     is_dry_run: bool,
+    integrity: IntegrityMode,
 ) -> Result<(ValidatedSettings, SchemaOps), SettingsError>
 where
     S: SchemaDriver,
@@ -34,6 +35,7 @@ where
         &ctx.destination,
         introspector.as_ref(),
         is_dry_run,
+        integrity,
     );
     let validated_settings = validator.validate(&settings).await?;
 

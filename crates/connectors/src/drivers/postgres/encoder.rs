@@ -17,10 +17,10 @@ impl PgCopyEncoder {
         }
     }
 
-    /// Encodes binary data as PostgreSQL hex format.
+    /// Encodes binary data as PostgreSQL hex-bytea format for COPY CSV.
     fn encode_bytea(data: &[u8]) -> String {
         let hex: String = data.iter().map(|b| format!("{:02x}", b)).collect();
-        format!("\\\\x{}", hex)
+        format!("\\x{}", hex)
     }
 
     /// Encodes an array in PostgreSQL array literal format.

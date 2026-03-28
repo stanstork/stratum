@@ -82,7 +82,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         // Verify all tables were created and populated
         assert_table_exists("actor", true).await;
@@ -188,7 +188,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         // Verify all tables were created and populated
         assert_table_exists("actor", true).await;
@@ -316,7 +316,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         // Verify all tables were created and populated
         assert_table_exists("actor", true).await;
@@ -400,7 +400,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         // Verify all tables were created and populated
         assert_table_exists("actor", true).await;
@@ -536,7 +536,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         // Verify all tables were created and populated
         assert_table_exists("actor", true).await;
@@ -679,7 +679,7 @@ mod tests {
         "#;
 
         // This should fail but continue with independent pipelines
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         // Verify successful pipelines
         assert_table_exists("actor", true).await;
@@ -803,7 +803,7 @@ mod tests {
             }
         "#;
 
-        let _ = run_smql(tmpl).await;
+        let _ = run_smql(tmpl, false).await;
 
         // Verify all tables were created and populated
         assert_table_exists("actor", true).await;

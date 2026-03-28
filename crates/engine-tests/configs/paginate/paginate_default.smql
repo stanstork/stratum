@@ -1,0 +1,31 @@
+// Pagination: DEFAULT (OFFSET/LIMIT) strategy
+//
+// Simplest strategy: no cursor column, no ordering.
+// Each batch is fetched as SELECT ... LIMIT n OFFSET (batch * n).
+//
+// Characteristics:
+//   - O(n) database cost - every batch scans rows 0..offset
+//   - Works on any table regardless of indexing
+//   - batch_size=50 on 200 actor rows -> 4 full pages
+
+define {
+    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "paginate_actor_default" {
+    from { connection = connection.src  table = "actor" }
+    to   { connection = connection.dst  table = "actor" }
+
+    paginate {
+        strategy = "default"
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 50
+    }
+}

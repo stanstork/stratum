@@ -58,6 +58,7 @@ use engine_core::{
 };
 use engine_processing::io::{destination::Destination, format::DataFormat, source::Source};
 use engine_runtime::dag::Dag;
+use model::execution::flags::IntegrityMode;
 use model::execution::pipeline::RetryConfig as CoreRetryConfig;
 use model::{
     core::value::Value,
@@ -496,7 +497,8 @@ impl ReportBuilder {
         introspector: &dyn SchemaIntrospector,
     ) -> ReportBuilderResult<ValidatedSettings> {
         let settings = Settings::from_map(&pipeline.settings);
-        let validator = SettingsValidator::new(source, dest, introspector, true);
+        let validator =
+            SettingsValidator::new(source, dest, introspector, true, IntegrityMode::Off);
         validator.validate(&settings).await.map_err(|e| {
             ReportBuilderError::Config(format!("Validation failed for {}: {}", pipeline.name, e))
         })
