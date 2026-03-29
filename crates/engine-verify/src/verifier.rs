@@ -16,16 +16,18 @@ use engine_core::{
 use engine_state::{MerkleStore, sled_store::SledStateStore};
 use model::{
     execution::{
-        pipeline::Pipeline,
+        pipeline::{Pagination, Pipeline},
         references::{DataMode, GraphReferences},
     },
     integrity::{
+        coerce::coerce_row_for_hash,
         hasher::RowHasher,
         merkle::MerkleTree,
         receipt::VerificationReceipt,
         result::{DivergentBatch, DivergentRow, VerificationResult},
     },
     pagination::cursor::Cursor,
+    records::Record,
     transform::mapping::TransformationMetadata,
 };
 use query_builder::offsets::{OffsetStrategy, OffsetStrategyFactory};
@@ -70,7 +72,18 @@ async fn verify_pipeline(
         .resolve_driver(&pipeline.destination.connection)
         .await?;
     let mapping = TransformationMetadata::new(pipeline);
-    let offset_strategy = OffsetStrategyFactory::from_pagination(&pipeline.source.pagination);
+    let resolved_pagination = resolve_pagination(&pipeline.source.pagination, &mapping);
+
+    if resolved_pagination.is_none() {
+        tracing::warn!(
+            "Pipeline '{}' has no `paginate` block. Verification requires deterministic \
+             row ordering to reproduce batch boundaries. Results may show false mismatches. \
+             Add a `paginate` block for reliable verification.",
+            pipeline.name
+        );
+    }
+
+    let offset_strategy = OffsetStrategyFactory::from_pagination(&resolved_pagination);
 
     let cascade_meta = get_graph_expansion(pipeline, &driver, &mapping).await?;
     let cascade_tables = resolve_cascade_tables(pipeline, &mapping, &cascade_meta);
@@ -121,9 +134,14 @@ async fn verify_table(
     let start = std::time::Instant::now();
 
     let meta = fetch_table_metadata(driver, table).await?;
+    let col_types: HashMap<String, String> = meta
+        .columns
+        .values()
+        .map(|c| (c.name.clone(), c.data_type.clone()))
+        .collect();
     let table_reader = create_table_reader(driver, meta, offset_strategy)?;
     let (actual_batch_roots, actual_row_hashes_by_batch) =
-        read_and_hash(&table_reader, receipt).await?;
+        read_and_hash(&table_reader, receipt, &col_types).await?;
 
     let duration_ms = start.elapsed().as_millis() as u64;
     Ok(build_result(
@@ -139,11 +157,12 @@ async fn verify_table(
 async fn read_and_hash(
     reader: &TableReader,
     receipt: &VerificationReceipt,
+    col_types: &HashMap<String, String>,
 ) -> Result<(Vec<[u8; 32]>, Vec<Vec<[u8; 32]>>), VerifyError> {
     if receipt.sorted_hashes {
-        read_and_hash_sorted(reader, receipt).await
+        read_and_hash_sorted(reader, receipt, col_types).await
     } else {
-        read_and_hash_batched(reader, receipt).await
+        read_and_hash_batched(reader, receipt, col_types).await
     }
 }
 
@@ -153,6 +172,7 @@ async fn read_and_hash(
 async fn read_and_hash_sorted(
     reader: &TableReader,
     receipt: &VerificationReceipt,
+    col_types: &HashMap<String, String>,
 ) -> Result<(Vec<[u8; 32]>, Vec<Vec<[u8; 32]>>), VerifyError> {
     let mut hasher = RowHasher::new(receipt.column_order.clone(), receipt.algorithm);
     let mut all_hashes = Vec::new();
@@ -161,7 +181,10 @@ async fn read_and_hash_sorted(
 
     loop {
         let (rows, next_cursor) = reader.next_batch(cursor, limit).await?;
-        all_hashes.extend(rows.iter().map(|r| hasher.hash_row(r)));
+        all_hashes.extend(
+            rows.iter()
+                .map(|r| hash_row_coerced(&mut hasher, r, col_types)),
+        );
 
         match next_cursor {
             None => break,
@@ -183,6 +206,7 @@ async fn read_and_hash_sorted(
 async fn read_and_hash_batched(
     reader: &TableReader,
     receipt: &VerificationReceipt,
+    col_types: &HashMap<String, String>,
 ) -> Result<(Vec<[u8; 32]>, Vec<Vec<[u8; 32]>>), VerifyError> {
     let need_row_hashes = receipt.row_hashes.is_some();
     let mut hasher = RowHasher::new(receipt.column_order.clone(), receipt.algorithm);
@@ -199,7 +223,10 @@ async fn read_and_hash_batched(
         let (rows, next_cursor) = reader.next_batch(cursor.clone(), limit).await?;
 
         if !rows.is_empty() {
-            let row_hashes: Vec<[u8; 32]> = rows.iter().map(|r| hasher.hash_row(r)).collect();
+            let row_hashes: Vec<[u8; 32]> = rows
+                .iter()
+                .map(|r| hash_row_coerced(&mut hasher, r, col_types))
+                .collect();
             let subtree_root = MerkleTree::root_from_hashes(&row_hashes, receipt.algorithm);
             actual_roots.push(subtree_root);
             if need_row_hashes {
@@ -392,4 +419,51 @@ async fn expand_graph_references(
     };
 
     Ok(cascade_meta)
+}
+
+/// Resolve pagination column references from source names to destination names.
+fn resolve_pagination(
+    pagination: &Option<Pagination>,
+    mapping: &TransformationMetadata,
+) -> Option<Pagination> {
+    let pag = pagination.as_ref()?;
+
+    Some(Pagination {
+        strategy: pag.strategy.clone(),
+        column: resolve_qualified_column(&pag.column, mapping),
+        tiebreaker: pag
+            .tiebreaker
+            .as_ref()
+            .map(|tb| resolve_qualified_column(tb, mapping)),
+        timezone: pag.timezone.clone(),
+    })
+}
+
+/// Resolve a `table.column` reference to destination names via the mapping.
+fn resolve_qualified_column(qual_col: &str, mapping: &TransformationMetadata) -> String {
+    let parts: Vec<&str> = qual_col.split('.').collect();
+    if parts.len() == 2 {
+        let src_table = parts[0];
+        let src_col = parts[1];
+        let dst_table = mapping.entities.resolve(src_table);
+        let dst_col = mapping.field_mappings.resolve(&dst_table, src_col);
+        format!("{}.{}", dst_table, dst_col)
+    } else {
+        qual_col.to_string()
+    }
+}
+
+/// Hash a row, applying column-type coercions when needed.
+/// Mirrors the same function in `engine-processing` so that verify
+/// produces identical hashes to the write path.
+fn hash_row_coerced(
+    hasher: &mut RowHasher,
+    row: &Record,
+    col_types: &HashMap<String, String>,
+) -> [u8; 32] {
+    if col_types.is_empty() {
+        hasher.hash_row(row)
+    } else {
+        hasher.hash_row(&coerce_row_for_hash(row, col_types))
+    }
 }

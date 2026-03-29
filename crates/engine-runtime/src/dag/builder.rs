@@ -172,7 +172,7 @@ mod tests {
 
     #[test]
     fn test_sequential_dependencies() {
-        // copy_actors (no deps) → copy_customers → copy_film
+        // copy_actors (no deps) -> copy_customers -> copy_film
         let mut builder = DagBuilder::new();
         builder
             .add_pipeline("copy_actors".to_string(), vec![])
@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn test_get_dependencies_sequential() {
-        // A → B → C
+        // A -> B -> C
         let mut builder = DagBuilder::new();
         builder.add_pipeline("A".to_string(), vec![]).unwrap();
         builder

@@ -7,6 +7,9 @@ pub struct SchemaOp {
     pub description: String,
     /// If true, "already exists" errors are silently ignored.
     pub idempotent: bool,
+    /// If true, "relation does not exist" errors are silently skipped.
+    /// Used for FK constraints where the referenced table may not be in the destination.
+    pub skip_if_missing_ref: bool,
 }
 
 /// Collected schema operations split into pre-migration and post-migration phases.

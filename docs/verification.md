@@ -466,6 +466,33 @@ stratum verify -c migration.smql --output report.txt
 
 ---
 
+## Pagination Requirement
+
+**Verification requires a `paginate` block for reliable results.**
+
+Both the write path (`apply --integrity`) and the verify path (`verify`) must read rows in the same order to produce matching batch-level Merkle roots. Without an explicit `paginate` block, the default strategy uses `OFFSET/LIMIT` without `ORDER BY` -- the database is free to return rows in any order, which can change between runs (e.g. after `VACUUM`, concurrent writes, or heap reorganization). This produces false mismatches.
+
+Add a `paginate` block to every pipeline that uses integrity verification:
+
+```smql
+paginate {
+    using  = "pk"
+    column = orders.id
+}
+```
+
+When `paginate` references source-side column names (e.g. `orders.id`), Stratum automatically resolves them to destination-side names through the pipeline's field mappings before verifying. For example, if the pipeline renames `customer.customer_id` to `id` and the destination table is `users`, the verify path reads from `users` ordered by `id`.
+
+If a pipeline runs with `--integrity` but no `paginate` block, a warning is logged at both `apply` and `verify` time:
+
+```
+WARN: Pipeline 'migrate_customer' has no `paginate` block. Verification requires
+deterministic row ordering to reproduce batch boundaries. Results may show false
+mismatches. Add a `paginate` block for reliable verification.
+```
+
+---
+
 ## Cascade Pipelines
 
 For pipelines using `with references { data = cascade }`, each FK-referenced table is independently verified:
@@ -491,6 +518,7 @@ For pipelines using `with references { data = cascade }`, each FK-referenced tab
 | Multiple pipelines (DAG)        | Each pipeline is verified independently. Results are collected in execution order.                                                                                           |
 | Many null columns               | Null-heavy rows serialize compactly (`0x00` per null column). No special handling required.                                                                                |
 | Cascade table row deduplication | A row referenced by 100 source batches contributes one hash to the set. The stored root reflects unique destination rows only.                                               |
+| No `paginate` block           | Row order is non-deterministic. Batch boundaries may not align between write and verify, causing false mismatches. A warning is logged. Add a `paginate` block to fix.      |
 
 ---
 

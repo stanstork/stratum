@@ -34,19 +34,19 @@ pipeline "migrate_customer" {
     }
 
     select {
-        // Rename: customer_id → id  (destination uses shorter PK names)
+        // Rename: customer_id -> id  (destination uses shorter PK names)
         id            = customer.customer_id
 
-        // Rename: first_name + last_name → merged into full_name
+        // Rename: first_name + last_name -> merged into full_name
         full_name     = concat(customer.first_name, " ", customer.last_name)
 
         // Keep email as-is
         email         = customer.email
 
-        // Rename: active → is_active  (boolean renamed for clarity)
+        // Rename: active -> is_active  (boolean renamed for clarity)
         is_active     = customer.active
 
-        // Rename: create_date → registered_at
+        // Rename: create_date -> registered_at
         registered_at = customer.create_date
 
         // Enrich with location fields from joined tables
@@ -57,9 +57,14 @@ pipeline "migrate_customer" {
         // these are internal FK / audit fields not needed in the destination.
     }
 
+    paginate {
+        strategy = "pk"
+        cursor   = "customer.customer_id"
+    }
+
     settings {
         create_missing_tables = true
-        ignore_constraints    = true
         batch_size            = 500
+        copy_columns          = "MAP_ONLY"
     }
 }

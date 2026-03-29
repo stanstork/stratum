@@ -50,6 +50,7 @@ impl<S: SchemaDriver, D: SchemaDriver> CreateMissingTablesSetting<S, D> {
                 sql,
                 description: format!("Create enum type '{}'", name),
                 idempotent: true,
+                skip_if_missing_ref: false,
             });
         }
 
@@ -59,6 +60,7 @@ impl<S: SchemaDriver, D: SchemaDriver> CreateMissingTablesSetting<S, D> {
                 sql,
                 description: format!("Create table '{}'", name),
                 idempotent: false,
+                skip_if_missing_ref: false,
             });
         }
 
@@ -68,6 +70,7 @@ impl<S: SchemaDriver, D: SchemaDriver> CreateMissingTablesSetting<S, D> {
                 sql,
                 description: format!("Add foreign key constraint on '{}'", name),
                 idempotent: false,
+                skip_if_missing_ref: true,
             });
         }
 

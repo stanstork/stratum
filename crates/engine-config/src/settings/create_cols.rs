@@ -89,6 +89,7 @@ impl<S: SchemaDriver, D: SchemaDriver> CreateMissingColumnsSetting<S, D> {
                         sql,
                         description: format!("Add column '{}' to table '{}'", def.name, table),
                         idempotent: false,
+                        skip_if_missing_ref: false,
                     });
                 }
             }
@@ -151,6 +152,7 @@ impl<S: SchemaDriver, D: SchemaDriver> CreateMissingColumnsSetting<S, D> {
                             comp.name, table
                         ),
                         idempotent: false,
+                        skip_if_missing_ref: false,
                     });
                 }
             }

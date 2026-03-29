@@ -28,7 +28,7 @@ pub enum Transform {
     },
     ArrayToJson,
     JsonToArray,
-    /// MySQL TINYINT(1) → Boolean: coerce 0 → false, non-zero → true
+    /// MySQL TINYINT(1) -> Boolean: coerce 0 -> false, non-zero -> true
     IntToBool,
     Custom(String), // SQL expression
 }

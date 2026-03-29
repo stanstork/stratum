@@ -252,6 +252,16 @@ impl PipelineOrchestrator {
         let mut config = ProducerConfig::default().with_batch_size(self.settings.batch_size);
 
         if self.settings.integrity().is_enabled() {
+            if self.pipeline.source.pagination.is_none() {
+                warn!(
+                    "Pipeline '{}' has integrity enabled but no `paginate` block. \
+                     Without explicit pagination the row order is non-deterministic, \
+                     which may cause `verify` to report false mismatches. \
+                     Add a `paginate` block for reliable verification.",
+                    self.pipeline.name
+                );
+            }
+
             let tables = dest_metas
                 .iter()
                 .map(|m| (m.name.clone(), m.columns.keys().cloned().collect()))

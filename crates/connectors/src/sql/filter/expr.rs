@@ -55,9 +55,9 @@ impl SqlFilterExpr {
                 }
             }
             // AND: keep children that survive, then
-            // * if 0 remain → drop the whole AND
-            // * if 1 remains → collapse to that child
-            // * else → rebuild AND
+            // * if 0 remain -> drop the whole AND
+            // * if 1 remains -> collapse to that child
+            // * else -> rebuild AND
             SqlFilterExpr::And(children) => {
                 let kept = children
                     .iter()

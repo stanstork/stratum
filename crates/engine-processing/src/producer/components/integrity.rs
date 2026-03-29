@@ -1,10 +1,9 @@
 use crate::error::ProducerError;
 use engine_state::MerkleStore;
 use model::{
-    core::value::{FieldValue, Value},
     integrity::{
-        config::IntegrityConfig, hasher::RowHasher, merkle::MerkleTree,
-        receipt::VerificationReceipt,
+        coerce::coerce_row_for_hash, config::IntegrityConfig, hasher::RowHasher,
+        merkle::MerkleTree, receipt::VerificationReceipt,
     },
     records::Record,
 };
@@ -238,44 +237,4 @@ fn hash_row_coerced(
     } else {
         hasher.hash_row(&coerce_row_for_hash(row, col_types))
     }
-}
-
-/// Apply the same coercions to row values at hash time as the COPY writer applies
-/// before writing - so that migration hashes match verify hashes.
-fn coerce_row_for_hash(row: &Record, col_types: &HashMap<String, String>) -> Record {
-    let fields: Vec<FieldValue> = row
-        .fields
-        .iter()
-        .map(|fv| {
-            let coerced = fv.value.as_ref().map(|value| {
-                let pg_type = col_types.get(&fv.name).map(|s| s.as_str()).unwrap_or("");
-                coerce_value_for_hash(value.clone(), pg_type)
-            });
-            FieldValue {
-                name: fv.name.clone(),
-                value: coerced,
-                data_type: fv.data_type.clone(),
-            }
-        })
-        .collect();
-    Record {
-        schema: row.schema.clone(),
-        fields,
-    }
-}
-
-/// Coerce a single value to match what the COPY writer would write and PG would store.
-/// TODO: make this more robust and configurable - handle more types, handle nested structures, etc.
-fn coerce_value_for_hash(value: Value, pg_type: &str) -> Value {
-    let pg_type_lc = pg_type.to_lowercase();
-    if (pg_type_lc.ends_with("[]") || pg_type_lc.contains("array") || pg_type_lc == "set")
-        && let Value::String(s) = &value
-    {
-        let elements: Vec<Value> = s
-            .split(',')
-            .map(|item| Value::String(item.trim_matches('"').trim_matches('\'').to_string()))
-            .collect();
-        return Value::Array(elements);
-    }
-    value
 }

@@ -128,7 +128,7 @@ fn convert_type(source: &Type) -> ConversionResult {
 
         Type::Bit { .. } => ConversionResult::Exact(source.clone()),
 
-        // MySQL GEOMETRY/POINT/etc. → BYTEA (WKB binary).
+        // MySQL GEOMETRY/POINT/etc. -> BYTEA (WKB binary).
         // PostGIS geometry type is not available without the extension.
         Type::Geometry { .. } => ConversionResult::Compatible {
             target: Type::Blob { max_bytes: None },

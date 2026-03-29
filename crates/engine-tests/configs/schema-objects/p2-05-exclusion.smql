@@ -27,7 +27,7 @@
 //   \dt
 //   SELECT COUNT(*) FROM payment;  -- should fail (excluded)
 //   SELECT COUNT(*) FROM rental;   -- should fail (excluded)
-//   SELECT COUNT(*) FROM customer; -- should succeed (schema_only → 0 rows)
+//   SELECT COUNT(*) FROM customer; -- should succeed (schema_only -> 0 rows)
 //
 // =============================================================================
 

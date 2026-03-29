@@ -9,9 +9,9 @@
 //   - Related table rows must NOT contain rows unrelated to the primary batch
 //
 // TABLES EXPECTED (payment FK graph, depth = 1):
-//   customer   (payment.customer_id → customer.customer_id)
-//   staff      (payment.staff_id → staff.staff_id)
-//   rental     (payment.rental_id → rental.rental_id)
+//   customer   (payment.customer_id -> customer.customer_id)
+//   staff      (payment.staff_id -> staff.staff_id)
+//   rental     (payment.rental_id -> rental.rental_id)
 //   payment    (root)
 //
 // KEY CORRECTNESS CHECK:

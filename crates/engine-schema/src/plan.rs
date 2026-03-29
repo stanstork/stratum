@@ -287,6 +287,7 @@ impl SchemaPlan {
                 sql,
                 description: format!("Create enum type '{}'", column),
                 idempotent: true,
+                skip_if_missing_ref: false,
             });
         }
 
@@ -305,6 +306,7 @@ impl SchemaPlan {
                     sql,
                     description: format!("Create sequence '{}'", seq.name),
                     idempotent: true,
+                    skip_if_missing_ref: false,
                 }
             })
             .collect()
@@ -352,6 +354,7 @@ impl SchemaPlan {
                 sql,
                 description: format!("Create table '{}'", resolved_table),
                 idempotent: true,
+                skip_if_missing_ref: false,
             });
         }
 
@@ -377,6 +380,7 @@ impl SchemaPlan {
                 sql,
                 description: format!("Create index '{}'", index.name),
                 idempotent: true,
+                skip_if_missing_ref: false,
             });
         }
 
@@ -423,6 +427,7 @@ impl SchemaPlan {
                     sql,
                     description: format!("Add foreign key '{}' on '{}'", desc, resolved_table),
                     idempotent: true,
+                    skip_if_missing_ref: true,
                 });
             }
         }
@@ -453,6 +458,7 @@ impl SchemaPlan {
                         desc, resolved_table
                     ),
                     idempotent: true,
+                    skip_if_missing_ref: false,
                 });
             }
         }
@@ -474,6 +480,7 @@ impl SchemaPlan {
                     sql,
                     description: format!("Add check constraint '{}' on '{}'", desc, resolved_table),
                     idempotent: true,
+                    skip_if_missing_ref: false,
                 });
             }
         }
@@ -504,6 +511,7 @@ impl SchemaPlan {
                         name, resolved_table
                     ),
                     idempotent: true, // IF EXISTS makes this a no-op when constraint is absent
+                    skip_if_missing_ref: false,
                 });
             }
         }
