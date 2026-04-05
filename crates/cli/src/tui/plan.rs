@@ -30,7 +30,8 @@ pub async fn build_plan_context(
     let ast = parse(&smql_content)?;
 
     // Build core plan
-    let core_plan = CoreExecutionPlan::build(&ast, env)?;
+    let mut core_plan = CoreExecutionPlan::build(&ast, env)?;
+    core_plan.config_path = config_path.to_string();
 
     // Build DAG
     let dag = build_dag(&core_plan)?;
@@ -45,7 +46,7 @@ pub async fn build_plan_context(
         .await?;
 
     // Initialize pipeline states
-    let pipelines = initialize_pipelines_from_plan(&report, &core_plan.hash());
+    let pipelines = initialize_pipelines_from_plan(&report, core_plan.hash());
 
     info!("Plan built successfully with {} pipelines", pipelines.len());
 

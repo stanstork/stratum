@@ -7,9 +7,10 @@ use crate::{
 };
 use connectors::sql::metadata::table::TableMetadata;
 use engine_core::{metrics::Metrics, retry::RetryPolicy};
+use engine_infra::shutdown::ShutdownSignal;
+use engine_state::models::CheckpointStage;
 use model::records::batch::Batch;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 pub mod components;
@@ -45,7 +46,7 @@ pub struct Consumer {
     coordinator: BatchCoordinator,
 
     // Communication
-    cancel: CancellationToken,
+    shutdown: ShutdownSignal,
 
     // State
     mode: ConsumerMode,
@@ -57,7 +58,7 @@ impl Consumer {
         ctx: &PipelineContext,
         batch_rx: mpsc::Receiver<Batch>,
         dest_metadata: Vec<TableMetadata>,
-        cancel: CancellationToken,
+        shutdown: ShutdownSignal,
         metrics: Metrics,
     ) -> Self {
         let run_id = ctx.run_id.clone();
@@ -86,7 +87,7 @@ impl Consumer {
 
         Self {
             coordinator,
-            cancel,
+            shutdown,
             mode: ConsumerMode::Idle,
             ids,
         }
@@ -129,7 +130,7 @@ impl Consumer {
 
                 // If we crashed during "write" stage, the producer will re-send
                 // that batch based on its checkpoint recovery logic
-                if checkpoint.stage == "write" {
+                if checkpoint.stage == CheckpointStage::Write {
                     warn!(
                         batch_id = %checkpoint.batch_id,
                         "Last batch was being written when crash occurred, \
@@ -225,6 +226,6 @@ impl Consumer {
 
     /// Check if we should stop processing.
     fn should_stop(&self) -> bool {
-        self.cancel.is_cancelled()
+        self.shutdown.cancel.is_cancelled()
     }
 }

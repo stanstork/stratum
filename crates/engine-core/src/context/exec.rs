@@ -28,9 +28,7 @@ impl ExecutionContext {
         state: Arc<SledStateStore>,
         env: Arc<EnvContext>,
     ) -> Result<Self, DriverError> {
-        // Generate a deterministic run_id based on the plan hash
-        // This allows resuming the same migration after restart
-        let run_id = format!("run-{}", &plan.hash()[..16]);
+        let run_id = plan.run_id();
 
         Ok(ExecutionContext {
             connection_pool: Arc::new(RwLock::new(ConnectionPool::new())),

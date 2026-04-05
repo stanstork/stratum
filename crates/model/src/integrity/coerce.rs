@@ -1,4 +1,7 @@
-use crate::{core::value::FieldValue, core::value::Value, records::Record};
+use crate::{
+    core::value::{FieldValue, Value},
+    records::{OpType, Record},
+};
 use std::collections::HashMap;
 
 /// Apply column-type coercions to a row before hashing.
@@ -27,6 +30,7 @@ pub fn coerce_row_for_hash(row: &Record, col_types: &HashMap<String, String>) ->
     Record {
         schema: row.schema.clone(),
         fields,
+        op_type: OpType::default(),
     }
 }
 

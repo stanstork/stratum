@@ -6,6 +6,7 @@ use engine_core::{
         models::{Checkpoint, CheckpointSummary, WalEntry},
     },
 };
+use engine_state::models::CheckpointStage;
 use model::pagination::cursor::Cursor;
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -47,7 +48,7 @@ impl StateManager {
                 run_id: self.ids.run_id(),
                 item_id: self.ids.item_id(),
                 part_id: self.ids.part_id(),
-                stage: "read".to_string(),
+                stage: CheckpointStage::Read,
                 src_offset: current.clone(),
                 pending_offset: Some(next.clone()),
                 batch_id: batch_id.to_string(),
@@ -73,7 +74,7 @@ impl StateManager {
     /// Save a checkpoint with specific stage and cursor information.
     pub async fn save_checkpoint(
         &self,
-        stage: &str,
+        stage: &CheckpointStage,
         src_offset: &Cursor,
         pending_offset: Option<&Cursor>,
         batch_id: &str,
@@ -84,7 +85,7 @@ impl StateManager {
                 run_id: self.ids.run_id(),
                 item_id: self.ids.item_id(),
                 part_id: self.ids.part_id(),
-                stage: stage.to_string(),
+                stage: *stage,
                 src_offset: src_offset.clone(),
                 pending_offset: pending_offset.cloned(),
                 batch_id: batch_id.to_string(),
@@ -137,8 +138,8 @@ impl StateManager {
     ///     - Otherwise -> resume from `src_offset`
     /// - Otherwise: fallback to `src_offset`
     async fn cursor_from_checkpoint(&self, summary: &CheckpointSummary) -> Cursor {
-        match summary.stage.as_str() {
-            "committed" => {
+        match summary.stage {
+            CheckpointStage::Committed => {
                 // Batch was fully committed, safe to continue from src_offset
                 info!(
                     cursor = ?summary.src_offset,
@@ -147,7 +148,7 @@ impl StateManager {
                 summary.src_offset.clone()
             }
 
-            "read" | "write" => {
+            CheckpointStage::Read | CheckpointStage::Write => {
                 // Batch was in progress - need to check if it was actually written
                 let wal_entries = match self.store.iter_wal(&self.ids.run_id()).await {
                     Ok(entries) => entries,

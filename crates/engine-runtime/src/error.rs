@@ -42,6 +42,10 @@ pub enum MigrationError {
     #[error("Shutdown requested")]
     ShutdownRequested,
 
+    /// Migration was intentionally paused.
+    #[error("Migration paused")]
+    Paused,
+
     /// Hook execution failed.
     #[error("Hook execution failed: {0}")]
     HookExecutionFailed(String),

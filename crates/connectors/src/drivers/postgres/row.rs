@@ -6,7 +6,7 @@ use model::{
         types::Type,
         value::{FieldValue, Value},
     },
-    records::Record,
+    records::{OpType, Record},
 };
 use rust_decimal::Decimal as RustDecimal;
 use std::{net::IpAddr, str::FromStr};
@@ -41,6 +41,7 @@ impl<'a> RowDecoder for PgRowDecoder<'a> {
         Record {
             schema: table.to_string(),
             fields,
+            op_type: OpType::default(),
         }
     }
 

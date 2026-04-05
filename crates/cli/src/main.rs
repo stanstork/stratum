@@ -3,9 +3,9 @@ use crate::{
     shutdown::ShutdownCoordinator,
 };
 use clap::Parser;
+use engine_infra::shutdown::ShutdownSignal;
 use engine_processing::EnvContext;
 use std::{process, sync::Arc};
-use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 mod args;
@@ -39,15 +39,15 @@ async fn main() {
 /// Main application logic
 async fn run(cli: Cli) -> Result<(), CliError> {
     // Set up graceful shutdown
-    let cancel = CancellationToken::new();
-    let shutdown_coordinator = ShutdownCoordinator::new(cancel.clone());
-    shutdown_coordinator.register_handlers();
+    let shutdown = ShutdownSignal::new();
+    let coordinator = ShutdownCoordinator::new(shutdown.cancel.clone(), shutdown.pause.clone());
+    coordinator.register_handlers();
 
     // Initialize environment variables
     let env = init_environment(cli.env_file.as_deref())?;
 
     // Execute the command
-    execute_command(&cli, cancel, env).await
+    execute_command(&cli, shutdown, env).await
 }
 
 /// Initializes environment variables from file if provided
@@ -73,6 +73,14 @@ fn handle_error(error: CliError) -> i32 {
         CliError::ShutdownRequested => {
             info!("Application shutdown gracefully");
             130 // Standard exit code for SIGINT
+        }
+        CliError::Paused => {
+            info!("Migration paused - resume with the same config");
+            2
+        }
+        CliError::UserMessage(msg) => {
+            eprintln!("{}", msg);
+            1
         }
         _ => {
             tracing::error!("Application error: {}", error);

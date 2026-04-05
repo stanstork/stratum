@@ -42,6 +42,9 @@ pub enum CliError {
     #[error("Shutdown requested")]
     ShutdownRequested,
 
+    #[error("Migration paused - resume with the same config to continue")]
+    Paused,
+
     #[error("Plan build error: {0}")]
     PlanBuild(#[from] BuildError),
 
@@ -64,6 +67,10 @@ pub enum CliError {
 
     #[error("Connection test failed: {0}")]
     Connection(#[from] ConnectionError),
+
+    /// Non-error user-facing message (prints to stderr, exits with code 1, no ERROR log)
+    #[error("{0}")]
+    UserMessage(String),
 
     #[error("Unknown error: {0}")]
     Unknown(String),

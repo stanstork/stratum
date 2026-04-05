@@ -50,6 +50,7 @@ mod tests {
     use super::*;
     use crate::core::types::Type;
     use crate::core::value::FieldValue;
+    use crate::records::OpType;
 
     fn make_record(fields: &[(&str, Value)]) -> Record {
         Record::new(
@@ -62,6 +63,7 @@ mod tests {
                     data_type: Type::Text { charset: None },
                 })
                 .collect(),
+            OpType::default(),
         )
     }
 

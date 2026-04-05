@@ -11,8 +11,10 @@ connectors = { path = "../connectors" }
 engine-runtime = { path = "../engine-runtime" }
 engine-config = { path = "../engine-config" }
 engine-core = { path = "../engine-core" }
+engine-infra = { path = "../engine-infra" }
 engine-processing = { path = "../engine-processing" }
 engine-planner = { path = "../engine-planner" }
+engine-state = { path = "../engine-state" }
 engine-verify = { path = "../engine-verify" }
 
 tokio = { version = "1.43.0", features = ["full"] }

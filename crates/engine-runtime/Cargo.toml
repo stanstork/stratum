@@ -12,6 +12,7 @@ engine-core = { path = "../engine-core" }
 engine-state = { path = "../engine-state" }
 engine-processing = { path = "../engine-processing" }
 engine-config = { path = "../engine-config" }
+engine-infra = { path = "../engine-infra" }
 
 tokio = { version = "1.43.0", features = ["full"] }
 futures = "0.3.31"

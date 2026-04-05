@@ -1,14 +1,42 @@
 use crate::io::{
     format::DataFormat,
-    sink::{Sink, postgres::PostgresSink},
+    sink::{Sink, mysql::MySqlSink, postgres::PostgresSink},
 };
 use connectors::{
-    drivers::postgres::driver::PgDriver, error::DriverError, sql::metadata::table::TableMetadata,
+    drivers::{mysql::driver::MySqlDriver, postgres::driver::PgDriver},
+    error::DriverError,
+    sql::metadata::table::TableMetadata,
+    traits::driver::Driver,
 };
 use engine_core::schema::type_registry::Dialect;
 use model::{execution::connection::Connection, records::Record};
 use query_builder::dialect;
 use std::sync::Arc;
+
+/// Trait for creating a [`Destination`] from a typed driver.
+pub trait IntoDestination: Driver {
+    fn into_destination(self: Arc<Self>, table: &str, source_dialect: Dialect) -> Destination;
+}
+
+impl IntoDestination for PgDriver {
+    fn into_destination(self: Arc<Self>, table: &str, source_dialect: Dialect) -> Destination {
+        Destination {
+            name: table.to_string(),
+            format: DataFormat::Postgres,
+            sink: Arc::new(PostgresSink::new(self, source_dialect)),
+        }
+    }
+}
+
+impl IntoDestination for MySqlDriver {
+    fn into_destination(self: Arc<Self>, table: &str, source_dialect: Dialect) -> Destination {
+        Destination {
+            name: table.to_string(),
+            format: DataFormat::MySql,
+            sink: Arc::new(MySqlSink::new(self, source_dialect)),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct Destination {
@@ -18,17 +46,7 @@ pub struct Destination {
 }
 
 impl Destination {
-    /// Create a new PostgreSQL destination.
-    pub fn postgres(driver: Arc<PgDriver>, table: &str, source_dialect: Dialect) -> Self {
-        Destination {
-            name: table.to_string(),
-            format: DataFormat::Postgres,
-            sink: Arc::new(PostgresSink::new(driver, source_dialect)),
-        }
-    }
-
-    /// Create a destination from connection info.
-    /// Note: For PostgreSQL, prefer using `postgres()` with a typed driver.
+    /// Create a destination from connection info and a pre-built sink.
     pub fn new(
         sink: Arc<dyn Sink + Send + Sync>,
         table: &str,

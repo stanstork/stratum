@@ -6,7 +6,7 @@ use model::{
         types::Type,
         value::{FieldValue, Value},
     },
-    records::Record,
+    records::{OpType, Record},
 };
 use mysql_async::{Row as MySqlRow, Value as MySqlValue, consts::ColumnType};
 use mysql_async::{consts::ColumnFlags, prelude::FromValue};
@@ -37,6 +37,7 @@ impl RowDecoder for MySqlRow {
         Record {
             schema: table.to_string(),
             fields,
+            op_type: OpType::default(),
         }
     }
 

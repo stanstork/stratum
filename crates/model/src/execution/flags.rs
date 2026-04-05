@@ -12,6 +12,16 @@ pub enum IntegrityMode {
 }
 
 impl IntegrityMode {
+    pub fn new(integrity: bool, full_integrity: bool) -> Self {
+        if full_integrity {
+            IntegrityMode::FullHashes
+        } else if integrity {
+            IntegrityMode::BatchHashes
+        } else {
+            IntegrityMode::Off
+        }
+    }
+
     pub fn is_enabled(self) -> bool {
         !matches!(self, Self::Off)
     }

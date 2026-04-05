@@ -20,7 +20,7 @@ impl MetadataGenerator {
             plan_id: Uuid::new_v4().to_string(),
             generated_at: Utc::now(),
             engine_version: env!("CARGO_PKG_VERSION").to_string(),
-            config_hash: core_plan.hash(),
+            config_hash: core_plan.hash().to_string(),
             config_path: config_path.display().to_string(),
         }
     }

@@ -143,6 +143,16 @@ pub enum GeomKind {
 }
 
 impl Type {
+    pub fn is_auto_increment(&self) -> bool {
+        matches!(
+            self,
+            Type::Int {
+                auto_increment: true,
+                ..
+            }
+        )
+    }
+
     /// Get a simple type name for lookup purposes (used by custom mappings)
     pub fn name(&self) -> String {
         match self {

@@ -9,6 +9,7 @@ model = { path = "../model" }
 connectors = { path = "../connectors" }
 engine-runtime = { path = "../engine-runtime" }
 engine-core = { path = "../engine-core" }
+engine-infra = { path = "../engine-infra" }
 engine-processing = { path = "../engine-processing" }
 engine-config = { path = "../engine-config" }
 engine-planner = { path = "../engine-planner" }

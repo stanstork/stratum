@@ -2,7 +2,7 @@ use chrono::DateTime;
 use engine_state::{
     StateStore,
     error::StateStoreError,
-    models::{Checkpoint, WalEntry},
+    models::{Checkpoint, CheckpointStage, WalEntry},
 };
 use model::pagination::cursor::Cursor;
 use serde::Serialize;
@@ -129,8 +129,8 @@ impl ProgressService {
             ProgressStage::Failed
         } else if item_done {
             ProgressStage::Done
-        } else if let Some(stage_str) = checkpoint_stage.as_deref() {
-            stage_from_checkpoint(stage_str)
+        } else if let Some(stage) = checkpoint_stage {
+            stage_from_checkpoint(&stage)
         } else if item_started {
             ProgressStage::Snapshot
         } else {
@@ -170,11 +170,11 @@ impl ProgressService {
     }
 }
 
-fn stage_from_checkpoint(stage: &str) -> ProgressStage {
+fn stage_from_checkpoint(stage: &CheckpointStage) -> ProgressStage {
     match stage {
-        "read" | "write" => ProgressStage::Snapshot,
-        "committed" => ProgressStage::Running,
-        "validated" => ProgressStage::Validating,
+        CheckpointStage::Read | CheckpointStage::Write => ProgressStage::Snapshot,
+        CheckpointStage::Committed => ProgressStage::Running,
+        CheckpointStage::Validated => ProgressStage::Validating,
         _ => ProgressStage::Idle,
     }
 }
@@ -190,12 +190,17 @@ mod tests {
     const ITEM_ID: &str = "test-item";
     const PART_ID: &str = "part-0";
 
-    fn checkpoint(stage: &str, cursor: Cursor, pending: Option<Cursor>, rows: u64) -> Checkpoint {
+    fn checkpoint(
+        stage: CheckpointStage,
+        cursor: Cursor,
+        pending: Option<Cursor>,
+        rows: u64,
+    ) -> Checkpoint {
         Checkpoint {
             run_id: RUN_ID.to_string(),
             item_id: ITEM_ID.to_string(),
             part_id: PART_ID.to_string(),
-            stage: stage.to_string(),
+            stage,
             src_offset: cursor,
             pending_offset: pending,
             batch_id: "batch".into(),
@@ -229,7 +234,7 @@ mod tests {
             .unwrap();
         store
             .save_checkpoint(&checkpoint(
-                "read",
+                CheckpointStage::Read,
                 Cursor::Default { offset: 1 },
                 Some(Cursor::Default { offset: 2 }),
                 10,

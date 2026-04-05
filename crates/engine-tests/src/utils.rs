@@ -7,6 +7,7 @@ use connectors::{
     traits::row_decoder::RowDecoder,
 };
 use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan};
+use engine_infra::shutdown::ShutdownSignal;
 use engine_runtime::{error::MigrationError, execution::executor::run};
 use engine_verify::error::VerifyError;
 use model::{
@@ -21,7 +22,6 @@ use std::{
     io::{BufRead, BufReader},
     sync::Arc,
 };
-use tokio_util::sync::CancellationToken;
 
 /// DDL statement to precreate the `actor` table in Postgres for testing various scenarios involving existing tables.
 pub const ACTORS_TABLE_DDL: &str = r#"CREATE TABLE actor (
@@ -120,13 +120,13 @@ pub async fn run_smql(smql: &str, integrity: bool) -> Result<(), MigrationError>
     let doc = parse(smql).expect("parse smql");
     let env = Arc::new(EnvContext::empty());
     let plan = ExecutionPlan::build(&doc, env.clone()).expect("build execution plan");
-    let cancel = CancellationToken::new();
+    let shutdown = ShutdownSignal::new();
     let mode = if integrity {
         IntegrityMode::BatchHashes
     } else {
         IntegrityMode::Off
     };
-    run(plan, ExecutionFlags::new(false, mode), cancel, env).await
+    run(plan, ExecutionFlags::new(false, mode), shutdown, env).await
 }
 
 /// Like `run_smql` but also stores individual row hashes in the receipt
@@ -135,11 +135,11 @@ pub async fn run_smql_full_integrity(smql: &str) -> Result<(), MigrationError> {
     let doc = parse(smql).expect("parse smql");
     let env = Arc::new(EnvContext::empty());
     let plan = ExecutionPlan::build(&doc, env.clone()).expect("build execution plan");
-    let cancel = CancellationToken::new();
+    let shutdown = ShutdownSignal::new();
     run(
         plan,
         ExecutionFlags::new(false, IntegrityMode::FullHashes),
-        cancel,
+        shutdown,
         env,
     )
     .await

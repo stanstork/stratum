@@ -12,6 +12,7 @@ use crate::{
     },
 };
 use engine_core::{context::env::EnvContext, event_bus::bus::EventBus};
+use engine_infra::shutdown::ShutdownSignal;
 use indicatif::{ProgressBar, ProgressStyle};
 use model::{
     events::migration::MigrationEvent,
@@ -19,7 +20,6 @@ use model::{
 };
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 /// Orchestrates the TUI lifecycle and background engine tasks
 ///
@@ -34,7 +34,7 @@ pub async fn run_tui(
     config_path: String,
     exact_filter: bool,
     integrity: IntegrityMode,
-    cancel: CancellationToken,
+    shutdown: ShutdownSignal,
     env: Arc<EnvContext>,
 ) -> Result<(), CliError> {
     // Build Plan (Outside TUI mode so errors/logs show in standard terminal)
@@ -50,13 +50,13 @@ pub async fn run_tui(
     let flags = ExecutionFlags::new(false, integrity);
     let event_bus = EventBus::new();
     spawn_event_forwarder(event_bus.clone(), channels.event_tx);
-    spawn_command_handler(channels.command_rx, cancel.clone());
+    spawn_command_handler(channels.command_rx, shutdown.cancel.clone());
     spawn_executor(
         flags,
         event_bus,
         plan_context.core_plan,
         plan_context.dag,
-        cancel,
+        shutdown,
         env,
     );
 

@@ -49,7 +49,9 @@ pub async fn load_plan(
         // Otherwise, read the config file and parse it
         smql_syntax::builder::parse(&source)?
     };
-    Ok(ExecutionPlan::build(&doc, env)?)
+    let mut plan = ExecutionPlan::build(&doc, env)?;
+    plan.config_path = path.to_string();
+    Ok(plan)
 }
 
 /// Discovers the config file path by searching in multiple locations

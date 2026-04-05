@@ -3,15 +3,15 @@ use crate::{
     error::MigrationError,
 };
 use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan};
+use engine_infra::shutdown::ShutdownSignal;
 use model::execution::flags::ExecutionFlags;
 use std::sync::Arc;
-use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 pub async fn run(
     plan: ExecutionPlan,
     flags: ExecutionFlags,
-    cancel: CancellationToken,
+    shutdown: ShutdownSignal,
     env: Arc<EnvContext>,
 ) -> Result<(), MigrationError> {
     // Build DAG from the execution plan
@@ -33,7 +33,7 @@ pub async fn run(
         info!("  Level {}: {:?}", level_idx + 1, level);
     }
 
-    DagExecutor::new(plan, flags, cancel, env)
+    DagExecutor::new(plan, flags, shutdown, env)
         .await?
         .execute(dag)
         .await

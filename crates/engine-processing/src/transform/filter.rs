@@ -80,16 +80,19 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use model::core::{
-        types::{IntSize, Type},
-        value::{FieldValue, Value},
+    use model::{
+        core::{
+            types::{IntSize, Type},
+            value::{FieldValue, Value},
+        },
+        records::OpType,
     };
 
     #[test]
     fn test_empty_row_filter() {
         let filter = EmptyRowFilter;
 
-        let empty_row = Record::new("test_table", vec![]);
+        let empty_row = Record::new("test_table", vec![], OpType::default());
         assert!(!filter.should_keep(&empty_row));
 
         let non_empty_row = Record::new(
@@ -103,6 +106,7 @@ mod tests {
                     auto_increment: false,
                 },
             }],
+            OpType::default(),
         );
         assert!(filter.should_keep(&non_empty_row));
     }
@@ -124,6 +128,7 @@ mod tests {
                 value: Some(Value::Boolean(true)),
                 data_type: Type::Boolean,
             }],
+            OpType::default(),
         );
         assert!(filter.should_keep(&active_row));
 
@@ -134,6 +139,7 @@ mod tests {
                 value: Some(Value::Boolean(false)),
                 data_type: Type::Boolean,
             }],
+            OpType::default(),
         );
         assert!(!filter.should_keep(&inactive_row));
     }

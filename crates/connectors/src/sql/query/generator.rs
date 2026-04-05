@@ -317,7 +317,11 @@ impl<'a> QueryGenerator<'a> {
                 col_builder = col_builder.nullable();
             }
             if let Some(default_val) = &col.default {
-                col_builder = col_builder.default_value(Expr::Literal(default_val.clone()));
+                // Serial types (serial, bigserial, smallserial) already imply a
+                // DEFAULT nextval(...) - adding an explicit DEFAULT is a conflict.
+                if !col.data_type.is_auto_increment() {
+                    col_builder = col_builder.default_value(Expr::Literal(default_val.clone()));
+                }
             }
             if let Some(expr) = &col.generated_expression {
                 col_builder = col_builder.generated(expr, col.is_stored);

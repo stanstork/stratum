@@ -1,5 +1,5 @@
 use crate::error::StateStoreError;
-use crate::models::{Checkpoint, CheckpointSummary, WalEntry};
+use crate::models::{Checkpoint, CheckpointSummary, RunState, WalEntry};
 use async_trait::async_trait;
 
 #[async_trait]
@@ -26,4 +26,11 @@ pub trait StateStore: Send + Sync {
 
     async fn append_wal(&self, entry: &WalEntry) -> Result<(), StateStoreError>;
     async fn iter_wal(&self, run_id: &str) -> Result<Vec<WalEntry>, StateStoreError>;
+
+    async fn save_run_state(&self, state: &RunState) -> Result<(), StateStoreError>;
+    async fn load_run_state(&self, run_id: &str) -> Result<Option<RunState>, StateStoreError>;
+    async fn list_runs(&self) -> Result<Vec<RunState>, StateStoreError>;
+
+    /// Delete all state for a given run: run state, checkpoints, and WAL entries.
+    async fn delete_run(&self, run_id: &str) -> Result<(), StateStoreError>;
 }

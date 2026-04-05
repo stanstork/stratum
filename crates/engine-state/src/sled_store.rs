@@ -1,6 +1,6 @@
 use crate::error::StateStoreError;
 use crate::merkle_store::MerkleStore;
-use crate::models::{Checkpoint, WalEntry};
+use crate::models::{Checkpoint, CheckpointStage, RunState, WalEntry};
 use crate::store::StateStore;
 use async_trait::async_trait;
 use model::integrity::receipt::VerificationReceipt;
@@ -22,17 +22,6 @@ impl SledStateStore {
     fn chk_key(run_id: &str, item_id: &str, part_id: &str) -> String {
         format!("chk:{}:{}:{}", run_id, item_id, part_id)
     }
-
-    /// Ranks the stage for comparison logic.
-    /// Order: Read (1) < Write (2) < Committed (3)
-    fn stage_rank(stage: &str) -> u8 {
-        match stage {
-            "read" => 1,
-            "write" => 2,
-            "committed" => 3,
-            _ => 0,
-        }
-    }
 }
 
 #[async_trait]
@@ -53,10 +42,10 @@ impl StateStore for SledStateStore {
                 })?;
 
                 let is_same_batch = existing.batch_id == cp.batch_id;
-                let is_committed = existing.stage == "committed";
+                let is_committed = existing.stage == CheckpointStage::Committed;
 
                 let should_update = if is_same_batch {
-                    Self::stage_rank(&cp.stage) >= Self::stage_rank(&existing.stage)
+                    cp.stage >= existing.stage
                 } else {
                     is_committed
                 };
@@ -125,6 +114,75 @@ impl StateStore for SledStateStore {
 
         Ok(entries)
     }
+
+    async fn save_run_state(&self, state: &RunState) -> Result<(), StateStoreError> {
+        let key = format!("run:{}", state.run_id);
+        let value =
+            bincode::serialize(state).map_err(|e| StateStoreError::Serialization(e.to_string()))?;
+        self.db
+            .insert(key, value)
+            .map_err(|e| StateStoreError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn load_run_state(&self, run_id: &str) -> Result<Option<RunState>, StateStoreError> {
+        let key = format!("run:{}", run_id);
+        match self
+            .db
+            .get(key)
+            .map_err(|e| StateStoreError::Storage(e.to_string()))?
+        {
+            Some(bytes) => {
+                Ok(Some(bincode::deserialize(&bytes).map_err(|e| {
+                    StateStoreError::Serialization(e.to_string())
+                })?))
+            }
+            None => Ok(None),
+        }
+    }
+
+    async fn list_runs(&self) -> Result<Vec<RunState>, StateStoreError> {
+        let prefix = "run:";
+        let mut runs = Vec::new();
+
+        for item in self.db.scan_prefix(prefix) {
+            let (_key, value) = item.map_err(|e| StateStoreError::Storage(e.to_string()))?;
+            let run: RunState = bincode::deserialize(&value)
+                .map_err(|e| StateStoreError::Serialization(e.to_string()))?;
+            runs.push(run);
+        }
+
+        Ok(runs)
+    }
+
+    async fn delete_run(&self, run_id: &str) -> Result<(), StateStoreError> {
+        // Delete run state
+        self.db
+            .remove(format!("run:{}", run_id))
+            .map_err(|e| StateStoreError::Storage(e.to_string()))?;
+
+        // Delete all checkpoints for this run
+        for item in self.db.scan_prefix(format!("chk:{}:", run_id)) {
+            let (key, _) = item.map_err(|e| StateStoreError::Storage(e.to_string()))?;
+            self.db
+                .remove(key)
+                .map_err(|e| StateStoreError::Storage(e.to_string()))?;
+        }
+
+        // Delete all WAL entries for this run
+        for item in self.db.scan_prefix(format!("wal:{}:", run_id)) {
+            let (key, _) = item.map_err(|e| StateStoreError::Storage(e.to_string()))?;
+            self.db
+                .remove(key)
+                .map_err(|e| StateStoreError::Storage(e.to_string()))?;
+        }
+
+        self.db
+            .flush()
+            .map_err(|e| StateStoreError::Storage(e.to_string()))?;
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -179,12 +237,12 @@ mod tests {
     use tempfile::tempdir;
 
     // Helper to create dummy checkpoints
-    fn mk_cp(stage: &str, batch: &str, cursor: Cursor) -> Checkpoint {
+    fn mk_cp(stage: CheckpointStage, batch: &str, cursor: Cursor) -> Checkpoint {
         Checkpoint {
             run_id: "run".into(),
             item_id: "item".into(),
             part_id: "part".into(),
-            stage: stage.to_string(),
+            stage,
             src_offset: cursor,
             pending_offset: None,
             batch_id: batch.to_string(),
@@ -198,12 +256,16 @@ mod tests {
         let store = SledStateStore::open(dir.path()).unwrap();
 
         store
-            .save_checkpoint(&mk_cp("write", "batch-1", Cursor::None))
+            .save_checkpoint(&mk_cp(CheckpointStage::Write, "batch-1", Cursor::None))
             .await
             .unwrap();
 
         store
-            .save_checkpoint(&mk_cp("read", "batch-2", Cursor::Default { offset: 1 }))
+            .save_checkpoint(&mk_cp(
+                CheckpointStage::Read,
+                "batch-2",
+                Cursor::Default { offset: 1 },
+            ))
             .await
             .unwrap();
 
@@ -212,7 +274,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(cp.stage, "write");
+        assert_eq!(cp.stage, CheckpointStage::Write);
         assert_eq!(cp.batch_id, "batch-1");
     }
 
@@ -222,12 +284,16 @@ mod tests {
         let store = SledStateStore::open(dir.path()).unwrap();
 
         store
-            .save_checkpoint(&mk_cp("committed", "batch-1", Cursor::None))
+            .save_checkpoint(&mk_cp(CheckpointStage::Committed, "batch-1", Cursor::None))
             .await
             .unwrap();
 
         store
-            .save_checkpoint(&mk_cp("read", "batch-2", Cursor::Default { offset: 1 }))
+            .save_checkpoint(&mk_cp(
+                CheckpointStage::Read,
+                "batch-2",
+                Cursor::Default { offset: 1 },
+            ))
             .await
             .unwrap();
 
@@ -237,7 +303,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(cp.stage, "read");
+        assert_eq!(cp.stage, CheckpointStage::Read);
         assert_eq!(cp.batch_id, "batch-2");
     }
 }

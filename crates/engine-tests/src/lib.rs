@@ -39,13 +39,10 @@ async fn pg_pool() -> Arc<Client> {
 async fn reset_postgres_schema() {
     let pool = pg_pool().await;
     // Drop and recreate public schema (removes all tables, types, etc.).
-    // Also clean up any pg_type entries whose namespace no longer exists (can accumulate
-    // from parallel test runs that race on DROP SCHEMA).
     pool.batch_execute(
         r#"
         DROP SCHEMA public CASCADE;
         CREATE SCHEMA public;
-        DELETE FROM pg_type WHERE typnamespace NOT IN (SELECT oid FROM pg_namespace);
     "#,
     )
     .await

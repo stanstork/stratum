@@ -6,6 +6,7 @@ use engine_core::{
     dispatch_driver, drivers::DriverRef, event_bus::bus::EventBus, metrics::Metrics,
     schema::schema_ops::SchemaOps,
 };
+use engine_infra::shutdown::ShutdownSignal;
 use engine_processing::{
     consumer::Consumer,
     context::PipelineContext,
@@ -24,7 +25,6 @@ use std::{
     time::Duration,
 };
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 const BATCH_CHANNEL_CAPACITY: usize = 64;
@@ -44,7 +44,7 @@ pub struct PipelineOrchestrator {
     dst_driver: DriverRef,
     settings: ValidatedSettings,
     schema_ops: SchemaOps,
-    cancel: CancellationToken,
+    shutdown: ShutdownSignal,
     event_bus: EventBus,
     done_ops: Arc<Mutex<HashSet<String>>>,
     cascade_tables: Vec<String>,
@@ -58,7 +58,7 @@ impl PipelineOrchestrator {
         dst_driver: DriverRef,
         settings: ValidatedSettings,
         schema_ops: SchemaOps,
-        cancel: CancellationToken,
+        shutdown: ShutdownSignal,
         event_bus: EventBus,
         done_ops: Arc<Mutex<HashSet<String>>>,
         cascade_tables: Vec<String>,
@@ -69,7 +69,7 @@ impl PipelineOrchestrator {
             dst_driver,
             settings,
             schema_ops,
-            cancel,
+            shutdown,
             event_bus,
             done_ops,
             cascade_tables,
@@ -78,24 +78,26 @@ impl PipelineOrchestrator {
 
     /// Executes the complete pipeline lifecycle:
     /// pre-DDL -> before hooks -> data migration -> post-DDL -> after hooks
-    pub async fn execute(&self) -> Result<(), MigrationError> {
+    /// Returns the number of rows processed.
+    pub async fn execute(&self) -> Result<u64, MigrationError> {
         self.execute_schema_ops("pre-migration", &self.schema_ops.pre)
             .await?;
         self.execute_hooks(HookPhase::Before).await?;
 
-        if self.is_schema_only() {
+        let rows = if self.is_schema_only() {
             info!(
                 "Schema-only mode: skipping data migration for pipeline '{}'",
                 self.pipeline.name
             );
+            0
         } else {
-            self.execute_pipeline().await?;
-        }
+            self.execute_pipeline().await?
+        };
 
         self.execute_schema_ops("post-migration", &self.schema_ops.post)
             .await?;
         self.execute_hooks(HookPhase::After).await?;
-        Ok(())
+        Ok(rows)
     }
 
     /// Execute a batch of schema operations against the destination driver,
@@ -137,6 +139,14 @@ impl PipelineOrchestrator {
         Ok(())
     }
 
+    fn is_schema_only(&self) -> bool {
+        self.pipeline
+            .source
+            .graph_references
+            .as_ref()
+            .is_some_and(|r| matches!(r.data_mode, DataMode::SchemaOnly))
+    }
+
     async fn execute_hooks(&self, phase: HookPhase) -> Result<(), MigrationError> {
         let hooks = match &self.pipeline.lifecycle {
             Some(h) => h,
@@ -165,7 +175,8 @@ impl PipelineOrchestrator {
         Ok(())
     }
 
-    async fn execute_pipeline(&self) -> Result<(), MigrationError> {
+    /// Returns the number of rows processed.
+    async fn execute_pipeline(&self) -> Result<u64, MigrationError> {
         info!("Starting pipeline execution: {}", self.pipeline.name);
 
         self.publish_started().await;
@@ -175,9 +186,10 @@ impl PipelineOrchestrator {
         let (coordinator, metrics) = self.build_coordinator().await?;
 
         // Run the pipeline with cancellation support
-
         self.await_completion_or_cancel(coordinator, &metrics, start_time)
-            .await
+            .await?;
+
+        Ok(metrics.snapshot().records_processed)
     }
 
     async fn build_coordinator(&self) -> Result<(PipelineCoordinator, Metrics), MigrationError> {
@@ -199,7 +211,7 @@ impl PipelineOrchestrator {
             &self.ctx,
             batch_rx,
             dest_metas,
-            self.cancel.clone(),
+            self.shutdown.clone(),
             metrics.clone(),
         )
         .await;
@@ -208,7 +220,7 @@ impl PipelineOrchestrator {
             producer,
             consumer,
             metrics.clone(),
-            self.cancel.clone(),
+            self.shutdown.cancel.clone(),
             self.event_bus.clone(),
         );
 
@@ -306,15 +318,20 @@ impl PipelineOrchestrator {
                 MigrationError::PipelineFailed(format!("Failed to start pipeline: {}", e))
             })?;
 
-        let cancel_fut = self.cancel.cancelled();
+        let cancel_fut = self.shutdown.cancel.cancelled();
+        let pause_fut = self.shutdown.pause.cancelled();
         let wait_fut = coordinator.wait();
 
         tokio::pin!(cancel_fut);
+        tokio::pin!(pause_fut);
         tokio::pin!(wait_fut);
 
         tokio::select! {
             result = &mut wait_fut => {
                 self.handle_pipeline_result(result, metrics, start_time).await
+            }
+            _ = &mut pause_fut => {
+                self.handle_pause(wait_fut).await
             }
             _ = &mut cancel_fut => {
                 self.handle_shutdown(wait_fut).await
@@ -341,6 +358,37 @@ impl PipelineOrchestrator {
                     "Pipeline error: {}",
                     e
                 )))
+            }
+        }
+    }
+
+    async fn handle_pause(
+        &self,
+        wait_fut: impl Future<Output = Result<(), impl std::fmt::Display>>,
+    ) -> Result<(), MigrationError> {
+        info!("Pause signal received - draining current batch");
+
+        // Trigger cancel so producer/consumer finish current work and stop
+        self.shutdown.cancel.cancel();
+
+        match tokio::time::timeout(SHUTDOWN_TIMEOUT, wait_fut).await {
+            Ok(Ok(())) => {
+                info!("Pipeline paused gracefully after draining batch");
+                Err(MigrationError::Paused)
+            }
+            Ok(Err(e)) => {
+                error!("Pipeline error during pause drain: {}", e);
+                Err(MigrationError::PipelineFailed(format!(
+                    "Pipeline error during pause: {}",
+                    e
+                )))
+            }
+            Err(_) => {
+                warn!(
+                    "Pipeline did not drain within {}s timeout - progress has been checkpointed",
+                    SHUTDOWN_TIMEOUT.as_secs()
+                );
+                Err(MigrationError::Paused)
             }
         }
     }
@@ -375,14 +423,6 @@ impl PipelineOrchestrator {
                 Err(MigrationError::ShutdownRequested)
             }
         }
-    }
-
-    fn is_schema_only(&self) -> bool {
-        self.pipeline
-            .source
-            .graph_references
-            .as_ref()
-            .is_some_and(|r| matches!(r.data_mode, DataMode::SchemaOnly))
     }
 
     async fn publish_started(&self) {

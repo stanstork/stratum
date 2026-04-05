@@ -1,8 +1,5 @@
 use crate::{dag::Dag, error::MigrationError, execution::orchestrator::PipelineOrchestrator};
-use connectors::{
-    error::DriverError, sql::metadata::table::TableMetadata,
-    traits::introspector::SchemaIntrospector,
-};
+use connectors::{sql::metadata::table::TableMetadata, traits::introspector::SchemaIntrospector};
 use engine_config::settings::{self, ValidatedSettings};
 use engine_core::{
     context::{env::EnvContext, exec::ExecutionContext},
@@ -18,10 +15,15 @@ use engine_core::{
     state::{StateStore, models::WalEntry, sled_store::SledStateStore},
     utils::make_item_id,
 };
+use engine_infra::shutdown::ShutdownSignal;
 use engine_processing::{
     context::PipelineContext,
-    io::{destination::Destination, source::Source},
+    io::{
+        destination::{Destination, IntoDestination},
+        source::Source,
+    },
 };
+use engine_state::models::{PauseReason, PipelineRunState, PipelineStatus, RunState, RunStatus};
 use futures::stream::{self, StreamExt};
 use model::{
     events::migration::MigrationEvent,
@@ -39,13 +41,12 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 pub struct DagExecutor {
     plan: ExecutionPlan,
     flags: ExecutionFlags,
-    cancel: CancellationToken,
+    shutdown: ShutdownSignal,
     exec_ctx: ExecutionContext,
     exec_config: ExecutionConfig,
     event_bus: EventBus,
@@ -57,76 +58,29 @@ impl DagExecutor {
     pub async fn new(
         plan: ExecutionPlan,
         flags: ExecutionFlags,
-        cancel: CancellationToken,
+        shutdown: ShutdownSignal,
         env: Arc<EnvContext>,
     ) -> Result<Self, MigrationError> {
         let event_bus = EventBus::new();
         Self::subscribe_to_events(&event_bus).await;
-        Self::init(plan, flags, cancel, event_bus, env).await
+        Self::init(plan, flags, shutdown, event_bus, env).await
     }
 
     /// Create executor with event bus for external monitoring (TUI/Pretty mode)
     pub async fn with_event_bus(
         plan: ExecutionPlan,
         flags: ExecutionFlags,
-        cancel: CancellationToken,
+        shutdown: ShutdownSignal,
         event_bus: EventBus,
         env: Arc<EnvContext>,
     ) -> Result<Self, MigrationError> {
-        Self::init(plan, flags, cancel, event_bus, env).await
-    }
-
-    pub async fn execute(self, dag: Dag) -> Result<(), MigrationError> {
-        let mut failed_pipelines = HashSet::new();
-
-        self.exec_ctx
-            .state
-            .append_wal(&WalEntry::RunStart {
-                run_id: self.exec_ctx.run_id(),
-                plan_hash: self.plan.hash(),
-            })
-            .await?;
-
-        let execution_order = dag.execution_order();
-        info!(
-            "Executing {} pipelines in {} levels",
-            dag.total_pipelines(),
-            execution_order.len()
-        );
-
-        for (level_idx, level) in execution_order.iter().enumerate() {
-            let executable = self.filter_executable(level, &mut failed_pipelines);
-
-            if executable.is_empty() {
-                warn!("All pipelines in level {} skipped", level_idx + 1);
-                continue;
-            }
-
-            info!(
-                "Level {}/{}: Executing {} pipelines (skipped {}): {:?}",
-                level_idx + 1,
-                execution_order.len(),
-                executable.len(),
-                level.len() - executable.len(),
-                executable
-            );
-
-            if self.cancel.is_cancelled() {
-                warn!("Shutdown requested");
-                return Err(MigrationError::ShutdownRequested);
-            }
-
-            self.execute_level(&executable, &mut failed_pipelines)
-                .await?;
-        }
-
-        self.finalize(failed_pipelines)
+        Self::init(plan, flags, shutdown, event_bus, env).await
     }
 
     async fn init(
         plan: ExecutionPlan,
         flags: ExecutionFlags,
-        cancel: CancellationToken,
+        shutdown: ShutdownSignal,
         event_bus: EventBus,
         env: Arc<EnvContext>,
     ) -> Result<Self, MigrationError> {
@@ -145,12 +99,320 @@ impl DagExecutor {
         Ok(Self {
             plan,
             flags,
-            cancel,
+            shutdown,
             exec_ctx,
             exec_config,
             event_bus,
             done_ops: Arc::new(Mutex::new(HashSet::new())),
         })
+    }
+
+    async fn subscribe_to_events(event_bus: &EventBus) {
+        let (event_tx, mut event_rx) = mpsc::channel::<Arc<MigrationEvent>>(100);
+        event_bus.subscribe::<MigrationEvent>(event_tx).await;
+
+        tokio::spawn(async move {
+            while let Some(event) = event_rx.recv().await {
+                info!("Migration Event: {}", event);
+            }
+        });
+
+        info!("Event subscriber configured for migration monitoring");
+    }
+
+    pub async fn execute(self, dag: Dag) -> Result<(), MigrationError> {
+        let mut failed_pipelines = HashSet::new();
+
+        // Initialize state or resume from a paused run
+        let (mut run_state, mut completed_pipelines) = self.init_or_resume_run().await?;
+
+        // Execute levels, updating run_state as pipelines complete
+        let run_result = self
+            .execute_levels(
+                &dag,
+                &mut run_state,
+                &mut completed_pipelines,
+                &mut failed_pipelines,
+            )
+            .await;
+
+        // Complete run and finalize state
+        self.finalize_run(run_result, run_state, failed_pipelines)
+            .await
+    }
+
+    async fn init_or_resume_run(&self) -> Result<(RunState, HashSet<String>), MigrationError> {
+        let run_id = self.exec_ctx.run_id();
+        let existing_run = self.exec_ctx.state.load_run_state(&run_id).await?;
+
+        let resuming = matches!(
+            existing_run.as_ref().map(|r| &r.status),
+            Some(RunStatus::Paused { .. })
+        );
+
+        let completed_pipelines: HashSet<String> = existing_run
+            .as_ref()
+            .map(|r| {
+                r.pipelines
+                    .iter()
+                    .filter(|p| p.status == PipelineStatus::Completed)
+                    .map(|p| p.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if resuming {
+            info!(
+                "Resuming paused migration {} ({} pipelines already completed)",
+                run_id,
+                completed_pipelines.len()
+            );
+        }
+
+        let run_state = self.build_initial_run_state(&run_id, existing_run, &completed_pipelines);
+
+        self.exec_ctx.state.save_run_state(&run_state).await?;
+
+        let wal_entry = if resuming {
+            WalEntry::RunResumed { run_id }
+        } else {
+            WalEntry::RunStart {
+                run_id,
+                plan_hash: self.plan.hash().to_string(),
+            }
+        };
+        self.exec_ctx.state.append_wal(&wal_entry).await?;
+
+        Ok((run_state, completed_pipelines))
+    }
+
+    fn build_initial_run_state(
+        &self,
+        run_id: &str,
+        existing_run: Option<RunState>,
+        completed_pipelines: &HashSet<String>,
+    ) -> RunState {
+        let pipelines = self
+            .plan
+            .pipelines
+            .iter()
+            .enumerate()
+            .map(|(idx, p)| {
+                let item_id = make_item_id(self.plan.hash(), &p.destination.table, idx);
+
+                if completed_pipelines.contains(&p.name) {
+                    let rows_done = existing_run
+                        .as_ref()
+                        .and_then(|r| r.pipelines.iter().find(|ps| ps.name == p.name))
+                        .map(|ps| ps.rows_done)
+                        .unwrap_or(0);
+
+                    PipelineRunState {
+                        name: p.name.clone(),
+                        item_id,
+                        status: PipelineStatus::Completed,
+                        rows_done,
+                        total_rows: None,
+                    }
+                } else {
+                    let rows_done = existing_run
+                        .as_ref()
+                        .and_then(|r| r.pipelines.iter().find(|ps| ps.name == p.name))
+                        .map(|ps| ps.rows_done)
+                        .unwrap_or(0);
+
+                    PipelineRunState {
+                        name: p.name.clone(),
+                        item_id,
+                        status: PipelineStatus::Pending,
+                        rows_done,
+                        total_rows: None,
+                    }
+                }
+            })
+            .collect();
+
+        RunState {
+            run_id: run_id.to_string(),
+            config_path: self.plan.config_path.clone(),
+            config_hash: self.plan.hash().to_string(),
+            status: RunStatus::Running,
+            started_at: existing_run
+                .map(|r| r.started_at)
+                .unwrap_or_else(chrono::Utc::now),
+            total_pipelines: self.plan.pipelines.len(),
+            pipelines,
+        }
+    }
+
+    async fn execute_levels(
+        &self,
+        dag: &Dag,
+        run_state: &mut RunState,
+        completed_pipelines: &mut HashSet<String>,
+        failed_pipelines: &mut HashSet<String>,
+    ) -> Result<(), MigrationError> {
+        let execution_order = dag.execution_order();
+        info!(
+            "Executing {} pipelines in {} levels",
+            dag.total_pipelines(),
+            execution_order.len()
+        );
+
+        for (level_idx, level) in execution_order.iter().enumerate() {
+            let level_remaining: Vec<String> = level
+                .iter()
+                .filter(|name| !completed_pipelines.contains(*name))
+                .cloned()
+                .collect();
+
+            let executable = self.filter_executable(&level_remaining, failed_pipelines);
+
+            if executable.is_empty() {
+                if level_remaining.is_empty() {
+                    info!("Level {}: all pipelines already completed", level_idx + 1);
+                } else {
+                    warn!("All pipelines in level {} skipped", level_idx + 1);
+                }
+                continue;
+            }
+
+            info!(
+                "Level {}/{}: Executing {} pipelines (skipped {}): {:?}",
+                level_idx + 1,
+                execution_order.len(),
+                executable.len(),
+                level.len() - executable.len(),
+                executable
+            );
+
+            // Check for process cancellation
+            if self.shutdown.cancel.is_cancelled() {
+                warn!("Shutdown requested");
+                return Err(MigrationError::ShutdownRequested);
+            }
+
+            // Check for requested pauses
+            if self.shutdown.pause.is_cancelled() {
+                info!("Pause requested - saving state");
+                self.save_paused_state(
+                    run_state,
+                    failed_pipelines,
+                    completed_pipelines,
+                    PauseReason::Manual,
+                )
+                .await?;
+                return Err(MigrationError::Paused);
+            }
+
+            // Execute the current level's pipelines
+            match self
+                .execute_level(
+                    &executable,
+                    run_state,
+                    completed_pipelines,
+                    failed_pipelines,
+                )
+                .await
+            {
+                Err(MigrationError::Paused) => {
+                    info!(
+                        "Pause detected during level {} - saving state",
+                        level_idx + 1
+                    );
+
+                    self.save_paused_state(
+                        run_state,
+                        failed_pipelines,
+                        completed_pipelines,
+                        PauseReason::Manual,
+                    )
+                    .await?;
+
+                    return Err(MigrationError::Paused);
+                }
+                Err(e) => return Err(e),
+                Ok(()) => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn finalize_run(
+        self,
+        run_result: Result<(), MigrationError>,
+        mut run_state: RunState,
+        failed_pipelines: HashSet<String>,
+    ) -> Result<(), MigrationError> {
+        match run_result {
+            // Process finalize state when the migration actually completed cleanly or handled its pipeline failures
+            Ok(()) | Err(MigrationError::PipelinesFailed(_)) => {
+                run_state.status = RunStatus::Completed {
+                    completed_at: chrono::Utc::now(),
+                };
+
+                let run_id = self.exec_ctx.run_id();
+                for ps in &mut run_state.pipelines {
+                    if ps.status == PipelineStatus::Pending {
+                        if failed_pipelines.contains(&ps.name) {
+                            ps.status = PipelineStatus::Failed {
+                                error: "Failed during execution".to_string(),
+                            };
+                        } else {
+                            ps.status = PipelineStatus::Completed;
+                        }
+                    }
+
+                    // Always refresh rows_done from checkpoint (authoritative cumulative count)
+                    if let Ok(Some(cp)) = self
+                        .exec_ctx
+                        .state
+                        .load_checkpoint(&run_id, &ps.item_id, "part-0")
+                        .await
+                    {
+                        ps.rows_done = cp.rows_done;
+                    }
+                }
+
+                self.exec_ctx.state.save_run_state(&run_state).await?;
+                self.exec_ctx
+                    .state
+                    .append_wal(&WalEntry::RunDone {
+                        run_id: self.exec_ctx.run_id(),
+                    })
+                    .await?;
+
+                self.finalize(failed_pipelines)
+            }
+            // Retain unhandled structural errors (Pauses, Manual Cancelations) directly
+            Err(e) => Err(e),
+        }
+    }
+
+    fn finalize(self, failed_pipelines: HashSet<String>) -> Result<(), MigrationError> {
+        if failed_pipelines.is_empty() {
+            info!("Migration completed successfully with all pipelines");
+            return Ok(());
+        }
+
+        let failed_list: Vec<String> = failed_pipelines.into_iter().collect();
+        error!(
+            "Migration completed with {} failed/skipped pipelines: {:?}",
+            failed_list.len(),
+            failed_list
+        );
+
+        match self.exec_config.on_failure {
+            FailureStrategy::Continue => {
+                warn!(
+                    "Continue strategy: returning Ok despite {} failed/skipped pipelines",
+                    failed_list.len()
+                );
+                Ok(())
+            }
+            FailureStrategy::FailFast => Err(MigrationError::PipelinesFailed(failed_list)),
+        }
     }
 
     /// Filter pipelines in a level, marking skipped ones as failed so dependents propagate.
@@ -189,9 +451,11 @@ impl DagExecutor {
     async fn execute_level(
         &self,
         executable: &[String],
+        run_state: &mut RunState,
+        completed_pipelines: &mut HashSet<String>,
         failed_pipelines: &mut HashSet<String>,
     ) -> Result<(), MigrationError> {
-        let results: Vec<(String, Result<(), MigrationError>)> = match self.exec_config.strategy {
+        let results: Vec<(String, Result<u64, MigrationError>)> = match self.exec_config.strategy {
             ExecutionStrategy::Sequential => {
                 let mut results = Vec::new();
                 for name in executable {
@@ -220,7 +484,19 @@ impl DagExecutor {
 
         for (name, result) in results {
             match result {
-                Ok(_) => info!("Pipeline '{}' completed successfully", name),
+                Ok(rows) => {
+                    info!("Pipeline '{}' completed successfully ({} rows)", name, rows);
+                    self.mark_pipeline_completed(&name, rows, run_state, completed_pipelines)
+                        .await?;
+                }
+                Err(MigrationError::Paused) => {
+                    info!("Pipeline '{}' paused at batch boundary", name);
+                    return Err(MigrationError::Paused);
+                }
+                Err(MigrationError::ShutdownRequested) => {
+                    info!("Pipeline '{}' stopped due to shutdown", name);
+                    return Err(MigrationError::ShutdownRequested);
+                }
                 Err(e) => {
                     error!("Pipeline '{}' failed: {}", name, e);
                     failed_pipelines.insert(name.clone());
@@ -235,32 +511,87 @@ impl DagExecutor {
         Ok(())
     }
 
-    fn finalize(self, failed_pipelines: HashSet<String>) -> Result<(), MigrationError> {
-        if failed_pipelines.is_empty() {
-            info!("Migration completed successfully with all pipelines");
-            return Ok(());
-        }
+    /// Mark a pipeline as completed in the RunState and persist to sled.
+    async fn mark_pipeline_completed(
+        &self,
+        name: &str,
+        rows_done: u64,
+        run_state: &mut RunState,
+        completed_pipelines: &mut HashSet<String>,
+    ) -> Result<(), MigrationError> {
+        completed_pipelines.insert(name.to_string());
 
-        let failed_list: Vec<String> = failed_pipelines.into_iter().collect();
-        error!(
-            "Migration completed with {} failed/skipped pipelines: {:?}",
-            failed_list.len(),
-            failed_list
-        );
-
-        match self.exec_config.on_failure {
-            FailureStrategy::Continue => {
-                warn!(
-                    "Continue strategy: returning Ok despite {} failed/skipped pipelines",
-                    failed_list.len()
-                );
-                Ok(())
+        if let Some(ps) = run_state.pipelines.iter_mut().find(|p| p.name == name) {
+            ps.status = PipelineStatus::Completed;
+            // Read cumulative rows from checkpoint (authoritative source),
+            // fall back to prior count + current session metrics.
+            if let Ok(Some(cp)) = self
+                .exec_ctx
+                .state
+                .load_checkpoint(&self.exec_ctx.run_id(), &ps.item_id, "part-0")
+                .await
+            {
+                ps.rows_done = cp.rows_done;
+            } else {
+                ps.rows_done += rows_done;
             }
-            FailureStrategy::FailFast => Err(MigrationError::PipelinesFailed(failed_list)),
         }
+
+        self.exec_ctx.state.save_run_state(run_state).await?;
+        Ok(())
     }
 
-    async fn execute_pipeline(&self, pipeline_name: &str) -> Result<(), MigrationError> {
+    /// Save RunState as paused with current pipeline statuses.
+    async fn save_paused_state(
+        &self,
+        base_state: &engine_state::models::RunState,
+        failed_pipelines: &HashSet<String>,
+        completed_pipelines: &HashSet<String>,
+        reason: engine_state::models::PauseReason,
+    ) -> Result<(), MigrationError> {
+        use engine_state::models::{PipelineStatus, RunStatus};
+
+        let mut state = base_state.clone();
+        state.status = RunStatus::Paused {
+            reason: reason.clone(),
+            paused_at: chrono::Utc::now(),
+        };
+
+        let run_id = self.exec_ctx.run_id();
+        for ps in &mut state.pipelines {
+            if completed_pipelines.contains(&ps.name) {
+                ps.status = PipelineStatus::Completed;
+            } else if failed_pipelines.contains(&ps.name) {
+                ps.status = PipelineStatus::Failed {
+                    error: "Failed during execution".to_string(),
+                };
+            }
+
+            // Update rows_done from checkpoint (cumulative) for all pipelines
+            if let Ok(Some(cp)) = self
+                .exec_ctx
+                .state
+                .load_checkpoint(&run_id, &ps.item_id, "part-0")
+                .await
+            {
+                ps.rows_done = cp.rows_done;
+            }
+        }
+
+        self.exec_ctx.state.save_run_state(&state).await?;
+        self.exec_ctx
+            .state
+            .append_wal(&WalEntry::RunPaused {
+                run_id: self.exec_ctx.run_id(),
+                reason,
+            })
+            .await?;
+
+        Ok(())
+    }
+
+    /// Returns (rows_processed) on success.
+    async fn execute_pipeline(&self, pipeline_name: &str) -> Result<u64, MigrationError> {
         let (idx, pipeline) = self
             .plan
             .pipelines
@@ -274,7 +605,7 @@ impl DagExecutor {
         self.run_pipeline(idx, pipeline).await
     }
 
-    async fn run_pipeline(&self, idx: usize, pipeline: &Pipeline) -> Result<(), MigrationError> {
+    async fn run_pipeline(&self, idx: usize, pipeline: &Pipeline) -> Result<u64, MigrationError> {
         let start_time = std::time::Instant::now();
         info!("Starting migration pipeline {}", pipeline.destination.table);
 
@@ -323,22 +654,23 @@ impl DagExecutor {
             dst_driver,
             settings,
             schema_ops,
-            self.cancel.clone(),
+            self.shutdown.clone(),
             self.event_bus.clone(),
             self.done_ops.clone(),
             cascade_tables,
         );
 
         // Execute: pre-DDL -> data migration -> post-DDL
-        orchestrator.execute().await?;
+        let rows = orchestrator.execute().await?;
 
         info!(
-            "Migration item {} completed in {:.2}s",
+            "Migration item {} completed in {:.2}s ({} rows)",
             pipeline.destination.table,
-            start_time.elapsed().as_secs_f64()
+            start_time.elapsed().as_secs_f64(),
+            rows
         );
 
-        Ok(())
+        Ok(rows)
     }
 
     async fn prepare_endpoints(
@@ -358,7 +690,10 @@ impl DagExecutor {
             Source::with_cascade(d.clone(), pipeline, mapping, offset_strategy, cascade_meta).await
         })?;
 
-        let destination = Self::create_destination(dst_driver, pipeline, src_driver.dialect())?;
+        let destination = dispatch_driver!(dst_driver, |d| {
+            d.clone()
+                .into_destination(&pipeline.destination.table, src_driver.dialect())
+        });
 
         Ok((source, destination, expanded_schema_ops, cascade_tables))
     }
@@ -375,90 +710,6 @@ impl DagExecutor {
         } else {
             Ok((None, None))
         }
-    }
-
-    /// Initializes the `PipelineContext` and commits the initialization event to the WAL.
-    async fn create_pipeline_context(
-        &self,
-        idx: usize,
-        pipeline: &Pipeline,
-        source: Source,
-        destination: Destination,
-        mapping: TransformationMetadata,
-        offset_strategy: Arc<dyn OffsetStrategy>,
-    ) -> Result<PipelineContext, MigrationError> {
-        let exec_ctx = Arc::new(self.exec_ctx.clone());
-        let run_id = self.exec_ctx.run_id();
-        let item_id = make_item_id(&self.plan.hash(), &pipeline.destination.table, idx);
-
-        let pipeline_ctx = PipelineContext::builder(exec_ctx.clone())
-            .run_id(run_id.clone())
-            .item_id(item_id.clone())
-            .source(source)
-            .destination(destination)
-            .pipeline(pipeline.clone())
-            .mapping(mapping)
-            .state(self.exec_ctx.state.clone())
-            .offset_strategy(offset_strategy)
-            .cursor(Cursor::None)
-            .build();
-
-        pipeline_ctx
-            .state
-            .append_wal(&WalEntry::ItemStart { run_id, item_id })
-            .await?;
-
-        Ok(pipeline_ctx)
-    }
-
-    /// Create a destination sink for the given driver.
-    fn create_destination(
-        driver: &DriverRef,
-        pipeline: &Pipeline,
-        source_dialect: Dialect,
-    ) -> Result<Destination, MigrationError> {
-        match driver {
-            DriverRef::Postgres(d) => Ok(Destination::postgres(
-                d.clone(),
-                &pipeline.destination.table,
-                source_dialect,
-            )),
-            // Uncomment as destination support is implemented:
-            // DriverRef::MySql(d) => Ok(Destination::mysql(
-            //     d.clone(),
-            //     &pipeline.destination.table,
-            //     source_dialect,
-            // )),
-            _ => Err(DriverError::UnsupportedScheme(format!(
-                "{:?} destination not yet implemented for pipeline '{}'",
-                driver.dialect(),
-                pipeline.name
-            ))
-            .into()),
-        }
-    }
-
-    /// Validate settings and collect schema operations without executing DDL.
-    async fn validate_and_plan_settings(
-        &self,
-        ctx: &mut PipelineContext,
-        src_driver: &DriverRef,
-        dst_driver: &DriverRef,
-        pipeline: &Pipeline,
-    ) -> Result<(ValidatedSettings, SchemaOps), MigrationError> {
-        let result = dispatch_drivers!(src_driver, dst_driver, |src, dst| {
-            settings::validate_and_plan::<Src, Dst>(
-                ctx,
-                src.clone(),
-                dst.clone(),
-                &pipeline.settings,
-                self.flags.dry_run,
-                self.flags.integrity,
-            )
-            .await?
-        });
-
-        Ok(result)
     }
 
     /// Expand graph references: introspect FK dependencies and produce schema ops + cascade metadata.
@@ -494,16 +745,60 @@ impl DagExecutor {
         Ok((Some(result.schema_ops), cascade_meta))
     }
 
-    async fn subscribe_to_events(event_bus: &EventBus) {
-        let (event_tx, mut event_rx) = mpsc::channel::<Arc<MigrationEvent>>(100);
-        event_bus.subscribe::<MigrationEvent>(event_tx).await;
+    /// Initializes the `PipelineContext` and commits the initialization event to the WAL.
+    async fn create_pipeline_context(
+        &self,
+        idx: usize,
+        pipeline: &Pipeline,
+        source: Source,
+        destination: Destination,
+        mapping: TransformationMetadata,
+        offset_strategy: Arc<dyn OffsetStrategy>,
+    ) -> Result<PipelineContext, MigrationError> {
+        let exec_ctx = Arc::new(self.exec_ctx.clone());
+        let run_id = self.exec_ctx.run_id();
+        let item_id = make_item_id(self.plan.hash(), &pipeline.destination.table, idx);
 
-        tokio::spawn(async move {
-            while let Some(event) = event_rx.recv().await {
-                info!("Migration Event: {}", event);
-            }
+        let pipeline_ctx = PipelineContext::builder(exec_ctx.clone())
+            .run_id(run_id.clone())
+            .item_id(item_id.clone())
+            .source(source)
+            .destination(destination)
+            .pipeline(pipeline.clone())
+            .mapping(mapping)
+            .state(self.exec_ctx.state.clone())
+            .offset_strategy(offset_strategy)
+            .cursor(Cursor::None)
+            .build();
+
+        pipeline_ctx
+            .state
+            .append_wal(&WalEntry::ItemStart { run_id, item_id })
+            .await?;
+
+        Ok(pipeline_ctx)
+    }
+
+    /// Validate settings and collect schema operations without executing DDL.
+    async fn validate_and_plan_settings(
+        &self,
+        ctx: &mut PipelineContext,
+        src_driver: &DriverRef,
+        dst_driver: &DriverRef,
+        pipeline: &Pipeline,
+    ) -> Result<(ValidatedSettings, SchemaOps), MigrationError> {
+        let result = dispatch_drivers!(src_driver, dst_driver, |src, dst| {
+            settings::validate_and_plan::<Src, Dst>(
+                ctx,
+                src.clone(),
+                dst.clone(),
+                &pipeline.settings,
+                self.flags.dry_run,
+                self.flags.integrity,
+            )
+            .await?
         });
 
-        info!("Event subscriber configured for migration monitoring");
+        Ok(result)
     }
 }

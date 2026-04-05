@@ -1,7 +1,7 @@
 use model::{
     core::value::FieldValue,
     pagination::{cursor::Cursor, page::FetchResult},
-    records::Record,
+    records::{OpType, Record},
 };
 use std::sync::Arc;
 use tracing::warn;
@@ -143,7 +143,7 @@ impl FileDataSource for CsvDataSource {
                         continue;
                     }
 
-                    let row = Record::new(&entity_name, fields);
+                    let row = Record::new(&entity_name, fields, OpType::default());
                     result.push(row);
                 }
                 Some(Err(e)) => {

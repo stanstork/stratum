@@ -3,7 +3,7 @@ use crate::{
         types::Type,
         value::{FieldValue, Value},
     },
-    records::Record,
+    records::{OpType, Record},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -140,7 +140,7 @@ impl FailedRow {
             })
             .collect();
 
-        Record::new(entity, field_values)
+        Record::new(entity, field_values, OpType::default())
     }
 
     pub fn with_execution_context(

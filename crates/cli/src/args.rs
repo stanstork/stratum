@@ -43,11 +43,17 @@ pub struct Cli {
 impl Cli {
     /// Returns true if running in TUI mode
     pub fn is_tui_mode(&self) -> bool {
-        matches!(self.command, Commands::Apply { tui: true, .. })
+        matches!(
+            self.command,
+            Commands::Apply { tui: true, .. } | Commands::Resume { tui: true, .. }
+        )
     }
 
     /// Returns true if running in pretty output mode
     pub fn is_pretty_mode(&self) -> bool {
-        matches!(self.command, Commands::Apply { pretty: true, .. })
+        matches!(
+            self.command,
+            Commands::Apply { pretty: true, .. } | Commands::Resume { pretty: true, .. }
+        )
     }
 }

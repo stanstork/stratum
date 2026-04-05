@@ -3,6 +3,7 @@ use engine_core::{
     context::env::EnvContext, event_bus::bus::EventBus,
     plan::execution::ExecutionPlan as CoreExecutionPlan,
 };
+use engine_infra::shutdown::ShutdownSignal;
 use engine_runtime::dag::{Dag, executor::DagExecutor};
 use model::{events::migration::MigrationEvent, execution::flags::ExecutionFlags};
 use std::{sync::Arc, time::Duration};
@@ -52,14 +53,14 @@ pub fn spawn_executor(
     bus: EventBus,
     plan: CoreExecutionPlan,
     graph: Dag,
-    cancel: CancellationToken,
+    shutdown: ShutdownSignal,
     env: Arc<EnvContext>,
 ) {
     tokio::spawn(async move {
         // Debounce start to let TUI paint first frame
         tokio::time::sleep(Duration::from_millis(500)).await;
 
-        let result = DagExecutor::with_event_bus(plan, flags, cancel, bus, env).await;
+        let result = DagExecutor::with_event_bus(plan, flags, shutdown, bus, env).await;
 
         match result {
             Ok(executor) => {

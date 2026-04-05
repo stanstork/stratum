@@ -4,17 +4,27 @@ use std::collections::HashMap;
 
 pub mod batch;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum OpType {
+    #[default]
+    Insert,
+    Update,
+    Delete,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Record {
     pub schema: String,
     pub fields: Vec<FieldValue>,
+    pub op_type: OpType,
 }
 
 impl Record {
-    pub fn new(schema: &str, fields: Vec<FieldValue>) -> Self {
+    pub fn new(schema: &str, fields: Vec<FieldValue>, op_type: OpType) -> Self {
         Record {
             schema: schema.to_string(),
             fields,
+            op_type,
         }
     }
 

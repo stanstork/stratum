@@ -1,15 +1,40 @@
 use crate::{Cli, error::CliError};
 use clap::{Subcommand, ValueEnum};
+use engine_infra::shutdown::ShutdownSignal;
 use engine_processing::EnvContext;
+use engine_state::sled_store::SledStateStore;
 use model::execution::flags::IntegrityMode;
-use std::sync::Arc;
-use tokio_util::sync::CancellationToken;
+use std::{path::PathBuf, sync::Arc};
 
 pub mod apply;
+pub mod pause;
 pub mod plan;
+pub mod reset;
+pub mod resume;
+pub mod status;
 pub mod test_conn;
 pub mod verify;
 pub mod version;
+
+const STATE_DIR: &str = ".stratum/state";
+
+/// Returns the path to the state directory (~/.stratum/state/).
+pub fn state_dir() -> Result<PathBuf, CliError> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| CliError::Unknown("Could not determine home directory".to_string()))?;
+    Ok(home.join(STATE_DIR))
+}
+
+/// Opens the sled state store from the default location.
+pub fn open_state_store() -> Result<SledStateStore, CliError> {
+    let path = state_dir()?;
+    SledStateStore::open(&path).map_err(|e| {
+        CliError::Unknown(format!(
+            "Failed to open state store at {}: {e}",
+            path.display()
+        ))
+    })
+}
 
 /// Sampling method for data preview
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
@@ -125,6 +150,56 @@ pub enum Commands {
         )]
         format: Option<String>,
     },
+    /// Show migration run status
+    Status {
+        #[arg(
+            short = 'c',
+            long,
+            help = "Path to SMQL config file. If provided, shows status for that migration only"
+        )]
+        config: Option<String>,
+    },
+    /// Resume a previously paused migration
+    Resume {
+        #[arg(
+            short = 'c',
+            long,
+            help = "Path to SMQL config file (auto-discovered if not specified)"
+        )]
+        config: Option<String>,
+
+        #[arg(long, help = "Run with interactive TUI (experimental)")]
+        tui: bool,
+
+        #[arg(long, help = "Run with pretty colored output")]
+        pretty: bool,
+
+        #[arg(long, help = "Compute integrity hashes and receipts during migration")]
+        integrity: bool,
+
+        #[arg(
+            long,
+            help = "Store individual row hashes in the receipt (implies --integrity)"
+        )]
+        full_integrity: bool,
+    },
+    /// Clear all state for a migration (checkpoints, WAL, run state)
+    Reset {
+        #[arg(
+            short = 'c',
+            long,
+            help = "Path to SMQL config file (auto-discovered if not specified)"
+        )]
+        config: Option<String>,
+
+        #[arg(long, help = "Skip confirmation prompt")]
+        force: bool,
+    },
+    /// Send pause signal to a running migration
+    Pause {
+        #[arg(short = 'c', long, help = "Path to SMQL config file")]
+        config: String,
+    },
     /// Show version information
     Version,
 }
@@ -132,7 +207,7 @@ pub enum Commands {
 /// Executes the appropriate command based on CLI arguments
 pub async fn execute_command(
     cli: &Cli,
-    cancel: CancellationToken,
+    shutdown: ShutdownSignal,
     env: Arc<EnvContext>,
 ) -> Result<(), CliError> {
     match &cli.command {
@@ -145,20 +220,14 @@ pub async fn execute_command(
             integrity,
             full_integrity,
         } => {
-            let integrity_mode = if *full_integrity {
-                IntegrityMode::FullHashes
-            } else if *integrity {
-                IntegrityMode::BatchHashes
-            } else {
-                IntegrityMode::Off
-            };
+            let integrity_mode = IntegrityMode::new(*integrity, *full_integrity);
             apply::execute(
                 config.clone(),
                 *tui,
                 *pretty,
                 *exact_filter,
                 integrity_mode,
-                cancel,
+                shutdown,
                 env,
             )
             .await
@@ -166,6 +235,7 @@ pub async fn execute_command(
         Commands::Verify { config, output } => {
             verify::execute(config.clone(), output.clone(), env.clone()).await
         }
+        Commands::Status { config } => status::execute(config.clone(), env).await,
         Commands::TestConn { url, format } => {
             test_conn::execute(cli, url.clone(), format.clone()).await
         }
@@ -173,5 +243,17 @@ pub async fn execute_command(
             version::execute();
             Ok(())
         }
+        Commands::Resume {
+            config,
+            tui,
+            pretty,
+            integrity,
+            full_integrity,
+        } => {
+            let integrity_mode = IntegrityMode::new(*integrity, *full_integrity);
+            resume::execute(config.clone(), *tui, *pretty, integrity_mode, shutdown, env).await
+        }
+        Commands::Reset { config, force } => reset::execute(config.clone(), *force, env).await,
+        Commands::Pause { config } => pause::execute(Some(config.clone()), env).await,
     }
 }

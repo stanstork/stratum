@@ -2,6 +2,7 @@ use crate::{
     consumer::components::writer::BatchWriter, error::ConsumerError, state_manager::StateManager,
 };
 use engine_core::{metrics::Metrics, state::models::Checkpoint};
+use engine_state::models::CheckpointStage;
 use model::records::batch::Batch;
 use tokio::sync::mpsc;
 use tracing::info;
@@ -69,7 +70,7 @@ impl BatchCoordinator {
         // Mark as being written
         self.state_manager
             .save_checkpoint(
-                "write",
+                &CheckpointStage::Write,
                 &batch.cursor,
                 Some(&batch.next),
                 &batch.id,
@@ -96,7 +97,13 @@ impl BatchCoordinator {
             })?;
 
         self.state_manager
-            .save_checkpoint("committed", &batch.next, None, &batch.id, new_rows)
+            .save_checkpoint(
+                &CheckpointStage::Committed,
+                &batch.next,
+                None,
+                &batch.id,
+                new_rows,
+            )
             .await
             .map_err(|e| ConsumerError::Checkpoint {
                 batch_id: batch.id.clone(),

@@ -1,14 +1,15 @@
 use crate::builder::{
     ReportBuilder, errors::ReportBuilderResult, infra::metadata_cache::MetadataCacheRef,
 };
+use connectors::traits::introspector::SchemaIntrospector;
 use engine_config::settings::validated::ValidatedSettings;
 use engine_core::{
-    context::exec::ConnectionPool,
-    dispatch_driver,
-    drivers::DriverRef,
-    schema::{plan::SchemaPlan, type_registry::Dialect},
+    context::exec::ConnectionPool, dispatch_driver, drivers::DriverRef, schema::plan::SchemaPlan,
 };
-use engine_processing::io::{destination::Destination, source::Source};
+use engine_processing::io::{
+    destination::{Destination, IntoDestination},
+    source::Source,
+};
 use model::{execution::pipeline::Pipeline, transform::mapping::TransformationMetadata};
 use query_builder::offsets::OffsetStrategyFactory;
 use std::sync::Arc;
@@ -77,15 +78,14 @@ impl PipelineAnalysisResources {
         });
 
         let source_dialect = src_driver.dialect();
+        let core_data_destination = dispatch_driver!(dst_driver.clone(), |d| {
+            d.clone()
+                .into_destination(&pipeline.destination.table, source_dialect)
+        });
 
-        let core_data_destination =
-            Self::create_destination(&dst_driver, pipeline, source_dialect)?;
-
-        let introspector: Arc<dyn connectors::traits::introspector::SchemaIntrospector> =
-            match &src_driver {
-                DriverRef::Postgres(d) => d.clone(),
-                DriverRef::MySql(d) => d.clone(),
-            };
+        let introspector = dispatch_driver!(&src_driver, |d| {
+            d.clone() as Arc<dyn SchemaIntrospector>
+        });
 
         let validated_settings = builder
             .validate_settings(
@@ -119,34 +119,6 @@ impl PipelineAnalysisResources {
             schema_plan,
             validated_settings,
         })
-    }
-
-    /// Create a destination sink. Unsupported drivers return an error.
-    fn create_destination(
-        driver: &DriverRef,
-        pipeline: &Pipeline,
-        source_dialect: Dialect,
-    ) -> ReportBuilderResult<Destination> {
-        match driver {
-            DriverRef::Postgres(d) => Ok(Destination::postgres(
-                d.clone(),
-                &pipeline.destination.table,
-                source_dialect,
-            )),
-            // Uncomment as destination support is implemented:
-            // DriverRef::MySql(d) => Ok(Destination::mysql(
-            //     d.clone(),
-            //     &pipeline.destination.table,
-            //     source_dialect,
-            // )),
-            _ => Err(
-                crate::builder::errors::ReportBuilderError::UnsupportedDriver(format!(
-                    "{:?} destination not yet supported in planner for pipeline '{}'",
-                    driver.dialect(),
-                    pipeline.name
-                )),
-            ),
-        }
     }
 }
 
