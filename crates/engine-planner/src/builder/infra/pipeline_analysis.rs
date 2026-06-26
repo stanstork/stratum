@@ -10,6 +10,7 @@ use engine_processing::io::{
     destination::{Destination, IntoDestination},
     source::Source,
 };
+use engine_wasm::registry::{PluginRegistry, plugin_columns};
 use model::{execution::pipeline::Pipeline, transform::mapping::TransformationMetadata};
 use query_builder::offsets::OffsetStrategyFactory;
 use std::sync::Arc;
@@ -34,6 +35,7 @@ impl PipelineAnalysisResources {
         pipeline: &Pipeline,
         connections: &mut ConnectionPool,
         builder: &ReportBuilder,
+        plugin_registry: &Arc<PluginRegistry>,
     ) -> ReportBuilderResult<Self> {
         let src_driver = DriverRef::resolve(
             &pipeline.source.connection.driver,
@@ -49,7 +51,7 @@ impl PipelineAnalysisResources {
         )
         .await?;
 
-        Self::build(pipeline, src_driver, dst_driver, builder).await
+        Self::build(pipeline, src_driver, dst_driver, builder, plugin_registry).await
     }
 
     /// Build all analysis resources from resolved drivers.
@@ -58,6 +60,7 @@ impl PipelineAnalysisResources {
         src_driver: DriverRef,
         dst_driver: DriverRef,
         builder: &ReportBuilder,
+        plugin_registry: &Arc<PluginRegistry>,
     ) -> ReportBuilderResult<Self> {
         let source_cache = MetadataCacheRef::new(
             &src_driver,
@@ -70,7 +73,9 @@ impl PipelineAnalysisResources {
             builder.config.metadata_timeout,
         );
 
-        let mapping = TransformationMetadata::new(pipeline);
+        let mut mapping = TransformationMetadata::new(pipeline);
+        mapping.set_plugin_columns(plugin_columns(pipeline, plugin_registry));
+
         let offset_strategy = OffsetStrategyFactory::from_pagination(&pipeline.source.pagination);
 
         let core_data_source = dispatch_driver!(&src_driver, |d| {

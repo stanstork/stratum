@@ -1,0 +1,45 @@
+// capabilities.smql - sandbox capability gating + resource-limit overrides.
+//
+// `geo_enrich` calls the host HTTP capability. It only works when the decl
+// grants `allow_http = true`. To test the GATE, remove `allow_http` (or set it
+// false) and re-run: the host must DENY __host_http_request and the row errors
+// cleanly - no silent success, no panic.
+//
+// Needs network (or a local stub at the URL in geo_enrich.js).
+//
+//   plugin validate -c examples/plugins/configs/capabilities.smql
+//   stratum apply   -c examples/plugins/configs/capabilities.smql
+
+define {
+    mysql_url    = env("MYSQL_URL",    "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+// Capability grant + explicit resource ceilings. Limits are upper bounds; these
+// generous values are well above what the plugin needs. Tighten `fuel_limit` to
+// e.g. 1000 to prove the override forces a fuel trap even on light work.
+plugin "geo_enrich" {
+    path               = "examples/plugins/js/geo_enrich.js"
+    allow_http         = true
+    allow_log          = true
+    memory_limit_bytes = 134217728   // 128 MB
+    fuel_limit         = 100000000   // 100M
+    timeout_ms         = 30000       // 30s
+}
+
+pipeline "enrich" {
+    from { connection = connection.src  table = "address" }
+    to   { connection = connection.dst  table = "address_geo" }
+
+    select {
+        address_id = address.address_id
+        // address has no IP column in sakila; this maps a stand-in so the config
+        // parses. For a real run, point `ip` at a column that holds an address.
+        country    = plugin.geo_enrich({ ip: address.address })
+    }
+
+    settings { create_missing_tables = true  batch_size = 50 }
+}

@@ -14,12 +14,12 @@ use engine_processing::{context::PipelineContext, io::format::DataFormat};
 use std::{slice, sync::Arc};
 use tracing::info;
 
-pub struct InferSchemaSetting<S: SchemaDriver, D: SchemaDriver> {
-    context: SchemaSettingContext<S, D>,
+pub struct InferSchemaSetting<D: SchemaDriver> {
+    context: SchemaSettingContext<D>,
 }
 
 #[async_trait]
-impl<S: SchemaDriver, D: SchemaDriver> MigrationSetting for InferSchemaSetting<S, D> {
+impl<D: SchemaDriver> MigrationSetting for InferSchemaSetting<D> {
     fn phase(&self) -> MigrationSettingsPhase {
         MigrationSettingsPhase::InferSchema
     }
@@ -39,8 +39,8 @@ impl<S: SchemaDriver, D: SchemaDriver> MigrationSetting for InferSchemaSetting<S
     }
 }
 
-impl<S: SchemaDriver, D: SchemaDriver> InferSchemaSetting<S, D> {
-    pub async fn new(ctx: SchemaSettingContext<S, D>) -> Self {
+impl<D: SchemaDriver> InferSchemaSetting<D> {
+    pub async fn new(ctx: SchemaSettingContext<D>) -> Self {
         Self { context: ctx }
     }
 

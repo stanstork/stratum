@@ -1,6 +1,33 @@
+use std::path::PathBuf;
 use std::process::Command;
 
+/// Embed the JS plugin runtime WASM so the CLI can auto-compile `.js` plugins with no extra setup.
+fn embed_js_runtime() {
+    let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    let candidates = [
+        std::env::var_os("STRATUM_JS_RUNTIME").map(PathBuf::from),
+        Some(manifest.join("../engine-wasm/src/tests/fixtures/stratum-plugin-js-runtime.wasm")),
+    ];
+
+    let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("js_runtime.wasm");
+    let mut embedded = false;
+    for src in candidates.into_iter().flatten() {
+        if src.is_file() {
+            std::fs::copy(&src, &out).expect("copy embedded JS runtime");
+            println!("cargo:rerun-if-changed={}", src.display());
+            embedded = true;
+            break;
+        }
+    }
+    if !embedded {
+        std::fs::write(&out, []).expect("write empty JS runtime placeholder");
+    }
+    println!("cargo:rerun-if-env-changed=STRATUM_JS_RUNTIME");
+}
+
 fn main() {
+    embed_js_runtime();
+
     // Get git commit hash
     let git_hash = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])

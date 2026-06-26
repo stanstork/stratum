@@ -5,9 +5,15 @@ use model::records::Record;
 
 pub mod mysql;
 pub mod postgres;
+pub mod wasm;
 
 #[async_trait]
 pub trait Sink: Send + Sync {
+    /// One-time setup before the first batch. Default: no-op.
+    async fn prepare(&self) -> Result<(), DriverError> {
+        Ok(())
+    }
+
     /// Write a batch of rows to the destination table.
     async fn write_batch(&self, meta: &TableMetadata, rows: &[Record]) -> Result<u64, DriverError>;
 
@@ -25,5 +31,9 @@ pub trait Sink: Send + Sync {
         Err(SinkError::FastPathNotSupported(
             "Fast path not implemented for this sink".to_string(),
         ))
+    }
+
+    async fn finalize(&self) -> Result<(), DriverError> {
+        Ok(())
     }
 }

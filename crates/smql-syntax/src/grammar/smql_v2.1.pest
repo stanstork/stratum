@@ -38,6 +38,7 @@ kw_not         = @{ "not" ~ !(ASCII_ALPHANUMERIC | "_") }
 kw_null        = @{ "null" ~ !(ASCII_ALPHANUMERIC | "_") }
 kw_and         = @{ "and" ~ !(ASCII_ALPHANUMERIC | "_") }
 kw_or          = @{ "or" ~ !(ASCII_ALPHANUMERIC | "_") }
+kw_plugin      = @{ "plugin" ~ !(ASCII_ALPHANUMERIC | "_") }
 
 // ============================================================
 // Literals
@@ -97,6 +98,9 @@ execution_block = { kw_execution ~ lbrace ~ attribute* ~ rbrace }
 // Connection block (with string name)
 connection_block = { kw_connection ~ lit_string ~ lbrace ~ (attribute | nested_block)* ~ rbrace }
 
+// Plugin block (with string name) - defines a WASM plugin and its permissions
+plugin_block = { kw_plugin ~ lit_string ~ lbrace ~ (attribute | nested_block)* ~ rbrace }
+
 // Pipeline block (with string name)
 pipeline_block = { kw_pipeline ~ lit_string ~ lbrace ~ pipeline_content* ~ rbrace }
 
@@ -130,9 +134,10 @@ join_clause       = { ident ~ kw_from ~ ident ~ (kw_where ~ expression)? }
 select_block      = { kw_select ~ lbrace ~ field_mapping* ~ rbrace }
 named_select_block = { kw_select ~ lit_string ~ lbrace ~ field_mapping* ~ rbrace }
 field_mapping     = { ident ~ op_eq ~ expression }
-validate_block    = { kw_validate ~ lbrace ~ validation_check* ~ rbrace }
+validate_block    = { kw_validate ~ lbrace ~ (wasm_rule | validation_check)* ~ rbrace }
 validation_check  = { (kw_assert | kw_warn) ~ lit_string ~ lbrace ~ validation_body ~ rbrace }
 validation_body   = { (("check" ~ op_eq ~ expression) | ("message" ~ op_eq ~ lit_string) | ("action" ~ op_eq ~ ident))* }
+wasm_rule         = { "rule" ~ lit_string ~ lbrace ~ "filter" ~ op_eq ~ plugin_call ~ "on_fail" ~ op_eq ~ ident ~ rbrace }
 on_error_block    = { kw_on_error ~ lbrace ~ (retry_block | failed_rows_block)* ~ rbrace }
 retry_block       = { kw_retry ~ lbrace ~ attribute* ~ rbrace }
 failed_rows_block = { kw_failed_rows ~ lbrace ~ (attribute | nested_block)* ~ rbrace }
@@ -173,6 +178,7 @@ primary = _{
   | lit_number
   | lit_string
   | when_expr
+  | plugin_call
   | fn_call
   | array_literal
   | dotted_ident
@@ -185,8 +191,13 @@ when_branch   = { expression ~ kw_then ~ expression }
 fn_call       = { ident ~ lparen ~ (expression ~ (comma ~ expression)*)? ~ rparen }
 array_literal = { lbracket ~ (expression ~ (comma ~ expression)*)? ~ comma? ~ rbracket }
 
+// Plugin call: plugin.<name>({ field: source.column, ... })
+plugin_call        = { kw_plugin ~ "." ~ ident ~ lparen ~ plugin_input_block ~ rparen }
+plugin_input_block = { lbrace ~ (plugin_input_field ~ (comma ~ plugin_input_field)*)? ~ comma? ~ rbrace }
+plugin_input_field = { ident ~ ":" ~ (dotted_ident | ident) }
+
 // ============================================================
 // Program Entry Point
 // ============================================================
 
-program = { SOI ~ (define_block | execution_block | connection_block | pipeline_block)* ~ EOI }
+program = { SOI ~ (define_block | execution_block | connection_block | plugin_block | pipeline_block)* ~ EOI }

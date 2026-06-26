@@ -2,6 +2,7 @@ use crate::dag::builder::PipelineNode;
 use std::collections::HashMap;
 
 pub mod builder;
+pub mod endpoint;
 pub mod error;
 pub mod executor;
 

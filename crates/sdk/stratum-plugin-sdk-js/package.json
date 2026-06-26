@@ -1,0 +1,26 @@
+{
+    "name": "@stratum/plugin-sdk",
+    "version": "0.1.0",
+    "description": "JavaScript SDK for Stratum WASM plugins",
+    "main": "src/index.js",
+    "types": "types/index.d.ts",
+    "files": [
+        "src",
+        "types",
+        "README.md"
+    ],
+    "engines": {
+        "node": ">=18"
+    },
+    "scripts": {
+        "test": "node --test test/*.test.js"
+    },
+    "keywords": [
+        "stratum",
+        "wasm",
+        "migration",
+        "plugin",
+        "etl"
+    ],
+    "license": "Apache-2.0"
+}

@@ -22,42 +22,6 @@ impl StateManager {
         Self { ids, store }
     }
 
-    /// Begin a new batch by logging to WAL and updating checkpoint.
-    pub async fn begin_batch(
-        &self,
-        batch_id: &str,
-        current: &Cursor,
-        next: &Cursor,
-    ) -> Result<(), StateStoreError> {
-        // Load current progress
-        let rows_done = self.get_rows_done().await?;
-
-        // Append WAL entry for durability
-        self.store
-            .append_wal(&WalEntry::BatchBegin {
-                run_id: self.ids.run_id(),
-                item_id: self.ids.item_id(),
-                part_id: self.ids.part_id(),
-                batch_id: batch_id.to_string(),
-            })
-            .await?;
-
-        // Update checkpoint with "read" stage
-        self.store
-            .save_checkpoint(&Checkpoint {
-                run_id: self.ids.run_id(),
-                item_id: self.ids.item_id(),
-                part_id: self.ids.part_id(),
-                stage: CheckpointStage::Read,
-                src_offset: current.clone(),
-                pending_offset: Some(next.clone()),
-                batch_id: batch_id.to_string(),
-                rows_done,
-                updated_at: chrono::Utc::now(),
-            })
-            .await
-    }
-
     /// Commit a batch by appending WAL entry.
     pub async fn commit_batch(&self, batch_id: &str) -> Result<(), StateStoreError> {
         self.store
@@ -203,15 +167,5 @@ impl StateManager {
                 if *item_id == ids.item_id() && *part_id == ids.part_id() && b_id == batch_id
             )
         })
-    }
-
-    /// Get current rows_done count from checkpoint
-    async fn get_rows_done(&self) -> Result<u64, StateStoreError> {
-        Ok(self
-            .store
-            .load_checkpoint(&self.ids.run_id(), &self.ids.item_id(), &self.ids.part_id())
-            .await?
-            .map(|cp| cp.rows_done)
-            .unwrap_or(0))
     }
 }

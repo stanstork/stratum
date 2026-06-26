@@ -57,12 +57,12 @@ Hashing runs inside `BatchCoordinator` (`IntegrityState`), after `TransformServi
 
 ```
 Source (SnapshotReader)
-  → TransformService (field mapping, computed columns, coercions)
-  → IntegrityState::hash_batch()        ← hash rows, accumulate batch roots
-  → BatchCoordinator (send batch to consumer)
+  -> TransformService (field mapping, computed columns, coercions)
+  -> IntegrityState::hash_batch()        ← hash rows, accumulate batch roots
+  -> BatchCoordinator (send batch to consumer)
   ↓ MPSC channel
 Sink (BatchWriter)
-  → StateManager (checkpoint)
+  -> StateManager (checkpoint)
 ```
 
 On pipeline completion, `IntegrityState::save_receipts()` builds the final `VerificationReceipt` per table and persists it to sled.
@@ -299,7 +299,7 @@ for each column_name in column_order (lexicographic order):
 | `Boolean(b)`     | `0x03` | 1 byte:`0x00` = false, `0x01` = true                |
 | `String(s)`      | `0x10` | 4-byte LE length + UTF-8 bytes                          |
 | `Decimal(d)`     | `0x11` | `"{mantissa}:{scale}"` ASCII, 4-byte LE length prefix |
-| `Float(f)`       | `0x12` | 8-byte big-endian IEEE 754 (NaN →`0x00` Null tag)    |
+| `Float(f)`       | `0x12` | 8-byte big-endian IEEE 754 (NaN ->`0x00` Null tag)    |
 | `Date(d)`        | `0x20` | 4-byte LE signed days since Unix epoch                  |
 | `Timestamp(ts)`  | `0x21` | 8-byte LE microseconds since Unix epoch, UTC            |
 | `Uuid(u)`        | `0x30` | 16 bytes big-endian                                     |
@@ -325,7 +325,7 @@ Column types are passed in `IntegrityConfig.column_types` and used on both the w
 - **NaN float**: Encoded as `0x00` (Null). NaN has undefined equality semantics.
 - **Missing column**: Treated as Null. Handles nullable columns absent from a record.
 - **Timestamp timezones**: Normalized to UTC before encoding.
-- **Enum type names**: String value only. MySQL `ENUM` → PostgreSQL `VARCHAR` produces identical bytes.
+- **Enum type names**: String value only. MySQL `ENUM` -> PostgreSQL `VARCHAR` produces identical bytes.
 
 ---
 
@@ -533,7 +533,7 @@ For pipelines using `with references { data = cascade }`, each FK-referenced tab
 | Subtree root computation | ~50 ns/row (amortized) | Single-pass level reduction, O(N) memory.              |
 | Receipt write to sled    | ~10 µs once           | One KV write per table at pipeline completion.         |
 
-Total: ~550 ns/row. At 30K rows/sec (typical MySQL→PostgreSQL), under 2% overhead. Bottleneck remains network I/O.
+Total: ~550 ns/row. At 30K rows/sec (typical MySQL->PostgreSQL), under 2% overhead. Bottleneck remains network I/O.
 
 `--full-integrity` adds one `Vec<[u8; 32]>` element per row (~32 bytes) retained in memory for the duration of the pipeline, plus the same 32 bytes persisted in sled. A 1M row table uses ~32 MB of additional sled storage.
 

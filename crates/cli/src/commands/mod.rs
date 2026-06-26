@@ -9,6 +9,7 @@ use std::{path::PathBuf, sync::Arc};
 pub mod apply;
 pub mod pause;
 pub mod plan;
+pub mod plugin;
 pub mod reset;
 pub mod resume;
 pub mod status;
@@ -46,6 +47,56 @@ pub enum SampleMethod {
     Random,
     /// By specific IDs
     Id,
+}
+
+#[derive(clap::Subcommand)]
+pub enum PluginCmd {
+    /// Compile a JavaScript plugin to WASM.
+    Compile {
+        input: PathBuf,
+        #[arg(short, long)]
+        output: PathBuf,
+        #[arg(long)]
+        minify: bool,
+        #[arg(long)]
+        esbuild_path: Option<PathBuf>,
+        #[arg(long)]
+        runtime_wasm: Option<PathBuf>,
+    },
+    /// Print a plugin's metadata (name, version, role, schema).
+    Inspect {
+        /// Path to a .wasm plugin.
+        path: PathBuf,
+        /// Emit machine-readable JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Validate every plugin referenced in an SMQL config.
+    Validate {
+        #[arg(short = 'c', long)]
+        config: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run a plugin once with sample input.
+    Test {
+        /// Path to a .wasm plugin.
+        path: PathBuf,
+        /// transform | filter | source | sink (defaults to the plugin's role).
+        #[arg(long)]
+        mode: Option<String>,
+        /// Input JSON file (a row for transform/filter, a batch for sink). "-" = stdin.
+        #[arg(long)]
+        input: Option<String>,
+        /// Cursor for source mode (opaque string).
+        #[arg(long)]
+        cursor: Option<String>,
+        /// Plugin config JSON file passed at initialize.
+        #[arg(long)]
+        config_json: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -202,6 +253,11 @@ pub enum Commands {
     },
     /// Show version information
     Version,
+    /// Plugin tooling: compile, inspect, validate, and test WASM/JS plugins.
+    Plugin {
+        #[command(subcommand)]
+        cmd: PluginCmd,
+    },
 }
 
 /// Executes the appropriate command based on CLI arguments
@@ -255,5 +311,6 @@ pub async fn execute_command(
         }
         Commands::Reset { config, force } => reset::execute(config.clone(), *force, env).await,
         Commands::Pause { config } => pause::execute(Some(config.clone()), env).await,
+        Commands::Plugin { cmd } => plugin::run(cmd, env.clone()).await,
     }
 }

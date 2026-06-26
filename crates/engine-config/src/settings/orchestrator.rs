@@ -1,12 +1,12 @@
 use super::{
     create_cols::CreateMissingColumnsSetting, create_tables::CreateMissingTablesSetting,
-    driver::SchemaDriver, endpoint::Endpoint, error::SettingsError,
+    driver::SchemaDriver, endpoint::Endpoint, endpoint::SchemaSource, error::SettingsError,
     infer_schema::InferSchemaSetting, traits::MigrationSetting, types::Settings,
     validated::ValidatedSettings, validator::SettingsValidator,
 };
 use crate::settings::SchemaSettingContext;
 use connectors::traits::introspector::SchemaIntrospector;
-use engine_core::schema::schema_ops::SchemaOps;
+use engine_core::schema::{schema_ops::SchemaOps, type_registry::Dialect};
 use engine_processing::context::PipelineContext;
 use model::{core::value::Value, execution::flags::IntegrityMode};
 use std::{collections::HashMap, sync::Arc};
@@ -15,16 +15,16 @@ use std::{collections::HashMap, sync::Arc};
 ///
 /// Returns validated settings (for non-schema config like batch_size) and
 /// the collected schema operations split into pre/post migration phases.
-pub async fn validate_and_plan<S, D>(
+pub async fn validate_and_plan<D>(
     ctx: &mut PipelineContext,
-    src_driver: Arc<S>,
+    src_introspector: Arc<dyn SchemaIntrospector>,
+    src_dialect: Dialect,
     dst_driver: Arc<D>,
     settings: &HashMap<String, Value>,
     is_dry_run: bool,
     integrity: IntegrityMode,
 ) -> Result<(ValidatedSettings, SchemaOps), SettingsError>
 where
-    S: SchemaDriver,
     D: SchemaDriver,
 {
     let settings = Settings::from_map(settings);
@@ -41,7 +41,8 @@ where
 
     let mut all_settings = collect_settings(
         ctx,
-        src_driver.clone(),
+        src_introspector,
+        src_dialect,
         dst_driver.clone(),
         &validated_settings,
     )
@@ -60,21 +61,17 @@ where
     Ok((validated_settings, schema_ops))
 }
 
-pub async fn collect_settings<S, D>(
+pub async fn collect_settings<D>(
     ctx: &PipelineContext,
-    src_driver: Arc<S>,
+    src_introspector: Arc<dyn SchemaIntrospector>,
+    src_dialect: Dialect,
     dst_driver: Arc<D>,
     validated: &ValidatedSettings,
 ) -> Vec<Box<dyn MigrationSetting>>
 where
-    S: SchemaDriver,
     D: SchemaDriver,
 {
-    let source_info = Endpoint::new(
-        src_driver,
-        ctx.source.name.clone(),
-        ctx.source.format.to_dialect(),
-    );
+    let source_info = SchemaSource::new(src_introspector, ctx.source.name.clone(), src_dialect);
 
     let dest_info = Endpoint::new(
         dst_driver,

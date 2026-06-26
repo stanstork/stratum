@@ -133,3 +133,50 @@ fn test_parse_invalid_syntax() {
         assert!(result.is_err(), "Should fail: {}", input);
     }
 }
+
+#[test]
+fn test_parse_plugin_call_as_select_value() {
+    let input = r#"
+pipeline "p" {
+    from { connection = connection.src }
+    to   { connection = connection.dst }
+    select {
+        score = plugin.score_risk({ amount: charges.amount, country: charges.country })
+    }
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+}
+
+#[test]
+fn test_parse_plugin_call_with_bare_ident_input() {
+    // Right-hand side of an input field can be a bare ident, not just dotted.
+    let input = r#"
+pipeline "p" {
+    from { connection = connection.src }
+    to   { connection = connection.dst }
+    select {
+        out = plugin.my_plugin({ x: col_name })
+    }
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+}
+
+#[test]
+fn test_fn_call_still_parses_alongside_plugin_call() {
+    // Sanity: a regular function call (no struct literal arg) keeps working.
+    let input = r#"
+pipeline "p" {
+    from { connection = connection.src }
+    to   { connection = connection.dst }
+    select {
+        full_name = concat(users.first, users.last)
+    }
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+}

@@ -1,4 +1,5 @@
 use crate::context::PipelineContext;
+use crate::transform::wasm::WasmTransform;
 use crate::{
     error::ProducerError,
     item::ItemId,
@@ -19,6 +20,7 @@ use crate::{
 };
 use engine_core::{context::env::EnvContext, retry::RetryPolicy};
 use engine_state::MerkleStore;
+use engine_wasm::registry::PluginRegistry;
 use model::{
     execution::pipeline::Pipeline, pagination::cursor::Cursor, records::batch::Batch,
     transform::mapping::TransformationMetadata,
@@ -30,16 +32,18 @@ use tracing::info;
 pub mod components;
 pub mod config;
 
+#[allow(clippy::result_large_err)]
 pub fn build_transform_pipeline(
     pipeline: &Pipeline,
+    plugin_registry: &PluginRegistry,
     mapping: &TransformationMetadata,
     mapped_columns_only: bool,
     env: Arc<EnvContext>,
-) -> TransformPipeline {
-    let mut transform_pipeline = TransformPipeline::new();
+) -> Result<TransformPipeline, ProducerError> {
+    let mut tp = TransformPipeline::new();
 
     // Each transform is only added if it's needed.
-    transform_pipeline = transform_pipeline
+    tp = tp
         .add_if(!mapping.entities.is_empty(), || {
             TableMapper::new(mapping.entities.clone())
         })
@@ -48,13 +52,39 @@ pub fn build_transform_pipeline(
         })
         .add_if(!mapping.field_mappings.computed_fields.is_empty(), || {
             ComputedTransform::new(mapping.clone(), env.clone())
-        })
-        .add_if(mapped_columns_only, || FieldPruner::new(mapping.clone()))
-        .add_validator_if(!pipeline.validations.is_empty(), || {
-            PipelineValidator::new(pipeline.validations.clone(), mapping.clone(), env.clone())
         });
 
-    transform_pipeline
+    // WASM transforms run AFTER built-in transforms but BEFORE pruning/validation.
+    for call in &pipeline.plugin_transforms {
+        let plugin = plugin_registry
+            .instantiate(&call.plugin_name)
+            .map_err(|e| {
+                ProducerError::Other(format!(
+                    "plugin '{}' instantiation failed: {e}",
+                    call.plugin_name
+                ))
+            })?;
+        tp = tp.add_transform(WasmTransform::new(
+            plugin,
+            call.output_column.clone(),
+            call.input_mapping.clone(),
+        ));
+    }
+
+    // Prune unmapped columns last, once plugin inputs have been consumed.
+    tp = tp.add_if(mapped_columns_only, || FieldPruner::new(mapping.clone()));
+
+    if !pipeline.validations.is_empty() {
+        let validator = PipelineValidator::new(
+            pipeline.validations.clone(),
+            mapping.clone(),
+            env.clone(),
+            plugin_registry,
+        )?;
+        tp = tp.add_validator(validator);
+    }
+
+    Ok(tp)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -97,7 +127,7 @@ impl Producer {
         batch_tx: mpsc::Sender<Batch>,
         mut config: ProducerConfig,
         mapped_columns_only: bool,
-    ) -> Self {
+    ) -> Result<Self, ProducerError> {
         let exec_ctx = ctx.exec_ctx.clone();
         let run_id = ctx.run_id.clone();
         let item_id = ctx.item_id.clone();
@@ -121,8 +151,13 @@ impl Producer {
         let reader = SnapshotReader::new(source, retry_policy, config.batch_size);
 
         let env = exec_ctx.env.clone();
-        let transform_pipeline =
-            build_transform_pipeline(&pipeline, &mapping, mapped_columns_only, env);
+        let transform_pipeline = build_transform_pipeline(
+            &pipeline,
+            &ctx.plugin_registry,
+            &mapping,
+            mapped_columns_only,
+            env,
+        )?;
         let transformer = TransformService::new(
             exec_ctx,
             transform_pipeline,
@@ -137,7 +172,7 @@ impl Producer {
             coordinator = coordinator.enable_integrity(integrity, merkle_store);
         }
 
-        Self {
+        Ok(Self {
             reader,
             transformer,
             coordinator,
@@ -146,7 +181,7 @@ impl Producer {
             ids,
             config,
             pipeline_name: pipeline.name.clone(),
-        }
+        })
     }
 
     pub async fn start_snapshot(&mut self) -> Result<(), ProducerError> {

@@ -1,29 +1,25 @@
-use crate::{dag::Dag, error::MigrationError, execution::orchestrator::PipelineOrchestrator};
-use connectors::{sql::metadata::table::TableMetadata, traits::introspector::SchemaIntrospector};
-use engine_config::settings::{self, ValidatedSettings};
+use crate::{
+    dag::{
+        Dag,
+        endpoint::{resolve_destination, resolve_source},
+    },
+    error::MigrationError,
+    execution::orchestrator::PipelineOrchestrator,
+};
 use engine_core::{
     context::{env::EnvContext, exec::ExecutionContext},
-    dispatch_driver, dispatch_drivers,
-    drivers::DriverRef,
     event_bus::bus::EventBus,
-    plan::{cascade::resolve_cascade_tables, execution::ExecutionPlan},
-    schema::{
-        graph_expander::GraphExpander,
-        schema_ops::SchemaOps,
-        type_registry::{Dialect, TypeRegistry},
-    },
+    plan::execution::ExecutionPlan,
     state::{StateStore, models::WalEntry, sled_store::SledStateStore},
     utils::make_item_id,
 };
 use engine_infra::shutdown::ShutdownSignal;
 use engine_processing::{
     context::PipelineContext,
-    io::{
-        destination::{Destination, IntoDestination},
-        source::Source,
-    },
+    io::{destination::Destination, source::Source},
 };
 use engine_state::models::{PauseReason, PipelineRunState, PipelineStatus, RunState, RunStatus};
+use engine_wasm::registry::{PluginRegistry, load_registry, plugin_columns};
 use futures::stream::{self, StreamExt};
 use model::{
     events::migration::MigrationEvent,
@@ -31,13 +27,12 @@ use model::{
         execution_config::{ExecutionConfig, ExecutionStrategy, FailureStrategy},
         flags::ExecutionFlags,
         pipeline::Pipeline,
-        references::{DataMode, GraphReferences},
     },
 };
 use model::{pagination::cursor::Cursor, transform::mapping::TransformationMetadata};
 use query_builder::offsets::{OffsetStrategy, OffsetStrategyFactory};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     sync::{Arc, Mutex},
 };
 use tokio::sync::mpsc;
@@ -51,6 +46,7 @@ pub struct DagExecutor {
     exec_config: ExecutionConfig,
     event_bus: EventBus,
     done_ops: Arc<Mutex<HashSet<String>>>,
+    plugin_registry: Arc<PluginRegistry>,
 }
 
 impl DagExecutor {
@@ -95,6 +91,7 @@ impl DagExecutor {
         );
         let exec_ctx = ExecutionContext::new(&plan, state, env).await?;
         let exec_config = plan.execution_config.clone();
+        let plugin_registry = load_registry(&plan.plugins)?;
 
         Ok(Self {
             plan,
@@ -104,6 +101,7 @@ impl DagExecutor {
             exec_config,
             event_bus,
             done_ops: Arc::new(Mutex::new(HashSet::new())),
+            plugin_registry,
         })
     }
 
@@ -609,55 +607,67 @@ impl DagExecutor {
         let start_time = std::time::Instant::now();
         info!("Starting migration pipeline {}", pipeline.destination.table);
 
-        // Resolve drivers and core mapping components
-        let src_driver = self
-            .exec_ctx
-            .resolve_driver(&pipeline.source.connection)
-            .await?;
-        let dst_driver = self
-            .exec_ctx
-            .resolve_driver(&pipeline.destination.connection)
-            .await?;
-        let mapping = TransformationMetadata::new(pipeline);
+        let source_ep = resolve_source(
+            &pipeline.source.connection,
+            &self.exec_ctx,
+            &self.plugin_registry,
+        )
+        .await?;
+        let dest_ep = resolve_destination(
+            &pipeline.destination.connection,
+            &self.exec_ctx,
+            &self.plugin_registry,
+        )
+        .await?;
+
+        let mut mapping = TransformationMetadata::new(pipeline);
+        mapping.set_plugin_columns(plugin_columns(pipeline, &self.plugin_registry));
+
         let offset_strategy = OffsetStrategyFactory::from_pagination(&pipeline.source.pagination);
 
-        // Prepare Source and Destination (including graph expansion)
-        let (source, destination, expanded_schema_ops, cascade_tables) = self
-            .prepare_endpoints(
-                pipeline,
-                &src_driver,
-                &dst_driver,
-                &mapping,
-                offset_strategy.clone(),
-            )
+        let source = source_ep
+            .build(pipeline, &mapping, offset_strategy.clone())
             .await?;
+        let destination = dest_ep.build(pipeline, source_ep.dialect()).await?;
 
         // Build context and log start
         let mut pipeline_ctx = self
-            .create_pipeline_context(idx, pipeline, source, destination, mapping, offset_strategy)
+            .create_pipeline_context(
+                idx,
+                pipeline,
+                source.source,
+                destination,
+                mapping,
+                offset_strategy,
+            )
             .await?;
 
         // Validate settings and collect schema ops (no DDL execution)
-        let (settings, mut schema_ops) = self
-            .validate_and_plan_settings(&mut pipeline_ctx, &src_driver, &dst_driver, pipeline)
+        let (settings, mut schema_ops) = dest_ep
+            .plan_settings(
+                &mut pipeline_ctx,
+                source_ep.as_ref(),
+                pipeline,
+                self.flags.dry_run,
+                self.flags.integrity,
+            )
             .await?;
 
-        // If graph expansion produced schema ops, they replace the settings-based ops
-        // (graph expansion produces properly topologically sorted DDL)
-        if let Some(expanded_ops) = expanded_schema_ops {
-            schema_ops = expanded_ops;
+        // Graph-expansion ops (already topo-sorted) replace settings-based ops.
+        if let Some(expanded) = source.schema_ops {
+            schema_ops = expanded;
         }
 
         let orchestrator = PipelineOrchestrator::new(
             pipeline.clone(),
             pipeline_ctx,
-            dst_driver,
+            dest_ep,
             settings,
             schema_ops,
             self.shutdown.clone(),
             self.event_bus.clone(),
             self.done_ops.clone(),
-            cascade_tables,
+            source.cascade_tables,
         );
 
         // Execute: pre-DDL -> data migration -> post-DDL
@@ -671,78 +681,6 @@ impl DagExecutor {
         );
 
         Ok(rows)
-    }
-
-    async fn prepare_endpoints(
-        &self,
-        pipeline: &Pipeline,
-        src_driver: &DriverRef,
-        dst_driver: &DriverRef,
-        mapping: &TransformationMetadata,
-        offset_strategy: Arc<dyn OffsetStrategy>,
-    ) -> Result<(Source, Destination, Option<SchemaOps>, Vec<String>), MigrationError> {
-        let (expanded_schema_ops, cascade_meta) = self
-            .get_graph_expansion(pipeline, src_driver, mapping)
-            .await?;
-        let cascade_tables = resolve_cascade_tables(pipeline, mapping, &cascade_meta);
-
-        let source = dispatch_driver!(src_driver, |d| {
-            Source::with_cascade(d.clone(), pipeline, mapping, offset_strategy, cascade_meta).await
-        })?;
-
-        let destination = dispatch_driver!(dst_driver, |d| {
-            d.clone()
-                .into_destination(&pipeline.destination.table, src_driver.dialect())
-        });
-
-        Ok((source, destination, expanded_schema_ops, cascade_tables))
-    }
-
-    async fn get_graph_expansion(
-        &self,
-        pipeline: &Pipeline,
-        src_driver: &DriverRef,
-        mapping: &TransformationMetadata,
-    ) -> Result<(Option<SchemaOps>, Option<HashMap<String, TableMetadata>>), MigrationError> {
-        if let Some(refs) = &pipeline.source.graph_references {
-            self.expand_graph_references(&pipeline.source.table, src_driver, mapping, refs)
-                .await
-        } else {
-            Ok((None, None))
-        }
-    }
-
-    /// Expand graph references: introspect FK dependencies and produce schema ops + cascade metadata.
-    async fn expand_graph_references(
-        &self,
-        root_table: &str,
-        src_driver: &DriverRef,
-        mapping: &TransformationMetadata,
-        refs: &GraphReferences,
-    ) -> Result<(Option<SchemaOps>, Option<HashMap<String, TableMetadata>>), MigrationError> {
-        let source_dialect = src_driver.dialect();
-
-        let result = dispatch_driver!(src_driver, |d| {
-            let introspector: Arc<dyn SchemaIntrospector> = d.clone() as _;
-            let type_registry = Arc::new(TypeRegistry::new(
-                source_dialect,
-                Dialect::Postgres, // TODO: derive from destination driver
-            ));
-
-            let expander = GraphExpander::new(introspector, type_registry, source_dialect);
-            expander
-                .expand(root_table, refs, mapping, false, false)
-                .await
-                .map_err(MigrationError::from)?
-        });
-
-        let cascade_meta = if matches!(refs.data_mode, DataMode::Cascade) {
-            Some(result.discovered_tables)
-        } else {
-            None
-        };
-
-        Ok((Some(result.schema_ops), cascade_meta))
     }
 
     /// Initializes the `PipelineContext` and commits the initialization event to the WAL.
@@ -769,6 +707,7 @@ impl DagExecutor {
             .state(self.exec_ctx.state.clone())
             .offset_strategy(offset_strategy)
             .cursor(Cursor::None)
+            .plugin_registry(self.plugin_registry.clone())
             .build();
 
         pipeline_ctx
@@ -777,28 +716,5 @@ impl DagExecutor {
             .await?;
 
         Ok(pipeline_ctx)
-    }
-
-    /// Validate settings and collect schema operations without executing DDL.
-    async fn validate_and_plan_settings(
-        &self,
-        ctx: &mut PipelineContext,
-        src_driver: &DriverRef,
-        dst_driver: &DriverRef,
-        pipeline: &Pipeline,
-    ) -> Result<(ValidatedSettings, SchemaOps), MigrationError> {
-        let result = dispatch_drivers!(src_driver, dst_driver, |src, dst| {
-            settings::validate_and_plan::<Src, Dst>(
-                ctx,
-                src.clone(),
-                dst.clone(),
-                &pipeline.settings,
-                self.flags.dry_run,
-                self.flags.integrity,
-            )
-            .await?
-        });
-
-        Ok(result)
     }
 }

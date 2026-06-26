@@ -6,6 +6,7 @@ pub enum DataFormat {
     MySql,
     Postgres,
     Csv,
+    Wasm,
 }
 
 impl Display for DataFormat {
@@ -14,6 +15,7 @@ impl Display for DataFormat {
             DataFormat::MySql => write!(f, "MySQL"),
             DataFormat::Postgres => write!(f, "Postgres"),
             DataFormat::Csv => write!(f, "CSV"),
+            DataFormat::Wasm => write!(f, "WASM"),
         }
     }
 }
@@ -24,6 +26,7 @@ impl DataFormat {
             "mysql" => Some(DataFormat::MySql),
             "postgres" => Some(DataFormat::Postgres),
             "csv" => Some(DataFormat::Csv),
+            "wasm" => Some(DataFormat::Wasm),
             _ => None,
         }
     }

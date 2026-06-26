@@ -33,7 +33,7 @@ SMQL (Stratum Migration Query Language) is a declarative, SQL-inspired language 
 2. **Data-first language** — tables, columns, rows
 3. **SQL-inspired where it makes sense** — `where`, `with`, `select`
 4. **Declarative but opinionated** — clear intent over flexibility
-5. **Clear data flow** — `from → to` is always explicit
+5. **Clear data flow** — `from -> to` is always explicit
 
 ---
 
@@ -767,7 +767,7 @@ select "products" {
 
 When `data = cascade`, the `where` clause on the primary table propagates: only rows referenced by filtered primary rows are copied, recursively up to `depth` levels.
 
-Example: `where` filters to orders 1, 2, 3 → only users referenced by those orders are copied → only regions referenced by those users are copied.
+Example: `where` filters to orders 1, 2, 3 -> only users referenced by those orders are copied -> only regions referenced by those users are copied.
 
 ### Complete Graph Example
 

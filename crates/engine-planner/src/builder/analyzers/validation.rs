@@ -23,7 +23,7 @@ use expression_engine::ExpressionAnalyzer;
 use model::execution::{
     expr::CompiledExpression,
     pipeline::{
-        Join, Pipeline, ValidationAction as ModelValidationAction, ValidationRule,
+        Join, Pipeline, ValidationAction as ModelValidationAction, ValidationKind, ValidationRule,
         ValidationSeverity,
     },
 };
@@ -41,25 +41,46 @@ impl ValidationAnalyzer {
         joins: &[Join],
         ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<ValidationPlan> {
-        let columns = ExpressionAnalyzer::extract_columns(&validation.check);
-        self.verify_column_refs(&columns, ctx).map_err(|e| {
-            AnalyzerError::error(
-                "validation",
-                format!("Column check failed for '{}': {}", validation.label, e),
-            )
-        })?;
-
         let level = match validation.severity {
             ValidationSeverity::Assert => ValidationLevel::Assert,
             ValidationSeverity::Warn => ValidationLevel::Warn,
         };
-
         let action = self.validation_action(level.clone(), &validation.action);
 
-        let estimated_failure_rate = self
-            .estimate_probability(table, &validation.check, joins, ctx)
-            .await
-            .ok();
+        let (check, estimated_failure_rate) = match &validation.kind {
+            ValidationKind::Assert { check } => {
+                let columns = ExpressionAnalyzer::extract_columns(check);
+                self.verify_column_refs(&columns, ctx).map_err(|e| {
+                    AnalyzerError::error(
+                        "validation",
+                        format!("Column check failed for '{}': {}", validation.label, e),
+                    )
+                })?;
+
+                let rate = self
+                    .estimate_probability(table, check, joins, ctx)
+                    .await
+                    .ok();
+                let check_view = ValidationCheck {
+                    expression: ExpressionAnalyzer::to_string(check),
+                    columns_referenced: columns,
+                };
+                (check_view, rate)
+            }
+            ValidationKind::WasmFilter {
+                plugin_name,
+                input_mapping,
+            } => {
+                // Plugin logic isn't introspectable from SMQL, so we can't run a
+                // SQL-side probability estimate. Surface the plugin descriptor so
+                // sample previews and diagnostics can show the rule.
+                let check_view = ValidationCheck {
+                    expression: format!("wasm:{plugin_name}"),
+                    columns_referenced: input_mapping.values().cloned().collect(),
+                };
+                (check_view, None)
+            }
+        };
 
         info!(
             target: "analyzer",
@@ -72,10 +93,7 @@ impl ValidationAnalyzer {
         Ok(ValidationPlan {
             name: validation.label.clone(),
             level,
-            check: ValidationCheck {
-                expression: ExpressionAnalyzer::to_string(&validation.check),
-                columns_referenced: columns,
-            },
+            check,
             message: validation.message.clone(),
             action,
             estimated_failure_rate,

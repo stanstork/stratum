@@ -26,11 +26,13 @@ pub enum ValidationIssueKind {
 
     // Duplicate names
     DuplicateConnection { name: String, first_location: Span },
+    DuplicatePlugin { name: String, first_location: Span },
     DuplicatePipeline { name: String, first_location: Span },
     DuplicateDefineAttribute { name: String, first_location: Span },
 
     // Reference validation
     UndefinedConnection { name: String },
+    UndefinedPlugin { name: String },
     UndefinedPipeline { name: String },
     UndefinedDefineConstant { name: String },
     UndefinedVariable { name: String },
@@ -61,6 +63,9 @@ impl fmt::Display for ValidationIssueKind {
             ValidationIssueKind::DuplicateConnection { name, .. } => {
                 write!(f, "duplicate connection '{}'", name)
             }
+            ValidationIssueKind::DuplicatePlugin { name, .. } => {
+                write!(f, "duplicate plugin '{}'", name)
+            }
             ValidationIssueKind::DuplicatePipeline { name, .. } => {
                 write!(f, "duplicate pipeline '{}'", name)
             }
@@ -69,6 +74,9 @@ impl fmt::Display for ValidationIssueKind {
             }
             ValidationIssueKind::UndefinedConnection { name } => {
                 write!(f, "undefined connection '{}'", name)
+            }
+            ValidationIssueKind::UndefinedPlugin { name } => {
+                write!(f, "undefined plugin '{}'", name)
             }
             ValidationIssueKind::UndefinedPipeline { name } => {
                 write!(f, "undefined pipeline '{}'", name)

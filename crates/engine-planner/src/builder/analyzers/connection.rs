@@ -25,8 +25,26 @@ impl ConnectionAnalyzer {
         &self,
         connection: &Connection,
     ) -> Result<ConnectionPlan, ConnectionError> {
-        let start = Instant::now();
         let driver = Self::convert_driver(&connection.driver);
+
+        // A WASM connection is a plugin endpoint, not a database - there's
+        // nothing to connect to. Report it as such instead of failing a DB test.
+        if connection.driver.eq_ignore_ascii_case("wasm") {
+            let plugin = connection
+                .properties
+                .get_string("plugin")
+                .unwrap_or_default();
+            return Ok(ConnectionPlan {
+                name: connection.name.clone(),
+                driver,
+                url_masked: String::new(),
+                pool: None,
+                status: ConnectionStatus::Plugin { plugin },
+                role: ConnectionRole::Both,
+            });
+        }
+
+        let start = Instant::now();
         let url = Self::get_url(connection);
 
         // Attempt connection with timeout

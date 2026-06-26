@@ -1,5 +1,6 @@
 use crate::builder::analysis::AnalyzerError;
 use connectors::error::{DbError, DriverError};
+use engine_wasm::error::WasmError;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -62,6 +63,9 @@ pub enum ReportBuilderError {
 
     #[error("Invalid driver type: {0}")]
     InvalidDriverType(String),
+
+    #[error("Plugin load failed: {0}")]
+    Plugin(#[from] WasmError),
 }
 
 /// Connection-related errors
@@ -271,6 +275,9 @@ pub enum SchemaAnalyzerError {
 pub enum SampleCollectorError {
     #[error("Query failed while fetching samples: {0}")]
     QueryFailed(String),
+
+    #[error("Failed to build transform pipeline: {0}")]
+    PipelineBuildFailed(String),
 
     #[error("Transform failed for sample row {index}: {reason}")]
     TransformFailed { index: usize, reason: String },

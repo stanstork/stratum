@@ -3,12 +3,9 @@ use super::{
     phase::MigrationSettingsPhase,
 };
 use async_trait::async_trait;
-use connectors::{
-    sql::{
-        metadata::{column::ColumnMetadata, table::TableMetadata},
-        query::{column::ColumnDef, generator::QueryGenerator},
-    },
-    traits::introspector::SchemaIntrospector,
+use connectors::sql::{
+    metadata::{column::ColumnMetadata, table::TableMetadata},
+    query::{column::ColumnDef, generator::QueryGenerator},
 };
 use engine_core::schema::{
     schema_ops::{SchemaOp, SchemaOps},
@@ -19,12 +16,12 @@ use engine_processing::context::PipelineContext;
 use model::{core::types::Type, execution::expr::CompiledExpression};
 use std::sync::Arc;
 
-pub struct CreateMissingColumnsSetting<S: SchemaDriver, D: SchemaDriver> {
-    context: SchemaSettingContext<S, D>,
+pub struct CreateMissingColumnsSetting<D: SchemaDriver> {
+    context: SchemaSettingContext<D>,
 }
 
 #[async_trait]
-impl<S: SchemaDriver, D: SchemaDriver> MigrationSetting for CreateMissingColumnsSetting<S, D> {
+impl<D: SchemaDriver> MigrationSetting for CreateMissingColumnsSetting<D> {
     fn phase(&self) -> MigrationSettingsPhase {
         MigrationSettingsPhase::CreateMissingColumns
     }
@@ -34,8 +31,8 @@ impl<S: SchemaDriver, D: SchemaDriver> MigrationSetting for CreateMissingColumns
     }
 }
 
-impl<S: SchemaDriver, D: SchemaDriver> CreateMissingColumnsSetting<S, D> {
-    pub async fn new(ctx: SchemaSettingContext<S, D>) -> Self {
+impl<D: SchemaDriver> CreateMissingColumnsSetting<D> {
+    pub async fn new(ctx: SchemaSettingContext<D>) -> Self {
         Self { context: ctx }
     }
 
@@ -49,7 +46,12 @@ impl<S: SchemaDriver, D: SchemaDriver> CreateMissingColumnsSetting<S, D> {
             .await?;
 
         let src_name = self.context.mapping.entities.reverse_resolve(&dest_name);
-        let src_meta = self.context.source.driver.table_metadata(&src_name).await?;
+        let src_meta = self
+            .context
+            .source
+            .introspector
+            .table_metadata(&src_name)
+            .await?;
 
         let mut ops = SchemaOps::empty();
         self.plan_add_columns(&dest_name, &src_meta, &dest_meta, &mut ops)?;
@@ -104,7 +106,7 @@ impl<S: SchemaDriver, D: SchemaDriver> CreateMissingColumnsSetting<S, D> {
         dest_meta: &TableMetadata,
         ops: &mut SchemaOps,
     ) -> Result<(), SettingsError> {
-        let source = self.context.source.driver.clone() as Arc<dyn SchemaIntrospector>;
+        let source = self.context.source.introspector.clone();
         if let Some(computed) = self.context.mapping.field_mappings.get_computed(table) {
             let query_dialect = self.context.destination.dialect.as_query_dialect();
             let generator = QueryGenerator::new(query_dialect.as_ref());
@@ -116,7 +118,12 @@ impl<S: SchemaDriver, D: SchemaDriver> CreateMissingColumnsSetting<S, D> {
                         CompiledExpression::DotPath(segments) if segments.len() >= 2 => {
                             let alias = &segments[0];
                             let table = self.context.mapping.entities.resolve(alias);
-                            let meta = self.context.source.driver.table_metadata(&table).await?;
+                            let meta = self
+                                .context
+                                .source
+                                .introspector
+                                .table_metadata(&table)
+                                .await?;
                             ExpressionWrapper(comp.expression.clone())
                                 .infer_type(
                                     &meta.columns(),

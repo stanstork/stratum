@@ -20,6 +20,7 @@ pub struct Pipeline {
     pub lifecycle: Option<LifecycleHooks>,
     pub error_handling: Option<ErrorHandling>,
     pub settings: HashMap<String, Value>,
+    pub plugin_transforms: Vec<PluginTransformCall>,
 }
 
 /// From block - data source configuration
@@ -81,14 +82,26 @@ pub struct Transformation {
     pub expression: CompiledExpression,
 }
 
-/// Validate block rule
+/// Validate block rule. Common metadata lives at the top level; the per-variant
+/// payload (assert expression vs. WASM filter call) lives in `kind`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidationRule {
     pub label: String,
     pub severity: ValidationSeverity,
-    pub check: CompiledExpression,
     pub message: String,
     pub action: ValidationAction,
+    pub kind: ValidationKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ValidationKind {
+    /// Expression-based assertion (existing behavior).
+    Assert { check: CompiledExpression },
+    /// Delegates the pass/reject decision to a WASM filter plugin.
+    WasmFilter {
+        plugin_name: String,
+        input_mapping: HashMap<String, String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -164,4 +177,11 @@ pub enum FileFormat {
     Json,
     Csv,
     Parquet,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginTransformCall {
+    pub plugin_name: String,
+    pub output_column: String,
+    pub input_mapping: HashMap<String, String>,
 }

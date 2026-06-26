@@ -24,7 +24,7 @@ graph TB
 | Crate | Layer | Responsibility |
 |-------|-------|----------------|
 | `model` | Language | Core domain types (`Value`, `Pipeline`, `Record`, transformations) |
-| `smql-syntax` | Language | SMQL parser → AST (pest-based) |
+| `smql-syntax` | Language | SMQL parser -> AST (pest-based) |
 | `expression-engine` | Language | Expression evaluation (filters, computed columns, functions) |
 | `query-builder` | Language | SQL AST + dialect-aware rendering |
 | `connectors` | Data Access | MySQL, PostgreSQL, CSV drivers; unified `Driver` trait hierarchy |
@@ -32,7 +32,7 @@ graph TB
 | `engine-infra` | Infrastructure | EventBus, Metrics, Progress, Retry utilities |
 | `engine-schema` | Schema | Type system, DDL generation, FK dependency graph, schema planning |
 | `engine-core` | Core Services | ExecutionContext, DriverRef, plan builder — re-exports state/schema/infra |
-| `engine-config` | Config | SMQL → validated settings, connection resolution |
+| `engine-config` | Config | SMQL -> validated settings, connection resolution |
 | `engine-planner` | Planning | Execution plan analysis, metadata cache, diagnostics |
 | `engine-processing` | Execution | Producer-consumer pipeline, transforms, Source/Sink/Destination abstractions |
 | `engine-runtime` | Execution | DAG orchestrator, PipelineOrchestrator, actor coordination |
@@ -47,7 +47,7 @@ graph TB
 
 **Responsibilities:**
 - Command parsing and dispatch
-- Signal handling (SIGINT/SIGTERM → CancellationToken)
+- Signal handling (SIGINT/SIGTERM -> CancellationToken)
 - Graceful shutdown coordination
 - Output modes: plain, pretty (colored), TUI (ratatui)
 
@@ -70,7 +70,7 @@ graph TB
 - Analyze pipelines: estimate row counts, detect schema mismatches
 
 **Key Components:**
-- **`engine-config`**: Loads SMQL → `ExecutionPlan` with validated settings per pipeline
+- **`engine-config`**: Loads SMQL -> `ExecutionPlan` with validated settings per pipeline
 - **`engine-planner`**: Builds analysis context, caches table metadata via `MetadataCache<D>`
 
 ---
@@ -93,7 +93,7 @@ graph TB
 #### PipelineOrchestrator (`execution/orchestrator.rs`)
 - Owns a single pipeline's lifecycle end-to-end
 - Runs schema ops (CREATE TABLE, indexes) before data migration
-- Builds `PipelineCoordinator` → spawns producer and consumer tasks
+- Builds `PipelineCoordinator` -> spawns producer and consumer tasks
 - Monitors completion or cancellation
 
 #### ExecutionContext (`engine-core/context/exec.rs`)
@@ -111,7 +111,7 @@ New in Phase 2. Handles schema object migration independent of data pipelines.
 - **`planner.rs`** — `SchemaPlanner`: introspects source schema, builds `SchemaPlan`
 - **`plan.rs`** — `SchemaPlan`: column definitions, enum queries, dependency ordering, DDL generation
 - **`dep_graph.rs`** — `DependencyGraph`: topological sort of tables by FK dependencies; `partial_topological_order()` handles cycles deterministically
-- **`type_registry.rs`** — `TypeRegistry` + `TypeEngine`: source→destination type mapping per dialect
+- **`type_registry.rs`** — `TypeRegistry` + `TypeEngine`: source->destination type mapping per dialect
 - **`graph_expander.rs`** — `GraphExpander`: expands FK graphs, builds `SchemaOps` (ordered DDL operations)
 - **`schema_ops.rs`** — `SchemaOps`: ordered list of DDL ops (create table, create index, drop FK, add FK)
 - **`metadata_cache.rs`** — `MetadataCache<D>`: caches `TableMetadata` keyed by table name
@@ -135,12 +135,12 @@ The data pipeline. Runs one producer task and one consumer task per pipeline, co
 
 ```
 Source (SnapshotReader)
-  → TransformService
-  → BatchCoordinator
+  -> TransformService
+  -> BatchCoordinator
   ↓ MPSC channel (capacity: 64 batches, backpressure)
 Sink (BatchWriter)
-  → StateManager (checkpoint per batch)
-  → Metrics
+  -> StateManager (checkpoint per batch)
+  -> Metrics
 ```
 
 #### IO Abstractions (`io/`)
@@ -176,7 +176,7 @@ Per-pipeline execution context. Builder pattern. Holds:
 
 #### Circuit Breaker (`cb.rs`)
 - Threshold: 4 consecutive failures
-- Backoff: 1s → 2s → 4s → 8s → 16s → 30s (max)
+- Backoff: 1s -> 2s -> 4s -> 8s -> 16s -> 30s (max)
 - Resets on success
 
 ---
@@ -203,7 +203,7 @@ Driver (Send + Sync + 'static)
 
 | Driver | Read | Write | Schema | Notes |
 |--------|------|-------|--------|-------|
-| `MySqlDriver` | ✅ | ✅ | ✅ | `mysql_async`, TINYINT(1)→Boolean |
+| `MySqlDriver` | ✅ | ✅ | ✅ | `mysql_async`, TINYINT(1)->Boolean |
 | `PgDriver` | ✅ | ✅ | ✅ | `tokio-postgres`, COPY protocol |
 | CSV | ✅ | — | limited | streaming parse |
 
@@ -217,9 +217,9 @@ Driver (Send + Sync + 'static)
 Each driver implements `IntoCanonical` producing `TypeMapping { canonical: Type, fidelity: Fidelity, value_transform: Option<Transform>, warnings }`.
 
 Special conversions:
-- MySQL `TINYINT(1)` → `Type::Boolean` (via `Transform::IntToBool`)
-- MySQL `ENUM` → `Type::Varchar` + pre-DDL `CREATE TYPE` op
-- `BIGINT UNSIGNED` → `Type::Int64` with overflow warning
+- MySQL `TINYINT(1)` -> `Type::Boolean` (via `Transform::IntToBool`)
+- MySQL `ENUM` -> `Type::Varchar` + pre-DDL `CREATE TYPE` op
+- `BIGINT UNSIGNED` -> `Type::Int64` with overflow warning
 
 #### DriverRegistry (`registry.rs`)
 Global singleton (`DriverRegistry::global()`) mapping URL schemes to driver factories. Built-in drivers registered at startup.
@@ -260,7 +260,7 @@ Configurable retry policy with exponential backoff, used by circuit breaker.
 
 | Crate | Description |
 |-------|-------------|
-| `smql-syntax` | pest-based parser → AST (`PipelineBlock`, `ConnectionBlock`, etc.) |
+| `smql-syntax` | pest-based parser -> AST (`PipelineBlock`, `ConnectionBlock`, etc.) |
 | `model` | `Value`, `CanonicalValue`, `Record`, `Batch`, `Pipeline`, `Type`, `Transform`, execution types |
 | `expression-engine` | Expression evaluator: binary ops, string/date/math functions, null handling |
 | `query-builder` | SQL AST nodes + `Render` trait; dialect-specific rendering (MySQL, PostgreSQL); offset strategies |
@@ -272,25 +272,25 @@ Configurable retry policy with exponential backoff, used by circuit breaker.
 ### Typical Migration
 
 ```
-1. Parse SMQL  →  AST  (smql-syntax)
-2. Build plan  →  ExecutionPlan + hash  (engine-config, engine-core)
-3. Analyze     →  MetadataCache, row counts, diagnostics  (engine-planner)
-4. Initialize  →  ExecutionContext (connection pool, SledStateStore, run_id)
-5. Build DAG   →  topological levels from after=[...] declarations
+1. Parse SMQL  ->  AST  (smql-syntax)
+2. Build plan  ->  ExecutionPlan + hash  (engine-config, engine-core)
+3. Analyze     ->  MetadataCache, row counts, diagnostics  (engine-planner)
+4. Initialize  ->  ExecutionContext (connection pool, SledStateStore, run_id)
+5. Build DAG   ->  topological levels from after=[...] declarations
 6. Per level (parallel):
    For each pipeline:
-     a. Schema ops  →  CREATE TABLE (phase 1)
+     a. Schema ops  ->  CREATE TABLE (phase 1)
      b. Data migration:
-          Producer: paginate → transform → batch → MPSC channel
-          Consumer: receive → write → checkpoint
-     c. Schema ops  →  CREATE INDEX + ADD FK (phase 3)
-7. Completion  →  final metrics, shutdown
+          Producer: paginate -> transform -> batch -> MPSC channel
+          Consumer: receive -> write -> checkpoint
+     c. Schema ops  ->  CREATE INDEX + ADD FK (phase 3)
+7. Completion  ->  final metrics, shutdown
 ```
 
 ### Resume After Crash
 
 ```
-1. Load ExecutionPlan (same hash → same run_id)
+1. Load ExecutionPlan (same hash -> same run_id)
 2. For each pipeline: load checkpoint from SledStateStore
 3. Skip already-processed rows (cursor position)
 4. Continue from last checkpoint
@@ -307,7 +307,7 @@ Producer and consumer are `run_producer()`/`run_consumer()` async functions usin
 Pipelines declare dependencies via `after = [...]`. Topological sort produces execution levels; all pipelines within a level run in parallel. Independent pipelines get maximum throughput; dependent pipelines are automatically serialized.
 
 ### Two-Phase FK Creation
-FKs are created after data migration to prevent constraint violations during bulk insert. Schema ops use three phases: create tables → migrate data → create indexes and FKs.
+FKs are created after data migration to prevent constraint violations during bulk insert. Schema ops use three phases: create tables -> migrate data -> create indexes and FKs.
 
 ### Deterministic `partial_topological_order()` for FK Cycles
 When FK dependencies form a cycle (mutual references, self-references), a BFS-based `partial_topological_order()` places acyclic tables first, then cycle members alphabetically. This produces deterministic DDL regardless of `HashMap` iteration order.
@@ -333,7 +333,7 @@ Instead of `Arc<dyn Driver>` (which loses type information), `DriverRef` is an e
 | Per-pipeline memory | ~10–30MB (batch-size dependent) |
 | MPSC channel capacity | 64 batches |
 | Checkpoint interval | Every batch |
-| Retry backoff | 1s → 30s exponential |
+| Retry backoff | 1s -> 30s exponential |
 | Graceful shutdown | <5s to drain in-flight batches |
 
 ---
@@ -341,13 +341,13 @@ Instead of `Arc<dyn Driver>` (which loses type information), `DriverRef` is an e
 ## Reliability Features
 
 ### Checkpoint & Resume
-After each successful batch: cursor position + row counts committed to Sled. On restart: same `run_id` (deterministic from plan hash) → load checkpoint → resume from cursor.
+After each successful batch: cursor position + row counts committed to Sled. On restart: same `run_id` (deterministic from plan hash) -> load checkpoint -> resume from cursor.
 
 ### Circuit Breaker
-4 consecutive failures → circuit opens. Exponential backoff (1s…30s). Resets on next success. Prevents resource exhaustion from flapping destinations.
+4 consecutive failures -> circuit opens. Exponential backoff (1s…30s). Resets on next success. Prevents resource exhaustion from flapping destinations.
 
 ### Graceful Shutdown
-SIGINT/SIGTERM → `CancellationToken::cancel()` → all `tokio::select!` arms wake → current batch drains → final checkpoint → clean exit (code 130 for SIGINT).
+SIGINT/SIGTERM -> `CancellationToken::cancel()` -> all `tokio::select!` arms wake -> current batch drains -> final checkpoint -> clean exit (code 130 for SIGINT).
 
 ---
 

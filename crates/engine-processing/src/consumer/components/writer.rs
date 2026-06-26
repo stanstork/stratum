@@ -77,6 +77,22 @@ impl BatchWriter {
         }
     }
 
+    /// Run the destination sink's one-time setup before the first batch.
+    pub async fn prepare(&self) -> Result<(), ConsumerError> {
+        self.destination
+            .prepare()
+            .await
+            .map_err(|e| ConsumerError::Sink(SinkError::Driver(e)))
+    }
+
+    /// Run the destination sink's one-time teardown after the last batch.
+    pub async fn finalize(&self) -> Result<(), ConsumerError> {
+        self.destination
+            .finalize()
+            .await
+            .map_err(|e| ConsumerError::Sink(SinkError::Driver(e)))
+    }
+
     /// Get current write strategy.
     pub fn strategy(&self) -> WriteStrategy {
         self.strategy

@@ -31,17 +31,18 @@ pipeline "customers" {
 
 ## Features
 
-- **Declarative pipelines** — SMQL v2.1 with SQL-inspired syntax
-- **Schema migration** — CREATE TABLE, indexes, foreign keys, ENUMs, sequences
-- **DAG execution** — `after = [pipeline.x]` dependencies, parallel levels
-- **Crash recovery** — sled-backed checkpoints, automatic resume
-- **Transformations** — field mapping, computed columns, `when` expressions, functions
-- **Data quality** — `validate` blocks with per-row `assert` / `warn` rules
-- **Fault tolerance** — circuit breaker, configurable retry, Dead Letter Queue
-- **Graph references** — auto-discover and migrate FK-dependent tables
-- **Pagination strategies** — primary key, numeric, timestamp cursor
-- **Lifecycle hooks** — `before` / `after` SQL blocks per pipeline
-- **Cryptographic verification** — Merkle tree receipts prove destination matches what was written
+- **Declarative pipelines** - SMQL v2.1 with SQL-inspired syntax
+- **Schema migration** - CREATE TABLE, indexes, foreign keys, ENUMs, sequences
+- **DAG execution** - `after = [pipeline.x]` dependencies, parallel levels
+- **Crash recovery** - sled-backed checkpoints, automatic resume
+- **Transformations** - field mapping, computed columns, `when` expressions, functions
+- **Data quality** - `validate` blocks with per-row `assert` / `warn` rules
+- **Fault tolerance** - circuit breaker, configurable retry, Dead Letter Queue
+- **Graph references** - auto-discover and migrate FK-dependent tables
+- **Pagination strategies** - primary key, numeric, timestamp cursor
+- **Lifecycle hooks** - `before` / `after` SQL blocks per pipeline
+- **WASM plugins** - sandboxed transform / filter / source / sink plugins in native Rust or JavaScript
+- **Cryptographic verification** - Merkle tree receipts prove destination matches what was written
 
 ## Supported Connectors
 
@@ -55,7 +56,7 @@ pipeline "customers" {
 **From source (requires Rust stable):**
 
 ```bash
-git clone https://github.com/your-org/stratum
+git clone https://github.com/stanstork/stratum.git
 cd stratum
 cargo build --release
 # binary at ./target/release/stratum
@@ -197,6 +198,37 @@ on_error {
 }
 ```
 
+**WASM plugins (transform + filter):**
+```smql
+// Declare plugins once - a .js is compiled to WASM (QuickJS) on first use;
+// a prebuilt .wasm (e.g. native Rust) is loaded as-is.
+plugin "to_upper"    { path = "plugins/upper.js" }
+plugin "is_positive" { path = "plugins/positive.wasm" }
+
+pipeline "customers" {
+  from { connection = connection.src, table = "customers" }
+  to   { connection = connection.dst, table = "customers" }
+
+  select {
+    id        = customers.id
+    loud_name = plugin.to_upper({ name: customers.name })   // transform plugin
+  }
+
+  validate {
+    rule "positive_balance" {
+      filter  = plugin.is_positive({ value: customers.balance })   // filter plugin
+      on_fail = skip
+    }
+  }
+}
+```
+
+Plugins can also act as a pipeline's **source** or **sink** via a
+`connection { driver = "wasm" plugin = "..." }`. See
+[docs/plugins/](docs/plugins/README.md) for authoring in
+[Rust](docs/plugins/rust.md) or [JavaScript](docs/plugins/javascript.md),
+capabilities, and resource limits. Runnable examples: [`examples/plugins/`](examples/plugins/).
+
 **Cryptographic verification:**
 ```bash
 # 1. Migrate with integrity receipts
@@ -214,11 +246,11 @@ stratum verify -c migration.smql
 #     row 3412: expected a3f1... actual 9d8c...
 ```
 
-Verification re-reads the destination and compares Merkle tree roots — it detects modified, deleted, and inserted rows, not just count differences. See [docs/verification.md](docs/verification.md) for the full design.
+Verification re-reads the destination and compares Merkle tree roots - it detects modified, deleted, and inserted rows, not just count differences. See [docs/verification.md](docs/verification.md) for the full design.
 
 ## State & Resume
 
-Stratum stores pipeline state in `~/.stratum/state/` (sled embedded KV). If a migration is interrupted, re-running the same command resumes from the last checkpoint — no rows are re-processed. Integrity receipts are stored in the same directory under `receipt:{pipeline}:{table}` keys.
+Stratum stores pipeline state in `~/.stratum/state/` (sled embedded KV). If a migration is interrupted, re-running the same command resumes from the last checkpoint - no rows are re-processed. Integrity receipts are stored in the same directory under `receipt:{pipeline}:{table}` keys.
 
 ## Documentation
 
@@ -226,6 +258,7 @@ Stratum stores pipeline state in `~/.stratum/state/` (sled embedded KV). If a mi
 |----------|-------------|
 | [docs/smql-reference.md](docs/smql-reference.md) | Full SMQL v2.1 language reference |
 | [docs/architecture.md](docs/architecture.md) | Crate map, design decisions, data flow |
+| [docs/plugins/](docs/plugins/README.md) | WASM plugins - roles, native Rust & JS (QuickJS) runtimes, authoring, CLI |
 | [docs/verification.md](docs/verification.md) | Cryptographic verification design and implementation |
 
 ## Development
@@ -245,3 +278,18 @@ cargo fmt
 ```
 
 Test fixtures and example configs are in [`examples/configs/`](examples/configs/).
+
+## License
+
+Stratum is licensed under the **GNU Affero General Public License v3.0 or later**
+(`AGPL-3.0-or-later`). See [LICENSE](LICENSE) for the full text.
+
+```
+Copyright (C) 2026 Stratum contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version. This program is distributed WITHOUT ANY WARRANTY; see the GNU
+Affero General Public License for more details.
+```

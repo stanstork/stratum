@@ -1,5 +1,5 @@
 use crate::ast::{
-    block::{ConnectionBlock, DefineBlock, ExecutionBlock},
+    block::{ConnectionBlock, DefineBlock, ExecutionBlock, PluginBlock},
     pipeline::PipelineBlock,
     span::Span,
 };
@@ -12,6 +12,7 @@ pub struct SmqlDocument {
     pub execution_block: Option<ExecutionBlock>,
     pub connections: Vec<ConnectionBlock>,
     pub pipelines: Vec<PipelineBlock>,
+    pub plugins: Vec<PluginBlock>,
     pub span: Span,
 }
 
@@ -27,6 +28,7 @@ mod tests {
             execution_block: None,
             connections: vec![],
             pipelines: vec![],
+            plugins: vec![],
             span,
         };
 
@@ -34,5 +36,6 @@ mod tests {
         assert!(doc.execution_block.is_none());
         assert_eq!(doc.connections.len(), 0);
         assert_eq!(doc.pipelines.len(), 0);
+        assert_eq!(doc.plugins.len(), 0);
     }
 }

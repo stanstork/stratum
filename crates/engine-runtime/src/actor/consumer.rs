@@ -66,6 +66,11 @@ impl ConsumerTask {
             ConsumerStatus::Idle => TickAction::Idle,
             ConsumerStatus::Finished => {
                 info!("Consumer finished");
+                if let Err(e) = self.consumer.finalize().await {
+                    error!(error = %e, "Consumer finalize failed");
+                    let _ = self.consumer.stop().await;
+                    return TickAction::Failed(ActorError::Internal(e.to_string()));
+                }
                 let _ = self.consumer.stop().await;
                 TickAction::Done
             }

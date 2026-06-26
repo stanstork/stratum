@@ -73,6 +73,19 @@ impl SemanticValidator {
             }
         }
 
+        // Register plugins
+        for plugin in &document.plugins {
+            if let Some(first_span) = self.symbols.add_plugin(plugin.name.clone(), plugin.span) {
+                self.issues.add_error(ValidationIssue::error(
+                    ValidationIssueKind::DuplicatePlugin {
+                        name: plugin.name.clone(),
+                        first_location: first_span,
+                    },
+                    plugin.span,
+                ));
+            }
+        }
+
         // Register pipelines
         for pipeline in &document.pipelines {
             if let Some(first_span) = self
@@ -239,6 +252,9 @@ impl SemanticValidator {
             for check in &validate.checks {
                 self.validate_expression(&check.body.check);
             }
+            for rule in &validate.wasm_rules {
+                self.validate_wasm_rule(rule);
+            }
         }
 
         if let Some(on_error) = &block.on_error_block {
@@ -318,6 +334,18 @@ impl SemanticValidator {
             ExpressionKind::IsNull(operand) | ExpressionKind::IsNotNull(operand) => {
                 self.validate_expression(operand);
             }
+            ExpressionKind::PluginCall(call) => {
+                if !self.symbols.plugins.contains_key(&call.plugin_name) {
+                    self.issues.add_error(ValidationIssue::error(
+                        ValidationIssueKind::UndefinedPlugin {
+                            name: call.plugin_name.clone(),
+                        },
+                        call.span,
+                    ));
+                }
+                // input fields' source_refs are bare table.column DotPaths;
+                // those don't go through the symbol table.
+            }
             ExpressionKind::Grouped(inner) => {
                 self.validate_expression(inner);
             }
@@ -343,24 +371,8 @@ impl SemanticValidator {
 
         for attr in &block.attributes {
             self.validate_expression(&attr.value);
-
-            // Check connection reference
-            if attr.key.name == "connection"
-                && let ExpressionKind::DotNotation(ref path) = attr.value.kind
-                && path.segments.len() == 2
-                && path.segments[0] == "connection"
-            {
-                let conn_name = &path.segments[1];
-                self.symbols.mark_connection_used(conn_name);
-
-                if !self.symbols.connections.contains_key(conn_name) {
-                    self.issues.add_error(ValidationIssue::error(
-                        ValidationIssueKind::UndefinedConnection {
-                            name: conn_name.clone(),
-                        },
-                        attr.value.span,
-                    ));
-                }
+            if attr.key.name == "connection" {
+                self.validate_endpoint_ref(&attr.value);
             }
         }
     }
@@ -383,25 +395,53 @@ impl SemanticValidator {
 
         for attr in &block.attributes {
             self.validate_expression(&attr.value);
+            if attr.key.name == "connection" {
+                self.validate_endpoint_ref(&attr.value);
+            }
+        }
+    }
 
-            // Check connection references
-            if attr.key.name == "connection"
-                && let ExpressionKind::DotNotation(ref path) = attr.value.kind
-                && path.segments.len() == 2
-                && path.segments[0] == "connection"
-            {
-                let conn_name = &path.segments[1];
-                self.symbols.mark_connection_used(conn_name);
-
-                if !self.symbols.connections.contains_key(conn_name) {
+    /// Validate `connection = connection.<name>` or `connection = plugin.<name>`
+    /// in a `from`/`to` block, marking the symbol used and reporting any
+    /// reference to an undeclared connection or plugin.
+    fn validate_endpoint_ref(&mut self, value: &Expression) {
+        let ExpressionKind::DotNotation(ref path) = value.kind else {
+            return;
+        };
+        if path.segments.len() != 2 {
+            return;
+        }
+        let name = &path.segments[1];
+        match path.segments[0].as_str() {
+            "connection" => {
+                self.symbols.mark_connection_used(name);
+                if !self.symbols.connections.contains_key(name) {
                     self.issues.add_error(ValidationIssue::error(
-                        ValidationIssueKind::UndefinedConnection {
-                            name: conn_name.clone(),
-                        },
-                        attr.value.span,
+                        ValidationIssueKind::UndefinedConnection { name: name.clone() },
+                        value.span,
                     ));
                 }
             }
+            "plugin" if !self.symbols.plugins.contains_key(name) => {
+                self.issues.add_error(ValidationIssue::error(
+                    ValidationIssueKind::UndefinedPlugin { name: name.clone() },
+                    value.span,
+                ));
+            }
+            _ => {}
+        }
+    }
+
+    /// Validate a WASM filter rule inside a `validate { … }` block: the
+    /// referenced plugin must be declared.
+    fn validate_wasm_rule(&mut self, rule: &crate::ast::validation::WasmValidationRule) {
+        if !self.symbols.plugins.contains_key(&rule.filter.plugin_name) {
+            self.issues.add_error(ValidationIssue::error(
+                ValidationIssueKind::UndefinedPlugin {
+                    name: rule.filter.plugin_name.clone(),
+                },
+                rule.filter.span,
+            ));
         }
     }
 

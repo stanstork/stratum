@@ -1,6 +1,6 @@
 use crate::io::{
     format::DataFormat,
-    sink::{Sink, mysql::MySqlSink, postgres::PostgresSink},
+    sink::{Sink, mysql::MySqlSink, postgres::PostgresSink, wasm::WasmSinkAdapter},
 };
 use connectors::{
     drivers::{mysql::driver::MySqlDriver, postgres::driver::PgDriver},
@@ -9,6 +9,7 @@ use connectors::{
     traits::driver::Driver,
 };
 use engine_core::schema::type_registry::Dialect;
+use engine_wasm::runtime::instance::PluginInstance;
 use model::{execution::connection::Connection, records::Record};
 use query_builder::dialect;
 use std::sync::Arc;
@@ -59,12 +60,27 @@ impl Destination {
         Ok(Destination { name, format, sink })
     }
 
+    pub fn wasm(plugin: PluginInstance, table: &str) -> Self {
+        let name = table.to_string();
+        let format = DataFormat::Wasm;
+        let sink = Arc::new(WasmSinkAdapter::new(plugin));
+        Destination { name, format, sink }
+    }
+
     pub async fn write_batch(
         &self,
         meta: &TableMetadata,
         rows: &[Record],
     ) -> Result<u64, DriverError> {
         self.sink.write_batch(meta, rows).await
+    }
+
+    pub async fn prepare(&self) -> Result<(), DriverError> {
+        self.sink.prepare().await
+    }
+
+    pub async fn finalize(&self) -> Result<(), DriverError> {
+        self.sink.finalize().await
     }
 
     pub fn dialect(&self) -> Box<dyn dialect::Dialect> {

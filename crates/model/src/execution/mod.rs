@@ -7,6 +7,7 @@ pub mod failed_row;
 pub mod flags;
 pub mod item_id;
 pub mod pipeline;
+pub mod plugin;
 pub mod properties;
 pub mod references;
 pub mod row_count;

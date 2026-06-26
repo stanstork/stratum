@@ -1,5 +1,6 @@
 use crate::io::{destination::Destination, source::Source};
 use engine_core::{context::exec::ExecutionContext, state::sled_store::SledStateStore};
+use engine_wasm::registry::PluginRegistry;
 use model::{
     execution::pipeline::Pipeline, pagination::cursor::Cursor,
     transform::mapping::TransformationMetadata,
@@ -19,6 +20,7 @@ pub struct PipelineContext {
     pub state: Arc<SledStateStore>,
     pub offset_strategy: Arc<dyn OffsetStrategy>,
     pub cursor: Cursor,
+    pub plugin_registry: Arc<PluginRegistry>,
 }
 
 impl PipelineContext {
@@ -38,6 +40,7 @@ pub struct PipelineContextBuilder {
     state: Option<Arc<SledStateStore>>,
     offset_strategy: Option<Arc<dyn OffsetStrategy>>,
     cursor: Option<Cursor>,
+    plugin_registry: Option<Arc<PluginRegistry>>,
 }
 
 impl PipelineContextBuilder {
@@ -53,6 +56,7 @@ impl PipelineContextBuilder {
             state: None,
             offset_strategy: None,
             cursor: None,
+            plugin_registry: None,
         }
     }
 
@@ -101,6 +105,11 @@ impl PipelineContextBuilder {
         self
     }
 
+    pub fn plugin_registry(mut self, plugin_registry: Arc<PluginRegistry>) -> Self {
+        self.plugin_registry = Some(plugin_registry);
+        self
+    }
+
     pub fn build(self) -> PipelineContext {
         PipelineContext {
             exec_ctx: self.exec_ctx,
@@ -113,6 +122,7 @@ impl PipelineContextBuilder {
             state: self.state.expect("state is required"),
             offset_strategy: self.offset_strategy.expect("offset_strategy is required"),
             cursor: self.cursor.unwrap_or(Cursor::None),
+            plugin_registry: self.plugin_registry.expect("plugin_registry is required"),
         }
     }
 }

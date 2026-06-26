@@ -10,22 +10,24 @@ use model::{
         pipeline::{
             BackoffStrategy, DataDestination, DataSource, ErrorHandling, FailedRowsAction,
             FailedRowsConfig, FailedRowsDestination, FileFormat, Filter, Join, LifecycleHooks,
-            Pagination, Pipeline, RetryConfig, Transformation, ValidationAction, ValidationRule,
-            ValidationSeverity, WriteMode,
+            Pagination, Pipeline, PluginTransformCall, RetryConfig, Transformation,
+            ValidationAction, ValidationKind as RuleKind, ValidationRule, ValidationSeverity,
+            WriteMode,
         },
+        plugin::PluginDecl,
         properties::Properties,
         references::{DataMode, GraphReferences, TraversalDepth},
     },
 };
 use smql_syntax::ast::{
-    block::{ConnectionBlock, DefineBlock, ExecutionBlock},
+    block::{ConnectionBlock, DefineBlock, ExecutionBlock, PluginBlock},
     expr::{Expression, ExpressionKind},
     literal::Literal,
     operator::BinaryOperator,
     pipeline::{FromBlock, PipelineBlock, ToBlock},
     validation::ValidationKind,
 };
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, str::FromStr, sync::Arc};
 
 // ============================================================
 // Attribute Name Constants
@@ -274,6 +276,7 @@ impl PlanBuilder {
         let error_handling = self.build_error_handling(pipeline_block)?;
         let lifecycle = self.build_lifecycle(pipeline_block)?;
         let settings = self.build_settings(pipeline_block)?;
+        let plugin_transforms = self.build_plugin_transforms(pipeline_block);
 
         Ok(Pipeline {
             name: pipeline_block.name.clone(),
@@ -287,6 +290,7 @@ impl PlanBuilder {
             lifecycle: Some(lifecycle),
             error_handling: Some(error_handling),
             settings,
+            plugin_transforms,
         })
     }
 
@@ -530,6 +534,9 @@ impl PlanBuilder {
             Ok(select
                 .fields
                 .iter()
+                // Plugin calls are routed to `plugin_transforms`, not regular
+                // expression transformations.
+                .filter(|f| !matches!(f.value.kind, ExpressionKind::PluginCall(_)))
                 .map(|f| Transformation {
                     target_field: f.name.name.clone(),
                     expression: self.compile_expression(&f.value).unwrap(),
@@ -538,6 +545,44 @@ impl PlanBuilder {
         } else {
             Ok(Vec::new())
         }
+    }
+
+    /// Extract `output = plugin.name({ field: src.col, ... })` entries from the
+    /// select block into `PluginTransformCall`s.
+    fn build_plugin_transforms(&self, pipeline_block: &PipelineBlock) -> Vec<PluginTransformCall> {
+        let Some(select) = &pipeline_block.select_block else {
+            return Vec::new();
+        };
+        select
+            .fields
+            .iter()
+            .filter_map(|f| match &f.value.kind {
+                ExpressionKind::PluginCall(call) => Some(PluginTransformCall {
+                    plugin_name: call.plugin_name.clone(),
+                    output_column: f.name.name.clone(),
+                    input_mapping: Self::plugin_input_mapping(call),
+                }),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Map a plugin call's input fields to `plugin_field -> source column name`.
+    /// The source column is the last segment of the dotted reference (e.g.
+    /// `orders.amount` -> `amount`), matching how records are keyed.
+    fn plugin_input_mapping(call: &smql_syntax::ast::expr::PluginCall) -> HashMap<String, String> {
+        call.inputs
+            .iter()
+            .map(|input| {
+                let column = input
+                    .source_ref
+                    .segments
+                    .last()
+                    .cloned()
+                    .unwrap_or_default();
+                (input.plugin_field.clone(), column)
+            })
+            .collect()
     }
 
     fn build_named_transformations(
@@ -549,6 +594,7 @@ impl PlanBuilder {
             let transforms = named
                 .fields
                 .iter()
+                .filter(|f| !matches!(f.value.kind, ExpressionKind::PluginCall(_)))
                 .map(|f| Transformation {
                     target_field: f.name.name.clone(),
                     expression: self.compile_expression(&f.value).unwrap(),
@@ -563,34 +609,57 @@ impl PlanBuilder {
         &self,
         pipeline_block: &PipelineBlock,
     ) -> Result<Vec<ValidationRule>, ConvertError> {
-        if let Some(validate) = &pipeline_block.validate_block {
-            Ok(validate
-                .checks
-                .iter()
-                .map(|check| ValidationRule {
-                    label: check.label.clone(),
-                    severity: match check.kind {
-                        ValidationKind::Assert => ValidationSeverity::Assert,
-                        ValidationKind::Warn => ValidationSeverity::Warn,
-                    },
+        let Some(validate) = &pipeline_block.validate_block else {
+            return Ok(Vec::new());
+        };
+
+        let mut rules: Vec<ValidationRule> = validate
+            .checks
+            .iter()
+            .map(|check| ValidationRule {
+                label: check.label.clone(),
+                severity: match check.kind {
+                    ValidationKind::Assert => ValidationSeverity::Assert,
+                    ValidationKind::Warn => ValidationSeverity::Warn,
+                },
+                kind: RuleKind::Assert {
                     check: self.compile_expression(&check.body.check).unwrap(),
-                    message: check.body.message.clone(),
-                    action: check
-                        .body
-                        .action
-                        .as_ref()
-                        .and_then(|a| match a.as_str() {
-                            ACTION_SKIP => Some(ValidationAction::Skip),
-                            ACTION_FAIL => Some(ValidationAction::Fail),
-                            ACTION_WARN => Some(ValidationAction::Warn),
-                            ACTION_CONTINUE => Some(ValidationAction::Continue),
-                            _ => None,
-                        })
-                        .unwrap_or(ValidationAction::Warn),
-                })
-                .collect())
-        } else {
-            Ok(Vec::new())
+                },
+                message: check.body.message.clone(),
+                action: check
+                    .body
+                    .action
+                    .as_ref()
+                    .and_then(|a| Self::parse_validation_action(a))
+                    .unwrap_or(ValidationAction::Warn),
+            })
+            .collect();
+
+        // WASM filter rules: `rule "x" { filter = plugin.name({...}) on_fail = skip }`
+        for wr in &validate.wasm_rules {
+            rules.push(ValidationRule {
+                label: wr.name.clone(),
+                severity: ValidationSeverity::Assert,
+                kind: RuleKind::WasmFilter {
+                    plugin_name: wr.filter.plugin_name.clone(),
+                    input_mapping: Self::plugin_input_mapping(&wr.filter),
+                },
+                message: format!("row rejected by filter plugin '{}'", wr.filter.plugin_name),
+                action: Self::parse_validation_action(&wr.on_fail)
+                    .unwrap_or(ValidationAction::Fail),
+            });
+        }
+
+        Ok(rules)
+    }
+
+    fn parse_validation_action(a: &str) -> Option<ValidationAction> {
+        match a {
+            ACTION_SKIP => Some(ValidationAction::Skip),
+            ACTION_FAIL => Some(ValidationAction::Fail),
+            ACTION_WARN => Some(ValidationAction::Warn),
+            ACTION_CONTINUE => Some(ValidationAction::Continue),
+            _ => None,
         }
     }
 
@@ -1003,6 +1072,105 @@ impl PlanBuilder {
             definitions.insert(attr.key.name.clone(), DefinitionInfo { value, source });
         }
         Ok(definitions)
+    }
+
+    /// Convert a `plugin "name" { path = ..., allow_http = ..., ... }` block
+    /// into a `PluginDecl`. Unknown attributes are ignored; `path` is required.
+    pub fn build_plugin(&self, block: &PluginBlock) -> Result<PluginDecl, ConvertError> {
+        let as_string = |v: &Value| match v {
+            Value::String(s) => Some(s.clone()),
+            _ => None,
+        };
+        let as_bool = |v: &Value| matches!(v, Value::Boolean(true));
+        let as_u64 = |v: &Value| match v {
+            Value::Int(n) if *n >= 0 => Some(*n as u64),
+            Value::UInt(n) => Some(*n),
+            _ => None,
+        };
+        let as_str_list = |v: &Value| match v {
+            Value::Array(items) => items.iter().filter_map(&as_string).collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+
+        let mut decl = PluginDecl {
+            name: block.name.clone(),
+            path: PathBuf::new(),
+            allow_http: false,
+            allow_kv: false,
+            allow_log: true,
+            allow_metrics: false,
+            allow_fs_read: Vec::new(),
+            allow_fs_write: Vec::new(),
+            allow_env: Vec::new(),
+            memory_limit_bytes: None,
+            fuel_limit: None,
+            timeout_ms: None,
+            config_json: None,
+        };
+
+        for attr in &block.attributes {
+            let value = self.eval_expression(&attr.value)?;
+            match attr.key.name.as_str() {
+                "path" => decl.path = as_string(&value).map(PathBuf::from).unwrap_or_default(),
+                "allow_http" => decl.allow_http = as_bool(&value),
+                "allow_kv" => decl.allow_kv = as_bool(&value),
+                "allow_log" => decl.allow_log = as_bool(&value),
+                "allow_metrics" => decl.allow_metrics = as_bool(&value),
+                "memory_limit_bytes" => decl.memory_limit_bytes = as_u64(&value),
+                "fuel_limit" => decl.fuel_limit = as_u64(&value),
+                "timeout_ms" => decl.timeout_ms = as_u64(&value),
+                "allow_fs_read" => {
+                    decl.allow_fs_read =
+                        as_str_list(&value).into_iter().map(PathBuf::from).collect()
+                }
+                "allow_fs_write" => {
+                    decl.allow_fs_write =
+                        as_str_list(&value).into_iter().map(PathBuf::from).collect()
+                }
+                "allow_env" => decl.allow_env = as_str_list(&value),
+                _ => {}
+            }
+        }
+
+        // Nested `config { ... }` block -> JSON bytes passed to the plugin at __stratum_initialize.
+        if let Some(cfg) = block.nested_blocks.iter().find(|b| b.kind == "config") {
+            let mut map = serde_json::Map::new();
+            for attr in &cfg.attributes {
+                let value = self.eval_expression(&attr.value)?;
+                map.insert(attr.key.name.clone(), Self::value_to_plain_json(&value));
+            }
+            let bytes = serde_json::to_vec(&serde_json::Value::Object(map)).map_err(|e| {
+                ConvertError::Plan(format!("plugin '{}' config serialization: {e}", block.name))
+            })?;
+            decl.config_json = Some(bytes);
+        }
+
+        if decl.path.as_os_str().is_empty() {
+            return Err(ConvertError::Plan(format!(
+                "plugin '{}' is missing required 'path'",
+                block.name
+            )));
+        }
+        Ok(decl)
+    }
+
+    /// Convert an evaluated SMQL value into plain JSON for a plugin's config
+    /// (natural scalars/arrays, not the `{type,value}` exchange envelope).
+    fn value_to_plain_json(v: &Value) -> serde_json::Value {
+        match v {
+            Value::Null => serde_json::Value::Null,
+            Value::Boolean(b) => serde_json::Value::Bool(*b),
+            Value::Int(n) => serde_json::Value::from(*n),
+            Value::UInt(n) => serde_json::Value::from(*n),
+            Value::Float(f) => serde_json::Number::from_f64(*f)
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null),
+            Value::String(s) => serde_json::Value::String(s.clone()),
+            Value::Array(items) => {
+                serde_json::Value::Array(items.iter().map(Self::value_to_plain_json).collect())
+            }
+            other => serde_json::Value::String(format!("{other:?}")),
+        }
     }
 
     fn convert_binop(&self, op: BinaryOperator) -> BinaryOp {
@@ -1538,6 +1706,7 @@ mod tests {
                     },
                 ],
                 span: test_span(),
+                wasm_rules: vec![],
             }),
             on_error_block: None,
             paginate_block: None,

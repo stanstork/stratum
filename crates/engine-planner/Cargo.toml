@@ -2,6 +2,7 @@
 name = "engine-planner"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 
 [dependencies]
 model = { path = "../model" }
@@ -10,6 +11,7 @@ query-builder = { path = "../query-builder" }
 engine-core = { path = "../engine-core" }
 engine-runtime = { path = "../engine-runtime" }
 engine-processing = { path = "../engine-processing" }
+engine-wasm = { path = "../engine-wasm" }
 expression-engine = { path = "../expression-engine" }
 engine-config = { path = "../engine-config" }
 

@@ -16,6 +16,20 @@ members = [
     "crates/engine-planner",
     "crates/engine-schema",
     "crates/engine-verify",
+    "crates/engine-wasm",
+    "crates/sdk/stratum-plugin-compiler",
+]
+
+exclude = [
+    "crates/engine-wasm/src/tests/plugins/rust",
+    "crates/sdk/stratum-plugin-sdk",
+    "crates/sdk/stratum-plugin-sdk-macros",
+    # WASM-only QuickJS runtime: built solely for wasm32-wasip1 (see
+    # build_fixtures.sh) and committed as a fixture.
+    "crates/sdk/stratum-plugin-js-runtime",
 ]
 
 resolver = "2"
+
+[workspace.package]
+license = "AGPL-3.0-or-later"

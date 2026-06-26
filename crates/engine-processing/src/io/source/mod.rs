@@ -6,13 +6,14 @@ use crate::io::{
     },
     format::DataFormat,
     linked::LinkedSource,
-    source::{db_reader::DbSourceReader, reader::SourceReader},
+    source::{db_reader::DbSourceReader, reader::SourceReader, wasm_reader::WasmSourceReader},
 };
 use connectors::{
     error::DriverError,
     sql::metadata::table::TableMetadata,
     traits::{introspector::SchemaIntrospector, reader::DataReader},
 };
+use engine_wasm::runtime::instance::PluginInstance;
 use model::{
     execution::pipeline::Pipeline,
     pagination::{cursor::Cursor, page::FetchResult},
@@ -25,7 +26,9 @@ use query_builder::{
 use std::{collections::HashMap, sync::Arc};
 
 pub mod db_reader;
+pub mod plugin_introspector;
 pub mod reader;
+pub mod wasm_reader;
 
 #[derive(Clone)]
 pub struct Source {
@@ -47,6 +50,20 @@ impl Source {
         D: DataReader + SchemaIntrospector,
     {
         Self::with_cascade(driver, pipeline, mapping, offset_strategy, None).await
+    }
+
+    pub fn from_plugin(plugin: PluginInstance, pipeline: &Pipeline) -> Result<Self, DriverError> {
+        let name = pipeline.source.table.clone();
+        let format = DataFormat::Wasm;
+        let reader = Arc::new(WasmSourceReader::new(plugin, name.clone()));
+
+        Ok(Source {
+            name,
+            format,
+            primary: reader,
+            linked: None, // joins not supported for WASM sources
+            filter: None, // filter pushdown not supported; rely on validate{} rules
+        })
     }
 
     /// Create a source with optional cascade metadata for graph-based migration.
@@ -192,6 +209,10 @@ impl Source {
             DataFormat::Csv => Ok(Some(Filter::Csv(CsvFilterCompiler::compile(
                 &combined_condition,
             )))),
+            _ => Err(DriverError::UnsupportedFormat(format!(
+                "filters not supported for format {:?}",
+                format
+            ))),
         }
     }
 }

@@ -45,6 +45,7 @@ pub enum ExpressionKind {
     IsNull(Box<Expression>),
     IsNotNull(Box<Expression>),
     Grouped(Box<Expression>),
+    PluginCall(PluginCall),
 }
 
 /// When expression branch
@@ -52,5 +53,22 @@ pub enum ExpressionKind {
 pub struct WhenBranch {
     pub condition: Expression,
     pub value: Expression,
+    pub span: Span,
+}
+
+/// Plugin invocation - shared by select-block transforms and validate-block
+/// WASM filter rules.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginCall {
+    pub plugin_name: String,
+    pub inputs: Vec<PluginInputField>,
+    pub span: Span,
+}
+
+/// `field_name: source.column` inside a plugin call's input block.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginInputField {
+    pub plugin_field: String,
+    pub source_ref: DotPath,
     pub span: Span,
 }

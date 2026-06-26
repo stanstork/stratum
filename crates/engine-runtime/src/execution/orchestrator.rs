@@ -1,16 +1,16 @@
-use crate::{actor::coordinator::PipelineCoordinator, error::MigrationError};
+use crate::{
+    actor::coordinator::PipelineCoordinator,
+    dag::endpoint::{DestinationEndpoint, HookPhase},
+    error::MigrationError,
+};
 use chrono;
 use connectors::sql::metadata::table::TableMetadata;
-use engine_config::settings::{self, validated::ValidatedSettings};
-use engine_core::{
-    dispatch_driver, drivers::DriverRef, event_bus::bus::EventBus, metrics::Metrics,
-    schema::schema_ops::SchemaOps,
-};
+use engine_config::settings::validated::ValidatedSettings;
+use engine_core::{event_bus::bus::EventBus, metrics::Metrics, schema::schema_ops::SchemaOps};
 use engine_infra::shutdown::ShutdownSignal;
 use engine_processing::{
     consumer::Consumer,
     context::PipelineContext,
-    hooks::executor::HookExecutor,
     producer::{Producer, config::ProducerConfig},
 };
 use model::integrity::{algorithm::HashAlgorithm, config::IntegrityConfig};
@@ -30,18 +30,12 @@ use tracing::{error, info, warn};
 const BATCH_CHANNEL_CAPACITY: usize = 64;
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Debug, Clone, Copy)]
-enum HookPhase {
-    Before,
-    After,
-}
-
 /// Orchestrates the complete pipeline execution lifecycle including hooks.
 /// The orchestrator ensures proper sequencing and error handling across all phases.
 pub struct PipelineOrchestrator {
     pipeline: Pipeline,
     ctx: PipelineContext,
-    dst_driver: DriverRef,
+    dest_ep: Box<dyn DestinationEndpoint>,
     settings: ValidatedSettings,
     schema_ops: SchemaOps,
     shutdown: ShutdownSignal,
@@ -55,7 +49,7 @@ impl PipelineOrchestrator {
     pub fn new(
         pipeline: Pipeline,
         ctx: PipelineContext,
-        dst_driver: DriverRef,
+        dest_ep: Box<dyn DestinationEndpoint>,
         settings: ValidatedSettings,
         schema_ops: SchemaOps,
         shutdown: ShutdownSignal,
@@ -66,7 +60,7 @@ impl PipelineOrchestrator {
         Self {
             pipeline,
             ctx,
-            dst_driver,
+            dest_ep,
             settings,
             schema_ops,
             shutdown,
@@ -100,7 +94,7 @@ impl PipelineOrchestrator {
         Ok(rows)
     }
 
-    /// Execute a batch of schema operations against the destination driver,
+    /// Execute a batch of schema operations against the destination endpoint,
     /// skipping any ops whose SQL has already been executed in a prior pipeline.
     async fn execute_schema_ops(
         &self,
@@ -122,16 +116,9 @@ impl PipelineOrchestrator {
                 }
             }
 
-            dispatch_driver!(&self.dst_driver, |d| {
-                settings::apply_schema_ops(d.as_ref(), std::slice::from_ref(op))
-                    .await
-                    .map_err(|e| {
-                        MigrationError::PipelineFailed(format!(
-                            "{} schema operation failed: {}",
-                            phase, e
-                        ))
-                    })?
-            });
+            self.dest_ep
+                .apply_schema_ops(std::slice::from_ref(op), phase)
+                .await?;
 
             self.done_ops.lock().unwrap().insert(op.sql.clone());
         }
@@ -160,16 +147,7 @@ impl PipelineOrchestrator {
         };
 
         if should_run {
-            dispatch_driver!(&self.dst_driver, |d| {
-                let mut executor = HookExecutor::new(d.clone(), hooks.clone());
-                let result = match phase {
-                    HookPhase::Before => executor.execute_before().await,
-                    HookPhase::After => executor.execute_after().await,
-                };
-                result.map_err(|e| {
-                    MigrationError::HookExecutionFailed(format!("{:?} hooks failed: {}", phase, e))
-                })?;
-            });
+            self.dest_ep.run_hooks(phase, hooks).await?;
         }
 
         Ok(())
@@ -205,7 +183,8 @@ impl PipelineOrchestrator {
             config,
             self.settings.mapped_columns_only(),
         )
-        .await;
+        .await
+        .map_err(|e| MigrationError::InitializationError(e.to_string()))?;
 
         let consumer = Consumer::new(
             &self.ctx,
@@ -231,33 +210,9 @@ impl PipelineOrchestrator {
     /// In cascade mode, fetches metadata for all discovered tables.
     /// Otherwise, just the single destination table.
     async fn fetch_destination_metadata(&self) -> Result<Vec<TableMetadata>, MigrationError> {
-        if self.cascade_tables.is_empty() {
-            let dest_table = &self.ctx.destination.name;
-            let meta = self
-                .dst_driver
-                .table_metadata(dest_table)
-                .await
-                .map_err(|e| {
-                    MigrationError::PipelineFailed(format!(
-                        "Failed to get destination metadata: {}",
-                        e
-                    ))
-                })?;
-            return Ok(vec![meta]);
-        }
-
-        let mut metas = Vec::with_capacity(self.cascade_tables.len());
-        for table in &self.cascade_tables {
-            let meta = self.dst_driver.table_metadata(table).await.map_err(|e| {
-                MigrationError::PipelineFailed(format!(
-                    "Failed to get cascade destination metadata for '{}': {}",
-                    table, e
-                ))
-            })?;
-            metas.push(meta);
-        }
-
-        Ok(metas)
+        self.dest_ep
+            .destination_metadata(&self.ctx, &self.cascade_tables)
+            .await
     }
 
     fn build_producer_config(&self, dest_metas: &[TableMetadata]) -> ProducerConfig {

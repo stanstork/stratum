@@ -1,0 +1,68 @@
+// diagnostics.smql - DELIBERATELY BROKEN. Each pipeline trips a specific
+// diagnostic so you can confirm the analyzers catch it. Expect failures.
+//
+//   plugin validate -c examples/plugins/configs/diagnostics.smql   (field/role checks)
+//   stratum plan    -c examples/plugins/configs/diagnostics.smql   (canonical TYPE checks)
+//
+// Comment out pipelines one at a time to isolate each code.
+
+define {
+    mysql_url    = env("MYSQL_URL",    "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+plugin "gross_to_net" { path = "examples/plugins/js/gross_to_net.js" }  // transform, f64 in/out
+plugin "email_valid"  { path = "examples/plugins/js/email_valid.js" }   // filter
+plugin "upper"        { path = "examples/plugins/js/upper.js" }         // transform, string
+
+// (1) ROLE MISMATCH - using a filter as a transform.
+//     validate: "'email_valid' is a Filter, but is used as a transform".
+pipeline "role_mismatch" {
+    from { connection = connection.src  table = "actor" }
+    to   { connection = connection.dst  table = "d_role" }
+    select {
+        actor_id = actor.actor_id
+        oops     = plugin.email_valid({ email: actor.first_name })
+    }
+    settings { create_missing_tables = true }
+}
+
+// (2) UNMAPPED INPUT - gross_to_net needs {gross, rate}; only gross supplied.
+//     validate: "input field 'rate' is not provided by its mapping".
+//     plan:     PLUGIN_INPUT_UNMAPPED.
+pipeline "unmapped_field" {
+    from { connection = connection.src  table = "film" }
+    to   { connection = connection.dst  table = "d_unmapped" }
+    select {
+        film_id = film.film_id
+        net     = plugin.gross_to_net({ gross: film.replacement_cost })
+    }
+    settings { create_missing_tables = true }
+}
+
+// (3) UNKNOWN MAPPING KEY - `bogus` is not a declared input field.
+//     validate: warning "references unknown input field 'bogus'".
+pipeline "unknown_key" {
+    from { connection = connection.src  table = "actor" }
+    to   { connection = connection.dst  table = "d_unknown" }
+    select {
+        actor_id = actor.actor_id
+        up       = plugin.upper({ name: actor.last_name, bogus: actor.first_name })
+    }
+    settings { create_missing_tables = true }
+}
+
+// (4) INPUT TYPE MISMATCH - gross_to_net wants f64; `title` is text.
+//     plan: PLUGIN_INPUT_TYPE_MISMATCH, is_executable=false.
+pipeline "type_mismatch" {
+    from { connection = connection.src  table = "film" }
+    to   { connection = connection.dst  table = "d_type" }
+    select {
+        film_id = film.film_id
+        net     = plugin.gross_to_net({ gross: film.title, rate: film.rental_rate })
+    }
+    settings { create_missing_tables = true }
+}

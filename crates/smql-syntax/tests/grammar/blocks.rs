@@ -416,3 +416,72 @@ pipeline "test" {
     let result = SmqlParser::parse(Rule::program, input);
     assert!(result.is_ok());
 }
+
+#[test]
+fn test_parse_plugin_block_minimal() {
+    let input = r#"
+plugin "fraud" {
+    path = "./plugins/fraud.wasm"
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+}
+
+#[test]
+fn test_parse_plugin_block_with_config_and_capabilities() {
+    let input = r#"
+plugin "stripe_src" {
+    path = "./plugins/stripe.wasm"
+    allow_http = true
+    memory = 67108864
+    timeout = 5000
+    config {
+        base_url = "https://api.stripe.com"
+        api_key  = "sk_test_xyz"
+    }
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+}
+
+#[test]
+fn test_parse_validate_block_with_wasm_rule() {
+    let input = r#"
+pipeline "p" {
+    from { connection = connection.src }
+    to   { connection = connection.dst }
+    validate {
+        rule "fraud_screen" {
+            filter  = plugin.check_fraud({ amount: charges.amount, country: charges.country })
+            on_fail = skip
+        }
+    }
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+}
+
+#[test]
+fn test_parse_validate_block_mixed_assert_and_wasm_rule() {
+    let input = r#"
+pipeline "p" {
+    from { connection = connection.src }
+    to   { connection = connection.dst }
+    validate {
+        assert "positive_amount" {
+            check = charges.amount > 0
+            message = "amount must be positive"
+        }
+        rule "fraud_screen" {
+            filter  = plugin.check_fraud({ amount: charges.amount })
+            on_fail = skip
+        }
+    }
+}
+"#;
+    let result = SmqlParser::parse(Rule::program, input);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+}

@@ -8,12 +8,12 @@ use engine_core::schema::schema_ops::{SchemaOp, SchemaOps};
 use engine_processing::context::PipelineContext;
 use tracing::info;
 
-pub struct CreateMissingTablesSetting<S: SchemaDriver, D: SchemaDriver> {
-    context: SchemaSettingContext<S, D>,
+pub struct CreateMissingTablesSetting<D: SchemaDriver> {
+    context: SchemaSettingContext<D>,
 }
 
 #[async_trait]
-impl<S: SchemaDriver, D: SchemaDriver> MigrationSetting for CreateMissingTablesSetting<S, D> {
+impl<D: SchemaDriver> MigrationSetting for CreateMissingTablesSetting<D> {
     fn phase(&self) -> MigrationSettingsPhase {
         MigrationSettingsPhase::CreateMissingTables
     }
@@ -23,8 +23,8 @@ impl<S: SchemaDriver, D: SchemaDriver> MigrationSetting for CreateMissingTablesS
     }
 }
 
-impl<S: SchemaDriver, D: SchemaDriver> CreateMissingTablesSetting<S, D> {
-    pub async fn new(ctx: SchemaSettingContext<S, D>) -> Self {
+impl<D: SchemaDriver> CreateMissingTablesSetting<D> {
+    pub async fn new(ctx: SchemaSettingContext<D>) -> Self {
         Self { context: ctx }
     }
 

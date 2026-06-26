@@ -1,0 +1,10 @@
+[package]
+name = "test_transform"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+stratum-plugin-sdk = { path = "../../../../../../sdk/stratum-plugin-sdk" }

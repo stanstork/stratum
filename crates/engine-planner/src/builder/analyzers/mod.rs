@@ -5,6 +5,7 @@ pub mod hooks;
 pub mod join;
 pub mod mapping;
 pub mod pagination;
+pub mod plugin;
 pub mod sample;
 pub mod schema;
 pub mod source;

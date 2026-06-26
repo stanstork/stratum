@@ -1,10 +1,10 @@
 flowchart TD
-    START([User: stratum apply -c config.smql]) --> PARSE[smql-syntax<br/>Parse SMQL → AST]
-    PARSE --> BUILD_PLAN[engine-config<br/>AST → ExecutionPlan<br/>resolve env vars, validate settings]
+    START([User: stratum apply -c config.smql]) --> PARSE[smql-syntax<br/>Parse SMQL -> AST]
+    PARSE --> BUILD_PLAN[engine-config<br/>AST -> ExecutionPlan<br/>resolve env vars, validate settings]
     BUILD_PLAN --> HASH["Deterministic plan hash<br/>run_id = run-&lt;hash16&gt;"]
     HASH --> INIT[Initialize ExecutionContext<br/>connection pool + SledStateStore<br/>EnvContext]
 
-    INIT --> DAG_BUILD[Build DAG<br/>from after= declarations<br/>topological sort → levels]
+    INIT --> DAG_BUILD[Build DAG<br/>from after= declarations<br/>topological sort -> levels]
 
     DAG_BUILD --> LEVEL_LOOP{For each<br/>DAG level}
 
@@ -19,7 +19,7 @@ flowchart TD
     RESUME --> SCHEMA_P1
     FRESH --> SCHEMA_P1
 
-    SCHEMA_P1["Schema Phase 1<br/>SchemaPlanner introspects source<br/>DependencyGraph → topological order<br/>CREATE TABLE (no FKs)"]
+    SCHEMA_P1["Schema Phase 1<br/>SchemaPlanner introspects source<br/>DependencyGraph -> topological order<br/>CREATE TABLE (no FKs)"]
 
     SCHEMA_P1 --> DATA_MIGRATE[Data Migration]
 
@@ -48,7 +48,7 @@ flowchart TD
 
     BATCH -.->|"Batch (cap:64, backpressure)"| RECV
 
-    CB["Circuit Breaker<br/>4 failures → open<br/>backoff: 1s…30s → retry"]
+    CB["Circuit Breaker<br/>4 failures -> open<br/>backoff: 1s…30s -> retry"]
     WRITE -.->|failure| CB
     CB -.->|retry| WRITE
 

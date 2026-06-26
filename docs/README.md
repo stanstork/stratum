@@ -27,6 +27,7 @@ Stratum is a declarative data pipeline engine that safely migrates data and sche
 - Field-level transformations and computed columns
 - Row-level data validation
 - Dead Letter Queue for failed rows
+- WASM plugins (transform / filter / source / sink) in native Rust or JavaScript
 - Graceful shutdown (SIGINT/SIGTERM)
 - Dry-run analysis (`plan` command)
 - Automatic resume from checkpoints
@@ -34,12 +35,12 @@ Stratum is a declarative data pipeline engine that safely migrates data and sche
 ## Architecture at a Glance
 
 ```
-SMQL → ExecutionPlan → DAG Executor
+SMQL -> ExecutionPlan -> DAG Executor
                            ↓  (level by level, parallel within level)
                   PipelineOrchestrator
                       ↓           ↓
               Schema Ops      Data Pipeline
-          (CREATE TABLE,    run_producer() → MPSC → run_consumer()
+          (CREATE TABLE,    run_producer() -> MPSC -> run_consumer()
            indexes, FKs)         ↓                       ↓
                             Source DB             Destination DB
                                                   + SledStateStore
@@ -53,3 +54,4 @@ SMQL → ExecutionPlan → DAG Executor
 | [architecture.md](architecture.md) | Full crate map, layer breakdown, design decisions |
 | [smql-reference.md](smql-reference.md) | SMQL v2.1 language reference with examples |
 | [verification.md](verification.md) | Cryptographic verification — Merkle trees, proof storage, verify command |
+| [plugins/](plugins/README.md) | WASM plugins — roles, runtimes (native Rust / JS-QuickJS), authoring, CLI |

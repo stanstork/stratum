@@ -26,3 +26,13 @@ pub struct ConnectionBlock {
     pub nested_blocks: Vec<NestedBlock>,
     pub span: Span,
 }
+
+// Plugin block for WASM plugin definitions
+// Syntax: plugin "my_plugin" { path = "./plugins/my_plugin.wasm", allow_http = true, ... }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginBlock {
+    pub name: String,
+    pub attributes: Vec<Attribute>,
+    pub nested_blocks: Vec<NestedBlock>,
+    pub span: Span,
+}

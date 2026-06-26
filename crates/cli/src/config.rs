@@ -1,4 +1,4 @@
-use crate::error::CliError;
+use crate::{compile::ensure_plugins_compiled, error::CliError};
 use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan};
 use smql_syntax::ast::doc::SmqlDocument;
 use std::{path::PathBuf, sync::Arc};
@@ -51,6 +51,8 @@ pub async fn load_plan(
     };
     let mut plan = ExecutionPlan::build(&doc, env)?;
     plan.config_path = path.to_string();
+    // Transparently compile any `.js` plugin sources to WASM (cached).
+    ensure_plugins_compiled(&mut plan)?;
     Ok(plan)
 }
 

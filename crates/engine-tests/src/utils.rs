@@ -21,6 +21,7 @@ use std::{
     fs::File,
     io::{BufRead, BufReader},
     sync::Arc,
+    time::Duration,
 };
 
 /// DDL statement to precreate the `actor` table in Postgres for testing various scenarios involving existing tables.
@@ -143,6 +144,50 @@ pub async fn run_smql_full_integrity(smql: &str) -> Result<(), MigrationError> {
         env,
     )
     .await
+}
+
+/// Run a migration in a background task and trigger a graceful pause (the Ctrl-C
+/// path: drain current batch, checkpoint, exit) once the Postgres `dest_table`
+/// has at least `min_rows` rows. Returns after the run exits, leaving a
+/// resumable checkpoint. Re-run the same SMQL with `run_smql` to resume.
+pub async fn run_smql_with_pause(smql: &str, dest_table: &str, min_rows: i64) {
+    let doc = parse(smql).expect("parse smql");
+    let env = Arc::new(EnvContext::empty());
+    let plan = ExecutionPlan::build(&doc, env.clone()).expect("build execution plan");
+
+    let shutdown = ShutdownSignal::new();
+    let signal = shutdown.clone();
+    let handle = tokio::spawn(run(
+        plan,
+        ExecutionFlags::new(false, IntegrityMode::Off),
+        shutdown,
+        env,
+    ));
+
+    loop {
+        if handle.is_finished() {
+            break;
+        }
+        if pg_count_or_zero(dest_table).await >= min_rows {
+            signal.pause.cancel();
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+
+    let _ = handle.await;
+}
+
+/// Row count of a Postgres table, or 0 if it doesn't exist yet.
+pub async fn pg_count_or_zero(table: &str) -> i64 {
+    let pg = pg_pool().await;
+    match pg
+        .query_one(&format!("SELECT COUNT(*) FROM {table}"), &[])
+        .await
+    {
+        Ok(row) => row.get(0),
+        Err(_) => 0,
+    }
 }
 
 pub async fn run_verify_smql(smql: &str) -> Result<(), VerifyError> {
@@ -405,6 +450,25 @@ pub async fn get_cell_as_usize(query: &str, schema: &str, db: DbType, column: &s
         .unwrap_or_else(|| panic!("column `{column}` was NULL"))
         .as_usize()
         .unwrap_or_else(|| panic!("column `{column}` was not a float"))
+}
+
+/// Return the `information_schema` data type of a Postgres column
+/// (e.g. "double precision", "text", "bigint").
+pub async fn get_pg_column_type(table: &str, column: &str) -> String {
+    let pg = pg_pool().await;
+    let query = r#"
+        SELECT data_type
+          FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = $1
+           AND column_name = $2
+    "#;
+    let row = pg
+        .query_opt(query, &[&table, &column])
+        .await
+        .unwrap()
+        .unwrap_or_else(|| panic!("column '{column}' not found in table '{table}'"));
+    row.get(0)
 }
 
 /// Execute a SQL statement in Postgres, panicking on any error

@@ -30,6 +30,14 @@ impl BatchCoordinator {
         }
     }
 
+    pub async fn prepare(&self) -> Result<(), ConsumerError> {
+        self.writer.prepare().await
+    }
+
+    pub async fn finalize(&self) -> Result<(), ConsumerError> {
+        self.writer.finalize().await
+    }
+
     /// Try to receive and process one batch.
     pub async fn try_process_one(&mut self) -> Result<bool, ConsumerError> {
         match self.batch_rx.try_recv() {

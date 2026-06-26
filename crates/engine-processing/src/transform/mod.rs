@@ -6,3 +6,4 @@ pub mod mapping;
 pub mod pipeline;
 pub mod pruner;
 pub mod validation;
+pub mod wasm;

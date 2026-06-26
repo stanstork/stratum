@@ -1,0 +1,10 @@
+# cargo-audit configuration (https://github.com/rustsec/rustsec/tree/main/cargo-audit)
+
+[advisories]
+ignore = [
+    # RUSTSEC-2020-0140 - FALSE POSITIVE.
+    # The advisory targets the crates.io crate named `model`. Our workspace has
+    # a local path crate also named `model` (crates/model), which cargo-audit
+    # matches purely by name+version. It is not the affected published crate.
+    "RUSTSEC-2020-0140",
+]

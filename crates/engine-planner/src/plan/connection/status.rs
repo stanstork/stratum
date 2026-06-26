@@ -13,6 +13,10 @@ pub enum ConnectionStatus {
     /// Not tested (--no-connect flag)
     Untested,
 
+    /// A WASM plugin endpoint - there is no database to connect to; the plugin
+    /// is loaded/validated separately.
+    Plugin { plugin: String },
+
     /// Connection failed during plan generation
     Failed { error: String },
 }

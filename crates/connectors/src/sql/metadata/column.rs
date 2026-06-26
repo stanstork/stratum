@@ -20,7 +20,7 @@ const COL_IS_STORED: &str = "is_stored";
 const COL_GENERATED_EXPRESSION: &str = "generated_expression";
 const COL_FULL_COLUMN_TYPE: &str = "full_column_type";
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct ColumnMetadata {
     pub ordinal: usize,
     pub name: String,

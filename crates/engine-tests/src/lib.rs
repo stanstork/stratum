@@ -11,6 +11,8 @@ use tracing::{error, warn};
 pub mod dag_integration;
 pub mod integration;
 pub mod paginate;
+pub mod plugins;
+pub mod resume;
 pub mod schema_objects;
 pub mod utils;
 pub mod verify;

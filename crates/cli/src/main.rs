@@ -10,6 +10,7 @@ use tracing::info;
 
 mod args;
 mod commands;
+mod compile;
 mod config;
 mod env;
 mod error;

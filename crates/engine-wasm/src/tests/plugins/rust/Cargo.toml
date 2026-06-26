@@ -1,0 +1,11 @@
+[workspace]
+members = [
+    "test_alloc",
+    "test_sink",
+    "test_transform",
+    "test_filter",
+    "test_source",
+    "test_infinite_loop",
+    "test_memory_hog",
+]
+resolver = "2"

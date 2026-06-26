@@ -4,9 +4,10 @@ use crate::{
             AnalysisContext, AnalysisContextConfig, AnalysisReport, AnalyzerError,
             AnalyzerRegistry, PipelineAnalysisInput,
         },
-        analyzers::{connection::ConnectionAnalyzer, sample::SampleConfig},
+        analyzers::{connection::ConnectionAnalyzer, plugin::PluginAnalyzer, sample::SampleConfig},
         data_flow::DataFlowAnalyzer,
         diagnostics::diagnostic_generator::DiagnosticGenerator,
+        endpoint::{is_wasm_pipeline, resolve_destination, resolve_source},
         errors::{ConnectionError, ReportBuilderError, ReportBuilderResult, SourceAnalyzerError},
         estimator::{DurationEstimator, ResourceEstimator},
         infra::{
@@ -58,6 +59,7 @@ use engine_core::{
 };
 use engine_processing::io::{destination::Destination, format::DataFormat, source::Source};
 use engine_runtime::dag::Dag;
+use engine_wasm::registry::{PluginRegistry, load_registry};
 use model::execution::flags::IntegrityMode;
 use model::execution::pipeline::RetryConfig as CoreRetryConfig;
 use model::{
@@ -85,12 +87,15 @@ pub mod analysis;
 pub mod analyzers;
 pub mod data_flow;
 pub mod diagnostics;
+pub mod endpoint;
 pub mod errors;
 pub mod estimator;
 pub mod explain;
 pub mod infra;
+pub mod plugin_validation;
 pub mod summary;
 pub mod utils;
+pub mod wasm_schema;
 
 /// Configuration for report building
 pub struct ReportBuilderConfig {
@@ -174,10 +179,18 @@ impl ReportBuilder {
         let connections = self.collect_connections(core_plan).await?;
         let mut connection_pool = self.build_connection_pool(&connections, core_plan).await?;
 
+        // Per-run plugin registry - shared with the executor so plan --sample
+        // invokes WASM transforms identically to apply.
+        let plugin_registry = load_registry(&core_plan.plugins)?;
+
         // Pipeline Analysis
-        let pipelines = self
-            .build_pipelines(core_plan, dag, &mut connection_pool)
+        let mut pipelines = self
+            .build_pipelines(core_plan, dag, &mut connection_pool, &plugin_registry)
             .await?;
+
+        // Plan-time WASM plugin validation: type-checks transform/filter calls
+        // against the source/destination column types now that both sides are analyzed.
+        PluginAnalyzer::new().analyze(&mut pipelines, core_plan, &plugin_registry);
 
         // Post-Analysis Processing
         let execution_order = self.build_execution_stages(dag, &pipelines)?;
@@ -187,7 +200,7 @@ impl ReportBuilder {
             DiagnosticGenerator::generate(&pipelines, &connections, &execution_settings);
         let estimations =
             ResourceEstimator::estimate(&pipelines, &execution_order, &execution_settings);
-        let (is_executable, blocking_reason) = self.check_executability(&diagnostics);
+        let (is_executable, blocking_reason) = self.check_executability(&diagnostics, &pipelines);
 
         Ok(MigrationReport {
             plan_id: metadata.plan_id,
@@ -214,10 +227,14 @@ impl ReportBuilder {
         core_plan: &CoreExecutionPlan,
         dag: &Dag,
         connections: &mut ConnectionPool,
+        plugin_registry: &Arc<PluginRegistry>,
     ) -> ReportBuilderResult<Vec<PipelinePlan>> {
         let mut pipelines = Vec::with_capacity(core_plan.pipelines.len());
         for pipeline in &core_plan.pipelines {
-            pipelines.push(self.analyze_pipeline(pipeline, dag, connections).await?);
+            pipelines.push(
+                self.analyze_pipeline(pipeline, dag, connections, plugin_registry)
+                    .await?,
+            );
         }
         Ok(pipelines)
     }
@@ -228,15 +245,25 @@ impl ReportBuilder {
         pipeline: &Pipeline,
         dag: &Dag,
         connections: &mut ConnectionPool,
+        plugin_registry: &Arc<PluginRegistry>,
     ) -> ReportBuilderResult<PipelinePlan> {
         info!("Analyzing pipeline: {}", pipeline.name);
 
+        // WASM-aware path: when either endpoint is a WASM plugin the DB<->DB
+        // analyzer chain can't run.
+        if is_wasm_pipeline(pipeline) {
+            return self
+                .analyze_wasm_pipeline(pipeline, dag, connections, plugin_registry)
+                .await;
+        }
+
         // Prepare physical adapters and metadata caches via specialized resource container
-        let resources = PipelineAnalysisResources::create(pipeline, connections, self).await?;
+        let resources =
+            PipelineAnalysisResources::create(pipeline, connections, self, plugin_registry).await?;
 
         // Run specific analysis (schema validation, sampling, join analysis)
         let analysis_report = self
-            .run_pipeline_analysis(pipeline, &resources)
+            .run_pipeline_analysis(pipeline, &resources, plugin_registry)
             .await
             .map_err(|e| {
                 ReportBuilderError::SourceAnalyzer(SourceAnalyzerError::QueryFailed(format!(
@@ -248,6 +275,56 @@ impl ReportBuilder {
         // Final assembly of the plan
         self.assemble_pipeline_plan(pipeline, dag, resources, analysis_report)
             .await
+    }
+
+    /// Slim assembly path for pipelines with at least one WASM endpoint.
+    async fn analyze_wasm_pipeline(
+        &self,
+        pipeline: &Pipeline,
+        dag: &Dag,
+        connections: &mut ConnectionPool,
+        plugin_registry: &Arc<PluginRegistry>,
+    ) -> ReportBuilderResult<PipelinePlan> {
+        let src_ep = resolve_source(pipeline, connections, plugin_registry).await?;
+        let dst_ep = resolve_destination(pipeline, connections, plugin_registry).await?;
+
+        // A WASM source feeding a real DB destination can still create/extend the
+        // destination table; preview those changes (mirrors the DB<->DB path).
+        let schema_changes = wasm_schema::wasm_source_schema_changes(
+            self,
+            pipeline,
+            src_ep.as_ref(),
+            dst_ep.as_ref(),
+            plugin_registry,
+        )
+        .await?;
+
+        let (order, stage) = self
+            .calculate_execution_positions(dag, &pipeline.name)
+            .unwrap_or((0, 0));
+
+        Ok(PipelinePlan {
+            name: pipeline.name.clone(),
+            description: pipeline.description.clone(),
+            execution_order: order,
+            execution_stage: stage,
+            depends_on: dag.get_dependencies(&pipeline.name).unwrap_or_default(),
+            source: src_ep.source_plan().clone(),
+            destination: dst_ep.destination_plan().clone(),
+            filters: Vec::new(),
+            joins: Vec::new(),
+            mappings: Vec::new(),
+            validations: Vec::new(),
+            error_handling: self.map_error_handling(&pipeline.error_handling),
+            pagination: Default::default(),
+            hooks: Default::default(),
+            settings: Default::default(),
+            data_flow_summary: Default::default(),
+            schema_changes,
+            diagnostics: Vec::new(),
+            estimations: Default::default(),
+            sample: None,
+        })
     }
 
     /// Final step for a pipeline: calculates summaries, execution positions, and resource estimations.
@@ -325,6 +402,7 @@ impl ReportBuilder {
         &self,
         pipeline: &Pipeline,
         resources: &PipelineAnalysisResources,
+        plugin_registry: &Arc<PluginRegistry>,
     ) -> Result<AnalysisReport, AnalyzerError> {
         let config = &self.config;
         let ctx_config = AnalysisContextConfig {
@@ -357,6 +435,7 @@ impl ReportBuilder {
                 resources.dst_driver.dialect(),
                 schema_plan.clone(),
                 Arc::new(mapping.clone()),
+                plugin_registry.clone(),
                 ctx_config,
             );
 
@@ -541,10 +620,20 @@ impl ReportBuilder {
         Ok(plan)
     }
 
-    fn check_executability(&self, diagnostics: &[Diagnostic]) -> (bool, Option<String>) {
-        let errors: Vec<_> = diagnostics
+    fn check_executability(
+        &self,
+        diagnostics: &[Diagnostic],
+        pipelines: &[PipelinePlan],
+    ) -> (bool, Option<String>) {
+        let top_level_errors = diagnostics
             .iter()
-            .filter(|d| d.level == DiagnosticLevel::Error)
+            .filter(|d| d.level == DiagnosticLevel::Error);
+        let pipeline_errors = pipelines
+            .iter()
+            .flat_map(|p| p.diagnostics.iter())
+            .filter(|d| d.level == DiagnosticLevel::Error);
+        let errors: Vec<_> = top_level_errors
+            .chain(pipeline_errors)
             .map(|e| e.message.clone())
             .collect();
         if errors.is_empty() {

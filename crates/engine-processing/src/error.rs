@@ -1,4 +1,4 @@
-use crate::io::error::SinkError;
+use crate::{io::error::SinkError, transform::error::TransformError};
 use connectors::error::DriverError;
 use engine_state::error::StateStoreError;
 use model::pagination::cursor::Cursor;
@@ -77,7 +77,7 @@ pub enum ProducerError {
     CircuitBreakerOpen { stage: String, last_error: String },
 
     #[error("Transformation failed: {0}")]
-    Transform(#[from] crate::transform::error::TransformError),
+    Transform(#[from] TransformError),
 
     #[error("Producer finished work.")]
     Finished,

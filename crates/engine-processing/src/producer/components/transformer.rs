@@ -11,8 +11,8 @@ use model::{
     },
     records::Record,
 };
-use std::sync::Arc;
-use tracing::{info, warn};
+use std::{collections::HashMap, sync::Arc};
+use tracing::{debug, info, warn};
 
 /// Result of transforming a batch of rows, including statistics
 #[derive(Debug, Clone)]
@@ -93,9 +93,13 @@ impl TransformService {
         batch_id: &str,
         rows: Vec<Record>,
     ) -> (Vec<Record>, Vec<Record>, Vec<FailedRow>, bool) {
+        // Cap the number of error messages we retain.
+        const MAX_ERROR_SAMPLES: usize = 10;
+
         let mut successful = Vec::new();
         let mut filtered = Vec::new();
         let mut failed_rows = Vec::new();
+        let mut error_samples = Vec::new();
         let mut has_fatal = false;
 
         for mut row in rows {
@@ -115,6 +119,19 @@ impl TransformService {
                         has_fatal = true;
                     }
 
+                    // The error is otherwise only captured inside the FailedRow.
+                    // Log it so the cause is diagnosable.
+                    let err_msg = e.to_string();
+                    debug!(
+                        pipeline = %self.pipeline_name,
+                        batch_id = %batch_id,
+                        "row transformation failed: {err_msg}"
+                    );
+
+                    if error_samples.len() < MAX_ERROR_SAMPLES {
+                        error_samples.push(err_msg);
+                    }
+
                     // Transformation failed - create FailedRow for DLQ
                     let failed_row = self.create_failed_row(run_id, batch_id, &row, e);
                     failed_rows.push(failed_row);
@@ -124,8 +141,13 @@ impl TransformService {
         }
 
         if !failed_rows.is_empty() {
+            let sample = summarize_errors(&error_samples);
             if let Some(writer) = &self.failed_row_writer {
-                info!("Writing {} failed rows to DLQ", failed_rows.len());
+                info!(
+                    "Writing {} failed rows to DLQ ({})",
+                    failed_rows.len(),
+                    sample
+                );
                 if let Err(write_err) = writer.write_batch(&failed_rows).await {
                     warn!(
                         "Failed to write {} failed rows to DLQ: {}",
@@ -135,8 +157,9 @@ impl TransformService {
                 }
             } else {
                 warn!(
-                    "No DLQ writer configured, {} failed rows will not be written",
-                    failed_rows.len()
+                    "No DLQ writer configured, {} failed rows will not be written. Causes: {}",
+                    failed_rows.len(),
+                    sample
                 );
             }
         }
@@ -172,4 +195,42 @@ impl TransformService {
     pub fn pipeline(&self) -> &TransformPipeline {
         &self.pipeline
     }
+}
+
+/// Build a compact, human-readable summary of failed-row error messages.
+fn summarize_errors(messages: &[String]) -> String {
+    const MAX_DISTINCT: usize = 3;
+
+    let mut order: Vec<&str> = Vec::new();
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+
+    for msg in messages {
+        let entry = counts.entry(msg.as_str()).or_insert(0);
+        if *entry == 0 {
+            order.push(msg.as_str());
+        }
+        *entry += 1;
+    }
+
+    let shown: Vec<String> = order
+        .iter()
+        .take(MAX_DISTINCT)
+        .map(|msg| {
+            let count = counts[msg];
+            if count > 1 {
+                format!("{msg} (x{count})")
+            } else {
+                (*msg).to_string()
+            }
+        })
+        .collect();
+
+    let mut summary = shown.join("; ");
+    if order.len() > MAX_DISTINCT {
+        summary.push_str(&format!(
+            "; … +{} more distinct",
+            order.len() - MAX_DISTINCT
+        ));
+    }
+    summary
 }

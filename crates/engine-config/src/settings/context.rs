@@ -1,23 +1,26 @@
-use super::{driver::SchemaDriver, endpoint::Endpoint, error::SettingsError};
+use super::{
+    driver::SchemaDriver,
+    endpoint::{Endpoint, SchemaSource},
+    error::SettingsError,
+};
 use crate::settings::CopyColumns;
 use crate::settings::validated::ValidatedSettings;
-use connectors::traits::introspector::SchemaIntrospector;
 use engine_core::schema::planner::SchemaPlanner;
 use engine_core::schema::{plan::SchemaPlan, type_registry::TypeRegistry, types::TypeEngine};
 use model::transform::mapping::TransformationMetadata;
 use std::sync::Arc;
 
 #[derive(Clone)]
-pub struct SchemaSettingContext<S: SchemaDriver, D: SchemaDriver> {
-    pub source: Endpoint<S>,
+pub struct SchemaSettingContext<D: SchemaDriver> {
+    pub source: SchemaSource,
     pub destination: Endpoint<D>,
     pub mapping: TransformationMetadata,
     pub settings: ValidatedSettings,
 }
 
-impl<S: SchemaDriver, D: SchemaDriver> SchemaSettingContext<S, D> {
+impl<D: SchemaDriver> SchemaSettingContext<D> {
     pub fn new(
-        source: Endpoint<S>,
+        source: SchemaSource,
         destination: Endpoint<D>,
         mapping: &TransformationMetadata,
         settings: &ValidatedSettings,
@@ -45,7 +48,7 @@ impl<S: SchemaDriver, D: SchemaDriver> SchemaSettingContext<S, D> {
     pub async fn init_schema_planner(&self) -> Result<SchemaPlanner, SettingsError> {
         let ignore_constraints = self.settings.ignore_constraints();
         let mapped_columns_only = *self.settings.copy_columns() == CopyColumns::MapOnly;
-        let introspector = self.source.driver.clone() as Arc<dyn SchemaIntrospector>;
+        let introspector = self.source.introspector.clone();
 
         Ok(SchemaPlanner::new(
             introspector,
@@ -61,7 +64,7 @@ impl<S: SchemaDriver, D: SchemaDriver> SchemaSettingContext<S, D> {
         let ignore_constraints = self.settings.ignore_constraints();
         let mapped_columns_only = *self.settings.copy_columns() == CopyColumns::MapOnly;
 
-        let introspector = self.source.driver.clone() as Arc<dyn SchemaIntrospector>;
+        let introspector = self.source.introspector.clone();
         let registry = Arc::new(self.type_registry());
 
         let type_engine =

@@ -63,6 +63,9 @@ impl SchemaPlanner {
         let computed = plan.computed_column_defs(table).await;
         plan.extend_column_defs(&meta.name, computed);
 
+        // Fold in columns produced by plugin transforms.
+        plan.add_plugin_columns(&meta.name, self.mapping.plugin_columns.clone());
+
         Ok(plan)
     }
 

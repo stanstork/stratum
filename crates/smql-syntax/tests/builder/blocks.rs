@@ -253,3 +253,53 @@ fn test_parse_with_comments() {
     let result = parse(input);
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 }
+
+#[test]
+fn test_build_plugin_block_minimal() {
+    let input = r#"
+        plugin "fraud" {
+            path = "./plugins/fraud.wasm"
+        }
+    "#;
+    let doc = parse(input).expect("should parse");
+    assert_eq!(doc.plugins.len(), 1);
+    let p = &doc.plugins[0];
+    assert_eq!(p.name, "fraud");
+    assert_eq!(p.attributes.len(), 1);
+    assert_eq!(p.attributes[0].key.name, "path");
+    assert!(p.nested_blocks.is_empty());
+}
+
+#[test]
+fn test_build_plugin_block_with_config_nested() {
+    let input = r#"
+        plugin "stripe_src" {
+            path = "./plugins/stripe.wasm"
+            allow_http = true
+            config {
+                base_url = "https://api.stripe.com"
+                api_key  = "sk_test_xyz"
+            }
+        }
+    "#;
+    let doc = parse(input).expect("should parse");
+    assert_eq!(doc.plugins.len(), 1);
+    let p = &doc.plugins[0];
+    assert_eq!(p.name, "stripe_src");
+    assert_eq!(p.attributes.len(), 2);
+    assert_eq!(p.nested_blocks.len(), 1);
+    assert_eq!(p.nested_blocks[0].kind, "config");
+    assert_eq!(p.nested_blocks[0].attributes.len(), 2);
+}
+
+#[test]
+fn test_build_multiple_plugins_in_document() {
+    let input = r#"
+        plugin "a" { path = "./a.wasm" }
+        plugin "b" { path = "./b.wasm" allow_http = true }
+    "#;
+    let doc = parse(input).expect("should parse");
+    assert_eq!(doc.plugins.len(), 2);
+    assert_eq!(doc.plugins[0].name, "a");
+    assert_eq!(doc.plugins[1].name, "b");
+}

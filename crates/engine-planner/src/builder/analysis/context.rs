@@ -5,6 +5,7 @@ use crate::plan::sample::method::SamplingMethod;
 use engine_core::schema::plan::SchemaPlan;
 use engine_core::schema::type_registry::Dialect;
 use engine_processing::io::driver::SchemaDriver;
+use engine_wasm::registry::PluginRegistry;
 use model::core::value::Value;
 use model::transform::mapping::TransformationMetadata;
 use std::sync::Arc;
@@ -44,9 +45,14 @@ pub struct AnalysisContext<S: SchemaDriver, D: SchemaDriver> {
 
     pub source_dialect: Dialect,
     pub dest_dialect: Dialect,
+
+    /// Shared per-run plugin registry. Same instance the executor will use,
+    /// so sample previews invoke plugins identically to a real run.
+    pub plugin_registry: Arc<PluginRegistry>,
 }
 
 impl<S: SchemaDriver, D: SchemaDriver> AnalysisContext<S, D> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         src_driver: Arc<S>,
         src_dialect: Dialect,
@@ -54,6 +60,7 @@ impl<S: SchemaDriver, D: SchemaDriver> AnalysisContext<S, D> {
         dest_dialect: Dialect,
         schema_plan: Arc<SchemaPlan>,
         mapping: Arc<TransformationMetadata>,
+        plugin_registry: Arc<PluginRegistry>,
         config: AnalysisContextConfig,
     ) -> Self {
         // Create metadata caches
@@ -95,6 +102,7 @@ impl<S: SchemaDriver, D: SchemaDriver> AnalysisContext<S, D> {
             use_exact_where: config.use_exact_where,
             source_dialect: src_dialect,
             dest_dialect,
+            plugin_registry,
         }
     }
 }

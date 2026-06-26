@@ -216,7 +216,7 @@ impl PrettyPrinter {
         let details = build_row_details(rows_processed, rows_skipped, rows_failed);
         let progress_msg = format!("{} {}", name, details);
 
-        self.print_line(Color::Yellow, "→", &progress_msg)
+        self.print_line(Color::Yellow, "->", &progress_msg)
     }
 
     /// Prints pipeline failed message

@@ -1,8 +1,10 @@
 use engine_planner::builder::errors::{ConnectionError, ReportBuilderError};
 use engine_runtime::{dag::error::DagError, error::MigrationError};
 use engine_verify::error::VerifyError;
+use engine_wasm::error::WasmError;
 use model::execution::errors::ConvertError;
 use smql_syntax::errors::{BuildError, SmqlError};
+use stratum_plugin_compiler::CompileError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -67,6 +69,12 @@ pub enum CliError {
 
     #[error("Connection test failed: {0}")]
     Connection(#[from] ConnectionError),
+
+    #[error("Plugin compile error: {0}")]
+    PluginCompile(#[from] CompileError),
+
+    #[error("Plugin error: {0}")]
+    Wasm(#[from] WasmError),
 
     /// Non-error user-facing message (prints to stderr, exits with code 1, no ERROR log)
     #[error("{0}")]

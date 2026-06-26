@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use crate::settings::CopyColumns;
-use model::execution::flags::IntegrityMode;
+use model::{core::value::Value, execution::flags::IntegrityMode};
 use serde::Serialize;
 
 /// Immutable, validated configuration used throughout the migration.
@@ -35,6 +37,23 @@ impl ValidatedSettings {
             dry_run,
             integrity: IntegrityMode::Off,
         }
+    }
+
+    pub fn from_pipeline(
+        settings: &HashMap<String, Value>,
+        dry_run: bool,
+        integrity: IntegrityMode,
+    ) -> Self {
+        let mut s = Self::default(dry_run);
+        s.integrity = integrity;
+        if let Some(Value::UInt(n)) = settings.get("batch_size") {
+            s.batch_size = *n as usize;
+        } else if let Some(Value::Int(n)) = settings.get("batch_size")
+            && *n > 0
+        {
+            s.batch_size = *n as usize;
+        }
+        s
     }
 
     pub fn from_builder(builder: ValidatedSettingsBuilder) -> Self {

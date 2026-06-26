@@ -1,0 +1,40 @@
+// sink_endpoint.smql - a WASM plugin wired as the pipeline SINK, exercising the
+// prepare -> write_batch (xN) -> finalize lifecycle inside a REAL migration.
+//
+// A plugin sink is a `connection` with `driver = "wasm"` + `plugin = "<name>"`,
+// referenced from the pipeline's `to { }`. The sink owns its own storage, so it
+// needs no `url` and Stratum issues no DDL.
+//
+// Self-contained - pairs the `counter_source` plugin source with the `log_sink`
+// plugin sink, so no database or input file is needed. (To isolate the SINK from
+// the source path, swap `from` to a real DB/CSV connection instead.)
+//
+//   stratum plugin validate -c examples/plugins/configs/sink_endpoint.smql
+//   rm -rf ~/.stratum/state
+//   stratum apply           -c examples/plugins/configs/sink_endpoint.smql
+//
+// What to confirm:
+//   - "log_sink: prepare" fires exactly ONCE, before the first batch.
+//   - "log_sink: wrote N" fires once per batch (3 + 3 + 1 over batch_size = 3).
+//   - "log_sink: finalize, 7 rows total" fires ONCE, after the last batch, on
+//     clean completion. finalize must NOT fire on Ctrl-C / circuit-breaker.
+//   - To prove finalize-on-error guards data loss: make the sink's finalize
+//     throw and confirm the migration ABORTS (rows not silently lost).
+
+connection "feed"    { driver = "wasm" plugin = "counter_source" }
+connection "logsink" { driver = "wasm" plugin = "log_sink" }
+
+plugin "counter_source" { path = "examples/plugins/js/counter_source.js" }
+plugin "log_sink"       { path = "examples/plugins/js/log_sink.js" }
+
+pipeline "pump" {
+    from { connection = connection.feed    table = "counter" }
+    to   { connection = connection.logsink table = "sink" }
+
+    // The sink declares input { id: i64 }; map only that column.
+    select {
+        id = counter.id
+    }
+
+    settings { batch_size = 3 }
+}

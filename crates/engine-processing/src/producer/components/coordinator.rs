@@ -52,8 +52,7 @@ impl BatchCoordinator {
         self.batch_tx = None;
     }
 
-    /// Complete batch lifecycle: hash rows, log start, send, and commit.
-    /// Records transformation statistics only after successful batch processing.
+    /// Hash (for integrity), send the batch to the consumer, and record stats.
     pub async fn process_batch(
         &mut self,
         batch_id: String,
@@ -68,16 +67,9 @@ impl BatchCoordinator {
             state.hash_batch(&rows);
         }
 
-        // Log batch start for crash recovery.
-        self.state_manager
-            .begin_batch(&batch_id, &current_cursor, &next_cursor)
+        // Send to consumer (which checkpoints after a successful write).
+        self.send_batch(batch_id, current_cursor, rows, next_cursor)
             .await?;
-
-        // Send to consumer.
-        self.send_batch(batch_id.clone(), current_cursor, rows, next_cursor)
-            .await?;
-
-        self.state_manager.commit_batch(&batch_id).await?;
 
         // Only record stats after successful processing.
         self.batches_processed += 1;

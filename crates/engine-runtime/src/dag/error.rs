@@ -16,6 +16,9 @@ pub enum DagError {
 
     #[error("Empty pipeline list")]
     EmptyPipelines,
+
+    #[error("Initialization error: {0}")]
+    InitializationError(String),
 }
 
 #[derive(Error, Debug)]

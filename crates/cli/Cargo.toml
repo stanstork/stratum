@@ -2,6 +2,7 @@
 name = "cli"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 
 [dependencies]
 smql-syntax = { path = "../smql-syntax" }
@@ -16,6 +17,8 @@ engine-processing = { path = "../engine-processing" }
 engine-planner = { path = "../engine-planner" }
 engine-state = { path = "../engine-state" }
 engine-verify = { path = "../engine-verify" }
+engine-wasm = { path = "../engine-wasm" }
+stratum-plugin-compiler = { path = "../sdk/stratum-plugin-compiler" }
 
 tokio = { version = "1.43.0", features = ["full"] }
 tokio-util = "0.7.17"

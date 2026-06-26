@@ -7,6 +7,7 @@ use smql_syntax::{
         operator::BinaryOperator,
         pipeline::{FromBlock, PipelineBlock, ToBlock, WhereClause},
     },
+    builder::parse,
     errors::ValidationIssueKind,
     semantic::validator::validate,
 };
@@ -72,6 +73,7 @@ fn test_undefined_connection_reference() {
             span: span(6, 1),
         }],
         span: span(1, 1),
+        plugins: vec![],
     };
 
     let result = validate(&doc);
@@ -113,6 +115,7 @@ fn test_undefined_pipeline_reference() {
             span: span(1, 1),
         }],
         span: span(1, 1),
+        plugins: vec![],
     };
 
     let result = validate(&doc);
@@ -169,6 +172,7 @@ fn test_undefined_define_constant() {
             span: span(5, 1),
         }],
         span: span(1, 1),
+        plugins: vec![],
     };
 
     let result = validate(&doc);
@@ -180,4 +184,162 @@ fn test_undefined_define_constant() {
         .filter(|e| matches!(e.kind, ValidationIssueKind::UndefinedDefineConstant { .. }))
         .collect();
     assert_eq!(undefined_errors.len(), 1);
+}
+
+#[test]
+fn test_pipeline_uses_plugin_as_source_via_dotpath() {
+    // `connection = plugin.fraud` where the plugin IS declared - no errors.
+    let doc = parse(
+        r#"
+            plugin "fraud" {
+                path = "./plugins/fraud.wasm"
+            }
+            connection "dst" {
+                driver = "postgres"
+                url    = "localhost"
+            }
+            pipeline "p" {
+                from {
+                    connection = plugin.fraud
+                    table = "x"
+                }
+                to {
+                    connection = connection.dst
+                    table = "x"
+                }
+            }
+        "#,
+    )
+    .expect("parse ok");
+
+    let result = validate(&doc);
+    assert!(
+        !result.has_errors(),
+        "unexpected errors: {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn test_pipeline_references_undefined_plugin_in_from_block() {
+    let doc = parse(
+        r#"
+            connection "dst" {
+                driver = "postgres"
+                url    = "localhost"
+            }
+            pipeline "p" {
+                from { connection = plugin.missing table = "x" }
+                to   { connection = connection.dst   table = "x" }
+            }
+        "#,
+    )
+    .expect("parse ok");
+
+    let result = validate(&doc);
+    assert!(result.has_errors());
+    let plugin_errs: Vec<_> = result
+        .errors
+        .iter()
+        .filter(|e| {
+            matches!(
+                &e.kind,
+                ValidationIssueKind::UndefinedPlugin { name } if name == "missing"
+            )
+        })
+        .collect();
+    assert_eq!(plugin_errs.len(), 1);
+}
+
+#[test]
+fn test_select_block_plugin_call_undefined_plugin() {
+    let doc = parse(
+        r#"
+            connection "src" { driver = "mysql"    url = "u" }
+            connection "dst" { driver = "postgres" url = "u" }
+            pipeline "p" {
+                from { connection = connection.src table = "x" }
+                to   { connection = connection.dst table = "x" }
+                select {
+                    score = plugin.score_risk({ amount: x.amount })
+                }
+            }
+        "#,
+    )
+    .expect("parse ok");
+
+    let result = validate(&doc);
+    assert!(result.has_errors());
+    let plugin_errs: Vec<_> = result
+        .errors
+        .iter()
+        .filter(|e| {
+            matches!(
+                &e.kind,
+                ValidationIssueKind::UndefinedPlugin { name } if name == "score_risk"
+            )
+        })
+        .collect();
+    assert_eq!(plugin_errs.len(), 1);
+}
+
+#[test]
+fn test_select_block_plugin_call_declared_plugin_passes() {
+    let doc = parse(
+        r#"
+            plugin "score_risk" { path = "./score.wasm" }
+            connection "src" { driver = "mysql"    url = "u" }
+            connection "dst" { driver = "postgres" url = "u" }
+            pipeline "p" {
+                from { connection = connection.src table = "x" }
+                to   { connection = connection.dst table = "x" }
+                select {
+                    score = plugin.score_risk({ amount: x.amount })
+                }
+            }
+        "#,
+    )
+    .expect("parse ok");
+
+    let result = validate(&doc);
+    assert!(
+        !result.has_errors(),
+        "unexpected errors: {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn test_validate_wasm_rule_undefined_plugin() {
+    let doc = parse(
+        r#"
+            connection "src" { driver = "mysql"    url = "u" }
+            connection "dst" { driver = "postgres" url = "u" }
+            pipeline "p" {
+                from { connection = connection.src table = "x" }
+                to   { connection = connection.dst table = "x" }
+                validate {
+                    rule "fraud" {
+                        filter  = plugin.check_fraud({ amount: x.amount })
+                        on_fail = skip
+                    }
+                }
+            }
+        "#,
+    )
+    .expect("parse ok");
+
+    let result = validate(&doc);
+    assert!(result.has_errors());
+    let plugin_errs: Vec<_> = result
+        .errors
+        .iter()
+        .filter(|e| {
+            matches!(
+                &e.kind,
+                ValidationIssueKind::UndefinedPlugin { name } if name == "check_fraud"
+            )
+        })
+        .collect();
+    assert_eq!(plugin_errs.len(), 1);
 }

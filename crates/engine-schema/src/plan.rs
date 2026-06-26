@@ -160,6 +160,44 @@ impl SchemaPlan {
         }
     }
 
+    /// Register columns produced by plugin transforms (e.g. `select { sum =
+    /// plugin.adder({...}) }`) so they're included in the destination DDL.
+    pub fn add_plugin_columns(&mut self, table_name: &str, outputs: Vec<(String, Type)>) {
+        if outputs.is_empty() {
+            return;
+        }
+
+        let cols = self
+            .column_definitions
+            .entry(table_name.to_string())
+            .or_default();
+
+        for (name, data_type) in outputs {
+            if let Some(existing) = cols.iter_mut().find(|c| c.name == name) {
+                // Plugin output shadows a source column: retype it, drop any
+                // char length / generated-expression carried over from the
+                // source definition. Keep nullability and primary-key as-is.
+                existing.data_type = data_type;
+                existing.char_max_length = None;
+                existing.generated_expression = None;
+                existing.is_generated = false;
+                existing.is_stored = false;
+            } else {
+                cols.push(ColumnDef {
+                    name,
+                    is_nullable: true,
+                    default: None,
+                    data_type,
+                    is_primary_key: false,
+                    char_max_length: None,
+                    generated_expression: None,
+                    is_stored: false,
+                    is_generated: false,
+                });
+            }
+        }
+    }
+
     pub fn add_enum_def(&mut self, table_name: &str, column_name: &str) {
         self.enum_definitions
             .insert((table_name.to_string(), column_name.to_string()));
@@ -929,7 +967,15 @@ impl SchemaPlan {
         };
         columns
             .into_iter()
-            .filter(|col| mapping.contains_target(&col.name))
+            .filter(|col| {
+                // Keep mapped targets and plugin-transform outputs.
+                mapping.contains_target(&col.name)
+                    || self
+                        .mapping
+                        .plugin_columns
+                        .iter()
+                        .any(|(name, _)| name == &col.name)
+            })
             .collect()
     }
 }

@@ -1,0 +1,48 @@
+// transforms.smql - transform plugins wired into `select`.
+//
+//   plugin validate -c examples/plugins/configs/transforms.smql   (no DB needed)
+//   plugin -c … then: stratum plan  -c examples/plugins/configs/transforms.smql
+//                     stratum apply -c examples/plugins/configs/transforms.smql
+//
+// Plugin `path`s point at .js sources - Stratum compiles + caches them on first
+// use (~/.stratum/plugin-cache). Swap to the prebuilt .wasm if you prefer.
+
+define {
+    mysql_url    = env("MYSQL_URL",    "mysql://sakila_user:qwerty123@localhost:3306/sakila")
+    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+plugin "upper"        { path = "examples/plugins/js/upper.js" }
+plugin "full_name"    { path = "examples/plugins/js/full_name.js" }
+plugin "gross_to_net" { path = "examples/plugins/js/gross_to_net.js" }
+
+// String transforms over actor names.
+pipeline "actors" {
+    from { connection = connection.src  table = "actor" }
+    to   { connection = connection.dst  table = "actor_enriched" }
+
+    select {
+        actor_id   = actor.actor_id
+        last_upper = plugin.upper({ name: actor.last_name })
+        full       = plugin.full_name({ first: actor.first_name, last: actor.last_name })
+    }
+
+    settings { create_missing_tables = true  batch_size = 200 }
+}
+
+// Numeric transform: net = gross * (1 - rate). Both inputs are mapped columns.
+pipeline "films" {
+    from { connection = connection.src  table = "film" }
+    to   { connection = connection.dst  table = "film_priced" }
+
+    select {
+        film_id = film.film_id
+        title   = film.title
+        net     = plugin.gross_to_net({ gross: film.replacement_cost, rate: film.rental_rate })
+    }
+
+    settings { create_missing_tables = true  batch_size = 200 }
+}

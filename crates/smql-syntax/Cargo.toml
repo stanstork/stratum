@@ -2,6 +2,7 @@
 name = "smql-syntax"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 
 [dependencies]
 bitflags = { version = "2.9.0", features = ["serde"] }

@@ -1,10 +1,10 @@
 use crate::{
     ast::{
         attribute::Attribute,
-        block::{ConnectionBlock, DefineBlock, ExecutionBlock},
+        block::{ConnectionBlock, DefineBlock, ExecutionBlock, PluginBlock},
         doc::SmqlDocument,
         dotpath::DotPath,
-        expr::{Expression, ExpressionKind, WhenBranch},
+        expr::{Expression, ExpressionKind, PluginCall, PluginInputField, WhenBranch},
         ident::Identifier,
         literal::Literal,
         operator::BinaryOperator,
@@ -16,7 +16,7 @@ use crate::{
         span::Span,
         validation::{
             FailedRowsBlock, OnErrorBlock, RetryBlock, ValidateBlock, ValidationBody,
-            ValidationCheck, ValidationKind,
+            ValidationCheck, ValidationKind, WasmValidationRule,
         },
     },
     errors::BuildError,
@@ -52,6 +52,7 @@ fn build_document(mut pairs: Pairs<Rule>) -> BuildResult<SmqlDocument> {
     let mut execution_block = None;
     let mut connections = Vec::new();
     let mut pipelines = Vec::new();
+    let mut plugins = Vec::new();
 
     for pair in program.into_inner() {
         match pair.as_rule() {
@@ -67,6 +68,9 @@ fn build_document(mut pairs: Pairs<Rule>) -> BuildResult<SmqlDocument> {
             Rule::pipeline_block => {
                 pipelines.push(build_pipeline_block(pair)?);
             }
+            Rule::plugin_block => {
+                plugins.push(build_plugin_block(pair)?);
+            }
             Rule::EOI => {}
             _ => {}
         }
@@ -77,6 +81,7 @@ fn build_document(mut pairs: Pairs<Rule>) -> BuildResult<SmqlDocument> {
         execution_block,
         connections,
         pipelines,
+        plugins,
         span,
     })
 }
@@ -223,6 +228,28 @@ fn build_pipeline_block(pair: Pair<Rule>) -> BuildResult<PipelineBlock> {
         before_block,
         after_block,
         settings_block,
+        span,
+    })
+}
+
+fn build_plugin_block(pair: Pair<Rule>) -> BuildResult<PluginBlock> {
+    let span = pair_to_span(&pair);
+    let mut name = String::new();
+    let mut attributes = Vec::new();
+    let mut nested_blocks = Vec::new();
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::lit_string => name = parse_string_literal(inner.as_str()),
+            Rule::attribute => attributes.push(build_attribute(inner)?),
+            Rule::nested_block => nested_blocks.push(build_nested_block(inner)?),
+            _ => {}
+        }
+    }
+    Ok(PluginBlock {
+        name,
+        attributes,
+        nested_blocks,
         span,
     })
 }
@@ -475,14 +502,107 @@ fn build_field_mapping(pair: Pair<Rule>) -> BuildResult<FieldMapping> {
 fn build_validate_block(pair: Pair<Rule>) -> BuildResult<ValidateBlock> {
     let span = pair_to_span(&pair);
     let mut checks = Vec::new();
+    let mut wasm_rules = Vec::new();
 
     for inner in pair.into_inner() {
-        if inner.as_rule() == Rule::validation_check {
-            checks.push(build_validation_check(inner)?);
+        match inner.as_rule() {
+            Rule::validation_check => checks.push(build_validation_check(inner)?),
+            Rule::wasm_rule => wasm_rules.push(build_wasm_rule(inner)?),
+            _ => {}
         }
     }
 
-    Ok(ValidateBlock { checks, span })
+    Ok(ValidateBlock {
+        checks,
+        wasm_rules,
+        span,
+    })
+}
+
+fn build_wasm_rule(pair: Pair<Rule>) -> BuildResult<WasmValidationRule> {
+    let span = pair_to_span(&pair);
+    let mut name = String::new();
+    let mut filter: Option<PluginCall> = None;
+    let mut on_fail = String::new();
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::lit_string => name = parse_string_literal(inner.as_str()),
+            Rule::plugin_call => filter = Some(build_plugin_call_inner(inner)?),
+            Rule::ident => on_fail = inner.as_str().to_string(),
+            _ => {}
+        }
+    }
+
+    let filter = filter.ok_or_else(|| BuildError {
+        message: format!("wasm rule '{}': missing `filter = plugin_call(...)`", name),
+        line: span.line,
+        column: span.column,
+    })?;
+
+    Ok(WasmValidationRule {
+        name,
+        filter,
+        on_fail,
+        span,
+    })
+}
+
+fn build_plugin_call_inner(pair: Pair<Rule>) -> BuildResult<PluginCall> {
+    let span = pair_to_span(&pair);
+    let mut plugin_name = String::new();
+    let mut inputs = Vec::new();
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::ident => plugin_name = inner.as_str().to_string(),
+            Rule::plugin_input_block => {
+                for field_pair in inner.into_inner() {
+                    if field_pair.as_rule() == Rule::plugin_input_field {
+                        inputs.push(build_plugin_input_field(field_pair)?);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(PluginCall {
+        plugin_name,
+        inputs,
+        span,
+    })
+}
+
+fn build_plugin_input_field(pair: Pair<Rule>) -> BuildResult<PluginInputField> {
+    let span = pair_to_span(&pair);
+    let mut plugin_field = String::new();
+    let mut source_ref = DotPath::new(Vec::new(), span);
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::ident => {
+                if plugin_field.is_empty() {
+                    plugin_field = inner.as_str().to_string();
+                } else {
+                    source_ref =
+                        DotPath::new(vec![inner.as_str().to_string()], pair_to_span(&inner));
+                }
+            }
+            Rule::dotted_ident => {
+                let segments: Vec<String> =
+                    inner.as_str().split('.').map(|s| s.to_string()).collect();
+                source_ref = DotPath::new(segments, pair_to_span(&inner));
+            }
+            _ => {}
+        }
+    }
+
+    Ok(crate::ast::expr::PluginInputField {
+        plugin_field,
+        source_ref,
+        span,
+    })
 }
 
 fn build_validation_check(pair: Pair<Rule>) -> BuildResult<ValidationCheck> {
@@ -969,6 +1089,10 @@ fn build_primary_inner(pair: Pair<Rule>, span: Span) -> BuildResult<Expression> 
             Ok(Expression::new(ExpressionKind::Identifier(name), span))
         }
         Rule::dotted_ident => Ok(build_dot_notation(pair, span)?),
+        Rule::plugin_call => {
+            let call = build_plugin_call_inner(pair)?;
+            Ok(Expression::new(ExpressionKind::PluginCall(call), span))
+        }
         Rule::fn_call => Ok(build_function_call(pair, span)?),
         Rule::array_literal => Ok(build_array_literal(pair, span)?),
         Rule::when_expr => Ok(build_when_expression(pair, span)?),

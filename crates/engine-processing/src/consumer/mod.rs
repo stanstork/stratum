@@ -100,9 +100,16 @@ impl Consumer {
             "Starting LiveConsumer"
         );
 
+        // Sink one-time setup before any batch is written.
+        self.coordinator.prepare().await?;
+
         self.mode = ConsumerMode::Running;
         info!("LiveConsumer started successfully");
         Ok(())
+    }
+
+    pub async fn finalize(&mut self) -> Result<(), ConsumerError> {
+        self.coordinator.finalize().await
     }
 
     pub async fn resume(

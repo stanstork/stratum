@@ -1,9 +1,23 @@
-use crate::ast::{attribute::Attribute, expr::Expression, pipeline::NestedBlock, span::Span};
+use crate::ast::{
+    attribute::Attribute,
+    expr::{Expression, PluginCall},
+    pipeline::NestedBlock,
+    span::Span,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ValidateBlock {
     pub checks: Vec<ValidationCheck>,
+    pub wasm_rules: Vec<WasmValidationRule>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WasmValidationRule {
+    pub name: String,
+    pub filter: PluginCall,
+    pub on_fail: String,
     pub span: Span,
 }
 

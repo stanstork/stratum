@@ -559,6 +559,10 @@ impl DiagnosticGenerator {
         let mut diagnostics = Vec::new();
 
         for p in pipelines {
+            if p.source.total_rows.is_unknown() {
+                continue;
+            }
+
             if p.source.effective_row_count().value == 0 && p.source.total_rows.value == 0 {
                 diagnostics.push(
                     Diagnostic::info(

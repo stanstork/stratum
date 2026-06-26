@@ -29,6 +29,7 @@ fn test_missing_required_fields_connection() {
         }],
         pipelines: vec![],
         span: span(1, 1),
+        plugins: vec![],
     };
 
     let result = validate(&doc);
@@ -62,6 +63,7 @@ fn test_missing_required_fields_pipeline() {
             span: span(1, 1),
         }],
         span: span(1, 1),
+        plugins: vec![],
     };
 
     let result = validate(&doc);
@@ -94,6 +96,7 @@ fn test_unused_connection_warning() {
         }],
         pipelines: vec![],
         span: span(1, 1),
+        plugins: vec![],
     };
 
     let result = validate(&doc);
@@ -121,6 +124,7 @@ fn test_unused_define_constant_warning() {
         connections: vec![],
         pipelines: vec![],
         span: span(1, 1),
+        plugins: vec![],
     };
 
     let result = validate(&doc);
@@ -144,6 +148,7 @@ fn test_empty_define_block_warning() {
         connections: vec![],
         pipelines: vec![],
         span: span(1, 1),
+        plugins: vec![],
     };
 
     let result = validate(&doc);
@@ -238,6 +243,7 @@ fn test_valid_document_no_errors() {
             span: s,
         }],
         span: s,
+        plugins: vec![],
     };
 
     let result = validate(&doc);
@@ -290,6 +296,7 @@ fn test_multiple_errors_collected() {
             span: span(9, 1),
         }],
         span: span(1, 1),
+        plugins: vec![],
     };
 
     let result = validate(&doc);

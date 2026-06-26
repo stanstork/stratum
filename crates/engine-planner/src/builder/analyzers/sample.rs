@@ -101,10 +101,12 @@ impl<S: SchemaDriver> SampleCollector<S> {
 
         let transform_pipeline = build_transform_pipeline(
             pipeline,
+            &ctx.plugin_registry,
             mapping,
             mapped_columns_only,
             Arc::new(EnvContext::empty()),
-        );
+        )
+        .map_err(|e| SampleCollectorError::PipelineBuildFailed(e.to_string()))?;
         let mut sample_rows = Vec::with_capacity(source_rows.len());
         let mut val_stats: HashMap<String, (usize, usize)> = HashMap::new();
 

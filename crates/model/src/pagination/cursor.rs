@@ -61,4 +61,8 @@ pub enum Cursor {
         ts: i64, // timestamp in microseconds
         id: u64, // tie-breaker id
     },
+
+    /// Opaque cursor produced and consumed by a WASM source plugin.
+    /// The host does not interpret the payload; it round-trips it verbatim.
+    Opaque(String),
 }

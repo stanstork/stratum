@@ -1,0 +1,13 @@
+[package]
+name = "stratum-plugin-compiler"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+publish = false
+
+[dependencies]
+walrus = "0.26.4"
+rquickjs = "0.12.0"
+serde_json = "1"
+thiserror = "2"
+blake3 = "1.5"

@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 pub struct SymbolTable {
     // Top-level declarations
     pub connections: HashMap<String, Span>,
+    pub plugins: HashMap<String, Span>,
     pub pipelines: HashMap<String, Span>,
     pub define_constants: HashMap<String, Span>,
 
@@ -19,6 +20,7 @@ impl SymbolTable {
     pub fn new() -> Self {
         SymbolTable {
             connections: HashMap::new(),
+            plugins: HashMap::new(),
             pipelines: HashMap::new(),
             define_constants: HashMap::new(),
             used_connections: HashSet::new(),
@@ -29,6 +31,10 @@ impl SymbolTable {
 
     pub fn add_connection(&mut self, name: String, span: Span) -> Option<Span> {
         self.connections.insert(name, span)
+    }
+
+    pub fn add_plugin(&mut self, name: String, span: Span) -> Option<Span> {
+        self.plugins.insert(name, span)
     }
 
     pub fn add_pipeline(&mut self, name: String, span: Span) -> Option<Span> {

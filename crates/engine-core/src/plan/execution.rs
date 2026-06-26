@@ -8,6 +8,7 @@ use model::execution::{
     errors::ConvertError,
     execution_config::ExecutionConfig,
     pipeline::Pipeline,
+    plugin::PluginDecl,
 };
 use serde::{Deserialize, Serialize};
 use smql_syntax::ast::doc::SmqlDocument;
@@ -23,6 +24,7 @@ pub struct ExecutionPlan {
     pub execution_config: ExecutionConfig,
     pub connections: Vec<Connection>,
     pub pipelines: Vec<Pipeline>,
+    pub plugins: Vec<PluginDecl>,
 
     /// Environment variables used throughout the configuration
     #[serde(default)]
@@ -65,6 +67,11 @@ impl ExecutionPlan {
             pipelines.push(pipeline);
         }
 
+        let mut plugins = Vec::new();
+        for plugin_block in &doc.plugins {
+            plugins.push(builder.build_plugin(plugin_block)?);
+        }
+
         // Collect all environment variable usage throughout the document
         let mut env_collector = EnvVarCollector::new();
         env_collector.collect_document(doc, |expr| builder.eval_expression(expr).ok());
@@ -80,6 +87,7 @@ impl ExecutionPlan {
                 conns
             },
             pipelines,
+            plugins,
             env_vars: env_collector.env_vars,
             config_path: String::new(),
             hash_cache: OnceLock::new(),
@@ -179,6 +187,108 @@ mod tests {
         }
         let doc = parse(smql).expect("Failed to parse SMQL");
         ExecutionPlan::build(&doc, Arc::new(env)).expect("Failed to build plan")
+    }
+
+    #[test]
+    fn test_plugin_block_builds_decl_with_config_json() {
+        let plan = build_plan(
+            r#"
+            plugin "stripe_src" {
+                path = "./plugins/stripe.wasm"
+                allow_http = true
+                fuel_limit = 50000000
+                config {
+                    base_url = "https://api.stripe.com"
+                    page_size = 100
+                }
+            }
+        "#,
+        );
+
+        assert_eq!(plan.plugins.len(), 1);
+        let p = &plan.plugins[0];
+        assert_eq!(p.name, "stripe_src");
+        assert_eq!(p.path.to_str(), Some("./plugins/stripe.wasm"));
+        assert!(p.allow_http);
+        assert!(p.allow_log, "allow_log defaults to true");
+        assert_eq!(p.fuel_limit, Some(50_000_000));
+
+        let cfg: serde_json::Value =
+            serde_json::from_slice(p.config_json.as_ref().expect("config_json populated")).unwrap();
+        assert_eq!(cfg["base_url"], "https://api.stripe.com");
+        assert_eq!(cfg["page_size"], 100);
+    }
+
+    #[test]
+    fn test_pipeline_plugin_transform_and_wasm_filter_are_wired() {
+        use model::execution::pipeline::{ValidationAction, ValidationKind as RuleKind};
+
+        let plan = build_plan(
+            r#"
+            connection "src" { driver = "mysql" host = "localhost" }
+            connection "dst" { driver = "postgres" host = "localhost" }
+            pipeline "p" {
+                from { connection = connection.src table = "charges" }
+                to   { connection = connection.dst table = "charges" }
+                select {
+                    score = plugin.score_risk({ amount: charges.amount, country: charges.country })
+                    keep  = charges.id
+                }
+                validate {
+                    rule "fraud_screen" {
+                        filter  = plugin.check_fraud({ amount: charges.amount })
+                        on_fail = skip
+                    }
+                }
+            }
+        "#,
+        );
+
+        let pipe = &plan.pipelines[0];
+
+        // Plugin transform extracted from the select block.
+        assert_eq!(pipe.plugin_transforms.len(), 1);
+        let pt = &pipe.plugin_transforms[0];
+        assert_eq!(pt.plugin_name, "score_risk");
+        assert_eq!(pt.output_column, "score");
+        assert_eq!(pt.input_mapping.get("amount"), Some(&"amount".to_string()));
+        assert_eq!(
+            pt.input_mapping.get("country"),
+            Some(&"country".to_string())
+        );
+
+        // The plugin field is NOT also a regular expression transformation;
+        // the plain `keep` field still is.
+        let targets: Vec<&str> = pipe
+            .transformations
+            .iter()
+            .map(|t| t.target_field.as_str())
+            .collect();
+        assert!(targets.contains(&"keep"));
+        assert!(!targets.contains(&"score"));
+
+        // WASM filter rule wired into validations.
+        let wasm = pipe
+            .validations
+            .iter()
+            .find(|r| matches!(r.kind, RuleKind::WasmFilter { .. }))
+            .expect("wasm filter validation");
+        assert!(matches!(wasm.action, ValidationAction::Skip));
+        if let RuleKind::WasmFilter {
+            plugin_name,
+            input_mapping,
+        } = &wasm.kind
+        {
+            assert_eq!(plugin_name, "check_fraud");
+            assert_eq!(input_mapping.get("amount"), Some(&"amount".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_plugin_block_requires_path() {
+        let doc = parse(r#"plugin "broken" { allow_http = true }"#).unwrap();
+        let result = ExecutionPlan::build(&doc, Arc::new(EnvContext::empty()));
+        assert!(result.is_err(), "plugin without path should fail to build");
     }
 
     /// Same config parsed multiple times must always produce the same run_id.

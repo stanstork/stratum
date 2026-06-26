@@ -447,7 +447,7 @@ fn render_mappings_panel(frame: &mut Frame, area: Rect, pipeline_plan: Option<&P
 
                 let spans = vec![
                     Span::raw(format!(
-                        "  {:<20} → {:<20} (",
+                        "  {:<20} -> {:<20} (",
                         source_expr.chars().take(20).collect::<String>(),
                         mapping.target.chars().take(20).collect::<String>()
                     )),

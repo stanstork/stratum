@@ -484,6 +484,10 @@ impl OffsetStrategyFactory {
             Cursor::Default { offset } => Arc::new(DefaultOffset { offset: *offset }),
 
             Cursor::None => Arc::new(DefaultOffset { offset: 0 }), // start from beginning
+
+            Cursor::Opaque(_) => {
+                unreachable!("Cursor::Opaque is consumed by WASM source readers, not SQL offsets")
+            }
         }
     }
 

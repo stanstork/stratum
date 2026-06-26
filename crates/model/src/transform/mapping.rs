@@ -1,4 +1,5 @@
 use crate::{
+    core::types::Type,
     execution::{expr::CompiledExpression, pipeline::Pipeline},
     transform::computed_field::ComputedField,
 };
@@ -51,6 +52,9 @@ pub struct TransformationMetadata {
 
     /// Cross-entity references grouped by the entity they reference.
     pub foreign_fields: HashMap<String, Vec<CrossEntityReference>>,
+
+    /// Columns produced by plugin transforms (`select { col = plugin.x({...}) }`).
+    pub plugin_columns: Vec<(String, Type)>,
 }
 
 impl FieldTransformations {
@@ -322,7 +326,13 @@ impl TransformationMetadata {
             entities: entity_name_map,
             field_mappings,
             foreign_fields,
+            plugin_columns: Vec::new(),
         }
+    }
+
+    /// Stamp the resolved plugin transform output columns.
+    pub fn set_plugin_columns(&mut self, columns: Vec<(String, Type)>) {
+        self.plugin_columns = columns;
     }
 
     /// Returns the entity name resolver (source <-> destination table names).
@@ -569,6 +579,7 @@ mod tests {
             lifecycle: None,
             error_handling: None,
             settings: HashMap::new(),
+            plugin_transforms: vec![],
         }
     }
 

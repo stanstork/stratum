@@ -1,13 +1,13 @@
 graph TB
     subgraph CLI["CLI Layer (crates/cli)"]
         CLI_CMDS["Commands: plan | apply | verify | test-conn"]
-        CLI_SIG["Signal handling<br/>SIGINT/SIGTERM → CancellationToken"]
+        CLI_SIG["Signal handling<br/>SIGINT/SIGTERM -> CancellationToken"]
         CLI_OUT["Output modes:<br/>plain | pretty | TUI (ratatui)"]
     end
 
     subgraph PLANNING["Planning Layer"]
-        SMQL["smql-syntax<br/>pest parser → AST"]
-        ENGINE_CFG["engine-config<br/>SMQL → ExecutionPlan<br/>ValidatedSettings"]
+        SMQL["smql-syntax<br/>pest parser -> AST"]
+        ENGINE_CFG["engine-config<br/>SMQL -> ExecutionPlan<br/>ValidatedSettings"]
         PLANNER["engine-planner<br/>MetadataCache<br/>Analysis & diagnostics"]
 
         SMQL --> ENGINE_CFG
@@ -24,7 +24,7 @@ graph TB
     end
 
     subgraph SCHEMA["Schema Layer (crates/engine-schema)"]
-        SCHEMA_PLAN["SchemaPlanner<br/>introspect → SchemaPlan"]
+        SCHEMA_PLAN["SchemaPlanner<br/>introspect -> SchemaPlan"]
         DEP_GRAPH["DependencyGraph<br/>partial_topological_order()<br/>FK cycle handling"]
         TYPE_ENG["TypeEngine + TypeRegistry<br/>dialect type mapping<br/>Transform hints"]
         SCHEMA_OPS["SchemaOps<br/>ordered DDL operations"]
@@ -57,7 +57,7 @@ graph TB
             SINK --> STATE_MGR
         end
 
-        CB["Circuit Breaker (cb.rs)<br/>threshold: 4 failures<br/>backoff: 1s → 30s"]
+        CB["Circuit Breaker (cb.rs)<br/>threshold: 4 failures<br/>backoff: 1s -> 30s"]
 
         BATCH_COORD -.->|Batch| CHANNEL
         CHANNEL -.-> SINK
@@ -68,17 +68,17 @@ graph TB
     subgraph IO["IO Abstractions (engine-processing/io)"]
         SOURCE["Source<br/>Arc&lt;dyn DataReader&gt;<br/>Arc&lt;dyn SchemaIntrospector&gt;"]
         DESTINATION["Destination<br/>Arc&lt;PgDriver&gt; (typed)"]
-        FILTER["FilterCompiler<br/>SqlFilterCompiler → WHERE"]
+        FILTER["FilterCompiler<br/>SqlFilterCompiler -> WHERE"]
         FORMAT["DataFormat<br/>MySql | Postgres | Csv"]
     end
 
     subgraph CONNECTORS["Connector Layer (crates/connectors)"]
         DRIVER_TRAIT["Driver trait hierarchy<br/>SchemaIntrospector<br/>DataReader | DataWriter<br/>Transactional"]
         DRIVER_REF["DriverRef (engine-core)<br/>enum: MySqlDriver | PgDriver<br/>dispatch_driver! macro"]
-        REGISTRY["DriverRegistry (global singleton)<br/>scheme → factory mapping"]
+        REGISTRY["DriverRegistry (global singleton)<br/>scheme -> factory mapping"]
 
         subgraph DRIVERS["Drivers"]
-            MYSQL_DRV["MySqlDriver<br/>mysql_async<br/>TINYINT(1)→Boolean"]
+            MYSQL_DRV["MySqlDriver<br/>mysql_async<br/>TINYINT(1)->Boolean"]
             PG_DRV["PgDriver<br/>tokio-postgres<br/>COPY protocol"]
             CSV_DRV["CSV<br/>streaming parse"]
         end
@@ -112,7 +112,7 @@ graph TB
         MODEL["model<br/>Value, CanonicalValue, Record<br/>Batch, Pipeline, Type, Transform"]
         EXPR["expression-engine<br/>binary ops, functions<br/>null handling"]
         QB["query-builder<br/>SQL AST + Render trait<br/>dialect-specific rendering<br/>offset strategies"]
-        SMQL_CRATE["smql-syntax<br/>pest parser → AST"]
+        SMQL_CRATE["smql-syntax<br/>pest parser -> AST"]
     end
 
     subgraph EXTERNAL["External Systems"]

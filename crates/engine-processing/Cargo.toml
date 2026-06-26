@@ -2,6 +2,7 @@
 name = "engine-processing"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
 
 [dependencies]
 smql-syntax = { path = "../smql-syntax" }
@@ -12,6 +13,7 @@ engine-core = { path = "../engine-core" }
 engine-state = { path = "../engine-state" }
 expression-engine = { path = "../expression-engine" }
 engine-infra = { path = "../engine-infra" }
+engine-wasm = { path = "../engine-wasm" }
 
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }

@@ -1,0 +1,47 @@
+// source_endpoint.smql - a WASM plugin wired as the pipeline SOURCE.
+//
+// A plugin endpoint is a `connection` with `driver = "wasm"` and a `plugin = "<name>"`
+// property naming a declared `plugin` block. The pipeline's `from`/`to` then point
+// at that connection like any other. (This is distinct from transform/filter
+// plugins, which appear inside `select`/`validate` via `plugin.<name>(...)`.)
+//
+// Self-contained - no database needed. `counter_source` synthesizes ids 0..6 in
+// pages of 3 (cursor paging), draining into the `log_sink` plugin so the run
+// needs no DB and no input file. (CSV is NOT a valid write target on this branch;
+// only postgres/mysql. To drain into a real table instead, point `to` at a
+// postgres connection.)
+//
+// This config's focus is the SOURCE read loop; see sink_endpoint.smql for the
+// same pipeline read with attention on the SINK lifecycle.
+//
+//   stratum plugin validate -c examples/plugins/configs/source_endpoint.smql
+//   rm -rf ~/.stratum/state
+//   stratum apply           -c examples/plugins/configs/source_endpoint.smql
+//
+// What to confirm (the source-endpoint path):
+//   - read_page is called repeatedly, advancing the cursor: the coordinator logs
+//     `cursor=None next=Opaque("3")`, then `Opaque("3")->Opaque("6")`, then
+//     `Opaque("6")->None` (batch_size = 3 over total 7 -> pages of 3 + 3 + 1).
+//   - the sink reports `wrote 3`, `wrote 3`, `wrote 1`, `7 rows total` - i.e. all
+//     7 rows arrive, no duplicates, no missing tail row, and paging TERMINATES.
+//   - RESUME: interrupt mid-run (Ctrl-C), then
+//     re-`apply` WITHOUT clearing ~/.stratum/state -> it must resume from the
+//     saved opaque cursor, not restart at 0.
+
+connection "feed"    { driver = "wasm" plugin = "counter_source" }
+connection "logsink" { driver = "wasm" plugin = "log_sink" }
+
+plugin "counter_source" { path = "examples/plugins/js/counter_source.js" }
+plugin "log_sink"       { path = "examples/plugins/js/log_sink.js" }
+
+pipeline "drain" {
+    from { connection = connection.feed    table = "counter" }
+    to   { connection = connection.logsink table = "sink" }
+
+    // Map the source plugin's declared output column the sink accepts (id).
+    select {
+        id = counter.id
+    }
+
+    settings { batch_size = 3 }
+}

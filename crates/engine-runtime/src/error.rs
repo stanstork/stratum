@@ -2,6 +2,7 @@ use crate::dag::error::DagError;
 use connectors::error::{DbError, DriverError};
 use engine_config::settings::error::SettingsError;
 use engine_state::error::StateStoreError;
+use engine_wasm::error::WasmError;
 use thiserror::Error;
 
 /// Top‐level errors for the data migration engine.
@@ -61,6 +62,10 @@ pub enum MigrationError {
     /// DAG error.
     #[error("DAG error: {0}")]
     Dag(#[from] DagError),
+
+    /// Wasm error.
+    #[error("Wasm error: {0}")]
+    Wasm(#[from] WasmError),
 }
 
 /// Common error type for all actors in the engine.
