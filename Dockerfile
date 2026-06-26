@@ -1,6 +1,11 @@
-FROM rust:1.87.0-slim AS builder
+# syntax=docker/dockerfile:1
 
-# Install necessary tools
+# Builder stage. Rust >= 1.88 is required (the codebase uses stabilized
+# let-chains on edition 2024); pinned to a recent stable.
+FROM rust:1.92-slim AS builder
+
+# Build dependencies. libssl-dev is needed because the Postgres connector uses
+# native-tls (OpenSSL).
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential \
@@ -8,34 +13,31 @@ RUN apt-get update && \
         libssl-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Create app directory and copy Cargo files, so dependencies can be cached
 WORKDIR /usr/src/stratum
+
+# Copy the whole workspace and build only the CLI binary (and its deps), not the
+# test crates. The build context is kept small by .dockerignore (excludes
+# target/, .git, node_modules).
 COPY . .
+RUN cargo build --release -p cli
 
-# Build the actual application
-RUN cargo build --release
-
-# Runtime stage
+# Runtime stage.
 FROM debian:bookworm-slim
 
-# Install necessary runtime dependencies
+# Runtime dependencies: OpenSSL (native-tls) and CA certificates (TLS to
+# databases / outbound HTTP from plugins).
 RUN apt-get update && \
     apt-get install -y --no-install-recommends libssl3 ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# Create a user to run the application
+# Run as a non-root user.
 RUN useradd --user-group --create-home stratum
 WORKDIR /home/stratum
 
-# Copy the built binary from the builder stage
+# Copy the built binary. The `cli` crate produces a binary named `cli`.
 COPY --from=builder /usr/src/stratum/target/release/cli /usr/local/bin/stratum
+RUN chmod +x /usr/local/bin/stratum
 
-# Make the binary executable
-RUN chmod +x /usr/local/bin/stratum && \
-    chown stratum:stratum /usr/local/bin/stratum
-
-# Switch to the non-root user
 USER stratum
 
-# Set the entrypoint to the binary
 ENTRYPOINT ["/usr/local/bin/stratum"]

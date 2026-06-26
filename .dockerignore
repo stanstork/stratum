@@ -1,0 +1,24 @@
+# Build artifacts (incl. excluded sub-crate target dirs). This is the big one:
+# the workspace target/ can be tens of GB.
+target/
+**/target/
+
+# Version control
+.git/
+.gitignore
+
+# JS tooling - not needed for the native CLI build (the QuickJS runtime is
+# embedded via a committed .wasm fixture).
+**/node_modules/
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Editor / OS cruft
+*.swp
+.DS_Store
+
+# Local env files
+.env
+*.env
