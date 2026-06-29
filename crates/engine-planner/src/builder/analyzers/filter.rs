@@ -150,7 +150,7 @@ impl<S: SchemaDriver, D: SchemaDriver> PlanAnalyzer<S, D> for FilterAnalyzer<S> 
             pipeline = %source_plan.table,
             columns = columns.len(),
             uses_index,
-            "Filter analysis completed"
+            "filter analysis completed"
         );
 
         let name = input

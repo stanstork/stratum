@@ -87,7 +87,7 @@ impl ValidationAnalyzer {
             label = %validation.label,
             level = ?level,
             failure_rate = ?estimated_failure_rate,
-            "Validation analysis complete"
+            "validation analysis completed"
         );
 
         Ok(ValidationPlan {
@@ -183,7 +183,7 @@ impl ValidationAnalyzer {
             .query_params(&sql, &params)
             .await
             .map_err(|e| {
-                error!(target: "analyzer", error = %e, sql = %sql, "Probability estimation failed");
+                error!(target: "analyzer", error = %e, sql = %sql, "probability estimation failed");
                 ValidationAnalyzerError::QueryFailed(e.to_string())
             })?;
 
@@ -237,13 +237,13 @@ impl<S: SchemaDriver, D: SchemaDriver> PlanAnalyzer<S, D> for ValidationAnalyzer
             match self.analyze_rule(table, validation, joins, ctx).await {
                 Ok(plan) => plans.push(plan),
                 Err(e) => {
-                    warn!(target: "analyzer", label = %validation.label, error = %e, "Skipping rule due to error");
+                    warn!(target: "analyzer", label = %validation.label, error = %e, "skipping rule due to error");
                     return Err(e);
                 }
             }
         }
 
-        info!(target: "analyzer", count = plans.len(), "Validation analysis completed");
+        info!(target: "analyzer", count = plans.len(), "validation analysis completed");
         Ok(plans)
     }
 }

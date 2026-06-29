@@ -69,20 +69,16 @@ impl GraphExpander {
         )
         .await?;
 
-        info!(
-            "Graph expansion: discovered {} tables from root '{}'",
-            full_graph.len(),
-            root_table
-        );
+        info!(tables = full_graph.len(), root = %root_table, "graph expansion: discovered tables");
 
         // Filter by depth and exclusion patterns
         let filtered_tables = self.filter_tables(root_table, &full_graph, refs);
 
         info!(
-            "Graph expansion: {} tables after filtering (depth={:?}, exclude={:?})",
-            filtered_tables.len(),
-            refs.depth,
-            refs.exclude
+            tables = filtered_tables.len(),
+            depth = ?refs.depth,
+            exclude = ?refs.exclude,
+            "graph expansion: tables after filtering"
         );
 
         let schema_ops = self

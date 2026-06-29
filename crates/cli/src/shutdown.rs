@@ -38,14 +38,14 @@ impl ShutdownCoordinator {
                 signal::ctrl_c()
                     .await
                     .expect("Failed to install SIGINT handler");
-                info!("Received SIGINT - pausing migration (press Ctrl+C again to force stop)");
+                info!("received SIGINT, pausing migration (press Ctrl+C again to force stop)");
                 pause_flag.store(true, Ordering::SeqCst);
                 pause_token.cancel();
 
                 signal::ctrl_c()
                     .await
                     .expect("Failed to install SIGINT handler");
-                info!("Received second SIGINT - forcing shutdown");
+                info!("received second SIGINT, forcing shutdown");
                 shutdown_flag.store(true, Ordering::SeqCst);
                 cancel_token.cancel();
             });
@@ -61,7 +61,7 @@ impl ShutdownCoordinator {
                 let mut term = signal::unix::signal(signal::unix::SignalKind::terminate())
                     .expect("Failed to install SIGTERM handler");
                 term.recv().await;
-                info!("Received SIGTERM - forcing shutdown");
+                info!("received SIGTERM, forcing shutdown");
                 shutdown_flag.store(true, Ordering::SeqCst);
                 cancel_token.cancel();
             });

@@ -1,5 +1,5 @@
 use crate::Cli;
-use tracing::Level;
+use tracing::{Level, info};
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Initializes the tracing logger based on CLI configuration and mode
@@ -73,7 +73,7 @@ fn init_tui_logger(cli: &Cli, env_filter: EnvFilter) {
         .init();
 
     // Log where logs are being written (this goes to the file)
-    tracing::info!("TUI mode: Logging to file at {}", log_file_path);
+    info!(path = %log_file_path, "TUI mode: logging to file");
 }
 
 /// Determines the log file path for TUI mode
@@ -111,7 +111,7 @@ fn init_pretty_logger(cli: &Cli, env_filter: EnvFilter) {
         .init();
 
     // Log where logs are being written (this goes to the file)
-    tracing::info!("Pretty output mode: Logging to file at {}", log_file_path);
+    info!(path = %log_file_path, "pretty output mode: logging to file");
 }
 
 /// Determines the log file path for pretty output mode

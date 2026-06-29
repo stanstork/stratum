@@ -58,6 +58,13 @@ impl ProducerTask {
     }
 
     async fn handle_success(&mut self, status: ProducerStatus) -> TickAction {
+        if self.breaker.consecutive_failures() > 0 {
+            info!(
+                run_id = %self.run_id,
+                item_id = %self.item_id,
+                "circuit breaker recovered"
+            );
+        }
         self.breaker.record_success();
         self.update_metrics().await;
 
@@ -65,7 +72,7 @@ impl ProducerTask {
             ProducerStatus::Working => TickAction::Continue,
             ProducerStatus::Idle => TickAction::Idle,
             ProducerStatus::Finished => {
-                info!("Producer finished");
+                info!(run_id = %self.run_id, item_id = %self.item_id, "producer finished");
                 let _ = self.producer.stop().await;
                 TickAction::Done
             }
@@ -74,34 +81,47 @@ impl ProducerTask {
 
     async fn handle_error(&mut self, e: ProducerError) -> TickAction {
         if e.is_shutdown() {
-            info!("Consumer channel closed, producer stopping gracefully");
+            info!(
+                run_id = %self.run_id,
+                item_id = %self.item_id,
+                "consumer channel closed, producer stopping gracefully"
+            );
             let _ = self.producer.stop().await;
             return TickAction::Done;
         }
 
         if e.is_fatal() {
-            error!(error = %e, "Fatal error - stopping migration immediately");
+            error!(
+                run_id = %self.run_id,
+                item_id = %self.item_id,
+                error = %e,
+                "fatal error, stopping migration immediately"
+            );
             let _ = self.producer.stop().await;
             return TickAction::Failed(ActorError::Internal(e.to_string()));
         }
 
         self.metrics.increment_failures(1);
-        error!(error = %e, "Producer tick failed");
+        error!(run_id = %self.run_id, item_id = %self.item_id, error = %e, "producer tick failed");
 
         match self.breaker.record_failure() {
             CircuitBreakerState::RetryAfter(delay) => {
                 warn!(
+                    run_id = %self.run_id,
+                    item_id = %self.item_id,
                     delay_ms = delay.as_millis(),
                     failures = self.breaker.consecutive_failures(),
-                    "Circuit breaker: backing off"
+                    "circuit breaker backing off"
                 );
                 tokio::time::sleep(delay).await;
                 TickAction::Continue
             }
             CircuitBreakerState::Open => {
                 error!(
+                    run_id = %self.run_id,
+                    item_id = %self.item_id,
                     failures = self.breaker.consecutive_failures(),
-                    "Circuit breaker open, stopping producer"
+                    "circuit breaker open, stopping producer"
                 );
                 let _ = self.producer.stop().await;
                 TickAction::Done
@@ -110,9 +130,9 @@ impl ProducerTask {
     }
 
     async fn handle_stop(&mut self, run_id: String, item_id: String) -> TickAction {
-        info!("Producer received stop");
+        info!(run_id = %self.run_id, item_id = %self.item_id, "producer received stop");
         if let Err(e) = self.producer.stop().await {
-            error!(error = %e, "Producer stop failed");
+            error!(run_id = %self.run_id, item_id = %self.item_id, error = %e, "producer stop failed");
             return TickAction::Failed(ActorError::Internal(e.to_string()));
         }
 
@@ -210,13 +230,13 @@ pub async fn run_producer(
                 }
                 Some(_) => {}
                 None => {
-                    info!("Producer mailbox closed, stopping");
+                    info!(run_id = %task.run_id, item_id = %task.item_id, "producer mailbox closed, stopping");
                     let _ = task.producer.stop().await;
                     return Ok(());
                 }
             },
             _ = cancel_token.cancelled() => {
-                info!("Producer stopping after cancellation");
+                info!(run_id = %task.run_id, item_id = %task.item_id, "producer stopping after cancellation");
                 let _ = task.producer.stop().await;
                 return Ok(());
             }
@@ -241,12 +261,12 @@ async fn wait_for_start(
                 Ok(Some((run_id, item_id)))
             }
             Some(ProducerMsg::Stop { .. }) | None => {
-                info!("Producer stopping before start");
+                info!("producer stopping before start");
                 Ok(None)
             }
         },
         _ = cancel_token.cancelled() => {
-            info!("Producer cancelled before start");
+            info!("producer cancelled before start");
             Ok(None)
         }
     }
@@ -259,11 +279,11 @@ async fn start_snapshot(
     item_id: &str,
 ) -> Result<(), ActorError> {
     if let Err(e) = producer.resume(run_id, item_id, "part-0").await {
-        error!("Failed to resume producer state: {}", e);
+        error!(run_id = %run_id, item_id = %item_id, error = %e, "failed to resume producer state");
         return Err(ActorError::Internal(e.to_string()));
     }
     if let Err(e) = producer.start_snapshot().await {
-        error!("Failed to start snapshot: {}", e);
+        error!(run_id = %run_id, item_id = %item_id, error = %e, "failed to start snapshot");
         return Err(ActorError::Internal(e.to_string()));
     }
 
@@ -294,7 +314,7 @@ async fn start_cdc(
     item_id: &str,
 ) -> Result<(), ActorError> {
     if let Err(e) = producer.start_cdc().await {
-        error!("Failed to start CDC: {}", e);
+        error!(run_id = %run_id, item_id = %item_id, error = %e, "failed to start CDC");
         return Err(ActorError::Internal(e.to_string()));
     }
 

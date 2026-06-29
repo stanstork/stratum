@@ -6,7 +6,7 @@ use crate::settings::{
 use connectors::traits::introspector::SchemaIntrospector;
 use engine_processing::io::{destination::Destination, format::DataFormat, source::Source};
 use model::execution::flags::IntegrityMode;
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 /// Validates migration settings before they are applied.
 pub struct SettingsValidator<'a> {
@@ -35,7 +35,7 @@ impl<'a> SettingsValidator<'a> {
     }
 
     pub async fn validate(&self, settings: &Settings) -> Result<ValidatedSettings, SettingsError> {
-        info!("Validating settings: {settings:#?}");
+        debug!("validating settings: {settings:#?}");
 
         let mut builder = ValidatedSettingsBuilder::new(self.dry_run, self.integrity);
         let mut errors: Vec<String> = Vec::new();
@@ -57,7 +57,7 @@ impl<'a> SettingsValidator<'a> {
         self.check_conflicts(&builder)?;
 
         let validated = builder.build();
-        info!("Settings validation completed successfully");
+        debug!("settings validation completed");
         self.log_validated_settings(&validated);
 
         Ok(validated)
@@ -67,8 +67,8 @@ impl<'a> SettingsValidator<'a> {
         if settings.batch_size > 0 {
             if settings.batch_size > 100_000 {
                 warn!(
-                    "Batch size {} is very large, may cause memory issues",
-                    settings.batch_size
+                    batch_size = settings.batch_size,
+                    "batch size is very large, may cause memory issues"
                 );
             }
             builder.batch_size = Some(settings.batch_size);
@@ -116,7 +116,7 @@ impl<'a> SettingsValidator<'a> {
 
         // Check if table already exists
         if self.destination_exists().await? {
-            warn!("create_missing_tables enabled but destination already exists, will be skipped");
+            warn!("create_missing_tables enabled but destination already exists, will skip");
         }
 
         builder.infer_schema = Some(true);
@@ -140,7 +140,7 @@ impl<'a> SettingsValidator<'a> {
 
         // Check if table already exists
         if self.destination_exists().await? {
-            warn!("create_missing_tables enabled but destination already exists, will be skipped");
+            warn!("create_missing_tables enabled but destination already exists, will skip");
         }
 
         builder.create_missing_tables = Some(true);
@@ -190,7 +190,7 @@ impl<'a> SettingsValidator<'a> {
         if builder.infer_schema.unwrap_or(false) && builder.create_missing_columns.unwrap_or(false)
         {
             warn!(
-                "infer_schema and create_missing_columns are both enabled; infer_schema takes precedence"
+                "infer_schema and create_missing_columns both enabled; infer_schema takes precedence"
             );
         }
 
@@ -222,20 +222,15 @@ impl<'a> SettingsValidator<'a> {
     }
 
     fn log_validated_settings(&self, settings: &ValidatedSettings) {
-        info!("=== Validated Settings ===");
-        info!("  Batch Size: {}", settings.batch_size());
-        info!("  Copy Columns: {:?}", settings.copy_columns());
-        info!("  Infer Schema: {}", settings.infer_schema());
-        info!(
-            "  Create Missing Tables: {}",
-            settings.create_missing_tables()
+        debug!(
+            batch_size = settings.batch_size(),
+            copy_columns = ?settings.copy_columns(),
+            infer_schema = settings.infer_schema(),
+            create_missing_tables = settings.create_missing_tables(),
+            create_missing_columns = settings.create_missing_columns(),
+            ignore_constraints = settings.ignore_constraints(),
+            dry_run = settings.is_dry_run(),
+            "validated settings"
         );
-        info!(
-            "  Create Missing Columns: {}",
-            settings.create_missing_columns()
-        );
-        info!("  Ignore Constraints: {}", settings.ignore_constraints());
-        info!("  Dry Run: {}", settings.is_dry_run());
-        info!("=========================");
     }
 }

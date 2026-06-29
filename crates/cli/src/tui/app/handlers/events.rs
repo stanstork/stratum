@@ -47,7 +47,7 @@ pub fn handle_migration_event(
     errors: &mut Vec<ErrorEntry>,
     event: MigrationEvent,
 ) {
-    debug!("Received migration event: {}", event.event_type());
+    debug!(event = %event.event_type(), "received migration event");
 
     let item_id = match event.item_id() {
         Some(id) => id.to_string(),
@@ -55,7 +55,7 @@ pub fn handle_migration_event(
     };
 
     if !pipelines.contains_key(&item_id) {
-        warn!(item_id, "Received event for unknown pipeline");
+        warn!(item_id, "received event for unknown pipeline");
         return;
     }
 
@@ -106,7 +106,7 @@ fn dispatch_event(
             handle_error_event(pipelines, errors, item_id, &event);
         }
 
-        _ => debug!("Unhandled event type: {}", event.event_type()),
+        _ => debug!(event = %event.event_type(), "unhandled event type"),
     }
 }
 

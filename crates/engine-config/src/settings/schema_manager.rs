@@ -12,24 +12,23 @@ pub async fn apply_schema_ops(
     ops: &[SchemaOp],
 ) -> Result<(), SettingsError> {
     for op in ops {
-        info!("Executing: {}", op.description);
-        debug!("SQL: {}", op.sql);
+        info!(op = %op.description, "executing schema operation");
+        debug!(sql = %op.sql, "schema operation SQL");
 
         if let Err(err) = driver.execute(&op.sql).await {
             if op.idempotent && is_type_already_exists_error(&err) {
-                info!("Already exists, skipping: {}", op.description);
+                info!(op = %op.description, "schema object already exists, skipping");
                 continue;
             }
             if op.skip_if_missing_ref && is_relation_not_found_error(&err) {
-                info!(
-                    "Referenced table does not exist in destination, skipping: {}",
-                    op.description
-                );
+                info!(op = %op.description, "referenced table missing in destination, skipping");
                 continue;
             }
             error!(
-                "Failed to execute schema op: {}\nSQL: {}\nError: {:?}",
-                op.description, op.sql, err
+                op = %op.description,
+                sql = %op.sql,
+                error = ?err,
+                "failed to execute schema operation"
             );
             return Err(SettingsError::Driver(err));
         }

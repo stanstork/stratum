@@ -26,10 +26,10 @@ impl SchemaAnalyzer {
         })?;
 
         if dest_exists {
-            info!(target: "analyzer", table = %dest_table, "Analyzing modifications for existing table structure");
+            info!(target: "analyzer", table = %dest_table, "analyzing modifications for existing table");
             self.compare_and_modify(dest_table, ctx).await
         } else {
-            info!(target: "analyzer", table = %dest_table, "Analyzing requirements for new table creation");
+            info!(target: "analyzer", table = %dest_table, "analyzing requirements for new table");
             self.plan_table_creation(dest_table, ctx).await
         }
     }
@@ -89,7 +89,7 @@ impl SchemaAnalyzer {
             });
         }
 
-        info!(target: "analyzer", table = %dest_table, "Planned creation of new table with {} changes", changes.len());
+        info!(target: "analyzer", table = %dest_table, changes = changes.len(), "planned new table creation");
 
         Ok(changes)
     }
@@ -143,10 +143,10 @@ impl SchemaAnalyzer {
         }
 
         if changes.is_empty() {
-            info!(target: "analyzer", table = %dest_table, "Schema matches target plan; no changes required");
+            info!(target: "analyzer", table = %dest_table, "schema matches target, no changes required");
         }
 
-        info!(target: "analyzer", table = %dest_table, "Identified {} schema changes for modification", changes.len());
+        info!(target: "analyzer", table = %dest_table, changes = changes.len(), "identified schema changes for modification");
 
         Ok(changes)
     }

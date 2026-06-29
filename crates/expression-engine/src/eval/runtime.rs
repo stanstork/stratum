@@ -85,7 +85,7 @@ impl Evaluator for CompiledExpression {
                 // However, if there is no join, no additional fields are included in the select.
                 let result = mapped.or(raw);
                 if result.is_none() {
-                    warn!("Cross-entity reference failed for {}.{}", entity, key);
+                    warn!(entity = %entity, key = %key, "cross-entity reference failed");
                 }
                 result
             }
@@ -133,7 +133,7 @@ impl Evaluator for CompiledExpression {
             ))),
 
             CompiledExpression::Array(_) => {
-                warn!("Array expressions are not yet supported");
+                warn!("array expressions are not yet supported");
                 None
             }
 
@@ -164,7 +164,7 @@ fn eval_function(
     match registry.call(name, args, &ctx) {
         Ok(value) => Some(value),
         Err(e) => {
-            warn!("Function evaluation failed for '{}': {}", name, e);
+            warn!(function = %name, error = %e, "function evaluation failed");
             None
         }
     }

@@ -17,7 +17,7 @@ pub async fn execute(
     env: Arc<EnvContext>,
 ) -> Result<(), CliError> {
     let config_path = config::resolve_path(config_path)?;
-    info!("Verifying migrated data: {}", config_path);
+    info!(config = %config_path, "verifying migrated data");
 
     let plan = config::load_plan(&config_path, false, env.clone()).await?;
     let results = verify(plan, env).await?;
@@ -45,8 +45,8 @@ pub async fn execute(
     if let Some(ref mut w) = writer {
         w.flush().map_err(CliError::ConfigFileRead)?;
         info!(
-            "Verification report written to: {}",
-            output.as_deref().unwrap_or("")
+            path = output.as_deref().unwrap_or(""),
+            "verification report written"
         );
     }
 

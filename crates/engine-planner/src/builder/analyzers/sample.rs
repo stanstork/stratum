@@ -121,7 +121,7 @@ impl<S: SchemaDriver> SampleCollector<S> {
             ));
         }
 
-        info!(table = %pipeline.source.table, count = sample_rows.len(), "Collected sample rows");
+        info!(table = %pipeline.source.table, count = sample_rows.len(), "collected sample rows");
 
         Ok(SampleDataPreview {
             enabled: true,

@@ -53,7 +53,7 @@ pub async fn execute(cli: &Cli, url: String, format: Option<String>) -> Result<(
         ConnectionKind::from_url(&url).map_err(CliError::InvalidConnectionFormat)?
     };
 
-    info!("Testing {:?} connection to: {}", kind, url);
+    info!(kind = ?kind, "testing connection");
 
     // Test the connection based on the kind
     match kind {

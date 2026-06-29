@@ -14,7 +14,7 @@ impl DdlWriter for PgDriver {
         let (sql, _params) =
             QueryGenerator::new(&dialect::Postgres).add_column(table, column.clone());
 
-        debug!("Adding column {} to table {}", column.name, table);
+        debug!(column = %column.name, table = %table, "adding column");
 
         self.execute(&sql).await?;
 

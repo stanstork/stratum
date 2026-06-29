@@ -45,9 +45,9 @@ fn compile_cached(src: &Path) -> Result<PathBuf, CliError> {
         CliError::UserMessage(format!("compiling JS plugin {}: {e}", src.display()))
     })?;
     if build.from_cache {
-        debug!(plugin = %src.display(), wasm = %build.path.display(), "Using cached JS plugin build");
+        debug!(plugin = %src.display(), wasm = %build.path.display(), "using cached JS plugin build");
     } else {
-        info!(plugin = %src.display(), wasm = %build.path.display(), "Compiled JS plugin");
+        info!(plugin = %src.display(), wasm = %build.path.display(), "compiled JS plugin");
     }
     Ok(build.path)
 }

@@ -31,7 +31,7 @@ impl<D: SchemaDriver> CreateMissingTablesSetting<D> {
     async fn build_schema_ops(&self) -> Result<SchemaOps, SettingsError> {
         // If the table already exists, bail out
         if self.context.destination_exists().await? {
-            info!("Destination table already exists; skipping schema creation.");
+            info!("destination table already exists, skipping schema creation");
             return Ok(SchemaOps::empty());
         }
 
@@ -74,7 +74,7 @@ impl<D: SchemaDriver> CreateMissingTablesSetting<D> {
             });
         }
 
-        info!("Create missing tables setting planned");
+        info!("planned create-missing-tables");
         Ok(ops)
     }
 }

@@ -2,7 +2,7 @@ use crate::hooks::error::HookError;
 use connectors::traits::{executor::QueryExecutor, transaction::Transactional};
 use model::execution::pipeline::LifecycleHooks;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Executes lifecycle hooks (before/after) for pipeline operations.
 ///
@@ -30,62 +30,46 @@ impl<D: QueryExecutor + Transactional> HookExecutor<D> {
     /// Executes all before hooks sequentially.
     pub async fn execute_before(&mut self) -> Result<(), HookError> {
         if self.hooks.before.is_empty() {
-            info!("No before hooks configured, skipping execution");
+            debug!("no before hooks configured");
             return Ok(());
         }
 
-        info!(
-            "Starting execution of {} before hook(s)",
-            self.hooks.before.len()
-        );
+        info!(count = self.hooks.before.len(), "running before hooks");
         let hooks = self.hooks.before.clone();
         for (index, sql) in hooks.iter().enumerate() {
-            info!(
-                "Executing before hook {}/{}: {}",
-                index + 1,
-                hooks.len(),
-                sql
-            );
+            debug!(hook = index + 1, total = hooks.len(), sql = %sql, "executing before hook");
             self.execute_sql(sql, index, true).await?;
-            info!(
-                "Before hook {}/{} completed successfully",
-                index + 1,
-                hooks.len()
+            debug!(
+                hook = index + 1,
+                total = hooks.len(),
+                "before hook completed"
             );
         }
 
-        info!("All {} before hook(s) executed successfully", hooks.len());
+        info!(count = hooks.len(), "before hooks completed");
         Ok(())
     }
 
     /// Executes all after hooks sequentially.
     pub async fn execute_after(&mut self) -> Result<(), HookError> {
         if self.hooks.after.is_empty() {
-            info!("No after hooks configured, skipping execution");
+            debug!("no after hooks configured");
             return Ok(());
         }
 
-        info!(
-            "Starting execution of {} after hook(s)",
-            self.hooks.after.len()
-        );
+        info!(count = self.hooks.after.len(), "running after hooks");
         let hooks = self.hooks.after.clone();
         for (index, sql) in hooks.iter().enumerate() {
-            info!(
-                "Executing after hook {}/{}: {}",
-                index + 1,
-                hooks.len(),
-                sql
-            );
+            debug!(hook = index + 1, total = hooks.len(), sql = %sql, "executing after hook");
             self.execute_sql(sql, index, false).await?;
-            info!(
-                "After hook {}/{} completed successfully",
-                index + 1,
-                hooks.len()
+            debug!(
+                hook = index + 1,
+                total = hooks.len(),
+                "after hook completed"
             );
         }
 
-        info!("All {} after hook(s) executed successfully", hooks.len());
+        info!(count = hooks.len(), "after hooks completed");
         Ok(())
     }
 
@@ -122,20 +106,20 @@ impl<D: QueryExecutor + Transactional> HookExecutor<D> {
                 // Hook execution failed - attempt rollback
                 let hook_type = if is_before { "before" } else { "after" };
                 warn!(
-                    "Hook execution failed, attempting rollback of {} hook #{}",
-                    hook_type,
-                    index + 1
+                    hook = hook_type,
+                    index = index + 1,
+                    "hook execution failed, rolling back"
                 );
 
                 if let Err(rollback_err) = tx.rollback().await {
                     warn!(
-                        "Failed to rollback {} hook #{}: {}",
-                        hook_type,
-                        index + 1,
-                        rollback_err
+                        hook = hook_type,
+                        index = index + 1,
+                        error = %rollback_err,
+                        "failed to roll back hook"
                     );
                 } else {
-                    info!("Successfully rolled back {} hook #{}", hook_type, index + 1);
+                    debug!(hook = hook_type, index = index + 1, "rolled back hook");
                 }
 
                 Err(HookError::ExecutionFailed {

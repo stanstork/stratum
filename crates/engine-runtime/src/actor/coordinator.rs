@@ -56,7 +56,7 @@ impl PipelineCoordinator {
 
     /// Starts the producer for snapshot processing.
     pub async fn start_snapshot(&self, run_id: String, item_id: String) -> Result<(), ActorError> {
-        info!(run_id = %run_id, item_id = %item_id, "Starting snapshot");
+        info!(run_id = %run_id, item_id = %item_id, "starting snapshot producer");
 
         self.producer_tx
             .send(ProducerMsg::StartSnapshot {
@@ -90,7 +90,7 @@ impl PipelineCoordinator {
 
     /// Starts the producer for CDC processing.
     pub async fn start_cdc(&self, run_id: String, item_id: String) -> Result<(), ActorError> {
-        info!(run_id = %run_id, item_id = %item_id, "Starting CDC");
+        info!(run_id = %run_id, item_id = %item_id, "starting CDC producer");
 
         self.producer_tx
             .send(ProducerMsg::StartCdc { run_id, item_id })
@@ -102,7 +102,7 @@ impl PipelineCoordinator {
 
     /// Flushes the consumer to process any remaining batches.
     pub async fn flush_consumer(&self, run_id: String, item_id: String) -> Result<(), ActorError> {
-        info!(run_id = %run_id, item_id = %item_id, "Flushing consumer");
+        info!(run_id = %run_id, item_id = %item_id, "flushing consumer");
 
         self.consumer_tx
             .send(ConsumerMsg::Flush { run_id, item_id })
@@ -119,7 +119,7 @@ impl PipelineCoordinator {
         item_id: String,
         part_id: String,
     ) -> Result<(), ActorError> {
-        info!("Stopping pipeline");
+        info!(run_id = %run_id, item_id = %item_id, "stopping pipeline");
 
         self.cancel_token.cancel();
 
@@ -131,7 +131,7 @@ impl PipelineCoordinator {
             })
             .await
         {
-            error!(error = ?e, "Failed to send stop to producer");
+            error!(error = ?e, "failed to send stop to producer");
         }
 
         if let Err(e) = self
@@ -143,10 +143,10 @@ impl PipelineCoordinator {
             })
             .await
         {
-            error!(error = ?e, "Failed to send stop to consumer");
+            error!(error = ?e, "failed to send stop to consumer");
         }
 
-        info!("Pipeline stopped");
+        info!("pipeline stopped");
         Ok(())
     }
 
@@ -164,12 +164,12 @@ impl PipelineCoordinator {
             tokio::join!(self.producer_handle, self.consumer_handle);
 
         let producer_result = producer_join_result.map_err(|e| {
-            error!("Producer task panicked: {}", e);
+            error!(error = %e, "producer task panicked");
             ActorError::Internal(format!("Producer task panicked: {}", e))
         })?;
 
         let consumer_result = consumer_join_result.map_err(|e| {
-            error!("Consumer task panicked: {}", e);
+            error!(error = %e, "consumer task panicked");
             ActorError::Internal(format!("Consumer task panicked: {}", e))
         })?;
 
@@ -207,7 +207,7 @@ impl PipelineCoordinator {
             run_id = %run_id,
             item_id = %item_id,
             part_id = %part_id,
-            "Starting CDC pipeline"
+            "starting CDC pipeline"
         );
 
         // Start consumer first so it's ready to receive data

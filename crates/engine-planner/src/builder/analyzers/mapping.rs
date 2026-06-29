@@ -392,13 +392,13 @@ impl<S: SchemaDriver, D: SchemaDriver> PlanAnalyzer<S, D> for MappingAnalyzer {
             {
                 Ok(m) => mappings.push(m),
                 Err(e) => {
-                    warn!(target: "analyzer", field = %trans.target_field, error = %e, "Transformation analysis failed");
+                    warn!(target: "analyzer", field = %trans.target_field, error = %e, "transformation analysis failed");
                     return Err(AnalyzerError::error("mapping", e.to_string()));
                 }
             }
         }
 
-        info!(target: "analyzer", count = mappings.len(), "Mapping analysis completed");
+        info!(target: "analyzer", count = mappings.len(), "mapping analysis completed");
         Ok(mappings)
     }
 }

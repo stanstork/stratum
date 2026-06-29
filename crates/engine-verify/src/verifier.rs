@@ -35,6 +35,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
+use tracing::warn;
 
 pub async fn verify(
     plan: ExecutionPlan,
@@ -75,11 +76,11 @@ async fn verify_pipeline(
     let resolved_pagination = resolve_pagination(&pipeline.source.pagination, &mapping);
 
     if resolved_pagination.is_none() {
-        tracing::warn!(
-            "Pipeline '{}' has no `paginate` block. Verification requires deterministic \
-             row ordering to reproduce batch boundaries. Results may show false mismatches. \
-             Add a `paginate` block for reliable verification.",
-            pipeline.name
+        warn!(
+            pipeline = %pipeline.name,
+            "pipeline has no `paginate` block; verification requires deterministic row \
+             ordering to reproduce batch boundaries, so results may show false mismatches. \
+             Add a `paginate` block for reliable verification."
         );
     }
 

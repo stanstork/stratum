@@ -125,7 +125,8 @@ impl TransformService {
                     debug!(
                         pipeline = %self.pipeline_name,
                         batch_id = %batch_id,
-                        "row transformation failed: {err_msg}"
+                        error = %err_msg,
+                        "row transformation failed"
                     );
 
                     if error_samples.len() < MAX_ERROR_SAMPLES {
@@ -143,23 +144,19 @@ impl TransformService {
         if !failed_rows.is_empty() {
             let sample = summarize_errors(&error_samples);
             if let Some(writer) = &self.failed_row_writer {
-                info!(
-                    "Writing {} failed rows to DLQ ({})",
-                    failed_rows.len(),
-                    sample
-                );
+                info!(count = failed_rows.len(), sample = %sample, "writing failed rows to DLQ");
                 if let Err(write_err) = writer.write_batch(&failed_rows).await {
                     warn!(
-                        "Failed to write {} failed rows to DLQ: {}",
-                        failed_rows.len(),
-                        write_err
+                        count = failed_rows.len(),
+                        error = %write_err,
+                        "failed to write rows to DLQ"
                     );
                 }
             } else {
                 warn!(
-                    "No DLQ writer configured, {} failed rows will not be written. Causes: {}",
-                    failed_rows.len(),
-                    sample
+                    count = failed_rows.len(),
+                    causes = %sample,
+                    "no DLQ writer configured, failed rows will be dropped"
                 );
             }
         }

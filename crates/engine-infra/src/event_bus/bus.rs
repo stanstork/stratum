@@ -70,7 +70,7 @@ impl EventBus {
         debug!(
             event_type = std::any::type_name::<E>(),
             subscriber_id = subscriber_id,
-            "Subscribed to event"
+            "subscribed to event"
         );
 
         Subscription {
@@ -91,7 +91,7 @@ impl EventBus {
             debug!(
                 event_type = std::any::type_name::<E>(),
                 subscriber_count = type_subscribers.len(),
-                "Publishing event"
+                "publishing event"
             );
 
             for (subscriber_id, boxed_sender) in type_subscribers.iter() {
@@ -104,21 +104,21 @@ impl EventBus {
                             event_type = std::any::type_name::<E>(),
                             subscriber_id = subscriber_id,
                             error = ?e,
-                            "Dropped event for slow subscriber (channel full)"
+                            "dropped event for slow subscriber (channel full)"
                         );
                     }
                 } else {
                     warn!(
                         event_type = std::any::type_name::<E>(),
                         subscriber_id = subscriber_id,
-                        "Failed to downcast sender for subscriber"
+                        "failed to downcast sender for subscriber"
                     );
                 }
             }
         } else {
             debug!(
                 event_type = std::any::type_name::<E>(),
-                "No subscribers for event"
+                "no subscribers for event"
             );
         }
     }
@@ -131,7 +131,7 @@ impl EventBus {
 
             debug!(
                 subscriber_id = subscription.subscriber_id,
-                "Unsubscribed from event"
+                "unsubscribed from event"
             );
 
             // Clean up empty type maps to save memory
@@ -157,7 +157,7 @@ impl EventBus {
     pub async fn clear(&self) {
         let mut subscribers = self.subscribers.write().await;
         subscribers.clear();
-        debug!("Cleared all subscriptions from EventBus");
+        debug!("cleared all subscriptions");
     }
 }
 

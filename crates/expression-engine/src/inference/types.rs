@@ -130,10 +130,7 @@ fn get_numeric_type(left: &Type, right: &Type) -> Type {
             scale: None,
         },
         _ => {
-            warn!(
-                "Incompatible types for arithmetic operation: {:?} and {:?}",
-                left, right
-            );
+            warn!(left = ?left, right = ?right, "incompatible types for arithmetic operation");
             Type::Text { charset: None } // Fallback to Text for unsupported types
         }
     }

@@ -15,7 +15,7 @@ use bytes::Bytes;
 use futures_util::{SinkExt, pin_mut};
 use model::records::Record;
 use query_builder::dialect;
-use tracing::info;
+use tracing::debug;
 
 #[async_trait]
 impl DataWriter for PgDriver {
@@ -28,7 +28,7 @@ impl DataWriter for PgDriver {
         let generator = QueryGenerator::new(&dialect::Postgres);
         let (sql, params) = generator.insert_batch(meta, rows, &PgTypeConverter);
 
-        info!("Inserting {} rows into {}", num_rows, meta.name);
+        debug!(rows = num_rows, table = %meta.name, "inserting rows");
 
         let client = self.client().read().await;
         let param_store = PgParamStore::from_values(&params);
@@ -68,7 +68,7 @@ impl DataWriter for PgDriver {
         let generator = QueryGenerator::new(&dialect::Postgres);
         let statement = generator.copy_from_stdin(table, &columns);
 
-        info!("COPY {} rows into {}", rows.len(), table);
+        debug!(rows = rows.len(), table = %table, "COPY rows into table");
 
         let client = self.client().write().await;
 

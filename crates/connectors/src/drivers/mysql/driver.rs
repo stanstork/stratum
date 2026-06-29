@@ -4,6 +4,7 @@ use crate::{
     traits::driver::{Driver, DriverInfo},
 };
 use mysql_async::{Pool, prelude::Queryable};
+use tracing::info;
 
 const MYSQL_MAX_PREPARED_STMT_PARAMS: u16 = 65535;
 
@@ -25,6 +26,8 @@ impl MySqlDriver {
     pub async fn connect(url: &str) -> Result<Self, DriverError> {
         let pool = Pool::from_url(url).map_err(|e| DriverError::ConnectionError(e.to_string()))?;
         let capabilities = Self::detect_capabilities(&pool).await?;
+
+        info!(driver = "mysql", "database connection established");
 
         Ok(Self { pool, capabilities })
     }

@@ -96,7 +96,7 @@ impl DestinationAnalyzer {
                 .map(ColumnInfo::from_metadata)
                 .collect(),
             Err(e) => {
-                warn!(table = %table, error = %e, "Failed to fetch destination columns");
+                warn!(table = %table, error = %e, "failed to fetch destination columns");
                 Vec::new()
             }
         }
@@ -117,7 +117,7 @@ impl<S: SchemaDriver, D: SchemaDriver> PlanAnalyzer<S, D> for DestinationAnalyze
         destination: &Self::Input,
         ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<Self::Output> {
-        info!(table = %destination.table, "Analyzing destination table");
+        info!(table = %destination.table, "analyzing destination table");
 
         let driver = DatabaseDriver::from_name(&destination.connection.driver);
         let table_exists = ctx
@@ -162,7 +162,7 @@ impl<S: SchemaDriver, D: SchemaDriver> PlanAnalyzer<S, D> for DestinationAnalyze
             exists = %plan.exists,
             mode = ?plan.mode,
             impact = ?plan.data_impact.action,
-            "Destination analysis completed"
+            "destination analysis completed"
         );
 
         Ok(plan)

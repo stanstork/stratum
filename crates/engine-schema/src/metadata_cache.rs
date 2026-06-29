@@ -106,9 +106,9 @@ impl<D: SchemaIntrospector + DataReader + Send + Sync + 'static> MetadataCache<D
         let driver = self.driver();
 
         cached_try_get(&self.table_exists, &key, || async {
-            debug!(table = %table, "Checking table existence");
+            debug!(table = %table, "checking table existence");
             driver.table_exists(table).await.inspect_err(|e| {
-                error!(table = %table, error = %e, "Failed to check table existence");
+                error!(table = %table, error = %e, "failed to check table existence");
             })
         })
         .await
@@ -119,9 +119,9 @@ impl<D: SchemaIntrospector + DataReader + Send + Sync + 'static> MetadataCache<D
         let driver = self.driver();
 
         cached_try_get(&self.table_metadata, &key, || async {
-            debug!(table = %table, "Fetching table metadata");
+            debug!(table = %table, "fetching table metadata");
             driver.table_metadata(table).await.inspect_err(|e| {
-                error!(table = %table, error = %e, "Failed to fetch table metadata");
+                error!(table = %table, error = %e, "failed to fetch table metadata");
             })
         })
         .await
@@ -132,9 +132,9 @@ impl<D: SchemaIntrospector + DataReader + Send + Sync + 'static> MetadataCache<D
         let driver = self.driver();
 
         cached_try_get(&self.index_metadata, &key, || async {
-            debug!(table = %table, "Fetching index metadata");
+            debug!(table = %table, "fetching index metadata");
             driver.index_metadata(table).await.inspect_err(|e| {
-                error!(table = %table, error = %e, "Failed to fetch index metadata");
+                error!(table = %table, error = %e, "failed to fetch index metadata");
             })
         })
         .await
@@ -146,7 +146,7 @@ impl<D: SchemaIntrospector + DataReader + Send + Sync + 'static> MetadataCache<D
             .table_size_bytes(table)
             .await
             .inspect_err(|e| {
-                error!(table = %table, error = %e, "Failed to fetch table size");
+                error!(table = %table, error = %e, "failed to fetch table size");
             })
     }
 
@@ -162,7 +162,7 @@ impl<D: SchemaIntrospector + DataReader + Send + Sync + 'static> MetadataCache<D
                 .count_rows(table, None, filter)
                 .await
                 .unwrap_or_else(|e| {
-                    warn!(table = %table, error = %e, "Failed to get row count");
+                    warn!(table = %table, error = %e, "failed to get row count");
                     RowCount::unknown()
                 })
         })

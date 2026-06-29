@@ -36,7 +36,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 pub struct DagExecutor {
     plan: ExecutionPlan,
@@ -111,11 +111,11 @@ impl DagExecutor {
 
         tokio::spawn(async move {
             while let Some(event) = event_rx.recv().await {
-                info!("Migration Event: {}", event);
+                debug!(event = %event, "migration event");
             }
         });
 
-        info!("Event subscriber configured for migration monitoring");
+        debug!("event subscriber configured");
     }
 
     pub async fn execute(self, dag: Dag) -> Result<(), MigrationError> {
@@ -161,9 +161,9 @@ impl DagExecutor {
 
         if resuming {
             info!(
-                "Resuming paused migration {} ({} pipelines already completed)",
-                run_id,
-                completed_pipelines.len()
+                run_id = %run_id,
+                completed = completed_pipelines.len(),
+                "resuming paused migration"
             );
         }
 
@@ -252,9 +252,9 @@ impl DagExecutor {
     ) -> Result<(), MigrationError> {
         let execution_order = dag.execution_order();
         info!(
-            "Executing {} pipelines in {} levels",
-            dag.total_pipelines(),
-            execution_order.len()
+            pipelines = dag.total_pipelines(),
+            levels = execution_order.len(),
+            "starting migration"
         );
 
         for (level_idx, level) in execution_order.iter().enumerate() {
@@ -268,31 +268,31 @@ impl DagExecutor {
 
             if executable.is_empty() {
                 if level_remaining.is_empty() {
-                    info!("Level {}: all pipelines already completed", level_idx + 1);
+                    info!(level = level_idx + 1, "level already completed, skipping");
                 } else {
-                    warn!("All pipelines in level {} skipped", level_idx + 1);
+                    warn!(level = level_idx + 1, "all pipelines in level skipped");
                 }
                 continue;
             }
 
             info!(
-                "Level {}/{}: Executing {} pipelines (skipped {}): {:?}",
-                level_idx + 1,
-                execution_order.len(),
-                executable.len(),
-                level.len() - executable.len(),
-                executable
+                level = level_idx + 1,
+                levels = execution_order.len(),
+                executing = executable.len(),
+                skipped = level.len() - executable.len(),
+                pipelines = ?executable,
+                "executing level"
             );
 
             // Check for process cancellation
             if self.shutdown.cancel.is_cancelled() {
-                warn!("Shutdown requested");
+                warn!("shutdown requested, aborting migration");
                 return Err(MigrationError::ShutdownRequested);
             }
 
             // Check for requested pauses
             if self.shutdown.pause.is_cancelled() {
-                info!("Pause requested - saving state");
+                info!("pause requested, saving state");
                 self.save_paused_state(
                     run_state,
                     failed_pipelines,
@@ -315,8 +315,8 @@ impl DagExecutor {
             {
                 Err(MigrationError::Paused) => {
                     info!(
-                        "Pause detected during level {} - saving state",
-                        level_idx + 1
+                        level = level_idx + 1,
+                        "pause detected during level, saving state"
                     );
 
                     self.save_paused_state(
@@ -381,6 +381,23 @@ impl DagExecutor {
                     })
                     .await?;
 
+                let total_rows: u64 = run_state.pipelines.iter().map(|p| p.rows_done).sum();
+                let elapsed =
+                    (chrono::Utc::now() - run_state.started_at).num_milliseconds() as f64 / 1000.0;
+                let rows_per_sec = if elapsed > 0.0 {
+                    total_rows as f64 / elapsed
+                } else {
+                    0.0
+                };
+                info!(
+                    pipelines = run_state.total_pipelines,
+                    failed = failed_pipelines.len(),
+                    rows = total_rows,
+                    elapsed_secs = %format!("{:.2}", elapsed),
+                    rows_per_sec = %format!("{:.0}", rows_per_sec),
+                    "migration run summary"
+                );
+
                 self.finalize(failed_pipelines)
             }
             // Retain unhandled structural errors (Pauses, Manual Cancelations) directly
@@ -390,22 +407,22 @@ impl DagExecutor {
 
     fn finalize(self, failed_pipelines: HashSet<String>) -> Result<(), MigrationError> {
         if failed_pipelines.is_empty() {
-            info!("Migration completed successfully with all pipelines");
+            info!("migration completed successfully");
             return Ok(());
         }
 
         let failed_list: Vec<String> = failed_pipelines.into_iter().collect();
         error!(
-            "Migration completed with {} failed/skipped pipelines: {:?}",
-            failed_list.len(),
-            failed_list
+            failed = failed_list.len(),
+            pipelines = ?failed_list,
+            "migration completed with failed/skipped pipelines"
         );
 
         match self.exec_config.on_failure {
             FailureStrategy::Continue => {
                 warn!(
-                    "Continue strategy: returning Ok despite {} failed/skipped pipelines",
-                    failed_list.len()
+                    failed = failed_list.len(),
+                    "continue strategy: reporting success despite failed/skipped pipelines"
                 );
                 Ok(())
             }
@@ -435,7 +452,7 @@ impl DagExecutor {
                 .any(|dep| failed_pipelines.contains(dep));
 
             if has_failed_dep {
-                warn!("Skipping pipeline '{}' due to failed dependency", name);
+                warn!(pipeline = %name, "skipping pipeline: dependency failed");
                 failed_pipelines.insert(name.clone());
             } else {
                 executable.push(name.clone());
@@ -483,20 +500,20 @@ impl DagExecutor {
         for (name, result) in results {
             match result {
                 Ok(rows) => {
-                    info!("Pipeline '{}' completed successfully ({} rows)", name, rows);
+                    debug!(pipeline = %name, rows, "pipeline completed");
                     self.mark_pipeline_completed(&name, rows, run_state, completed_pipelines)
                         .await?;
                 }
                 Err(MigrationError::Paused) => {
-                    info!("Pipeline '{}' paused at batch boundary", name);
+                    info!(pipeline = %name, "pipeline paused at batch boundary");
                     return Err(MigrationError::Paused);
                 }
                 Err(MigrationError::ShutdownRequested) => {
-                    info!("Pipeline '{}' stopped due to shutdown", name);
+                    info!(pipeline = %name, "pipeline stopped due to shutdown");
                     return Err(MigrationError::ShutdownRequested);
                 }
                 Err(e) => {
-                    error!("Pipeline '{}' failed: {}", name, e);
+                    error!(pipeline = %name, error = %e, "pipeline failed");
                     failed_pipelines.insert(name.clone());
 
                     if matches!(self.exec_config.on_failure, FailureStrategy::FailFast) {
@@ -603,9 +620,13 @@ impl DagExecutor {
         self.run_pipeline(idx, pipeline).await
     }
 
+    #[instrument(
+        skip_all,
+        fields(pipeline = %pipeline.name, table = %pipeline.destination.table)
+    )]
     async fn run_pipeline(&self, idx: usize, pipeline: &Pipeline) -> Result<u64, MigrationError> {
         let start_time = std::time::Instant::now();
-        info!("Starting migration pipeline {}", pipeline.destination.table);
+        info!("starting pipeline");
 
         let source_ep = resolve_source(
             &pipeline.source.connection,
@@ -674,10 +695,9 @@ impl DagExecutor {
         let rows = orchestrator.execute().await?;
 
         info!(
-            "Migration item {} completed in {:.2}s ({} rows)",
-            pipeline.destination.table,
-            start_time.elapsed().as_secs_f64(),
-            rows
+            rows,
+            elapsed_secs = start_time.elapsed().as_secs_f64(),
+            "pipeline finished"
         );
 
         Ok(rows)

@@ -6,6 +6,7 @@ use crate::{
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_postgres::{Client, NoTls};
+use tracing::{error, info};
 
 const PG_MAX_PREPARED_STMT_PARAMS: usize = 65535;
 
@@ -33,12 +34,14 @@ impl PgDriver {
         // Spawn connection handler
         tokio::spawn(async move {
             if let Err(e) = connection.await {
-                tracing::error!("PostgreSQL connection error: {}", e);
+                error!(error = %e, "Postgres connection error");
             }
         });
 
         let client = Arc::new(RwLock::new(client));
         let capabilities = Self::detect_capabilities(&client).await?;
+
+        info!(driver = "postgres", "database connection established");
 
         Ok(Self {
             client,

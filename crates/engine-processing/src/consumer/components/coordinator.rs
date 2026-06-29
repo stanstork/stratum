@@ -5,7 +5,7 @@ use engine_core::{metrics::Metrics, state::models::Checkpoint};
 use engine_state::models::CheckpointStage;
 use model::records::batch::Batch;
 use tokio::sync::mpsc;
-use tracing::info;
+use tracing::debug;
 
 /// Coordinates batch receiving, writing, and checkpointing.
 pub struct BatchCoordinator {
@@ -47,7 +47,7 @@ impl BatchCoordinator {
             }
             Err(mpsc::error::TryRecvError::Empty) => Ok(false),
             Err(mpsc::error::TryRecvError::Disconnected) => {
-                info!("Batch channel disconnected");
+                debug!("batch channel disconnected");
                 Ok(false)
             }
         }
@@ -63,13 +63,13 @@ impl BatchCoordinator {
         let row_count = batch.rows.len();
         let byte_count = batch.size_bytes();
 
-        info!(
+        debug!(
             batch_id = %batch_id,
             rows = row_count,
             bytes = byte_count,
             cursor = ?batch.cursor,
             next = ?batch.next,
-            "Processing batch"
+            "processing batch"
         );
 
         // Get current progress
@@ -122,13 +122,13 @@ impl BatchCoordinator {
         self.metrics.increment_bytes(byte_count as u64);
         self.metrics.increment_batches(1);
 
-        info!(
+        debug!(
             batch_id = %batch_id,
             rows = row_count,
             bytes = byte_count,
             total_rows = new_rows,
             strategy = ?write_result.strategy,
-            "Batch processed successfully"
+            "batch processed"
         );
 
         Ok(())

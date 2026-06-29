@@ -44,7 +44,7 @@ impl PaginationAnalyzer {
                 target: "analyzer",
                 table = %cursor_column.table,
                 column = %cursor_column.column,
-                "Pagination Performance Risk: Cursor column is not indexed."
+                "pagination performance risk: cursor column is not indexed"
             );
         }
 

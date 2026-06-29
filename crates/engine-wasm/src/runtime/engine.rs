@@ -99,11 +99,11 @@ impl WasmEngine {
         })?;
 
         if let Some(module) = self.module_cache.get(&canonical) {
-            debug!(path = %canonical.display(), "Using cached WASM module");
+            debug!(path = %canonical.display(), "using cached WASM module");
             return Ok(Arc::clone(module));
         }
 
-        info!(path = %canonical.display(), "Compiling WASM module");
+        info!(path = %canonical.display(), "compiling WASM module");
 
         let module = Module::from_file(&self.engine, &canonical).map_err(|e| {
             WasmError::CompilationFailed {

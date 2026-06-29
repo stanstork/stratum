@@ -108,11 +108,7 @@ impl FailedRowWriter {
         // Write batch using driver's write_batch method
         driver.write_batch(&metadata, &rows).await?;
 
-        info!(
-            "Wrote {} failed rows to table {}",
-            failed_rows.len(),
-            table_name
-        );
+        info!(count = failed_rows.len(), table = %table_name, "wrote failed rows to table");
         Ok(())
     }
 
@@ -150,7 +146,7 @@ impl FailedRowWriter {
         let json = serde_json::to_string(failed_row)?;
         writeln!(file, "{}", json)?;
 
-        debug!("Wrote failed row {} to {}", failed_row.id, path);
+        debug!(id = %failed_row.id, path = %path, "wrote failed row to file");
         Ok(())
     }
 }

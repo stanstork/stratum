@@ -105,7 +105,7 @@ impl PluginRegistry {
 
         let module = self.engine.load_module(&def.path)?;
         self.modules.insert(def.name.clone(), (module, def.clone()));
-        info!(plugin = %def.name, path = %def.path.display(), "Plugin loaded");
+        info!(plugin = %def.name, path = %def.path.display(), "plugin loaded");
         Ok(())
     }
 
@@ -128,7 +128,7 @@ impl PluginRegistry {
             config_json: decl.config_json.clone(),
         };
         self.modules.insert(decl.name.clone(), (module, def));
-        info!(plugin = %decl.name, path = %decl.path.display(), "Plugin loaded");
+        info!(plugin = %decl.name, path = %decl.path.display(), "plugin loaded");
         Ok(())
     }
 

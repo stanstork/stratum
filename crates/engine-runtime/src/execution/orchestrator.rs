@@ -25,7 +25,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 const BATCH_CHANNEL_CAPACITY: usize = 64;
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
@@ -79,10 +79,7 @@ impl PipelineOrchestrator {
         self.execute_hooks(HookPhase::Before).await?;
 
         let rows = if self.is_schema_only() {
-            info!(
-                "Schema-only mode: skipping data migration for pipeline '{}'",
-                self.pipeline.name
-            );
+            info!("schema-only mode, skipping data migration");
             0
         } else {
             self.execute_pipeline().await?
@@ -105,13 +102,13 @@ impl PipelineOrchestrator {
             return Ok(());
         }
 
-        info!("Executing {} {} schema operations", ops.len(), phase);
+        info!(count = ops.len(), phase, "executing schema operations");
 
         for op in ops {
             {
                 let set = self.done_ops.lock().unwrap();
                 if set.contains(&op.sql) {
-                    info!("Skipping already-executed schema op: {}", op.description);
+                    debug!(op = %op.description, "skipping already-executed schema op");
                     continue;
                 }
             }
@@ -155,7 +152,7 @@ impl PipelineOrchestrator {
 
     /// Returns the number of rows processed.
     async fn execute_pipeline(&self) -> Result<u64, MigrationError> {
-        info!("Starting pipeline execution: {}", self.pipeline.name);
+        info!("starting data migration");
 
         self.publish_started().await;
         let start_time = std::time::Instant::now();
@@ -221,11 +218,9 @@ impl PipelineOrchestrator {
         if self.settings.integrity().is_enabled() {
             if self.pipeline.source.pagination.is_none() {
                 warn!(
-                    "Pipeline '{}' has integrity enabled but no `paginate` block. \
-                     Without explicit pagination the row order is non-deterministic, \
-                     which may cause `verify` to report false mismatches. \
-                     Add a `paginate` block for reliable verification.",
-                    self.pipeline.name
+                    "integrity is enabled but no `paginate` block is set; without explicit \
+                     pagination the row order is non-deterministic, which may cause `verify` \
+                     to report false mismatches. Add a `paginate` block for reliable verification."
                 );
             }
 
@@ -269,7 +264,7 @@ impl PipelineOrchestrator {
             .start_snapshot_pipeline(self.ctx.run_id.clone(), self.ctx.item_id.clone(), part_id)
             .await
             .map_err(|e| {
-                error!("Failed to start snapshot pipeline: {}", e);
+                error!(error = %e, "failed to start snapshot pipeline");
                 MigrationError::PipelineFailed(format!("Failed to start pipeline: {}", e))
             })?;
 
@@ -302,12 +297,20 @@ impl PipelineOrchestrator {
     ) -> Result<(), MigrationError> {
         match result {
             Ok(()) => {
-                info!("Pipeline completed successfully");
+                let snap = metrics.snapshot();
+                if snap.rows_skipped > 0 || snap.rows_failed > 0 {
+                    warn!(
+                        skipped = snap.rows_skipped,
+                        failed = snap.rows_failed,
+                        "pipeline completed with skipped/failed rows"
+                    );
+                }
+                debug!("data migration completed");
                 self.publish_completed(metrics, start_time).await;
                 Ok(())
             }
             Err(e) => {
-                error!("Pipeline error: {}", e);
+                error!(error = %e, "pipeline error");
                 self.publish_failed(&e.to_string(), metrics).await;
                 Err(MigrationError::PipelineFailed(format!(
                     "Pipeline error: {}",
@@ -321,18 +324,18 @@ impl PipelineOrchestrator {
         &self,
         wait_fut: impl Future<Output = Result<(), impl std::fmt::Display>>,
     ) -> Result<(), MigrationError> {
-        info!("Pause signal received - draining current batch");
+        info!("pause signal received, draining current batch");
 
         // Trigger cancel so producer/consumer finish current work and stop
         self.shutdown.cancel.cancel();
 
         match tokio::time::timeout(SHUTDOWN_TIMEOUT, wait_fut).await {
             Ok(Ok(())) => {
-                info!("Pipeline paused gracefully after draining batch");
+                info!("pipeline paused gracefully after draining batch");
                 Err(MigrationError::Paused)
             }
             Ok(Err(e)) => {
-                error!("Pipeline error during pause drain: {}", e);
+                error!(error = %e, "pipeline error during pause drain");
                 Err(MigrationError::PipelineFailed(format!(
                     "Pipeline error during pause: {}",
                     e
@@ -340,8 +343,8 @@ impl PipelineOrchestrator {
             }
             Err(_) => {
                 warn!(
-                    "Pipeline did not drain within {}s timeout - progress has been checkpointed",
-                    SHUTDOWN_TIMEOUT.as_secs()
+                    timeout_secs = SHUTDOWN_TIMEOUT.as_secs(),
+                    "pipeline did not drain within timeout; progress has been checkpointed"
                 );
                 Err(MigrationError::Paused)
             }
@@ -352,19 +355,18 @@ impl PipelineOrchestrator {
         &self,
         wait_fut: impl Future<Output = Result<(), impl std::fmt::Display>>,
     ) -> Result<(), MigrationError> {
-        warn!("Shutdown signal received, waiting for in-flight operations to complete");
-        info!(
-            "Waiting up to {}s for graceful shutdown",
-            SHUTDOWN_TIMEOUT.as_secs()
+        warn!(
+            timeout_secs = SHUTDOWN_TIMEOUT.as_secs(),
+            "shutdown signal received, waiting for in-flight operations to complete"
         );
 
         match tokio::time::timeout(SHUTDOWN_TIMEOUT, wait_fut).await {
             Ok(Ok(())) => {
-                info!("Pipeline shutdown completed gracefully");
+                info!("pipeline shutdown completed gracefully");
                 Err(MigrationError::ShutdownRequested)
             }
             Ok(Err(e)) => {
-                error!("Pipeline error during shutdown: {}", e);
+                error!(error = %e, "pipeline error during shutdown");
                 Err(MigrationError::PipelineFailed(format!(
                     "Pipeline error during shutdown: {}",
                     e
@@ -372,8 +374,8 @@ impl PipelineOrchestrator {
             }
             Err(_) => {
                 warn!(
-                    "Pipeline did not complete within {}s timeout - progress has been checkpointed",
-                    SHUTDOWN_TIMEOUT.as_secs()
+                    timeout_secs = SHUTDOWN_TIMEOUT.as_secs(),
+                    "pipeline did not complete within timeout; progress has been checkpointed"
                 );
                 Err(MigrationError::ShutdownRequested)
             }

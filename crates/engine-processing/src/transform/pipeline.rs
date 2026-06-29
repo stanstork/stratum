@@ -166,7 +166,7 @@ impl TransformPipeline {
         {
             match action {
                 ValidationAction::Skip => {
-                    warn!("Validation '{}' failed: {} (skipping row)", rule, message);
+                    warn!(rule = %rule, message = %message, "validation failed, skipping row");
                     return Ok(Some(ApplyOutcome::Skipped {
                         reason: Some(format!("Validation '{}' failed: {}", rule, message)),
                     }));
@@ -175,7 +175,7 @@ impl TransformPipeline {
                     return Err(TransformError::ValidationFailed { rule, message });
                 }
                 ValidationAction::Warn => {
-                    warn!("Validation '{}' failed: {} (continuing)", rule, message);
+                    warn!(rule = %rule, message = %message, "validation failed, continuing");
                     warnings.push(ValidationWarning {
                         rule: rule.clone(),
                         message: message.clone(),

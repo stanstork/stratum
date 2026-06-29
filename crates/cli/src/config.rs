@@ -19,14 +19,14 @@ pub fn resolve_path(config: Option<String>) -> Result<String, CliError> {
         None => {
             // Check environment variable
             if let Ok(env_path) = std::env::var("STRATUM_CONFIG") {
-                info!("Using config file from STRATUM_CONFIG: {}", env_path);
+                info!(path = %env_path, "using config from STRATUM_CONFIG");
                 return Ok(env_path);
             }
 
             // Try to auto-discover the config file
             match discover_config() {
                 Some(path) => {
-                    info!("Auto-discovered config file at: {}", path.display());
+                    info!(path = %path.display(), "auto-discovered config file");
                     Ok(path.to_string_lossy().to_string())
                 }
                 None => Err(CliError::ConfigNotFound(display_search_paths())),
@@ -68,14 +68,14 @@ fn discover_config() -> Option<PathBuf> {
     let search_paths = get_search_paths();
 
     for path in search_paths {
-        debug!("Checking for config file at: {}", path.display());
+        debug!(path = %path.display(), "checking for config file");
         if path.exists() && path.is_file() {
-            debug!("Found config file at: {}", path.display());
+            debug!(path = %path.display(), "found config file");
             return Some(path);
         }
     }
 
-    debug!("No config file found in any of the search paths");
+    debug!("no config file found in search paths");
     None
 }
 

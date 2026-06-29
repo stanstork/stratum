@@ -49,10 +49,10 @@ impl<D: SchemaDriver> InferSchemaSetting<D> {
 
         // Check for existing destination
         if ctx.destination_exists().await? {
-            info!("Skipping schema inference: destination table already exists");
+            info!("skipping schema inference: destination table already exists");
             return Ok(SchemaOps::empty());
         }
-        info!("Destination table not found—planning schema inference");
+        info!("destination table not found, planning schema inference");
 
         let mut schema_plan = ctx.build_schema_plan().await?;
 

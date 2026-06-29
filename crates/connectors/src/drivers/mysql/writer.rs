@@ -21,7 +21,7 @@ impl DataWriter for MySqlDriver {
         let generator = QueryGenerator::new(&dialect::MySql);
         let (sql, params) = generator.insert_batch(meta, rows, &MySqlTypeConverter);
 
-        debug!("Inserting {} rows into {}", num_rows, meta.name);
+        debug!(rows = num_rows, table = %meta.name, "inserting rows");
 
         let params = MySqlParamStore::from_values(&params).params();
         let mut conn = self.pool().get_conn().await?;

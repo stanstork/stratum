@@ -5,6 +5,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use tokio_postgres::{Client, NoTls};
+use tracing::{error, warn};
 
 /// PostgreSQL transaction that owns a dedicated connection.
 /// Uses manual BEGIN/COMMIT/ROLLBACK for transaction control.
@@ -23,7 +24,7 @@ impl PgTransaction {
         // Spawn connection handler
         tokio::spawn(async move {
             if let Err(e) = connection.await {
-                tracing::error!("PostgreSQL transaction connection error: {}", e);
+                error!(error = %e, "Postgres transaction connection error");
             }
         });
 
@@ -43,7 +44,7 @@ impl PgTransaction {
 impl Drop for PgTransaction {
     fn drop(&mut self) {
         if !self.committed {
-            tracing::warn!("PgTransaction dropped without commit - will be rolled back");
+            warn!("transaction dropped without commit, rolling back");
         }
     }
 }

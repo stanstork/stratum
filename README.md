@@ -14,8 +14,8 @@ connection "dest" {
 }
 
 pipeline "customers" {
-  from { connection = connection.source, table = "customers" }
-  to   { connection = connection.dest,   table = "customers", mode = "replace" }
+  from { connection = connection.source table = "customers" }
+  to   { connection = connection.dest   table = "customers", mode = "replace" }
 
   where "active" {
     customers.deleted_at is null
@@ -120,15 +120,15 @@ stratum test-conn --url mysql://user:pass@localhost:3306/db
 **Multi-pipeline DAG with dependencies:**
 ```smql
 pipeline "dim_products" {
-  from { connection = connection.src, table = "products" }
-  to   { connection = connection.dst, table = "dim_products", mode = "replace" }
+  from { connection = connection.src table = "products" }
+  to   { connection = connection.dst table = "dim_products", mode = "replace" }
 }
 
 pipeline "fact_orders" {
   after = [pipeline.dim_products]  // runs after dim_products completes
 
-  from { connection = connection.src, table = "orders" }
-  to   { connection = connection.dst, table = "fact_orders", mode = "append" }
+  from { connection = connection.src table = "orders" }
+  to   { connection = connection.dst table = "fact_orders", mode = "append" }
 
   with {
     products from dim_products where products.id == orders.product_id
@@ -206,8 +206,8 @@ plugin "to_upper"    { path = "plugins/upper.js" }
 plugin "is_positive" { path = "plugins/positive.wasm" }
 
 pipeline "customers" {
-  from { connection = connection.src, table = "customers" }
-  to   { connection = connection.dst, table = "customers" }
+  from { connection = connection.src table = "customers" }
+  to   { connection = connection.dst table = "customers" }
 
   select {
     id        = customers.id

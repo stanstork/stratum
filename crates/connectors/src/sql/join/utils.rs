@@ -135,10 +135,7 @@ pub fn build_join_clauses(
         }
 
         if conditions.is_empty() {
-            warn!(
-                "No FK relation between `{}` and `{}` in schema",
-                current_table, next_table
-            );
+            warn!(current = %current_table, next = %next_table, "no FK relation between tables in schema");
             return Vec::new();
         }
 

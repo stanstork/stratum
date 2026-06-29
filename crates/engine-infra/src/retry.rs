@@ -2,6 +2,7 @@ use model::execution::pipeline::{BackoffStrategy, RetryConfig};
 use std::future::Future;
 use std::time::Duration;
 use tokio::time::sleep;
+use tracing::warn;
 
 /// Indicates whether an error should be retried or treated as fatal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +102,7 @@ impl RetryPolicy {
         F: FnMut() -> Fut,
         Fut: Future<Output = Result<T, E>>,
         Classifier: Fn(&E) -> RetryDisposition,
+        E: std::fmt::Display,
     {
         let mut attempt = 0;
 
@@ -115,6 +117,13 @@ impl RetryPolicy {
                         }
 
                         let delay = self.backoff_delay(attempt);
+                        warn!(
+                            attempt = attempt + 1,
+                            max_attempts = self.max_attempts,
+                            backoff_ms = delay.as_millis(),
+                            error = %err,
+                            "operation failed, retrying after backoff"
+                        );
                         sleep(delay).await;
                         attempt += 1;
                     }
@@ -146,6 +155,12 @@ mod tests {
 
     #[derive(Debug, Clone)]
     struct TestError(&'static str);
+
+    impl std::fmt::Display for TestError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.0)
+        }
+    }
 
     #[tokio::test]
     async fn retries_transient_failure_and_succeeds() {

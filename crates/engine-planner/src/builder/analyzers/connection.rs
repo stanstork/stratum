@@ -75,7 +75,7 @@ impl ConnectionAnalyzer {
             target: "analyzer",
             connection = %connection.name,
             status = ?status,
-            "Connection analysis complete"
+            "connection analysis completed"
         );
 
         Ok(ConnectionPlan {

@@ -15,10 +15,7 @@ impl DataReader for PgDriver {
         let generator = QueryGenerator::new(&dialect::Postgres);
         let (sql, params) = generator.select(&request);
 
-        debug!(
-            "Fetching rows from {} with filter: {:?}",
-            request.table, request.filter
-        );
+        debug!(table = %request.table, filter = ?request.filter, "fetching rows");
 
         let client = self.client().read().await;
         let param_store = PgParamStore::from_values(&params);

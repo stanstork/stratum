@@ -67,8 +67,10 @@ impl<'a> BinaryOpEvaluator<'a> {
 
             _ => {
                 warn!(
-                    "Unsupported type combination for binary op: {:?} {:?} {:?}",
-                    self.left, self.op, self.right
+                    left = ?self.left,
+                    op = ?self.op,
+                    right = ?self.right,
+                    "unsupported type combination for binary op"
                 );
                 None
             }
@@ -99,7 +101,7 @@ impl<'a> BinaryOpEvaluator<'a> {
             BinaryOp::GreaterOrEqual => Value::Boolean(l >= r),
             BinaryOp::LessOrEqual => Value::Boolean(l <= r),
             _ => {
-                warn!("Unsupported binary operation for integer: {:?}", self.op);
+                warn!(op = ?self.op, "unsupported binary operation for integer");
                 return None;
             }
         })
@@ -129,10 +131,7 @@ impl<'a> BinaryOpEvaluator<'a> {
             BinaryOp::GreaterOrEqual => Value::Boolean(l >= r),
             BinaryOp::LessOrEqual => Value::Boolean(l <= r),
             _ => {
-                warn!(
-                    "Unsupported binary operation for unsigned integer: {:?}",
-                    self.op
-                );
+                warn!(op = ?self.op, "unsupported binary operation for unsigned integer");
                 return None;
             }
         })
@@ -152,7 +151,7 @@ impl<'a> BinaryOpEvaluator<'a> {
             BinaryOp::GreaterOrEqual => Value::Boolean(l >= r),
             BinaryOp::LessOrEqual => Value::Boolean(l <= r),
             _ => {
-                warn!("Unsupported binary operation for float: {:?}", self.op);
+                warn!(op = ?self.op, "unsupported binary operation for float");
                 return None;
             }
         })
@@ -188,7 +187,7 @@ impl<'a> BinaryOpEvaluator<'a> {
             BinaryOp::GreaterOrEqual => Value::Boolean(l >= r),
             BinaryOp::LessOrEqual => Value::Boolean(l <= r),
             _ => {
-                warn!("Unsupported binary operation for Decimal: {:?}", self.op);
+                warn!(op = ?self.op, "unsupported binary operation for decimal");
                 return None;
             }
         })
@@ -204,7 +203,7 @@ impl<'a> BinaryOpEvaluator<'a> {
             BinaryOp::LessOrEqual => Value::Boolean(l <= r),
             BinaryOp::Add => Value::String(format!("{}{}", l, r)),
             _ => {
-                warn!("Unsupported binary operation for String: {:?}", self.op);
+                warn!(op = ?self.op, "unsupported binary operation for string");
                 return None;
             }
         })
@@ -217,7 +216,7 @@ impl<'a> BinaryOpEvaluator<'a> {
             BinaryOp::Equal => Value::Boolean(l == r),
             BinaryOp::NotEqual => Value::Boolean(l != r),
             _ => {
-                warn!("Unsupported binary operation for Boolean: {:?}", self.op);
+                warn!(op = ?self.op, "unsupported binary operation for boolean");
                 return None;
             }
         })

@@ -1,6 +1,7 @@
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, NaiveDateTime};
 use model::core::{types::Type, value::Value};
+use tracing::warn;
 use uuid::Uuid;
 
 /// Coerce a value to match the target canonical type.
@@ -120,6 +121,10 @@ fn coerce_text(value: Value, target_type: &Type) -> Value {
                     Ok(text) => Value::String(text),
                     Err(err) => {
                         let bytes = err.into_bytes();
+                        warn!(
+                            bytes = bytes.len(),
+                            "binary value is not valid UTF-8; coercing to text with lossy replacement"
+                        );
                         Value::String(String::from_utf8_lossy(&bytes).to_string())
                     }
                 };

@@ -9,7 +9,7 @@ use engine_core::retry::RetryPolicy;
 use model::records::Record;
 use model::records::batch::Batch;
 use std::collections::HashMap;
-use tracing::{info, warn};
+use tracing::{debug, trace, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WriteStrategy {
@@ -54,15 +54,15 @@ impl BatchWriter {
     pub async fn auto_detect_strategy(mut self) -> Self {
         match self.can_use_fast_path().await {
             Ok(true) => {
-                info!("Fast path available, using sink for writes");
+                debug!("fast path available, using sink for writes");
                 self.strategy = WriteStrategy::FastPath;
             }
             Ok(false) => {
-                info!("Fast path not available, using regular destination writes");
+                debug!("fast path unavailable, using regular INSERT writes");
                 self.strategy = WriteStrategy::Regular;
             }
             Err(e) => {
-                warn!(error = %e, "Failed to detect fast path, falling back to regular writes");
+                warn!(error = %e, "failed to detect fast path, falling back to regular writes");
                 self.strategy = WriteStrategy::Regular;
             }
         }
@@ -102,11 +102,11 @@ impl BatchWriter {
     async fn can_use_fast_path(&self) -> Result<bool, ConsumerError> {
         let fast = self.destination.sink().support_fast_path().await?;
         if self.meta.is_empty() {
-            warn!("No table metadata available to determine fast path support");
+            warn!("no table metadata available to determine fast path support");
             return Ok(false);
         }
         let meta = &self.meta[0]; // For now, check only the first table
-        info!(table = %meta.name, fast_path = %fast, "Fast path support checked");
+        debug!(table = %meta.name, fast_path = %fast, "fast path support checked");
         Ok(fast && !meta.primary_keys.is_empty())
     }
 
@@ -114,15 +114,15 @@ impl BatchWriter {
     async fn write_batch_fast(&self, batch: &Batch) -> Result<WriteResult, ConsumerError> {
         let start = std::time::Instant::now();
 
-        info!(
+        trace!(
             batch_id = %batch.id,
             row_count = batch.rows.len(),
             strategy = "fast_path",
-            "Writing batch to destination via sink"
+            "writing batch via sink"
         );
 
         if self.meta.is_empty() {
-            warn!("No table metadata available for fast path write. Skipping write.");
+            warn!(batch_id = %batch.id, "no table metadata for fast-path write, skipping batch");
             return Ok(WriteResult {
                 rows_written: 0,
                 duration: start.elapsed(),
@@ -153,13 +153,13 @@ impl BatchWriter {
         let duration = start.elapsed();
         let rows_per_sec = rows_written as f64 / duration.as_secs_f64();
 
-        info!(
+        debug!(
             batch_id = %batch.id,
             rows = rows_written,
             strategy = "fast_path",
             duration_ms = duration.as_millis(),
             rows_per_sec = %format!("{:.2}", rows_per_sec),
-            "Batch written successfully via sink"
+            "batch written via sink"
         );
 
         Ok(WriteResult {
@@ -173,15 +173,15 @@ impl BatchWriter {
     async fn write_batch_regular(&self, batch: &Batch) -> Result<WriteResult, ConsumerError> {
         let start = std::time::Instant::now();
 
-        info!(
+        trace!(
             batch_id = %batch.id,
             row_count = batch.rows.len(),
             strategy = "regular",
-            "Writing batch to destination"
+            "writing batch via INSERT"
         );
 
         if self.meta.is_empty() {
-            warn!("No table metadata available for regular write. Skipping write.");
+            warn!(batch_id = %batch.id, "no table metadata for regular write, skipping batch");
             return Ok(WriteResult {
                 rows_written: 0,
                 duration: start.elapsed(),
@@ -212,13 +212,13 @@ impl BatchWriter {
         let duration = start.elapsed();
         let rows_per_sec = rows_written as f64 / duration.as_secs_f64();
 
-        info!(
+        debug!(
             batch_id = %batch.id,
             rows = rows_written,
             strategy = "regular",
             duration_ms = duration.as_millis(),
             rows_per_sec = %format!("{:.2}", rows_per_sec),
-            "Batch written successfully via destination"
+            "batch written via destination"
         );
 
         Ok(WriteResult {

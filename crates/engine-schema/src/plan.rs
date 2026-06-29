@@ -311,10 +311,7 @@ impl SchemaPlan {
                 .unwrap_or_default();
 
             if enum_type.is_empty() {
-                warn!(
-                    "Could not find enum type for column '{}' in table '{}'",
-                    column, table
-                );
+                warn!(column = %column, table = %table, "could not find enum type for column");
                 continue;
             }
 
@@ -656,10 +653,7 @@ impl SchemaPlan {
                 .unwrap_or_default();
 
             if enum_type.is_empty() {
-                warn!(
-                    "Could not find enum type for column '{}' in table '{}'",
-                    column, table
-                );
+                warn!(column = %column, table = %table, "could not find enum type for column");
                 continue;
             }
 
@@ -807,10 +801,7 @@ impl SchemaPlan {
         let metadata = match self.metadata_graph.get(table) {
             Some(m) => m,
             None => {
-                warn!(
-                    "Missing metadata for source table: {} (resolved: {})",
-                    table, resolved_table
-                );
+                warn!(table = %table, resolved = %resolved_table, "missing metadata for source table");
                 return defs;
             }
         };
@@ -847,8 +838,10 @@ impl SchemaPlan {
                 });
             } else {
                 warn!(
-                    "Failed to infer type for computed field '{}' in table '{}' (resolved: '{}')",
-                    column_name, table, resolved_table
+                    column = %column_name,
+                    table = %table,
+                    resolved = %resolved_table,
+                    "failed to infer type for computed field"
                 );
             }
         }
@@ -959,10 +952,7 @@ impl SchemaPlan {
 
     fn filter_to_mapped_columns(&self, table: &str, columns: Vec<ColumnDef>) -> Vec<ColumnDef> {
         let Some(mapping) = self.mapping.field_mappings.field_renames.get(table) else {
-            warn!(
-                "No field mapping found for table '{}'; returning all columns unchanged",
-                table
-            );
+            warn!(table = %table, "no field mapping found for table, returning all columns unchanged");
             return columns;
         };
         columns

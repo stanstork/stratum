@@ -9,7 +9,7 @@ use engine_core::{
 use engine_state::models::CheckpointStage;
 use model::pagination::cursor::Cursor;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 /// Manages checkpoint and WAL operations.
 pub struct StateManager {
@@ -75,15 +75,15 @@ impl StateManager {
 
         match summary {
             Some(s) => {
-                info!(
+                debug!(
                     stage = %s.stage,
                     batch_id = %s.batch_id,
-                    "Resuming from checkpoint"
+                    "resuming from checkpoint"
                 );
                 Ok(self.cursor_from_checkpoint(&s).await)
             }
             None => {
-                info!("No checkpoint found, starting from beginning");
+                debug!("no checkpoint found, starting from beginning");
                 Ok(Cursor::None)
             }
         }
@@ -105,9 +105,9 @@ impl StateManager {
         match summary.stage {
             CheckpointStage::Committed => {
                 // Batch was fully committed, safe to continue from src_offset
-                info!(
+                debug!(
                     cursor = ?summary.src_offset,
-                    "Resuming from committed checkpoint"
+                    "resuming from committed checkpoint"
                 );
                 summary.src_offset.clone()
             }
@@ -117,7 +117,7 @@ impl StateManager {
                 let wal_entries = match self.store.iter_wal(&self.ids.run_id()).await {
                     Ok(entries) => entries,
                     Err(err) => {
-                        warn!(error = %err, "Failed to read WAL entries, using safe cursor");
+                        warn!(error = %err, "failed to read WAL entries, using safe cursor");
                         return summary.src_offset.clone();
                     }
                 };
@@ -130,10 +130,10 @@ impl StateManager {
                         .cloned()
                         .unwrap_or_else(|| summary.src_offset.clone());
 
-                    info!(
+                    debug!(
                         cursor = ?resume_cursor,
                         batch_id = %summary.batch_id,
-                        "Batch was committed, resuming from pending_offset"
+                        "batch was committed, resuming from pending_offset"
                     );
                     resume_cursor
                 } else {
@@ -141,7 +141,7 @@ impl StateManager {
                     warn!(
                         cursor = ?summary.src_offset,
                         batch_id = %summary.batch_id,
-                        "Batch not committed, resuming from src_offset (will re-read)"
+                        "batch not committed, resuming from src_offset (will re-read)"
                     );
                     summary.src_offset.clone()
                 }
@@ -152,7 +152,7 @@ impl StateManager {
                 warn!(
                     stage = %stage,
                     cursor = ?summary.src_offset,
-                    "Unknown checkpoint stage, using src_offset"
+                    "unknown checkpoint stage, using src_offset"
                 );
                 summary.src_offset.clone()
             }

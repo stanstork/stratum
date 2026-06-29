@@ -11,7 +11,7 @@ use engine_runtime::{
 };
 use model::execution::flags::{ExecutionFlags, IntegrityMode};
 use std::{path::PathBuf, sync::Arc};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 /// Executes the apply command (run migration)
 pub async fn execute(
@@ -51,7 +51,7 @@ async fn run_tui_mode(
     shutdown: ShutdownSignal,
     env: Arc<EnvContext>,
 ) -> Result<(), CliError> {
-    info!("Running migration with TUI: {}", config_path);
+    info!(config = %config_path, "running migration with TUI");
     run_tui(config_path, exact_filter, flags.integrity, shutdown, env).await
 }
 
@@ -72,7 +72,7 @@ async fn run_pretty_mode(
     let printer_bus = event_bus.clone();
     let printer_handle = tokio::spawn(async move {
         if let Err(e) = PrettyPrinter::run(printer_bus, printer_cancel, pipeline_names).await {
-            tracing::error!("Pretty printer error: {}", e);
+            error!(error = %e, "pretty printer error");
         }
     });
 
@@ -96,7 +96,7 @@ async fn run_headless_mode(
     shutdown: ShutdownSignal,
     env: Arc<EnvContext>,
 ) -> Result<(), CliError> {
-    info!("Executing migration: {config_path}");
+    info!(config = %config_path, "executing migration");
     let plan = config::load_plan(&config_path, false, env.clone()).await?;
     handle_execution_result(executor::run(plan, flags, shutdown, env).await)
 }
@@ -120,15 +120,15 @@ fn build_dag(plan: &ExecutionPlan) -> Result<Dag, CliError> {
 fn handle_execution_result(result: Result<(), MigrationError>) -> Result<(), CliError> {
     match result {
         Ok(_) => {
-            info!("Migration completed successfully");
+            info!("migration completed successfully");
             Ok(())
         }
         Err(MigrationError::Paused) => {
-            info!("Migration paused - resume with the same config to continue");
+            info!("migration paused, resume with the same config to continue");
             Err(CliError::Paused)
         }
         Err(MigrationError::ShutdownRequested) => {
-            info!("Migration stopped due to shutdown request - progress has been saved");
+            info!("migration stopped by shutdown request, progress saved");
             Err(CliError::ShutdownRequested)
         }
         Err(e) => Err(CliError::Migration(e)),
@@ -178,7 +178,7 @@ impl PauseWatcher {
         };
 
         if let Err(e) = std::fs::create_dir_all(&dir) {
-            warn!("Failed to create state directory {}: {e}", dir.display());
+            warn!(dir = %dir.display(), error = %e, "failed to create state directory");
             return Ok(Self {
                 pause_path: None,
                 _handle: None,
@@ -205,7 +205,7 @@ impl PauseWatcher {
                 }
 
                 if watch_path.exists() {
-                    info!("Pause sentinel file detected - requesting pause");
+                    info!("pause sentinel file detected, requesting pause");
                     pause_token.cancel();
                     break;
                 }

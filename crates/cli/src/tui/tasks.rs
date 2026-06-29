@@ -34,12 +34,12 @@ pub fn spawn_command_handler(
         while let Some(cmd) = command_rx.recv().await {
             match cmd {
                 MigrationCommand::CancelAll => {
-                    info!("Shutdown/Cancel requested from TUI");
+                    info!("shutdown/cancel requested from TUI");
                     cancel.cancel();
                     break;
                 }
                 _ => {
-                    info!("Forwarding command to executor: {:?}", cmd);
+                    info!(command = ?cmd, "forwarding command to executor");
                     // TODO: Implement actual forwarding logic to the running executor instance
                 }
             }
@@ -65,10 +65,10 @@ pub fn spawn_executor(
         match result {
             Ok(executor) => {
                 if let Err(e) = executor.execute(graph).await {
-                    error!("Migration execution failed: {}", e);
+                    error!(error = %e, "migration execution failed");
                 }
             }
-            Err(e) => error!("Failed to initialize executor: {}", e),
+            Err(e) => error!(error = %e, "failed to initialize executor"),
         }
     });
 }

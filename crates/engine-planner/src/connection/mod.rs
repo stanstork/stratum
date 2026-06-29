@@ -32,11 +32,11 @@ pub struct PostgresConnectionTester {
 #[async_trait]
 impl ConnectionTester for MySqlConnectionTester {
     async fn test(&self) -> Result<ConnectionTestResult, ConnectionError> {
-        info!("Pinging MySQL at '{}'", mask_url(&self.conn_str));
+        info!(url = %mask_url(&self.conn_str), "pinging MySQL");
 
         // connect
         let opts = mysql_async::Opts::from_url(&self.conn_str).map_err(|e| {
-            error!("MySQL connection string parse failed: {}", e);
+            error!(error = %e, "MySQL connection string parse failed");
             ConnectionError::Failed {
                 name: self.name.clone(),
                 reason: format!("Invalid connection string: {}", e),
@@ -44,11 +44,7 @@ impl ConnectionTester for MySqlConnectionTester {
         })?;
         let pool = mysql_async::Pool::new(opts);
         let mut conn = pool.get_conn().await.map_err(|e| {
-            error!(
-                "MySQL connection to '{}' failed: {}",
-                mask_url(&self.conn_str),
-                e
-            );
+            error!(url = %mask_url(&self.conn_str), error = %e, "MySQL connection failed");
             ConnectionError::Failed {
                 name: self.name.clone(),
                 reason: format!("Connection failed: {}", e),
@@ -60,22 +56,14 @@ impl ConnectionTester for MySqlConnectionTester {
             .query_first("SELECT 1")
             .await
             .map_err(|e| {
-                error!(
-                    "MySQL ping query on '{}' failed: {}",
-                    mask_url(&self.conn_str),
-                    e
-                );
+                error!(url = %mask_url(&self.conn_str), error = %e, "MySQL ping query failed");
                 ConnectionError::Failed {
                     name: self.name.clone(),
                     reason: format!("Query failed: {}", e),
                 }
             })?
             .ok_or_else(|| {
-                let msg = format!(
-                    "MySQL ping to '{}' returned no result",
-                    mask_url(&self.conn_str)
-                );
-                error!("{}", msg);
+                error!(url = %mask_url(&self.conn_str), "MySQL ping returned no result");
                 ConnectionError::Failed {
                     name: self.name.clone(),
                     reason: "Ping query returned no result".to_string(),
@@ -84,12 +72,7 @@ impl ConnectionTester for MySqlConnectionTester {
 
         // verify the result
         if val != 1 {
-            let msg = format!(
-                "MySQL ping to '{}' returned unexpected result: {}",
-                mask_url(&self.conn_str),
-                val
-            );
-            error!("{}", msg);
+            error!(url = %mask_url(&self.conn_str), result = val, "MySQL ping returned unexpected result");
             return Err(ConnectionError::Failed {
                 name: self.name.clone(),
                 reason: format!("Unexpected result: {}", val),
@@ -101,11 +84,7 @@ impl ConnectionTester for MySqlConnectionTester {
             .query_first("SELECT VERSION()")
             .await
             .map_err(|e| {
-                error!(
-                    "MySQL version query on '{}' failed: {}",
-                    mask_url(&self.conn_str),
-                    e
-                );
+                error!(url = %mask_url(&self.conn_str), error = %e, "MySQL version query failed");
                 ConnectionError::Failed {
                     name: self.name.clone(),
                     reason: format!("Version query failed: {}", e),
@@ -113,11 +92,7 @@ impl ConnectionTester for MySqlConnectionTester {
             })?
             .unwrap_or_else(|| "unknown".to_string());
 
-        info!(
-            "MySQL ping to '{}' succeeded, version: {}",
-            mask_url(&self.conn_str),
-            version
-        );
+        info!(url = %mask_url(&self.conn_str), version = %version, "MySQL ping succeeded");
         drop(conn);
         pool.disconnect().await.ok();
 
@@ -128,17 +103,13 @@ impl ConnectionTester for MySqlConnectionTester {
 #[async_trait]
 impl ConnectionTester for PostgresConnectionTester {
     async fn test(&self) -> Result<ConnectionTestResult, ConnectionError> {
-        info!("Pinging Postgres at '{}'", mask_url(&self.conn_str));
+        info!(url = %mask_url(&self.conn_str), "pinging Postgres");
 
         // connect
         let (client, connection) = tokio_postgres::connect(&self.conn_str, NoTls)
             .await
             .map_err(|e| {
-                error!(
-                    "Postgres connection to '{}' failed: {}",
-                    mask_url(&self.conn_str),
-                    e
-                );
+                error!(url = %mask_url(&self.conn_str), error = %e, "Postgres connection failed");
                 ConnectionError::Failed {
                     name: self.name.clone(),
                     reason: format!("Connection failed: {}", e),
@@ -148,17 +119,13 @@ impl ConnectionTester for PostgresConnectionTester {
         // spawn the connection handler
         tokio::spawn(async move {
             if let Err(e) = connection.await {
-                error!("Postgres connection error: {}", e);
+                error!(error = %e, "Postgres connection error");
             }
         });
 
         // run the simple query
         let row = client.query_one("SELECT 1", &[]).await.map_err(|e| {
-            error!(
-                "Postgres ping query on '{}' failed: {}",
-                mask_url(&self.conn_str),
-                e
-            );
+            error!(url = %mask_url(&self.conn_str), error = %e, "Postgres ping query failed");
             ConnectionError::Failed {
                 name: self.name.clone(),
                 reason: format!("Query failed: {}", e),
@@ -168,12 +135,7 @@ impl ConnectionTester for PostgresConnectionTester {
         // verify the result
         let val: i32 = row.get(0);
         if val != 1 {
-            let msg = format!(
-                "Postgres ping to '{}' returned unexpected result: {}",
-                mask_url(&self.conn_str),
-                val
-            );
-            error!("{}", msg);
+            error!(url = %mask_url(&self.conn_str), result = val, "Postgres ping returned unexpected result");
             return Err(ConnectionError::Failed {
                 name: self.name.clone(),
                 reason: format!("Unexpected result: {}", val),
@@ -185,11 +147,7 @@ impl ConnectionTester for PostgresConnectionTester {
             .query_one("SELECT version()", &[])
             .await
             .map_err(|e| {
-                error!(
-                    "Postgres version query on '{}' failed: {}",
-                    mask_url(&self.conn_str),
-                    e
-                );
+                error!(url = %mask_url(&self.conn_str), error = %e, "Postgres version query failed");
                 ConnectionError::Failed {
                     name: self.name.clone(),
                     reason: format!("Version query failed: {}", e),
@@ -197,11 +155,7 @@ impl ConnectionTester for PostgresConnectionTester {
             })?;
         let version: String = version_row.get(0);
 
-        info!(
-            "Postgres ping to '{}' succeeded, version: {}",
-            mask_url(&self.conn_str),
-            version
-        );
+        info!(url = %mask_url(&self.conn_str), version = %version, "Postgres ping succeeded");
         Ok(ConnectionTestResult { version })
     }
 }

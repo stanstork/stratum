@@ -134,7 +134,7 @@ impl PluginInstance {
             });
         }
 
-        info!(plugin = %plugin_name, plugin_type = ?metadata.plugin_type, version = %metadata.version, "Plugin initialized");
+        info!(plugin = %plugin_name, plugin_type = ?metadata.plugin_type, version = %metadata.version, "plugin initialized");
 
         Ok(Self {
             store,

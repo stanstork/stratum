@@ -127,7 +127,7 @@ impl FileDataSource for CsvDataSource {
 
                         // if value is None but column is not nullable, skip entire row
                         if value.is_none() && !col_meta.is_nullable {
-                            warn!("Skipping row: column '{}' is null but not nullable", hdr);
+                            warn!(column = %hdr, "skipping row: column is null but not nullable");
                             skip_row = true;
                             break;
                         }

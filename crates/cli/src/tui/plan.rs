@@ -23,7 +23,7 @@ pub async fn build_plan_context(
     exact_filter: bool,
     env: Arc<EnvContext>,
 ) -> Result<PlanContext, CliError> {
-    info!("Building execution plan from {}...", config_path);
+    info!(config = %config_path, "building execution plan");
 
     // Parse SMQL
     let smql_content = std::fs::read_to_string(config_path)?;
@@ -48,7 +48,7 @@ pub async fn build_plan_context(
     // Initialize pipeline states
     let pipelines = initialize_pipelines_from_plan(&report, core_plan.hash());
 
-    info!("Plan built successfully with {} pipelines", pipelines.len());
+    info!(pipelines = pipelines.len(), "plan built");
 
     Ok(PlanContext {
         core_plan,

@@ -68,7 +68,7 @@ impl<D: SchemaDriver> HooksAnalyzer<D> {
             pipeline = %pipeline.name,
             before = before.len(),
             after = after.len(),
-            "Lifecycle hooks analysis complete"
+            "lifecycle hooks analysis completed"
         );
 
         Ok(HooksPlan {
@@ -92,7 +92,7 @@ impl<D: SchemaDriver> HooksAnalyzer<D> {
         let warnings = self.generate_warnings(&sql_upper, &impact);
 
         for warning in &warnings {
-            warn!(pipeline = %pipeline.name, sql = %sql_trimmed, warning = %warning, "Hook safety risk detected");
+            warn!(pipeline = %pipeline.name, sql = %sql_trimmed, warning = %warning, "hook safety risk detected");
         }
 
         Ok(HookStatement {

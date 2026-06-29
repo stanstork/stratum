@@ -5,6 +5,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use mysql_async::{Conn, prelude::Queryable};
+use tracing::warn;
 
 /// MySQL transaction that owns a connection with an active transaction.
 /// Uses manual "START TRANSACTION", "COMMIT", and "ROLLBACK" control to ensure proper transaction handling.
@@ -31,7 +32,7 @@ impl MySqlTransaction {
 impl Drop for MySqlTransaction {
     fn drop(&mut self) {
         if !self.committed {
-            tracing::warn!("MySqlTransaction dropped without commit - will be rolled back");
+            warn!("transaction dropped without commit, rolling back");
         }
     }
 }

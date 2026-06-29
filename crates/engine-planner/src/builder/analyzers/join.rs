@@ -53,7 +53,7 @@ impl JoinAnalyzer {
             table = %table,
             indexed = %indexed,
             match_rate = ?match_rate,
-            "Join analysis complete"
+            "join analysis completed"
         );
 
         Ok(JoinPlan {

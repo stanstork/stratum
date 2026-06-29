@@ -168,7 +168,7 @@ impl ReportBuilder {
         dag: &Dag,
         config_path: &Path,
     ) -> Result<MigrationReport, ReportBuilderError> {
-        info!("Orchestrating execution plan build for {:?}", config_path);
+        info!(config = ?config_path, "building execution plan");
 
         // Preparation & Metadata
         let metadata = MetadataGenerator::generate(core_plan, config_path);
@@ -247,7 +247,7 @@ impl ReportBuilder {
         connections: &mut ConnectionPool,
         plugin_registry: &Arc<PluginRegistry>,
     ) -> ReportBuilderResult<PipelinePlan> {
-        info!("Analyzing pipeline: {}", pipeline.name);
+        info!(pipeline = %pipeline.name, "analyzing pipeline");
 
         // WASM-aware path: when either endpoint is a WASM plugin the DB<->DB
         // analyzer chain can't run.

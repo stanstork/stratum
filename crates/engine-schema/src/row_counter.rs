@@ -2,6 +2,7 @@ use crate::type_registry::Dialect;
 use connectors::{error::DriverError, sql::filter::SqlFilter, traits::reader::DataReader};
 use model::execution::row_count::RowCount;
 use std::{sync::Arc, time::Duration};
+use tracing::debug;
 
 pub struct RowCounter<D: DataReader + Send + Sync + 'static> {
     introspector: Arc<D>,
@@ -29,7 +30,7 @@ impl<D: DataReader + Send + Sync + 'static> RowCounter<D> {
             match self.count_fast(table, schema).await {
                 Ok(count) => return Ok(count),
                 Err(_) => {
-                    tracing::debug!("Fast count failed for {}, trying exact", table);
+                    debug!(table = %table, "fast count failed, trying exact");
                 }
             }
         }

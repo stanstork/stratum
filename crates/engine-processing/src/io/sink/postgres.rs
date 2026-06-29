@@ -15,7 +15,7 @@ use engine_core::schema::type_registry::{Dialect, TypeRegistry};
 use model::{core::convert::IntoCanonical, records::Record};
 use query_builder::dialect::Postgres as PgDialect;
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::debug;
 use uuid::Uuid;
 
 pub struct PostgresSink {
@@ -61,7 +61,7 @@ impl PostgresSink {
             .collect();
         let (sql, _) = generator.create_table(name, &column_defs, false, true);
 
-        info!("Creating staging table with SQL: {}", sql);
+        debug!(sql = %sql, "creating staging table");
         self.driver.execute(&sql).await?;
         Ok(())
     }
@@ -70,7 +70,7 @@ impl PostgresSink {
         let generator = QueryGenerator::new(&PgDialect);
         let (sql, _) = generator.drop_table(name, true);
 
-        info!("Dropping staging table with SQL: {}", sql);
+        debug!(sql = %sql, "dropping staging table");
         self.driver.execute(&sql).await?;
         Ok(())
     }
@@ -98,7 +98,7 @@ impl PostgresSink {
             generator.merge_from_staging(meta, staging_table, columns)
         };
 
-        debug!("Merging staging table with SQL: {}", sql);
+        debug!(sql = %sql, "merging staging table");
         self.driver.execute_params(&sql, &params).await?;
         Ok(())
     }
@@ -151,7 +151,7 @@ impl Sink for PostgresSink {
             .filter(|c| !c.is_generated)
             .collect();
 
-        info!("Staging table: {}", staging_table);
+        debug!(table = %staging_table, "using staging table");
 
         // Begin transaction
         let tx = self.driver.begin().await?;

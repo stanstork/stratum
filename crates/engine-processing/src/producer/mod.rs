@@ -27,7 +27,7 @@ use model::{
 };
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::info;
+use tracing::debug;
 
 pub mod components;
 pub mod config;
@@ -201,12 +201,12 @@ impl Producer {
         part_id: &str,
     ) -> Result<(), ProducerError> {
         self.cursor = self.coordinator.state_manager().resume_cursor().await?;
-        info!(
+        debug!(
             run_id = run_id,
             item_id = item_id,
             part_id = part_id,
-            "Resuming producer from cursor: {:?}",
-            self.cursor
+            cursor = ?self.cursor,
+            "resuming producer from cursor"
         );
         Ok(())
     }

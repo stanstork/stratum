@@ -52,7 +52,7 @@ impl<S: SchemaDriver> SourceAnalyzer<S> {
         source: &DataSource,
         ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<SourcePlan> {
-        info!(target: "analyzer", table = %source.table, "Performing source metadata and statistics analysis");
+        info!(target: "analyzer", table = %source.table, "analyzing source metadata and statistics");
 
         self.ensure_table_exists(&source.table, ctx).await?;
 
@@ -84,7 +84,7 @@ impl<S: SchemaDriver> SourceAnalyzer<S> {
             table = %source.table,
             columns = plan.columns.len(),
             rows = %plan.effective_row_count().display(),
-            "Source analysis complete"
+            "source analysis completed"
         );
 
         Ok(plan)

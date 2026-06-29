@@ -16,7 +16,7 @@ impl DataReader for MySqlDriver {
         let generator = QueryGenerator::new(&dialect::MySql);
         let (sql, params) = generator.select(&request);
 
-        debug!("Generated SQL: {}", sql);
+        debug!(sql = %sql, "generated SQL");
 
         let mut conn = self.pool().get_conn().await?;
         let params = MySqlParamStore::from_values(&params).params();

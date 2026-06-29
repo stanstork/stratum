@@ -152,10 +152,7 @@ impl DependencyGraph {
             // unwrap_or_default to be safe against future API changes.
             let empty = HashSet::new();
             let deps = self.dependencies.get(&table).unwrap_or_else(|| {
-                warn!(
-                    "Table '{}' missing from dependency map; treating as no dependencies",
-                    table
-                );
+                warn!(table = %table, "table missing from dependency map, treating as no dependencies");
                 &empty
             });
             let max_dep_level = deps

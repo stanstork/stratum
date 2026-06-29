@@ -29,7 +29,7 @@ pub async fn execute(cli: &Cli, commands: &Commands, env: Arc<EnvContext>) -> Re
     } = commands
     {
         let config_path = config::resolve_path(config.clone())?;
-        info!("Running dry-run migration: {}", config_path);
+        info!(config = %config_path, "running dry-run plan");
 
         // Load core plan
         let core_plan = config::load_plan(&config_path, false, env).await?;

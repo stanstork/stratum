@@ -11,7 +11,7 @@ use engine_infra::shutdown::ShutdownSignal;
 use engine_state::models::CheckpointStage;
 use model::records::batch::Batch;
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, warn};
 
 pub mod components;
 pub mod config;
@@ -94,17 +94,17 @@ impl Consumer {
     }
 
     pub async fn start(&mut self) -> Result<(), ConsumerError> {
-        info!(
+        debug!(
             run_id = %self.ids.run_id(),
             item_id = %self.ids.item_id(),
-            "Starting LiveConsumer"
+            "starting consumer"
         );
 
         // Sink one-time setup before any batch is written.
         self.coordinator.prepare().await?;
 
         self.mode = ConsumerMode::Running;
-        info!("LiveConsumer started successfully");
+        debug!("consumer started");
         Ok(())
     }
 
@@ -118,21 +118,21 @@ impl Consumer {
         item_id: &str,
         part_id: &str,
     ) -> Result<(), ConsumerError> {
-        info!(
+        debug!(
             run_id = run_id,
             item_id = item_id,
             part_id = part_id,
-            "Resuming consumer from checkpoint"
+            "resuming consumer from checkpoint"
         );
 
         // Load last checkpoint to verify state
         match self.coordinator.load_last_checkpoint().await? {
             Some(checkpoint) => {
-                info!(
+                debug!(
                     stage = %checkpoint.stage,
                     rows_done = checkpoint.rows_done,
                     cursor = ?checkpoint.src_offset,
-                    "Loaded checkpoint, consumer will continue from last position"
+                    "loaded checkpoint, continuing from last position"
                 );
 
                 // If we crashed during "write" stage, the producer will re-send
@@ -140,13 +140,12 @@ impl Consumer {
                 if checkpoint.stage == CheckpointStage::Write {
                     warn!(
                         batch_id = %checkpoint.batch_id,
-                        "Last batch was being written when crash occurred, \
-                         it may be re-sent by producer"
+                        "last batch was mid-write at crash, producer may re-send it"
                     );
                 }
             }
             None => {
-                info!("No checkpoint found, consumer starting fresh");
+                debug!("no checkpoint found, consumer starting fresh");
             }
         }
 
@@ -168,7 +167,7 @@ impl Consumer {
 
             ConsumerMode::Running => {
                 if self.should_stop() {
-                    info!("Consumer received stop signal, entering flush mode");
+                    debug!("stop signal received, entering flush mode");
                     self.mode = ConsumerMode::Flushing;
                     return Ok(ConsumerStatus::Working); // Continue to flush
                 }
@@ -183,9 +182,7 @@ impl Consumer {
                         // No batch available right now
                         // Check if channel is closed (producer finished)
                         if self.coordinator.is_channel_closed() {
-                            info!(
-                                "Batch channel closed and all batches processed, consumer finished"
-                            );
+                            debug!("batch channel closed and drained, consumer finished");
                             self.mode = ConsumerMode::Finished;
                             return Ok(ConsumerStatus::Finished);
                         }
@@ -193,7 +190,7 @@ impl Consumer {
                         Ok(ConsumerStatus::Idle)
                     }
                     Err(e) => {
-                        error!(error = %e, "Failed to process batch");
+                        error!(error = %e, "failed to process batch");
                         // On error, enter flushing mode to clean up
                         self.mode = ConsumerMode::Flushing;
                         Err(e)
@@ -203,10 +200,10 @@ impl Consumer {
 
             ConsumerMode::Flushing => {
                 // Flush any pending writes before finishing
-                info!("Flushing consumer writes");
+                debug!("flushing consumer writes");
 
                 if let Err(e) = self.coordinator.try_process_one().await {
-                    error!(error = %e, "Failed to flush on shutdown");
+                    error!(error = %e, "failed to flush on shutdown");
                 }
 
                 self.mode = ConsumerMode::Finished;
@@ -216,14 +213,14 @@ impl Consumer {
     }
 
     pub async fn stop(&mut self) -> Result<(), ConsumerError> {
-        info!(
+        debug!(
             run_id = %self.ids.run_id(),
             item_id = %self.ids.item_id(),
-            "Stopping LiveConsumer"
+            "stopping consumer"
         );
 
         self.mode = ConsumerMode::Finished;
-        info!("LiveConsumer stopped successfully");
+        debug!("consumer stopped");
         Ok(())
     }
 

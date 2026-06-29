@@ -8,7 +8,7 @@ use engine_processing::{
     error::ConsumerError,
 };
 use model::events::migration::MigrationEvent;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
@@ -23,9 +23,12 @@ struct ConsumerTask {
     item_id: String,
 
     // Progress tracking
-    start_time: std::time::Instant,
-    last_progress_report: std::time::Instant,
+    start_time: Instant,
+    last_progress_report: Instant,
     progress_interval: Duration,
+
+    last_log_report: Instant,
+    log_interval: Duration,
 }
 
 impl ConsumerTask {
@@ -36,7 +39,7 @@ impl ConsumerTask {
         run_id: String,
         item_id: String,
     ) -> Self {
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         Self {
             consumer,
             breaker: CircuitBreaker::default_db(),
@@ -47,6 +50,8 @@ impl ConsumerTask {
             start_time: now,
             last_progress_report: now,
             progress_interval: Duration::from_millis(500),
+            last_log_report: now,
+            log_interval: Duration::from_secs(5),
         }
     }
 
@@ -58,6 +63,13 @@ impl ConsumerTask {
     }
 
     async fn handle_success(&mut self, status: ConsumerStatus) -> TickAction {
+        if self.breaker.consecutive_failures() > 0 {
+            info!(
+                run_id = %self.run_id,
+                item_id = %self.item_id,
+                "circuit breaker recovered"
+            );
+        }
         self.breaker.record_success();
         self.report_progress().await;
 
@@ -65,9 +77,9 @@ impl ConsumerTask {
             ConsumerStatus::Working => TickAction::Continue,
             ConsumerStatus::Idle => TickAction::Idle,
             ConsumerStatus::Finished => {
-                info!("Consumer finished");
+                info!(run_id = %self.run_id, item_id = %self.item_id, "consumer finished");
                 if let Err(e) = self.consumer.finalize().await {
-                    error!(error = %e, "Consumer finalize failed");
+                    error!(run_id = %self.run_id, item_id = %self.item_id, error = %e, "consumer finalize failed");
                     let _ = self.consumer.stop().await;
                     return TickAction::Failed(ActorError::Internal(e.to_string()));
                 }
@@ -79,22 +91,26 @@ impl ConsumerTask {
 
     async fn handle_error(&mut self, e: ConsumerError) -> TickAction {
         self.metrics.increment_failures(1);
-        error!(error = %e, "Consumer tick failed");
+        error!(run_id = %self.run_id, item_id = %self.item_id, error = %e, "consumer tick failed");
 
         match self.breaker.record_failure() {
             CircuitBreakerState::RetryAfter(delay) => {
                 warn!(
+                    run_id = %self.run_id,
+                    item_id = %self.item_id,
                     delay_ms = delay.as_millis(),
                     failures = self.breaker.consecutive_failures(),
-                    "Circuit breaker: backing off"
+                    "circuit breaker backing off"
                 );
                 tokio::time::sleep(delay).await;
                 TickAction::Continue
             }
             CircuitBreakerState::Open => {
                 error!(
+                    run_id = %self.run_id,
+                    item_id = %self.item_id,
                     failures = self.breaker.consecutive_failures(),
-                    "Circuit breaker open, stopping consumer"
+                    "circuit breaker open, stopping consumer"
                 );
                 let _ = self.consumer.stop().await;
                 TickAction::Done
@@ -108,9 +124,9 @@ impl ConsumerTask {
         item_id: String,
         part_id: String,
     ) -> TickAction {
-        info!("Consumer received stop");
+        info!(run_id = %self.run_id, item_id = %self.item_id, "consumer received stop");
         if let Err(e) = self.consumer.stop().await {
-            error!(error = %e, "Consumer stop failed");
+            error!(run_id = %self.run_id, item_id = %self.item_id, error = %e, "consumer stop failed");
             return TickAction::Failed(ActorError::Internal(e.to_string()));
         }
 
@@ -155,6 +171,21 @@ impl ConsumerTask {
             })
             .await;
         self.last_progress_report = now;
+
+        // Human-readable heartbeat, throttled well below the event cadence so
+        // long migrations show progress in headless/file logs.
+        if now.duration_since(self.last_log_report) >= self.log_interval {
+            info!(
+                run_id = %self.run_id,
+                item_id = %self.item_id,
+                rows = snapshot.records_processed,
+                rows_per_sec = %format!("{:.0}", rows_per_second),
+                skipped = snapshot.rows_skipped,
+                failed = snapshot.rows_failed,
+                "migration progress"
+            );
+            self.last_log_report = now;
+        }
     }
 }
 
@@ -194,7 +225,7 @@ pub async fn run_consumer(
             }
             msg = rx.recv() => match msg {
                 Some(ConsumerMsg::Flush { run_id, item_id }) => {
-                    info!(run_id = %run_id, item_id = %item_id, "Flushing consumer");
+                    info!(run_id = %run_id, item_id = %item_id, "flushing consumer");
                     tick_interval.reset_immediately();
                 }
                 Some(ConsumerMsg::Stop { run_id, item_id, part_id }) => {
@@ -206,13 +237,13 @@ pub async fn run_consumer(
                 }
                 Some(_) => {}
                 None => {
-                    info!("Consumer mailbox closed, stopping");
+                    info!(run_id = %task.run_id, item_id = %task.item_id, "consumer mailbox closed, stopping");
                     let _ = task.consumer.stop().await;
                     return Ok(());
                 }
             },
             _ = cancel_token.cancelled() => {
-                info!("Consumer stopping after cancellation");
+                info!(run_id = %task.run_id, item_id = %task.item_id, "consumer stopping after cancellation");
                 let _ = task.consumer.stop().await;
                 return Ok(());
             }
@@ -231,11 +262,11 @@ async fn wait_for_start(
             msg = rx.recv() => match msg {
                 Some(ConsumerMsg::Start { run_id, item_id, part_id }) => {
                     if let Err(e) = consumer.start().await {
-                        error!(error = %e, "Failed to start consumer");
+                        error!(run_id = %run_id, item_id = %item_id, error = %e, "failed to start consumer");
                         return Err(ActorError::Internal(e.to_string()));
                     }
                     if let Err(e) = consumer.resume(&run_id, &item_id, &part_id).await {
-                        warn!(error = %e, "Failed to resume consumer state");
+                        warn!(run_id = %run_id, item_id = %item_id, error = %e, "failed to resume consumer state");
                     }
 
                     event_bus
@@ -250,13 +281,13 @@ async fn wait_for_start(
                     return Ok(Some((run_id, item_id)));
                 }
                 Some(ConsumerMsg::Stop { .. }) | None => {
-                    info!("Consumer stopping before start");
+                    info!("consumer stopping before start");
                     return Ok(None);
                 }
                 Some(_) => {}
             },
             _ = cancel_token.cancelled() => {
-                info!("Consumer cancelled before start");
+                info!("consumer cancelled before start");
                 return Ok(None);
             }
         }

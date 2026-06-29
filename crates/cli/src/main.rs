@@ -56,7 +56,7 @@ fn init_environment(env_file: Option<&str>) -> Result<Arc<EnvContext>, CliError>
     let mut env_manager = EnvManager::new();
 
     if let Some(path) = env_file {
-        info!("Loading environment variables from: {}", path);
+        info!(path = %path, "loading environment variables");
         env_manager.load_from_file(path)?;
     }
 
@@ -72,11 +72,11 @@ fn init_environment(env_file: Option<&str>) -> Result<Arc<EnvContext>, CliError>
 fn handle_error(error: CliError) -> i32 {
     match error {
         CliError::ShutdownRequested => {
-            info!("Application shutdown gracefully");
+            info!("application shut down gracefully");
             130 // Standard exit code for SIGINT
         }
         CliError::Paused => {
-            info!("Migration paused - resume with the same config");
+            info!("migration paused, resume with the same config");
             2
         }
         CliError::UserMessage(msg) => {
@@ -84,7 +84,7 @@ fn handle_error(error: CliError) -> i32 {
             1
         }
         _ => {
-            tracing::error!("Application error: {}", error);
+            tracing::error!(error = %error, "application error");
             1
         }
     }
