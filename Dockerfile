@@ -34,8 +34,8 @@ RUN apt-get update && \
 RUN useradd --user-group --create-home stratum
 WORKDIR /home/stratum
 
-# Copy the built binary. The `cli` crate produces a binary named `cli`.
-COPY --from=builder /usr/src/stratum/target/release/cli /usr/local/bin/stratum
+# Copy the built binary. The `cli` crate produces a binary named `stratum`.
+COPY --from=builder /usr/src/stratum/target/release/stratum /usr/local/bin/stratum
 RUN chmod +x /usr/local/bin/stratum
 
 USER stratum

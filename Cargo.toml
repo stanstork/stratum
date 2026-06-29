@@ -32,4 +32,12 @@ exclude = [
 resolver = "2"
 
 [workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
 license = "AGPL-3.0-or-later"
+repository = "https://github.com/stanstork/stratum"
+homepage = "https://github.com/stanstork/stratum"
+description = "Declarative, crash-safe data and schema migration engine with cryptographic verification and WASM plugins."
+keywords = ["database", "migration", "etl", "data-pipeline", "postgres"]
+categories = ["database", "command-line-utilities"]
