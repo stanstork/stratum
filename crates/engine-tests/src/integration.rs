@@ -16,6 +16,7 @@ mod tests {
         builder::{ReportBuilder, ReportBuilderConfig},
         plan::{diagnostics::level::DiagnosticLevel, validation::types::ValidationAction},
     };
+    use engine_processing::EnvContext;
     use engine_runtime::dag::builder::DagBuilder;
     use smql_syntax::builder::parse;
     use tracing_test::traced_test;
@@ -1650,12 +1651,18 @@ mod tests {
         // Parse SMQL configuration
         let doc = parse(&config_content).expect("parse SMQL config");
 
-        // Build core execution plan
-        let core_plan = CoreExecutionPlan::build(
-            &doc,
-            std::sync::Arc::new(engine_core::context::env::EnvContext::empty()),
-        )
-        .expect("build core execution plan");
+        // Build core execution plan.
+        let mut env = EnvContext::empty();
+        env.set(
+            "MYSQL_URL".to_string(),
+            "mysql://sakila_user:qwerty123@localhost:3306/sakila".to_string(),
+        );
+        env.set(
+            "POSTGRES_URL".to_string(),
+            "postgres://user:password@localhost:5432/testdb".to_string(),
+        );
+        let core_plan = CoreExecutionPlan::build(&doc, std::sync::Arc::new(env))
+            .expect("build core execution plan");
 
         // Build DAG from pipeline dependencies
         let mut dag_builder = DagBuilder::new();
