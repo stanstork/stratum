@@ -203,12 +203,16 @@ impl Source {
         };
 
         match format {
-            DataFormat::MySql | DataFormat::Postgres => Ok(Some(Filter::Sql(
-                SqlFilterCompiler::compile(&combined_condition),
-            ))),
-            DataFormat::Csv => Ok(Some(Filter::Csv(CsvFilterCompiler::compile(
-                &combined_condition,
-            )))),
+            DataFormat::MySql | DataFormat::Postgres => {
+                let filter = SqlFilterCompiler::compile(&combined_condition)
+                    .map_err(|e| DriverError::QueryError(e.to_string()))?;
+                Ok(Some(Filter::Sql(filter)))
+            }
+            DataFormat::Csv => {
+                let filter = CsvFilterCompiler::compile(&combined_condition)
+                    .map_err(|e| DriverError::QueryError(e.to_string()))?;
+                Ok(Some(Filter::Csv(filter)))
+            }
             _ => Err(DriverError::UnsupportedFormat(format!(
                 "filters not supported for format {:?}",
                 format

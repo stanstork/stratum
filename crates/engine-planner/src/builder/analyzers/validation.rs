@@ -162,7 +162,8 @@ impl ValidationAnalyzer {
             Vec::new()
         };
 
-        let sql_filter = SqlFilterCompiler::compile(check);
+        let sql_filter = SqlFilterCompiler::compile(check)
+            .map_err(|e| ValidationAnalyzerError::ParseError(e.to_string()))?;
         let filter_expr = sql_filter
             .expr
             .as_ref()

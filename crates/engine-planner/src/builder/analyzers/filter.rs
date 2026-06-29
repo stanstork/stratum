@@ -135,7 +135,8 @@ impl<S: SchemaDriver, D: SchemaDriver> PlanAnalyzer<S, D> for FilterAnalyzer<S> 
             None => return Ok(None),
         };
 
-        let sql_filter = SqlFilterCompiler::compile(&expr);
+        let sql_filter = SqlFilterCompiler::compile(&expr)
+            .map_err(|e| AnalyzerError::error("filter", e.to_string()))?;
         let columns = sql_filter.columns();
 
         self.validate_columns(&columns, &metadata, ctx)

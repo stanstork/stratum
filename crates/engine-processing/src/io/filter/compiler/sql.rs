@@ -1,4 +1,4 @@
-use crate::io::filter::compiler::FilterCompiler;
+use crate::io::filter::compiler::{FilterCompileError, FilterCompiler};
 use connectors::sql::filter::{SqlFilter, condition::Condition, expr::SqlFilterExpr};
 use model::execution::expr::{BinaryOp, CompiledExpression};
 
@@ -7,47 +7,51 @@ pub struct SqlFilterCompiler;
 impl FilterCompiler for SqlFilterCompiler {
     type Filter = SqlFilter;
 
-    fn compile(expr: &CompiledExpression) -> Self::Filter {
-        let sql_expr = compile_sql_expr(expr);
-        SqlFilter::with_expr(sql_expr)
+    fn compile(expr: &CompiledExpression) -> Result<Self::Filter, FilterCompileError> {
+        let sql_expr = compile_sql_expr(expr)?;
+        Ok(SqlFilter::with_expr(sql_expr))
     }
 }
 
-fn compile_sql_expr(expr: &CompiledExpression) -> SqlFilterExpr {
+fn compile_sql_expr(expr: &CompiledExpression) -> Result<SqlFilterExpr, FilterCompileError> {
     match expr {
         // Binary expression represents a condition (e.g., table.column = value)
         CompiledExpression::Binary { left, op, right } => {
             // Check if this is a logical operator (AND/OR) or a comparison
             if matches!(op, BinaryOp::And | BinaryOp::Or) {
                 // Logical operator - recursively compile both sides
-                let left_expr = compile_sql_expr(left);
-                let right_expr = compile_sql_expr(right);
-                let children = vec![left_expr, right_expr];
+                let children = vec![compile_sql_expr(left)?, compile_sql_expr(right)?];
 
-                match op {
+                Ok(match op {
                     BinaryOp::And => SqlFilterExpr::and(children),
                     BinaryOp::Or => SqlFilterExpr::or(children),
                     _ => unreachable!(),
-                }
+                })
             } else {
                 // Comparison operator - create a leaf condition
-                let condition = from_compiled_condition(left, op, right).unwrap();
-                SqlFilterExpr::leaf(condition)
+                let condition = from_compiled_condition(left, op, right)
+                    .map_err(|e| FilterCompileError::UnsupportedExpression(e.to_string()))?;
+                Ok(SqlFilterExpr::leaf(condition))
             }
         }
 
         // Function call with logical operators
         CompiledExpression::FunctionCall { name, args } => {
-            let children = args.iter().map(compile_sql_expr).collect::<Vec<_>>();
+            let children = args
+                .iter()
+                .map(compile_sql_expr)
+                .collect::<Result<Vec<_>, _>>()?;
 
             match name.to_ascii_uppercase().as_str() {
-                "AND" => SqlFilterExpr::and(children),
-                "OR" => SqlFilterExpr::or(children),
-                _ => panic!("Unsupported function call: {name}"),
+                "AND" => Ok(SqlFilterExpr::and(children)),
+                "OR" => Ok(SqlFilterExpr::or(children)),
+                _ => Err(FilterCompileError::UnsupportedFunction(name.clone())),
             }
         }
 
-        _ => panic!("Unsupported expression type for filter: {:?}", expr),
+        _ => Err(FilterCompileError::UnsupportedExpression(format!(
+            "{expr:?}"
+        ))),
     }
 }
 

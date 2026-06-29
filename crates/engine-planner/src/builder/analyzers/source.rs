@@ -26,7 +26,7 @@ use engine_processing::io::{
 };
 use model::execution::{pipeline::DataSource, row_count::RowCount};
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 struct SourceTableMetrics {
     metadata: TableMetadata,
@@ -149,19 +149,27 @@ impl<S: SchemaDriver> SourceAnalyzer<S> {
         let total_rows = ctx.source_cache.count_rows(&source.table, None).await;
 
         let filtered_rows = match combine_filters(&source.filters) {
-            Some(filter) => {
-                let sql_filter = SqlFilterCompiler::compile(&filter);
-
-                if ctx.use_exact_where {
-                    Some(
-                        ctx.source_cache
-                            .count_rows(&source.table, Some(&sql_filter))
-                            .await,
-                    )
-                } else {
-                    self.estimate_filtered_rows(source, ctx).await
+            Some(filter) => match SqlFilterCompiler::compile(&filter) {
+                Ok(sql_filter) => {
+                    if ctx.use_exact_where {
+                        Some(
+                            ctx.source_cache
+                                .count_rows(&source.table, Some(&sql_filter))
+                                .await,
+                        )
+                    } else {
+                        self.estimate_filtered_rows(source, ctx).await
+                    }
                 }
-            }
+                Err(e) => {
+                    warn!(
+                        target: "analyzer",
+                        error = %e,
+                        "failed to compile source filter; skipping filtered row estimate"
+                    );
+                    None
+                }
+            },
             None => None,
         };
 

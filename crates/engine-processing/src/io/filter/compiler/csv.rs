@@ -1,4 +1,4 @@
-use crate::io::filter::compiler::FilterCompiler;
+use crate::io::filter::compiler::{FilterCompileError, FilterCompiler};
 use connectors::drivers::csv::filter::{CsvComparator, CsvCondition, CsvFilter, CsvFilterExpr};
 use model::execution::expr::{BinaryOp, CompiledExpression};
 use std::str::FromStr;
@@ -8,9 +8,9 @@ pub struct CsvFilterCompiler;
 impl FilterCompiler for CsvFilterCompiler {
     type Filter = CsvFilter;
 
-    fn compile(expr: &CompiledExpression) -> Self::Filter {
-        let csv_expr = compile_csv_expr(expr);
-        CsvFilter::with_expr(csv_expr)
+    fn compile(expr: &CompiledExpression) -> Result<Self::Filter, FilterCompileError> {
+        let csv_expr = compile_csv_expr(expr)?;
+        Ok(CsvFilter::with_expr(csv_expr))
     }
 }
 
@@ -70,42 +70,43 @@ fn format_expr_value(expr: &CompiledExpression) -> Result<String, Box<dyn std::e
 }
 
 /// Recursively compiles a filter expression into a CSV filter AST.
-fn compile_csv_expr(expr: &CompiledExpression) -> CsvFilterExpr {
+fn compile_csv_expr(expr: &CompiledExpression) -> Result<CsvFilterExpr, FilterCompileError> {
     match expr {
         // Binary expression represents a condition
         CompiledExpression::Binary { left, op, right } => {
             // Check if this is a logical operator (AND/OR) or a comparison
             if matches!(op, BinaryOp::And | BinaryOp::Or) {
                 // Logical operator - recursively compile both sides
-                let left_expr = compile_csv_expr(left);
-                let right_expr = compile_csv_expr(right);
-                let children = vec![left_expr, right_expr];
+                let children = vec![compile_csv_expr(left)?, compile_csv_expr(right)?];
 
-                match op {
+                Ok(match op {
                     BinaryOp::And => CsvFilterExpr::and(children),
                     BinaryOp::Or => CsvFilterExpr::or(children),
                     _ => unreachable!(),
-                }
+                })
             } else {
                 // Comparison operator - create a leaf condition
-                let csv_cond = from_compiled_condition(left, op, right).unwrap();
-                CsvFilterExpr::leaf(csv_cond)
+                let csv_cond = from_compiled_condition(left, op, right)
+                    .map_err(|e| FilterCompileError::UnsupportedExpression(e.to_string()))?;
+                Ok(CsvFilterExpr::leaf(csv_cond))
             }
         }
 
         // Function call with logical operators
         CompiledExpression::FunctionCall { name, args } => {
-            let mut children = Vec::with_capacity(args.len());
-            for arg in args {
-                children.push(compile_csv_expr(arg));
-            }
+            let children = args
+                .iter()
+                .map(compile_csv_expr)
+                .collect::<Result<Vec<_>, _>>()?;
             match name.to_ascii_uppercase().as_str() {
-                "AND" => CsvFilterExpr::and(children),
-                "OR" => CsvFilterExpr::or(children),
-                _ => panic!("Unsupported function call: {name}"),
+                "AND" => Ok(CsvFilterExpr::and(children)),
+                "OR" => Ok(CsvFilterExpr::or(children)),
+                _ => Err(FilterCompileError::UnsupportedFunction(name.clone())),
             }
         }
 
-        _ => panic!("Unsupported expression type for CSV filter: {:?}", expr),
+        _ => Err(FilterCompileError::UnsupportedExpression(format!(
+            "{expr:?}"
+        ))),
     }
 }

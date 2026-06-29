@@ -83,11 +83,11 @@ impl Destination {
         self.sink.finalize().await
     }
 
-    pub fn dialect(&self) -> Box<dyn dialect::Dialect> {
+    pub fn dialect(&self) -> Option<Box<dyn dialect::Dialect>> {
         match self.format {
-            DataFormat::Postgres => Box::new(dialect::Postgres),
-            DataFormat::MySql => Box::new(dialect::MySql),
-            _ => panic!("Unsupported format: {:?}", self.format),
+            DataFormat::Postgres => Some(Box::new(dialect::Postgres)),
+            DataFormat::MySql => Some(Box::new(dialect::MySql)),
+            _ => None,
         }
     }
 
