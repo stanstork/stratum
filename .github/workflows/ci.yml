@@ -82,6 +82,7 @@ jobs:
     test:
         name: Integration Tests
         runs-on: ubuntu-latest
+        timeout-minutes: 25
 
         services:
             postgres:
@@ -190,7 +191,9 @@ jobs:
                   cache-on-failure: true
 
             - name: Run integration tests
-              run: cargo test -- --test-threads=1
+              env:
+                  RUST_LOG: "info,engine_runtime=debug,engine_processing=debug,connectors=debug"
+              run: cargo test -- --test-threads=1 --nocapture
 
     # Check documentation
     docs:
