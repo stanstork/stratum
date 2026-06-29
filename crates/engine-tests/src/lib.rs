@@ -40,9 +40,25 @@ async fn pg_pool() -> Arc<Client> {
 /// Also clears the state store to ensure tests start with clean state.
 async fn reset_postgres_schema() {
     let pool = pg_pool().await;
+
+    // A heavy prior test can leave a Postgres session alive for a moment during
+    // teardown. If it still holds a lock on a `public` object, the
+    // `DROP SCHEMA ... CASCADE` below would block forever (it has no timeout),
+    // which manifests as the *next* test hanging. Terminate any other backends
+    // on this database first.
+    let _ = pool
+        .batch_execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
+             WHERE datname = current_database() AND pid <> pg_backend_pid();",
+        )
+        .await;
+
     // Drop and recreate public schema (removes all tables, types, etc.).
+    // `statement_timeout` ensures a stuck reset fails loudly instead of hanging
+    // CI indefinitely.
     pool.batch_execute(
         r#"
+        SET statement_timeout = '30s';
         DROP SCHEMA public CASCADE;
         CREATE SCHEMA public;
     "#,
