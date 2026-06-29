@@ -12,11 +12,11 @@
 // that have no meaning in the destination system.
 //
 // Run:
-//   stratum apply -c schema.smql
+//   stratum apply -c schema.smql -e .env
 
 define {
-    mysql_url    = env("MYSQL_URL",    "mysql://sakila_user:qwerty123@localhost:3306/sakila")
-    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+    mysql_url    = env("MYSQL_URL")
+    postgres_url = env("POSTGRES_URL")
 }
 
 connection "src" { driver = "mysql"    url = define.mysql_url    }

@@ -1,5 +1,9 @@
 # Stratum
 
+[![CI](https://github.com/stanstork/stratum/actions/workflows/ci.yml/badge.svg)](https://github.com/stanstork/stratum/actions/workflows/ci.yml)
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)](LICENSE)
+![Status: early development](https://img.shields.io/badge/status-early%20development-orange)
+
 Stratum is a declarative data pipeline engine written in Rust. It migrates data and schema between databases safely, with crash recovery, parallel execution, rich transformation capabilities, and cryptographic post-migration verification.
 
 ```smql
@@ -29,6 +33,26 @@ pipeline "customers" {
 }
 ```
 
+## Why Stratum?
+
+Most database migrations are either hand-written scripts or heavyweight ETL/CDC
+platforms. Stratum sits in between - one declarative tool that:
+
+- **Reads like config, not code.** A single SMQL file describes the whole
+  migration: source, destination, filters, transforms, schema, and dependencies.
+- **Is safe to re-run.** Crash-safe checkpoints mean an interrupted migration
+  resumes exactly where it stopped - no half-applied state, no re-processed rows.
+- **Proves it worked.** Cryptographic (Merkle-tree) verification re-reads the
+  destination and proves it matches what was written, down to the offending row.
+- **Migrates schema, not just rows.** Tables, indexes, foreign keys, ENUMs, and
+  sequences - with FK-aware ordering and dependency-graph discovery.
+- **Extends without forking.** Transforms, filters, sources, and sinks can be
+  sandboxed WASM/JS plugins.
+
+If a `pg_dump | psql` one-liner covers your case, use that. Stratum is for
+migrations that need transformation, cross-engine type mapping, dependency
+ordering, resumability, or verification.
+
 ## Features
 
 - **Declarative pipelines** - SMQL v2.1 with SQL-inspired syntax
@@ -48,18 +72,62 @@ pipeline "customers" {
 
 | Role | Connector |
 |------|-----------|
-| Source | MySQL, PostgreSQL, CSV |
+| Source | MySQL, CSV |
 | Destination | PostgreSQL (COPY fast-path) |
+
+## Project Status
+
+Stratum is **pre-1.0 and under active development**. The engine runs real
+migrations today - data + schema, with verification, crash-safe resume, and
+plugins - but the SMQL language and internal APIs still change between commits.
+Treat it as promising-but-young: well suited to evaluation and non-critical
+workloads, not yet battle-tested for unattended production use.
+
+**Current limitations:**
+
+- **Destinations:** PostgreSQL only (with COPY fast-path). MySQL and CSV are
+  supported as **sources** only.
+- **Snapshot/batch migration only** - change-data-capture (CDC) is planned but
+  not implemented.
+- **Single-node:** execution and state (sled) are local to one machine; there is
+  no distributed/coordinated mode.
+- **Plugin host functions** (outbound HTTP, key-value, metrics) are
+  capability-gated and currently stubbed - disabled by default.
+- **No published binaries or crates yet** - build from source (below).
+
+These are known and tracked in the issue tracker.
 
 ## Install
 
-**From source (requires Rust stable):**
+**From source (requires Rust 1.88 or newer):**
 
 ```bash
 git clone https://github.com/stanstork/stratum.git
 cd stratum
 cargo build --release
 # binary at ./target/release/stratum
+```
+
+## Quick Start
+
+Spin up throwaway databases - MySQL seeded with the
+[Sakila](https://dev.mysql.com/doc/sakila/en/) sample database, plus an empty
+PostgreSQL - and run an example migration:
+
+```bash
+# 1. Start source + destination databases (credentials match .env.example)
+docker compose up -d
+
+# 2. Point Stratum at them
+cp .env.example .env
+
+# 3. Build, preview, then execute an example migration
+cargo build --release
+./target/release/stratum plan  -c examples/configs/schema.smql -e .env   # dry run, no writes
+./target/release/stratum apply -c examples/configs/schema.smql -e .env   # execute
+
+# Tear everything down (and delete the data)
+docker compose down -v
 ```
 
 ## Usage
@@ -94,6 +162,15 @@ stratum verify -c migration.smql --output report.txt
 
 # Test database connectivity
 stratum test-conn --url mysql://user:pass@localhost:3306/db
+
+# Inspect or control a run
+stratum status -c migration.smql   # show run status
+stratum pause  -c migration.smql   # request a graceful pause
+stratum resume -c migration.smql   # resume a paused run
+stratum reset  -c migration.smql   # clear all state for a migration
+
+# Plugin tooling (compile / inspect / validate / test WASM & JS plugins)
+stratum plugin --help
 ```
 
 **Global flags:**
@@ -278,6 +355,18 @@ cargo fmt
 ```
 
 Test fixtures and example configs are in [`examples/configs/`](examples/configs/).
+
+## Roadmap
+
+Rough direction (not commitments):
+
+- Additional destinations (MySQL sink, more connectors)
+- Change-data-capture for incremental sync
+- Published binaries and crates
+- Plugin host capabilities (HTTP, key-value) beyond the current stubs
+
+See the [issue tracker](https://github.com/stanstork/stratum/issues) for what's
+actively in progress.
 
 ## License
 

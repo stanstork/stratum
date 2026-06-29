@@ -16,7 +16,7 @@
 //
 //   stratum plugin validate -c examples/plugins/configs/source_endpoint.smql
 //   rm -rf ~/.stratum/state
-//   stratum apply           -c examples/plugins/configs/source_endpoint.smql
+//   stratum apply           -c examples/plugins/configs/source_endpoint.smql -e .env
 //
 // What to confirm (the source-endpoint path):
 //   - read_page is called repeatedly, advancing the cursor: the coordinator logs

@@ -1,0 +1,38 @@
+# Throwaway source + destination databases for trying Stratum locally.
+# Credentials match .env.example.
+#
+#   docker compose up -d        # start MySQL (seeded with Sakila) + PostgreSQL
+#   docker compose down -v      # stop and delete all data
+services:
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: sakila
+      MYSQL_USER: sakila_user
+      MYSQL_PASSWORD: qwerty123
+    ports:
+      - "3306:3306"
+    volumes:
+      # Seed the Sakila sample database (schema first, then data).
+      - ./.github/testdata/sakila-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./.github/testdata/sakila-data.sql:/docker-entrypoint-initdb.d/02-data.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: testdb
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d testdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 20

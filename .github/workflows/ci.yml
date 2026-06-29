@@ -174,15 +174,15 @@ jobs:
 
                   # Seed Sakila schema as root
                   mysql -h 127.0.0.1 -P 3306 -uroot -proot sakila \
-                      < .github/workflows/sakila-schema.sql
+                      < .github/testdata/sakila-schema.sql
 
                   # Seed Sakila data as root
                   mysql -h 127.0.0.1 -P 3306 -uroot -proot sakila \
-                      < .github/workflows/sakila-data.sql
+                      < .github/testdata/sakila-data.sql
 
                   # Seed Orders DB
                   mysql -h 127.0.0.1 -P 3306 -uuser -ppassword testdb \
-                      < .github/workflows/testdb.sql
+                      < .github/testdata/testdb.sql
 
             - name: Setup Rust cache
               uses: Swatinem/rust-cache@v2

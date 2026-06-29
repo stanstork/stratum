@@ -25,8 +25,8 @@ define {
     tax_multiplier     = 1.08
 
     // Environment variables with defaults
-    mysql_url          = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
-    postgres_url       = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+    mysql_url          = env("MYSQL_URL")
+    postgres_url       = env("POSTGRES_URL")
     batch_size         = env("BATCH_SIZE", 500)
     dlq_path           = env("DLQ_PATH", "/tmp/stratum_dlq")
 }

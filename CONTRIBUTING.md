@@ -1,25 +1,25 @@
 # Contributing
 
-Thanks for your interest in Stratum!
+Thanks for your interest in Stratum - it's genuinely appreciated.
 
-**Stratum is not yet open to external contributions.** The project is still in
-early, fast-moving development: the architecture, SMQL language, and internal
-APIs change frequently and without notice, so pull requests from outside the
-core team can't be reviewed or merged right now.
+Stratum is in early, fast-moving development: the architecture, the SMQL
+language, and internal APIs still change frequently. The most valuable way to
+help right now is to **use it and tell me what you find**:
 
-You're very welcome to:
+- **Try it out** on a real migration and see whether it fits your use case.
+- **Open an issue** to report a bug, ask a question, or share feedback or ideas -
+  this genuinely shapes where the project goes.
+- **Star or watch** the repo to follow along as it matures.
 
-- **Try it out** and see whether it fits your use case.
-- **Open an issue** to report a bug, ask a question, or share feedback - these
-  genuinely help shape the project.
-- **Star or watch** the repository to follow along as it matures.
+## Pull requests
 
-Please **don't open pull requests** for the time being. Unsolicited PRs will be
-closed unanswered, not because the effort isn't appreciated, but because we
-can't take on external code while the foundations are still shifting.
+I'm **not accepting external pull requests yet**. While the foundations are still
+shifting, code contributions are hard to review fairly and tend to conflict with
+in-flight work - so for now, please open an issue first rather than a PR. If
+you've already spotted a fix, an issue describing it is the best way to get it in.
 
-This policy will be revisited once the project stabilizes, and this document
-will be updated with proper contribution guidelines (development setup, coding
-standards, and the review process) when that happens.
+This will change as the project stabilizes: this document will be updated with a
+proper contribution guide (dev setup, coding standards, and the review process)
+once external PRs are welcome.
 
-Thanks for understanding!
+Thanks for understanding, and for taking the time to look at Stratum!

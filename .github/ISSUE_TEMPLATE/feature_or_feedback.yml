@@ -1,0 +1,18 @@
+name: Feature request or feedback
+description: Suggest an idea or improvement, or share feedback
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+      description: Describe the use case or the problem you're trying to solve.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else - examples, alternatives you considered, links.
+    validations:
+      required: false

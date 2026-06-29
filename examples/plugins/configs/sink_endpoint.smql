@@ -11,7 +11,7 @@
 //
 //   stratum plugin validate -c examples/plugins/configs/sink_endpoint.smql
 //   rm -rf ~/.stratum/state
-//   stratum apply           -c examples/plugins/configs/sink_endpoint.smql
+//   stratum apply           -c examples/plugins/configs/sink_endpoint.smql -e .env
 //
 // What to confirm:
 //   - "log_sink: prepare" fires exactly ONCE, before the first batch.

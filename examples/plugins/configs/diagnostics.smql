@@ -2,13 +2,13 @@
 // diagnostic so you can confirm the analyzers catch it. Expect failures.
 //
 //   plugin validate -c examples/plugins/configs/diagnostics.smql   (field/role checks)
-//   stratum plan    -c examples/plugins/configs/diagnostics.smql   (canonical TYPE checks)
+//   stratum plan    -c examples/plugins/configs/diagnostics.smql   (canonical TYPE checks) -e .env
 //
 // Comment out pipelines one at a time to isolate each code.
 
 define {
-    mysql_url    = env("MYSQL_URL",    "mysql://sakila_user:qwerty123@localhost:3306/sakila")
-    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+    mysql_url    = env("MYSQL_URL")
+    postgres_url = env("POSTGRES_URL")
 }
 
 connection "src" { driver = "mysql"    url = define.mysql_url    }

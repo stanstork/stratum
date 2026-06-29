@@ -1,15 +1,15 @@
 // transforms.smql - transform plugins wired into `select`.
 //
 //   plugin validate -c examples/plugins/configs/transforms.smql   (no DB needed)
-//   plugin -c … then: stratum plan  -c examples/plugins/configs/transforms.smql
-//                     stratum apply -c examples/plugins/configs/transforms.smql
+//   plugin -c … then: stratum plan  -c examples/plugins/configs/transforms.smql -e .env
+//                     stratum apply -c examples/plugins/configs/transforms.smql -e .env
 //
 // Plugin `path`s point at .js sources - Stratum compiles + caches them on first
 // use (~/.stratum/plugin-cache). Swap to the prebuilt .wasm if you prefer.
 
 define {
-    mysql_url    = env("MYSQL_URL",    "mysql://sakila_user:qwerty123@localhost:3306/sakila")
-    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
+    mysql_url    = env("MYSQL_URL")
+    postgres_url = env("POSTGRES_URL")
 }
 
 connection "src" { driver = "mysql"    url = define.mysql_url    }
