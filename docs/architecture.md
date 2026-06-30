@@ -36,7 +36,7 @@ graph TB
 | `engine-planner` | Planning | Execution plan analysis, metadata cache, diagnostics |
 | `engine-processing` | Execution | Producer-consumer pipeline, transforms, Source/Sink/Destination abstractions |
 | `engine-runtime` | Execution | DAG orchestrator, PipelineOrchestrator, actor coordination |
-| `cli` | Interface | Commands (plan, apply, verify, test-conn), TUI, signal handling |
+| `cli` | Interface | Commands (plan, apply, verify, ping), TUI, signal handling |
 | `engine-tests` | Testing | Integration test suite (MySQL ↔ PostgreSQL, Sakila database) |
 
 ---
@@ -55,7 +55,7 @@ graph TB
 - `plan` — dry-run analysis with optional sample data
 - `apply` — execute migration
 - `verify` — post-migration row count comparison
-- `test-conn` — test database connectivity
+- `ping` — test database connectivity
 
 **Global options:** `--env-file`, `--verbose`, `--quiet`, `--log-level`, `--log-file`, `--no-color`
 

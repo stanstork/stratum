@@ -1,11 +1,11 @@
 use crate::{
-    drivers::postgres::driver::PgDriver,
+    drivers::postgres::{driver::PgDriver, tls},
     error::DriverError,
     traits::transaction::{Transaction, Transactional},
 };
 use async_trait::async_trait;
-use tokio_postgres::{Client, NoTls};
-use tracing::{error, warn};
+use tokio_postgres::Client;
+use tracing::warn;
 
 /// PostgreSQL transaction that owns a dedicated connection.
 /// Uses manual BEGIN/COMMIT/ROLLBACK for transaction control.
@@ -17,16 +17,7 @@ pub struct PgTransaction {
 impl PgTransaction {
     /// Start a new transaction on a fresh connection.
     pub async fn begin(url: &str) -> Result<Self, DriverError> {
-        let (client, connection) = tokio_postgres::connect(url, NoTls)
-            .await
-            .map_err(|e| DriverError::ConnectionError(e.to_string()))?;
-
-        // Spawn connection handler
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                error!(error = %e, "Postgres transaction connection error");
-            }
-        });
+        let client = tls::connect(url).await?;
 
         // Start the transaction
         client

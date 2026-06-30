@@ -44,7 +44,7 @@ impl ConnectionKind {
     }
 }
 
-/// Executes the test-conn command (test database connection)
+/// Executes the ping command (test database connectivity)
 pub async fn execute(cli: &Cli, url: String, format: Option<String>) -> Result<(), CliError> {
     // Determine connection kind from format or URL
     let kind = if let Some(format_str) = format {

@@ -1,4 +1,5 @@
 use crate::{
+    drivers::mysql::tls,
     error::DriverError,
     sql::metadata::capabilities::Capabilities,
     traits::driver::{Driver, DriverInfo},
@@ -24,7 +25,7 @@ impl MySqlDriver {
 
     /// Establishes a connection pool and detects server capabilities.
     pub async fn connect(url: &str) -> Result<Self, DriverError> {
-        let pool = Pool::from_url(url).map_err(|e| DriverError::ConnectionError(e.to_string()))?;
+        let pool = tls::pool_from_url(url)?;
         let capabilities = Self::detect_capabilities(&pool).await?;
 
         info!(driver = "mysql", "database connection established");

@@ -8,6 +8,7 @@ pub mod params;
 pub mod queries;
 pub mod reader;
 pub mod row;
+pub mod tls;
 pub mod transaction;
 pub mod types;
 pub mod writer;

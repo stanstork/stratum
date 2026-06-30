@@ -13,7 +13,7 @@ pub mod plugin;
 pub mod reset;
 pub mod resume;
 pub mod status;
-pub mod test_conn;
+pub mod ping;
 pub mod verify;
 pub mod version;
 
@@ -187,8 +187,8 @@ pub enum Commands {
         )]
         output: Option<String>,
     },
-    /// Test database connection
-    TestConn {
+    /// Test database connectivity
+    Ping {
         #[arg(
             long,
             help = "Connection URL (e.g., mysql://user:pass@host:3306/db or postgresql://user:pass@host:5432/db)"
@@ -292,8 +292,8 @@ pub async fn execute_command(
             verify::execute(config.clone(), output.clone(), env.clone()).await
         }
         Commands::Status { config } => status::execute(config.clone(), env).await,
-        Commands::TestConn { url, format } => {
-            test_conn::execute(cli, url.clone(), format.clone()).await
+        Commands::Ping { url, format } => {
+            ping::execute(cli, url.clone(), format.clone()).await
         }
         Commands::Version => {
             version::execute();

@@ -1,3 +1,4 @@
+use super::tls;
 use crate::{
     error::DriverError,
     sql::metadata::capabilities::Capabilities,
@@ -5,8 +6,8 @@ use crate::{
 };
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio_postgres::{Client, NoTls};
-use tracing::{error, info};
+use tokio_postgres::Client;
+use tracing::info;
 
 const PG_MAX_PREPARED_STMT_PARAMS: usize = 65535;
 
@@ -27,17 +28,7 @@ impl PgDriver {
 
     /// Establishes a connection and detects server capabilities.
     pub async fn connect(url: &str) -> Result<Self, DriverError> {
-        let (client, connection) = tokio_postgres::connect(url, NoTls)
-            .await
-            .map_err(|e| DriverError::ConnectionError(e.to_string()))?;
-
-        // Spawn connection handler
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                error!(error = %e, "Postgres connection error");
-            }
-        });
-
+        let client = tls::connect(url).await?;
         let client = Arc::new(RwLock::new(client));
         let capabilities = Self::detect_capabilities(&client).await?;
 

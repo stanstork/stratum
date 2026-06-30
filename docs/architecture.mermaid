@@ -1,6 +1,6 @@
 graph TB
     subgraph CLI["CLI Layer (crates/cli)"]
-        CLI_CMDS["Commands: plan | apply | verify | test-conn"]
+        CLI_CMDS["Commands: plan | apply | verify | ping"]
         CLI_SIG["Signal handling<br/>SIGINT/SIGTERM -> CancellationToken"]
         CLI_OUT["Output modes:<br/>plain | pretty | TUI (ratatui)"]
     end

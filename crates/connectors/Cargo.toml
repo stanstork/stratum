@@ -31,7 +31,12 @@ tokio-postgres = { version = "0.7.15", features = [
 ] }
 postgres-native-tls = "0.5.2"
 native-tls = "0.2.14"
-mysql_async = { version = "0.36.1", features = ["chrono", "bigdecimal"] }
+url = "2.5"
+mysql_async = { version = "0.36.1", features = [
+    "chrono",
+    "bigdecimal",
+    "native-tls-tls",
+] }
 mysql_common = "0.35.5"
 bytes = "1.7.1"
 rust_decimal = { version = "1.40.0", features = ["db-postgres"] }

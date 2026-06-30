@@ -75,6 +75,60 @@ ordering, resumability, or verification.
 | Source | MySQL, CSV |
 | Destination | PostgreSQL (COPY fast-path) |
 
+### Secure connections (TLS/SSL)
+
+Most managed databases (AWS RDS, GCP Cloud SQL, Azure, Neon, Supabase,
+PlanetScale, Aiven, Heroku) require TLS. Both SQL drivers negotiate it from
+the connection URL - no extra config. Each driver uses its ecosystem's native
+parameter names; the per-driver tables below show exactly what each mode
+encrypts and verifies. To **authenticate** the server (not just encrypt), use a
+verifying mode (`verify-full` / `verify_ca`), with a CA bundle for private CAs.
+
+**PostgreSQL** - libpq-style `sslmode` (plus optional `sslrootcert`):
+
+| `sslmode`     | Transport                  | Cert chain | Hostname |
+|---------------|----------------------------|------------|----------|
+| `disable`     | plaintext                  | –          | –        |
+| `prefer` *(default)* | TLS, falls back to plaintext | not checked | not checked |
+| `require`     | TLS                        | not checked| not checked |
+| `verify-ca`   | TLS                        | verified   | not checked |
+| `verify-full` | TLS                        | verified   | verified |
+
+These follow libpq: `require` encrypts but does not authenticate the server;
+`verify-ca` / `verify-full` verify the certificate.
+
+```smql
+connection "dest" {
+  driver = "postgres"
+  url    = env("POSTGRES_URL")  # e.g. postgres://user:pass@db.example.com:5432/app?sslmode=verify-full
+}
+```
+
+For a private CA (e.g. RDS/Cloud SQL/Supabase), point at the CA bundle so the
+chain can be verified: `?sslmode=verify-full&sslrootcert=/path/to/ca.pem`.
+
+**MySQL** - `require_ssl` plus optional `verify_ca` / `verify_identity`, and
+`ssl_ca` for a private CA bundle (implies TLS):
+
+| URL parameters                              | Transport | Cert chain | Hostname |
+|---------------------------------------------|-----------|------------|----------|
+| *(none)*                                    | plaintext | –          | –        |
+| `require_ssl=true`                          | TLS       | verified   | verified |
+| `require_ssl=true&verify_ca=false`          | TLS       | not checked| not checked |
+| `require_ssl=true&verify_identity=false`    | TLS       | verified   | not checked |
+| `ssl_ca=/path/to/ca.pem`                    | TLS       | verified against CA | verified |
+
+```smql
+connection "source" {
+  driver = "mysql"
+  url    = env("MYSQL_URL")  # e.g. mysql://user:pass@db.example.com:3306/app?require_ssl=true
+}
+```
+
+For a private CA (e.g. RDS/Cloud SQL), supply the bundle and skip hostname
+verification if the certificate's CN doesn't match the host:
+`?ssl_ca=/path/to/ca.pem&verify_identity=false`.
+
 ## Project Status
 
 Stratum is **pre-1.0 and under active development**. The engine runs real
@@ -161,7 +215,7 @@ stratum verify -c migration.smql
 stratum verify -c migration.smql --output report.txt
 
 # Test database connectivity
-stratum test-conn --url mysql://user:pass@localhost:3306/db
+stratum ping --url mysql://user:pass@localhost:3306/db
 
 # Inspect or control a run
 stratum status -c migration.smql   # show run status

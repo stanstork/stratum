@@ -37,7 +37,7 @@ security fixes.
   **masked** in generated plans and log output (e.g.
   `mysql://user:****@host/db`). See
   `crates/engine-planner/src/builder/utils/masking.rs`.
-- The `test-conn` command does not log raw connection URLs.
+- The `ping` command does not log raw connection URLs.
 
 If you find a path where credentials reach logs, plan output, or state
 unmasked, please report it.

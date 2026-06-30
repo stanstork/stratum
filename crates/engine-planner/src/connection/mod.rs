@@ -3,8 +3,10 @@ use crate::{
     plan::connection::{plan::DatabaseDriver, utils::mask_url},
 };
 use async_trait::async_trait;
-use mysql_async::prelude::Queryable;
-use tokio_postgres::NoTls;
+use connectors::{
+    drivers::{mysql::driver::MySqlDriver, postgres::driver::PgDriver},
+    traits::driver::Driver,
+};
 use tracing::{error, info};
 
 /// Result of a connection test
@@ -34,67 +36,16 @@ impl ConnectionTester for MySqlConnectionTester {
     async fn test(&self) -> Result<ConnectionTestResult, ConnectionError> {
         info!(url = %mask_url(&self.conn_str), "pinging MySQL");
 
-        // connect
-        let opts = mysql_async::Opts::from_url(&self.conn_str).map_err(|e| {
-            error!(error = %e, "MySQL connection string parse failed");
-            ConnectionError::Failed {
-                name: self.name.clone(),
-                reason: format!("Invalid connection string: {}", e),
-            }
-        })?;
-        let pool = mysql_async::Pool::new(opts);
-        let mut conn = pool.get_conn().await.map_err(|e| {
+        let driver = MySqlDriver::connect(&self.conn_str).await.map_err(|e| {
             error!(url = %mask_url(&self.conn_str), error = %e, "MySQL connection failed");
             ConnectionError::Failed {
                 name: self.name.clone(),
-                reason: format!("Connection failed: {}", e),
+                reason: format!("Connection failed: {e}"),
             }
         })?;
 
-        // run the simple query
-        let val: i32 = conn
-            .query_first("SELECT 1")
-            .await
-            .map_err(|e| {
-                error!(url = %mask_url(&self.conn_str), error = %e, "MySQL ping query failed");
-                ConnectionError::Failed {
-                    name: self.name.clone(),
-                    reason: format!("Query failed: {}", e),
-                }
-            })?
-            .ok_or_else(|| {
-                error!(url = %mask_url(&self.conn_str), "MySQL ping returned no result");
-                ConnectionError::Failed {
-                    name: self.name.clone(),
-                    reason: "Ping query returned no result".to_string(),
-                }
-            })?;
-
-        // verify the result
-        if val != 1 {
-            error!(url = %mask_url(&self.conn_str), result = val, "MySQL ping returned unexpected result");
-            return Err(ConnectionError::Failed {
-                name: self.name.clone(),
-                reason: format!("Unexpected result: {}", val),
-            });
-        }
-
-        // get version
-        let version: String = conn
-            .query_first("SELECT VERSION()")
-            .await
-            .map_err(|e| {
-                error!(url = %mask_url(&self.conn_str), error = %e, "MySQL version query failed");
-                ConnectionError::Failed {
-                    name: self.name.clone(),
-                    reason: format!("Version query failed: {}", e),
-                }
-            })?
-            .unwrap_or_else(|| "unknown".to_string());
-
+        let version = driver.capabilities().version.clone();
         info!(url = %mask_url(&self.conn_str), version = %version, "MySQL ping succeeded");
-        drop(conn);
-        pool.disconnect().await.ok();
 
         Ok(ConnectionTestResult { version })
     }
@@ -105,57 +56,17 @@ impl ConnectionTester for PostgresConnectionTester {
     async fn test(&self) -> Result<ConnectionTestResult, ConnectionError> {
         info!(url = %mask_url(&self.conn_str), "pinging Postgres");
 
-        // connect
-        let (client, connection) = tokio_postgres::connect(&self.conn_str, NoTls)
-            .await
-            .map_err(|e| {
-                error!(url = %mask_url(&self.conn_str), error = %e, "Postgres connection failed");
-                ConnectionError::Failed {
-                    name: self.name.clone(),
-                    reason: format!("Connection failed: {}", e),
-                }
-            })?;
-
-        // spawn the connection handler
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                error!(error = %e, "Postgres connection error");
-            }
-        });
-
-        // run the simple query
-        let row = client.query_one("SELECT 1", &[]).await.map_err(|e| {
-            error!(url = %mask_url(&self.conn_str), error = %e, "Postgres ping query failed");
+        let driver = PgDriver::connect(&self.conn_str).await.map_err(|e| {
+            error!(url = %mask_url(&self.conn_str), error = %e, "Postgres connection failed");
             ConnectionError::Failed {
                 name: self.name.clone(),
-                reason: format!("Query failed: {}", e),
+                reason: format!("Connection failed: {e}"),
             }
         })?;
 
-        // verify the result
-        let val: i32 = row.get(0);
-        if val != 1 {
-            error!(url = %mask_url(&self.conn_str), result = val, "Postgres ping returned unexpected result");
-            return Err(ConnectionError::Failed {
-                name: self.name.clone(),
-                reason: format!("Unexpected result: {}", val),
-            });
-        }
-
-        // get version
-        let version_row = client
-            .query_one("SELECT version()", &[])
-            .await
-            .map_err(|e| {
-                error!(url = %mask_url(&self.conn_str), error = %e, "Postgres version query failed");
-                ConnectionError::Failed {
-                    name: self.name.clone(),
-                    reason: format!("Version query failed: {}", e),
-                }
-            })?;
-        let version: String = version_row.get(0);
-
+        let version = driver.capabilities().version.clone();
         info!(url = %mask_url(&self.conn_str), version = %version, "Postgres ping succeeded");
+
         Ok(ConnectionTestResult { version })
     }
 }
