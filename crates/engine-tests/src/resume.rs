@@ -46,7 +46,7 @@ mod tests {
     /// Pause mid-migration, then resume: every source row lands exactly once
     /// (no gaps, no duplicates).
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn db_migration_resumes_after_pause() {
         reset_postgres_schema().await;
         let smql = smql("film_resume");
@@ -75,7 +75,7 @@ mod tests {
     /// Resuming/re-running an already-completed migration is a no-op: the row
     /// count is unchanged and no duplicates are introduced.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn completed_db_migration_rerun_is_noop() {
         reset_postgres_schema().await;
         let smql = smql("film_done");
@@ -101,7 +101,7 @@ mod tests {
     /// Pausing and resuming twice still converges to the full, duplicate-free
     /// result (multiple checkpoints exercised).
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn db_migration_survives_repeated_pauses() {
         reset_postgres_schema().await;
         let smql = smql("film_multi");

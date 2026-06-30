@@ -18,7 +18,7 @@ mod tests {
     /// Simplest case: actor table, small row count, straightforward types.
     // Config: crates/engine-tests/configs/verify/actor.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_actor_matches() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(verify_config!("actor.smql")).expect("read smql");
@@ -29,7 +29,7 @@ mod tests {
     /// Larger table with DECIMAL, TIMESTAMP, nullable INT columns.
     // Config: crates/engine-tests/configs/verify/payment.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_payment_matches() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(verify_config!("payment.smql")).expect("read smql");
@@ -41,7 +41,7 @@ mod tests {
     // Config: crates/engine-tests/configs/verify/language.smql (prereq, no integrity)
     //         examples/configs/verify/film.smql      (with integrity)
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_film_matches() {
         reset_postgres_schema().await;
         // Language must exist first to satisfy film's FK constraint.
@@ -60,7 +60,7 @@ mod tests {
     /// Verify works when batch_size divides row count evenly (no partial last batch).
     // Config: crates/engine-tests/configs/verify/actor_exact_batch.smql  (batch_size=200, actor=200 rows)
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_exact_batch_boundary() {
         reset_postgres_schema().await;
         let smql =
@@ -72,7 +72,7 @@ mod tests {
     /// Verify works when the last batch is partial (total rows % batch_size != 0).
     // Config: crates/engine-tests/configs/verify/actor_partial_batch.smql  (batch_size=77, actor=200 rows)
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_partial_last_batch() {
         reset_postgres_schema().await;
         let smql =
@@ -84,7 +84,7 @@ mod tests {
     /// Cascade migration: payment + FK depth-1 (customer, staff, rental).
     // Config: crates/engine-tests/configs/verify/payment_cascade.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_cascade_payment_matches() {
         reset_postgres_schema().await;
         let smql =
@@ -96,7 +96,7 @@ mod tests {
     /// Verify detects when a row has been modified in the destination after apply.
     // Config: crates/engine-tests/configs/verify/actor.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_detects_modified_row() {
         use crate::utils::execute;
 
@@ -113,7 +113,7 @@ mod tests {
     /// Verify detects when a row has been deleted from the destination after apply.
     // Config: crates/engine-tests/configs/verify/actor.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_detects_deleted_row() {
         use crate::utils::execute;
 
@@ -130,7 +130,7 @@ mod tests {
     /// Verify returns NoPriorRun (no error) when no receipt exists yet.
     // Config: crates/engine-tests/configs/verify/actor.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_no_receipt_is_not_error() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(verify_config!("actor.smql")).expect("read smql");
@@ -151,7 +151,7 @@ mod tests {
     /// A filtered migration verifies correctly even though it's a subset of the source.
     // Config: crates/engine-tests/configs/verify/payment_staff_filter.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_where_filter_matches() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(verify_config!("payment_staff_filter.smql"))
@@ -177,7 +177,7 @@ mod tests {
     /// destination but the receipt matches exactly what was written.
     // Config: crates/engine-tests/configs/verify/payment_skip_validation.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_skip_validation_matches() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(verify_config!("payment_skip_validation.smql"))
@@ -202,7 +202,7 @@ mod tests {
     /// Verify should pass with the complete row count.
     // Config: crates/engine-tests/configs/verify/actor_warn_validation.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_warn_validation_all_rows_present() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(verify_config!("actor_warn_validation.smql"))
@@ -229,7 +229,7 @@ mod tests {
     /// against the receipt, which was built from the same doubly-reduced set.
     // Config: crates/engine-tests/configs/verify/payment_filter_and_skip.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_filter_and_skip_combined() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(verify_config!("payment_filter_and_skip.smql"))
@@ -260,7 +260,7 @@ mod tests {
     ///   - non-PK cursor: verify replays identical timestamp batch boundaries
     // Config: crates/engine-tests/configs/verify/rental_join_filter_ts.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_join_filter_timestamp_pagination() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(verify_config!("rental_join_filter_ts.smql"))
@@ -285,7 +285,7 @@ mod tests {
     ///     differ between the staff_id=1 and staff_id=2 halves)
     // Config: crates/engine-tests/configs/verify/payment_cascade_numeric.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_cascade_with_numeric_pagination() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(verify_config!("payment_cascade_numeric.smql"))
@@ -300,7 +300,7 @@ mod tests {
     /// changes its hash and causes verify to detect the mismatch.
     // Config: crates/engine-tests/configs/verify/payment_staff_filter.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_filtered_detects_tampering() {
         use crate::utils::execute;
 
@@ -329,7 +329,7 @@ mod tests {
     /// row after apply, the hash of at least one batch will differ from the receipt.
     // Config: crates/engine-tests/configs/verify/actor.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_detects_inserted_row() {
         use crate::utils::execute;
 
@@ -357,7 +357,7 @@ mod tests {
     /// destination, the row hash changes and verify must catch it.
     // Config: crates/engine-tests/configs/verify/rental_join_filter_ts.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_detects_tamper_in_computed_column() {
         use crate::utils::execute;
 
@@ -387,7 +387,7 @@ mod tests {
     /// and cause verify to report a mismatch.
     // Config: crates/engine-tests/configs/verify/payment_cascade.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_cascade_detects_tamper_in_leaf_table() {
         use crate::utils::execute;
 
@@ -417,7 +417,7 @@ mod tests {
     /// the same order.
     // Config: crates/engine-tests/configs/verify/payment_pk.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_pk_pagination() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(verify_config!("payment_pk.smql")).expect("read smql");
@@ -432,7 +432,7 @@ mod tests {
     /// correctly in verify when there is no cascade receipt overhead.
     // Config: crates/engine-tests/configs/verify/payment_numeric_plain.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_numeric_pagination_no_cascade() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(verify_config!("payment_numeric_plain.smql"))
@@ -447,7 +447,7 @@ mod tests {
     /// per batch index and verify replays pages sequentially by position.
     // Config: crates/engine-tests/configs/verify/payment_default.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_default_pagination_large_table() {
         reset_postgres_schema().await;
         let smql =
@@ -463,7 +463,7 @@ mod tests {
     /// than looping indefinitely or reporting a spurious mismatch.
     // Config: crates/engine-tests/configs/verify/actor_empty.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_empty_table() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(verify_config!("actor_empty.smql")).expect("read smql");
@@ -479,7 +479,7 @@ mod tests {
     /// where start = end = only batch. The receipt has exactly one entry.
     // Config: crates/engine-tests/configs/verify/actor_single_row.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_single_row() {
         reset_postgres_schema().await;
         let smql =
@@ -499,7 +499,7 @@ mod tests {
     /// to match between MySQL and PostgreSQL.
     // Config: crates/engine-tests/configs/verify/rental_plain.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_many_null_columns() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(verify_config!("rental_plain.smql")).expect("read smql");
@@ -513,7 +513,7 @@ mod tests {
     /// and the same destination must produce identical results without side effects.
     // Config: crates/engine-tests/configs/verify/actor.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_idempotent() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(verify_config!("actor.smql")).expect("read smql");
@@ -532,7 +532,7 @@ mod tests {
     /// return OK only if all receipts match.
     // Config: crates/engine-tests/configs/verify/dag_language_film.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_dag_pipeline() {
         reset_postgres_schema().await;
         let smql =
@@ -545,7 +545,7 @@ mod tests {
     /// the destination is untouched.
     // Config: crates/engine-tests/configs/verify/actor.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_full_integrity_matches() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(verify_config!("actor.smql")).expect("read smql");
@@ -557,7 +557,7 @@ mod tests {
     /// row index that was tampered, not just the batch range.
     // Config: crates/engine-tests/configs/verify/actor.smql
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_full_integrity_detects_modified_row_at_index() {
         use crate::utils::execute;
         use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan};

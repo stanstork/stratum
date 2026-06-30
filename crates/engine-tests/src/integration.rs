@@ -25,7 +25,7 @@ mod tests {
     // Scenario: The target table does not exist in Postgres, and no setting to create it is specified.
     // Expected Outcome: The test should pass without creating the table in Postgres.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn missing_table_not_created_without_setting() {
         reset_postgres_schema().await;
 
@@ -60,7 +60,7 @@ mod tests {
     // - The table should be created in Postgres.
     // - Data should be copied, and the row count should match the source table.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn create_missing_tables_creates_table_and_copies_data() {
         reset_postgres_schema().await;
 
@@ -103,7 +103,7 @@ mod tests {
     // - Data should be copied, and the row count should match between the source and destination tables.
     // - The new column should be populated with the concatenated values of `first_name` and `last_name`.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn create_missing_columns_adds_computed_concat_column() {
         reset_postgres_schema().await;
 
@@ -153,7 +153,7 @@ mod tests {
     // - The destination table should have only one column (`order_id`).
     // - Data should be copied, and the row count should match between the source and destination tables.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn map_only_setting_copies_only_mapped_columns() {
         reset_postgres_schema().await;
 
@@ -209,7 +209,7 @@ mod tests {
     // - Data should be copied without any modifications.
     // - The row count should match between the source and destination tables.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn migrate_into_existing_table_copies_all_rows() {
         reset_postgres_schema().await;
 
@@ -252,7 +252,7 @@ mod tests {
     // - Data should be copied, and the row count should match between the source and destination tables.
     // - The new column should be populated with the concatenated values of `first_name` and `last_name`.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn create_table_with_computed_column_and_ignore_constraints() {
         reset_postgres_schema().await;
 
@@ -308,7 +308,7 @@ mod tests {
     // - The destination table should not include any columns from the loaded table (`users`) since they are not mapped.
     // - Data should be copied, and the row count should match between the source and destination tables.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn join_without_select_excludes_joined_table_columns() {
         reset_postgres_schema().await;
 
@@ -373,7 +373,7 @@ mod tests {
     // - Data should be copied, and the row count should match between the source and destination tables.
     // - The new columns should be populated with the corresponding values from the loaded tables.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn multi_join_with_column_mappings_copies_joined_data() {
         reset_postgres_schema().await;
 
@@ -441,7 +441,7 @@ mod tests {
     // - The target table should be created in Postgres.
     // - The destination table should contain only the rows that satisfy the filter condition.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn where_filter_restricts_migrated_rows() {
         reset_postgres_schema().await;
 
@@ -496,7 +496,7 @@ mod tests {
     // - The target table should be created in Postgres.
     // - The destination table should contain only the rows that satisfy the filter condition.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn multi_join_with_nested_where_filter() {
         reset_postgres_schema().await;
 
@@ -566,7 +566,7 @@ mod tests {
     // - Pipelines with WARN action should migrate all rows while logging warnings.
     // - All destination tables should be created and populated according to their validation rules.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn validation_skip_and_warn_actions_filter_rows() {
         reset_postgres_schema().await;
 
@@ -841,7 +841,7 @@ mod tests {
     // - All destination tables created with proper transformed columns.
     // - Validation filtering applied based on transformed field values.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn validation_on_joined_tables_and_computed_fields() {
         reset_postgres_schema().await;
 
@@ -1080,7 +1080,7 @@ mod tests {
     // - The table is created but remains empty.
     // - This demonstrates that FAIL action prevents data migration when validation fails.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn validation_fail_action_stops_pipeline() {
         reset_postgres_schema().await;
 
@@ -1173,7 +1173,7 @@ mod tests {
     // - DLQ table created with failed validation rows and metadata.
     // - Migration stops after first batch with validation failure.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn validation_fail_action_writes_failed_rows_to_dlq_table() {
         reset_postgres_schema().await;
 
@@ -1284,7 +1284,7 @@ mod tests {
     // - Each line is a valid JSON object with failed row metadata.
     // - Migration continues for valid rows.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn dlq_file_output_in_jsonl_format() {
         reset_postgres_schema().await;
 
@@ -1419,7 +1419,7 @@ mod tests {
     // - Migration completes successfully.
     // - Index created by before hook exists in the destination table.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn before_hooks_run_ddl_before_migration() {
         reset_postgres_schema().await;
 
@@ -1482,7 +1482,7 @@ mod tests {
     // - After hooks execute after migration completes.
     // - All indexes created by after hooks exist.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn after_hooks_create_indexes_after_migration() {
         reset_postgres_schema().await;
 
@@ -1550,7 +1550,7 @@ mod tests {
     // - Migration completes successfully.
     // - Index created by after hook exists.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn before_and_after_hooks_full_lifecycle() {
         reset_postgres_schema().await;
 
@@ -1641,7 +1641,7 @@ mod tests {
     // - Row count estimates are calculated from source databases.
     // - No actual data is migrated (dry run only).
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn plan_generation_covers_all_smql_features() {
         // Load comprehensive test configuration
         let path = "../../examples/configs/plan-generation.smql";

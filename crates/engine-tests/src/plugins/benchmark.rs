@@ -78,7 +78,7 @@ mod tests {
         start.elapsed()
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn benchmark_plugin_transform_overhead() {
         let src = get_row_count("payment", "sakila", DbType::MySql).await;
 

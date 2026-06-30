@@ -58,7 +58,7 @@ mod tests {
     /// `on_fail = skip` drops the rows the filter rejects (here: `active = 0`),
     /// migrating only the rows that pass.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn js_filter_skips_rejected_rows() {
         reset_postgres_schema().await;
 
@@ -91,7 +91,7 @@ mod tests {
     /// When every row passes the filter (`customer_id > 0` always), all rows are
     /// migrated.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn js_filter_passes_all_valid_rows() {
         reset_postgres_schema().await;
 
@@ -107,7 +107,7 @@ mod tests {
     /// `on_fail = fail` aborts the pipeline on the first rejected row; with a
     /// single batch covering all customers, nothing is written.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn js_filter_on_fail_fail_aborts_pipeline() {
         reset_postgres_schema().await;
 

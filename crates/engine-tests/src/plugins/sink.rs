@@ -43,7 +43,7 @@ mod tests {
     /// Every source row drains through the sink: with `expect` = the source row
     /// count, the sink's finalize check passes and the migration succeeds.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn wasm_sink_receives_all_rows() {
         // Sink has no DB side effect; reset only to clear sled state between runs.
         reset_postgres_schema().await;
@@ -58,7 +58,7 @@ mod tests {
     /// The finalize hook actually runs and observes the true total: an `expect`
     /// that doesn't match the source count fails the migration.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn wasm_sink_finalize_observes_wrong_count() {
         reset_postgres_schema().await;
 

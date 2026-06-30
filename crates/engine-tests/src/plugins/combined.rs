@@ -58,7 +58,7 @@ mod tests {
     /// Full pipeline: the table is created with the mapped column + transform
     /// output, the filter drops `id = 0`, and the transform values are correct.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn combined_source_transform_filter_into_postgres() {
         reset_postgres_schema().await;
 
@@ -106,7 +106,7 @@ mod tests {
 
     /// The filter removes only the rows it rejects (id = 0), independent of total.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn combined_filter_drops_only_failing_rows() {
         reset_postgres_schema().await;
 

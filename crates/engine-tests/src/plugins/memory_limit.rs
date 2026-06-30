@@ -50,7 +50,7 @@ mod tests {
 
     /// Allocating well under the limit (16 MiB under 64 MiB) succeeds for every row.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn allocation_under_memory_limit_succeeds() {
         reset_postgres_schema().await;
 
@@ -66,7 +66,7 @@ mod tests {
     /// Allocating over the limit (256 MiB over 64 MiB) is denied: the plugin
     /// traps on every row, the host survives, and nothing is written.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn allocation_over_memory_limit_is_trapped() {
         reset_postgres_schema().await;
 
@@ -80,7 +80,7 @@ mod tests {
     /// An unbounded-allocation plugin is contained: it traps at the cap rather
     /// than exhausting host memory, the migration still completes, and no rows land.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn runaway_allocation_is_contained() {
         reset_postgres_schema().await;
 

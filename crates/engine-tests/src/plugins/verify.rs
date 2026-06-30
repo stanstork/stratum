@@ -71,7 +71,7 @@ mod tests {
     /// A transform-plugin migration verifies cleanly: the receipt (hashed after
     /// the plugin runs) matches the destination re-read.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_matches_with_transform_plugin() {
         reset_postgres_schema().await;
         let smql = transform_smql("films_verified");
@@ -82,7 +82,7 @@ mod tests {
     /// A WASM-source migration verifies cleanly (verify reads only the dest, so a
     /// plugin source is transparent to it).
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_matches_with_wasm_source() {
         reset_postgres_schema().await;
         let smql = source_smql("synth_verified");
@@ -93,7 +93,7 @@ mod tests {
     /// Tampering with the destination after a plugin migration is detected: the
     /// rebuilt Merkle root no longer matches the receipt.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_detects_tampered_transform_output() {
         reset_postgres_schema().await;
         let smql = transform_smql("films_verified");

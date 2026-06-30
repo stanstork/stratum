@@ -18,7 +18,7 @@ mod tests {
     /// 200 actor rows, batch_size=50 -> 4 pages.
     /// Verifies that OFFSET-based pagination fetches every row exactly once.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn paginate_default_offset() {
         reset_postgres_schema().await;
         let smql =
@@ -32,7 +32,7 @@ mod tests {
     /// WHERE actor_id > :last_id  ORDER BY actor_id ASC  LIMIT 50
     /// 200 rows, batch_size=50 -> 4 full pages, O(1) index seek per page.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn paginate_pk_small_table() {
         reset_postgres_schema().await;
         let smql =
@@ -46,7 +46,7 @@ mod tests {
     /// 16,044 payment rows, batch_size=1000 -> 16 full pages + 1 partial (44 rows).
     /// Partial last batch detection: the final fetch returns < batch_size rows.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn paginate_pk_large_table() {
         reset_postgres_schema().await;
         let smql =
@@ -65,7 +65,7 @@ mod tests {
     /// Every page boundary lands inside a duplicate-value run, so the tie-breaker
     /// is exercised on every fetch after the first.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn paginate_numeric_with_tiebreaker() {
         reset_postgres_schema().await;
         let smql =
@@ -83,7 +83,7 @@ mod tests {
     /// Sakila payment_date values are densely clustered: hundreds of payments share
     /// the same second, so the tie-breaker branch fires on nearly every page.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn paginate_timestamp_datetime_column() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(paginate_config!("paginate_timestamp.smql"))
@@ -104,7 +104,7 @@ mod tests {
     /// batch_size=50, 4 pages — every page after the first exercises timezone
     /// conversion in the cursor-to-SQL path.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn paginate_timestamp_with_timezone() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(paginate_config!("paginate_timestamp_tz.smql"))
@@ -123,7 +123,7 @@ mod tests {
     /// actor has 200 rows; batch_size=200 means exactly 1 full batch.
     /// The producer must still fetch a second (empty) page to detect end-of-data.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn paginate_pk_exact_batch_boundary() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(paginate_config!("paginate_pk_exact_boundary.smql"))
@@ -142,7 +142,7 @@ mod tests {
     /// 200 actor rows, batch_size=77 -> 2 full pages (154 rows) + 1 partial (46 rows).
     /// Verifies that the partial last page is not silently dropped.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn paginate_pk_partial_last_page() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(paginate_config!("paginate_pk_partial_last.smql"))
@@ -166,7 +166,7 @@ mod tests {
     /// Expected row count is verified against a MySQL query that applies the same
     /// filter: SELECT COUNT(*) FROM rental WHERE staff_id = 1
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn paginate_pk_join_and_filter() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(paginate_config!("paginate_pk_join_filter.smql"))

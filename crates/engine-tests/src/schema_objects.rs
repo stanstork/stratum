@@ -39,7 +39,7 @@ mod tests {
     //   - All 15 Sakila tables are created in Postgres (DDL only)
     //   - Every table is empty (no rows migrated)
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn schema_only_creates_all_sakila_tables_empty() {
         reset_postgres_schema().await;
 
@@ -81,7 +81,7 @@ mod tests {
     //   - Row counts match source
     //   - No orphaned payments (FK integrity)
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn cascade_migrates_schema_and_data_with_fk_integrity() {
         reset_postgres_schema().await;
 
@@ -134,7 +134,7 @@ mod tests {
     //   - All tables empty (schema_only mode)
     //   - No depth-2+ tables present (film, store, address, city, country, language, ...)
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn depth_limit_creates_only_direct_fk_tables() {
         reset_postgres_schema().await;
 
@@ -187,7 +187,7 @@ mod tests {
     //   - film.rating column type is the custom enum, not varchar
     //   - film row count matches source
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn enum_type_created_before_table_with_correct_labels() {
         reset_postgres_schema().await;
 
@@ -281,7 +281,7 @@ mod tests {
     //   - All tables empty (schema_only)
     //   - Tables outside either pipeline's depth-1 graph do not exist
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn schema_dedup_across_pipelines_no_duplicate_errors() {
         reset_postgres_schema().await;
 
@@ -331,7 +331,7 @@ mod tests {
     //   - Both circular FK constraints present post-migration
     //   - No orphaned rows (FK integrity)
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn circular_fk_migrates_with_both_constraints_intact() {
         reset_postgres_schema().await;
 
@@ -433,7 +433,7 @@ mod tests {
     //   - Data is correct: title_length = char_length(title), rental_revenue = rental_rate * rental_duration
     //   - INSERT/COPY excluded generated columns (migration succeeded without inserting them)
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn generated_columns_migrated_with_correct_expressions_and_data() {
         // --- Setup: add generated columns to MySQL film table ---
         // Use INFORMATION_SCHEMA to check existence before dropping/adding -
@@ -599,7 +599,7 @@ mod tests {
     //   - Excluded tables (payment, rental, store, staff) and their transitive deps
     //     (film, inventory, actor, ...) are not created
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn exclusion_creates_only_non_excluded_tables() {
         reset_postgres_schema().await;
 
@@ -651,7 +651,7 @@ mod tests {
     //   - FK constraints added post-migration without violations
     //   - film_actor.film_id always references an existing film row
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn full_chain_fk_constraints_satisfied() {
         reset_postgres_schema().await;
 
@@ -699,7 +699,7 @@ mod tests {
     //   - Row counts match source
     //   - FK on dim_film references dim_language (not language)
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn table_rename_map_creates_renamed_tables_with_fk_integrity() {
         reset_postgres_schema().await;
 
@@ -767,7 +767,7 @@ mod tests {
     //   - fact_payment has amount_cents column with correct values
     //   - payment_date renamed to pmt_date; last_update renamed to updated_at
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn full_sakila_warehouse_naming_with_computed_column() {
         reset_postgres_schema().await;
 

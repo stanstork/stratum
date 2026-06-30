@@ -51,7 +51,7 @@ mod tests {
 
     /// The plugin output column is created in the new table and every source row is migrated.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn transform_creates_output_column_and_copies_all_rows() {
         reset_postgres_schema().await;
 
@@ -85,7 +85,7 @@ mod tests {
     /// The plugin output column is created as `double precision` (its `f64`
     /// canonical type), not inferred from any source column.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn transform_output_column_is_double_precision() {
         reset_postgres_schema().await;
 
@@ -105,7 +105,7 @@ mod tests {
     /// The transform actually computes `a + b`, and DECIMAL source columns are
     /// coerced to `f64` before the call (regression: decimal inputs used to fail).
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn transform_computes_sum_with_decimal_inputs() {
         reset_postgres_schema().await;
 
@@ -147,7 +147,7 @@ mod tests {
 
     /// A plugin output column coexists with directly-mapped source columns.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn transform_alongside_mapped_source_columns() {
         reset_postgres_schema().await;
 
@@ -182,7 +182,7 @@ mod tests {
     /// the destination column is (re)typed to the plugin's output type and the
     /// computed value wins (the source column's values are discarded).
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn transform_output_shadowing_source_column_retypes_it() {
         reset_postgres_schema().await;
 

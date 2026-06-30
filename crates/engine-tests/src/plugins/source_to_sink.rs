@@ -41,7 +41,7 @@ mod tests {
 
     /// All generated rows flow source -> sink (default-style total of 10).
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn wasm_source_to_sink_drains_all_rows() {
         reset_postgres_schema().await;
 
@@ -53,7 +53,7 @@ mod tests {
     /// Both plugins honor their config, and cursor paging delivers every row
     /// exactly once (7 rows over page_size 3 -> 3 + 3 + 1; sink expects 7).
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn wasm_source_to_sink_respects_config_and_paging() {
         reset_postgres_schema().await;
 
@@ -65,7 +65,7 @@ mod tests {
     /// The end-to-end count is real: if the sink expects more than the source
     /// emits, finalize fails and the migration errors.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn wasm_sink_detects_count_mismatch() {
         reset_postgres_schema().await;
 

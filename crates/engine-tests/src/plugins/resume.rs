@@ -42,7 +42,7 @@ mod tests {
     /// once. The resume checkpoint is consumer-acked (written only after a batch
     /// is durably written), so batches the producer read ahead but the consumer
     /// hadn't written are simply re-read on resume - no loss, no duplicates.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn wasm_source_resumes_after_pause() {
         reset_postgres_schema().await;
 

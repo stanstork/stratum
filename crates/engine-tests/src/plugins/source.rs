@@ -48,7 +48,7 @@ mod tests {
     /// The destination table is created from the plugin's `output_schema` and all
     /// generated rows (default `total = 10`) are migrated.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn wasm_source_creates_table_and_migrates_rows() {
         reset_postgres_schema().await;
 
@@ -70,7 +70,7 @@ mod tests {
     /// Column types are inferred from the plugin's canonical output types
     /// (i64 -> bigint, string -> text).
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn wasm_source_infers_column_types() {
         reset_postgres_schema().await;
 
@@ -84,7 +84,7 @@ mod tests {
 
     /// Row contents are correct end-to-end: id `0..total` with label `row-{id}`.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn wasm_source_row_values_are_correct() {
         reset_postgres_schema().await;
 
@@ -117,7 +117,7 @@ mod tests {
     /// Plugin `config` (total/page_size) is honored, and cursor paging consumes
     /// every page (total = 5 over page_size = 2 -> pages of 2 + 2 + 1).
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn wasm_source_respects_config_and_pages_to_completion() {
         reset_postgres_schema().await;
 

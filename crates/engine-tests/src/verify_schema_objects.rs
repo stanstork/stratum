@@ -22,7 +22,7 @@ mod tests {
     /// Cascade receipts use sorted_hashes=true because FK-scoped fetches
     /// deliver related-table rows in non-PK order with duplicates across batches.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_cascade_payment() {
         reset_postgres_schema().await;
         let smql =
@@ -36,7 +36,7 @@ mod tests {
     /// All 15 Sakila tables are migrated; verify confirms the Merkle roots
     /// match for every table in the receipt.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_full_chain() {
         reset_postgres_schema().await;
         let smql =
@@ -50,7 +50,7 @@ mod tests {
     /// Two-phase strategy (CREATE TABLE without FK -> data -> ALTER TABLE ADD FK)
     /// must not affect the integrity receipt or verification.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_circular_fk() {
         reset_postgres_schema().await;
         let smql =
@@ -65,7 +65,7 @@ mod tests {
     /// MySQL text protocol sends ENUM values as strings; PG stores them as
     /// varchar. Canonical hashing treats both as TAG_STRING - hashes must match.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_enum_migration() {
         reset_postgres_schema().await;
         let smql = std::fs::read_to_string(phase2_config!("p2-08-enum-migration.smql"))
@@ -80,7 +80,7 @@ mod tests {
     /// the DB engine). The receipt is built from the written columns only;
     /// verify reads the same columns from the destination and confirms they match.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_generated_columns() {
         use mysql_async::prelude::Queryable;
 
@@ -151,7 +151,7 @@ mod tests {
     /// The receipt stores destination table names. Verify queries dim_film and
     /// dim_language (not film/language) and confirms the hashes match.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_table_rename() {
         reset_postgres_schema().await;
         let smql =
@@ -167,7 +167,7 @@ mod tests {
     /// renames (pmt_date, updated_at). The receipt covers every destination
     /// table; verify confirms each Merkle root matches.
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_full_sakila() {
         reset_postgres_schema().await;
         let smql =

@@ -16,7 +16,7 @@ mod tests {
     // - All tables should be created and populated
     // - Data should be migrated successfully for all pipelines
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn tc_dag_01_sequential_dependencies() {
         reset_postgres_schema().await;
 
@@ -104,7 +104,7 @@ mod tests {
     // - B and C can execute in parallel (both depend only on A)
     // - D executes last (after both B and C complete)
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn tc_dag_02_parallel_execution() {
         reset_postgres_schema().await;
 
@@ -214,7 +214,7 @@ mod tests {
     // - D executes after B and C (level 2)
     // - E executes last (level 3)
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn tc_dag_03_diamond_dependencies() {
         reset_postgres_schema().await;
 
@@ -340,7 +340,7 @@ mod tests {
     // - All pipelines execute in parallel (single level)
     // - All tables created and populated successfully
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn tc_dag_04_independent_pipelines() {
         reset_postgres_schema().await;
 
@@ -420,7 +420,7 @@ mod tests {
     // - Pipelines execute in correct topological order
     // - All data migrated successfully
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn tc_dag_05_complex_dependencies() {
         reset_postgres_schema().await;
 
@@ -566,7 +566,7 @@ mod tests {
     // - B should fail
     // - D and E should be skipped due to failed dependency
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn tc_dag_07_failure_continue_independent() {
         reset_postgres_schema().await;
 
@@ -700,7 +700,7 @@ mod tests {
     // - Root executes first
     // - All dependent pipelines can execute in parallel
     #[traced_test]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn tc_dag_06_wide_dependencies() {
         reset_postgres_schema().await;
 
