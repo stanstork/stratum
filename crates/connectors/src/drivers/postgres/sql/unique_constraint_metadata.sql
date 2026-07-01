@@ -7,6 +7,6 @@ JOIN pg_namespace n ON t.relnamespace = n.oid
 JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS u(attnum, ord) ON true
 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = u.attnum
 WHERE t.relname = $1
-  AND n.nspname = 'public'
+  AND n.nspname = $2
   AND c.contype = 'u'
 GROUP BY c.conname, t.relname

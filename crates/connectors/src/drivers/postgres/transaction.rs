@@ -1,5 +1,8 @@
 use crate::{
-    drivers::postgres::{driver::PgDriver, tls},
+    drivers::postgres::{
+        driver::{PgDriver, set_search_path},
+        tls,
+    },
     error::DriverError,
     traits::transaction::{Transaction, Transactional},
 };
@@ -16,8 +19,9 @@ pub struct PgTransaction {
 
 impl PgTransaction {
     /// Start a new transaction on a fresh connection.
-    pub async fn begin(url: &str) -> Result<Self, DriverError> {
+    pub async fn begin(url: &str, schema: &str) -> Result<Self, DriverError> {
         let client = tls::connect(url).await?;
+        set_search_path(&client, schema).await?;
 
         // Start the transaction
         client
@@ -64,7 +68,7 @@ impl Transaction for PgTransaction {
 #[async_trait]
 impl Transactional for PgDriver {
     async fn begin(&self) -> Result<Box<dyn Transaction>, DriverError> {
-        let tx = PgTransaction::begin(self.url()).await?;
+        let tx = PgTransaction::begin(self.url(), self.schema()).await?;
         Ok(Box::new(tx))
     }
 }

@@ -57,8 +57,9 @@ impl DataReader for PgDriver {
 
     async fn count_fast(&self, table: &str) -> Result<u64, DriverError> {
         let client = self.client().read().await;
+        let schema = self.schema();
         let row = client
-            .query_one(queries::COUNT_ROWS_FAST, &[&table])
+            .query_one(queries::COUNT_ROWS_FAST, &[&table, &schema])
             .await
             .map_err(|e| DriverError::QueryError(e.to_string()))?;
 

@@ -4,7 +4,7 @@ WITH primary_keys AS (
   JOIN information_schema.key_column_usage AS kcu
     ON tc.constraint_name = kcu.constraint_name
     AND tc.table_schema = kcu.table_schema
-  WHERE tc.table_schema = 'public' AND tc.table_name = '{table}' AND tc.constraint_type = 'PRIMARY KEY'
+  WHERE tc.table_schema = '{schema}' AND tc.table_name = '{table}' AND tc.constraint_type = 'PRIMARY KEY'
 ),
 unique_constraints AS (
   SELECT kcu.table_name, kcu.column_name
@@ -12,7 +12,7 @@ unique_constraints AS (
   JOIN information_schema.key_column_usage AS kcu
     ON tc.constraint_name = kcu.constraint_name
     AND tc.table_schema = kcu.table_schema
-  WHERE tc.table_schema = 'public' AND tc.table_name = '{table}' AND tc.constraint_type = 'UNIQUE'
+  WHERE tc.table_schema = '{schema}' AND tc.table_name = '{table}' AND tc.constraint_type = 'UNIQUE'
 )
 SELECT
   c.ordinal_position,
@@ -34,5 +34,5 @@ SELECT
   c.generation_expression AS generated_expression
 FROM information_schema.columns AS c
 LEFT JOIN pg_type t ON t.typname = c.udt_name
-WHERE c.table_schema = 'public' AND c.table_name = '{table}'
+WHERE c.table_schema = '{schema}' AND c.table_name = '{table}'
 ORDER BY c.ordinal_position::int;

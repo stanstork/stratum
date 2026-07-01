@@ -115,7 +115,11 @@ impl ConnectionPool {
             .get_string("url")
             .ok_or_else(|| DriverError::InvalidUrl("missing 'url' property".to_string()))?;
 
-        let driver = Arc::new(PgDriver::connect(&url).await?);
+        let driver = match conn.properties.get_string("schema") {
+            Some(schema) => PgDriver::connect_with_schema(&url, &schema).await?,
+            None => PgDriver::connect(&url).await?,
+        };
+        let driver = Arc::new(driver);
         self.pg_drivers.insert(conn.name.clone(), driver.clone());
         Ok(driver)
     }

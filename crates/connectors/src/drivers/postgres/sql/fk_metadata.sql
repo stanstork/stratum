@@ -40,7 +40,7 @@ LEFT JOIN information_schema.columns att_col
  AND att_col.table_name   = tbl.relname
  AND att_col.column_name  = att.attname
 WHERE con.contype = 'f'
-  AND sch.nspname = 'public'
+  AND sch.nspname = $2
   AND tbl.relname = $1
 GROUP BY
     con.conname,

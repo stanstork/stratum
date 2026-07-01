@@ -18,8 +18,9 @@ use std::collections::HashMap;
 impl SchemaIntrospector for PgDriver {
     async fn table_exists(&self, table: &str) -> Result<bool, DriverError> {
         let client = self.client().read().await;
+        let schema = self.schema();
         let row = client
-            .query_one(queries::TABLE_EXISTS_SQL, &[&table])
+            .query_one(queries::TABLE_EXISTS_SQL, &[&table, &schema])
             .await
             .map_err(|e| DriverError::QueryError(e.to_string()))?;
 
@@ -27,11 +28,11 @@ impl SchemaIntrospector for PgDriver {
     }
 
     async fn list_tables(&self, schema: Option<&str>) -> Result<Vec<String>, DriverError> {
-        let schema_name = schema.unwrap_or("public");
+        let schema = schema.unwrap_or(self.schema());
         let client = self.client().read().await;
 
         let rows = client
-            .query(queries::LIST_TABLES_SQL, &[&schema_name])
+            .query(queries::LIST_TABLES_SQL, &[&schema])
             .await
             .map_err(|e| DriverError::QueryError(e.to_string()))?;
 
@@ -39,7 +40,9 @@ impl SchemaIntrospector for PgDriver {
     }
 
     async fn table_metadata(&self, table: &str) -> Result<TableMetadata, DriverError> {
-        let query = queries::TABLE_METADATA_SQL.replace("{table}", table);
+        let query = queries::TABLE_METADATA_SQL
+            .replace("{schema}", self.schema())
+            .replace("{table}", table);
         let client = self.client().read().await;
 
         let rows = client
@@ -63,7 +66,7 @@ impl SchemaIntrospector for PgDriver {
 
     async fn index_metadata(&self, table: &str) -> Result<Vec<IndexMetadata>, DriverError> {
         let client = self.client().read().await;
-        let schema = "public";
+        let schema = self.schema();
 
         let rows = client
             .query(queries::INDEX_METADATA_SQL, &[&schema, &table])
@@ -83,9 +86,10 @@ impl SchemaIntrospector for PgDriver {
 
     async fn fk_metadata(&self, table: &str) -> Result<Vec<ForeignKeyMetadata>, DriverError> {
         let client = self.client().read().await;
+        let schema = self.schema();
 
         let rows = client
-            .query(queries::FK_METADATA_SQL, &[&table])
+            .query(queries::FK_METADATA_SQL, &[&table, &schema])
             .await
             .map_err(|e| DriverError::QueryError(e.to_string()))?;
 
@@ -131,9 +135,10 @@ impl SchemaIntrospector for PgDriver {
         table: &str,
     ) -> Result<Vec<UniqueConstraintMetadata>, DriverError> {
         let client = self.client().read().await;
+        let schema = self.schema();
 
         let rows = client
-            .query(queries::UNIQUE_CONSTRAINT_METADATA_SQL, &[&table])
+            .query(queries::UNIQUE_CONSTRAINT_METADATA_SQL, &[&table, &schema])
             .await
             .map_err(|e| DriverError::QueryError(e.to_string()))?;
 
@@ -153,9 +158,10 @@ impl SchemaIntrospector for PgDriver {
         table: &str,
     ) -> Result<Vec<CheckConstraintMetadata>, DriverError> {
         let client = self.client().read().await;
+        let schema = self.schema();
 
         let rows = client
-            .query(queries::CHECK_CONSTRAINT_METADATA_SQL, &[&table])
+            .query(queries::CHECK_CONSTRAINT_METADATA_SQL, &[&table, &schema])
             .await
             .map_err(|e| DriverError::QueryError(e.to_string()))?;
 

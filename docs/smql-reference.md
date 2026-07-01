@@ -56,6 +56,7 @@ connection "mysql_prod" {
 connection "warehouse_pg" {
   driver = "postgres"
   url    = env("DEST_DB")
+  schema = "analytics"   // optional (Postgres); defaults to "public"
 
   pool {
     max_size = 50
@@ -65,6 +66,11 @@ connection "warehouse_pg" {
 ```
 
 **Supported drivers:** `"mysql"`, `"postgres"`
+
+**`schema`** (Postgres only, optional): scopes the connection to a schema.
+Unqualified reads, writes, and created tables target it (via `search_path`), and
+metadata introspection is scoped to it. Defaults to `public`. The schema must
+already exist. For MySQL, the schema is the database in the connection URL.
 
 **pool options:**
 
