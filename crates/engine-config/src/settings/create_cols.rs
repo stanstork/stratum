@@ -9,7 +9,7 @@ use connectors::sql::{
 };
 use engine_core::schema::{
     schema_ops::{SchemaOp, SchemaOps},
-    types::{ExpressionWrapper, TypeInferencer},
+    types::{ComputedTypes, ExpressionWrapper, TypeInferencer},
     utils::create_column_def,
 };
 use engine_processing::context::PipelineContext;
@@ -111,6 +111,10 @@ impl<D: SchemaDriver> CreateMissingColumnsSetting<D> {
             let query_dialect = self.context.destination.dialect.as_query_dialect();
             let generator = QueryGenerator::new(query_dialect.as_ref());
 
+            // Resolved computed-column types, so a later computed column can
+            // reference an earlier one in the same select.
+            let mut computed_types = ComputedTypes::new();
+
             for comp in computed.iter() {
                 if dest_meta.get_column(&comp.name).is_none() {
                     // infer type (possibly from a cross-entity reference)
@@ -127,6 +131,7 @@ impl<D: SchemaDriver> CreateMissingColumnsSetting<D> {
                             ExpressionWrapper(comp.expression.clone())
                                 .infer_type(
                                     &meta.columns(),
+                                    &computed_types,
                                     &self.context.mapping,
                                     &source,
                                     self.context.source.dialect,
@@ -137,6 +142,7 @@ impl<D: SchemaDriver> CreateMissingColumnsSetting<D> {
                             ExpressionWrapper(comp.expression.clone())
                                 .infer_type(
                                     &source_meta.columns(),
+                                    &computed_types,
                                     &self.context.mapping,
                                     &source,
                                     self.context.source.dialect,
@@ -150,6 +156,7 @@ impl<D: SchemaDriver> CreateMissingColumnsSetting<D> {
                             comp.name
                         ))
                     })?;
+                    computed_types.insert(comp.name.to_ascii_lowercase(), data_type.clone());
                     let def = ColumnDef::from_computed(&comp.name, &data_type.0);
                     let (sql, _) = generator.add_column(table, def.clone());
                     ops.pre.push(SchemaOp {

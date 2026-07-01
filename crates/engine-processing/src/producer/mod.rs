@@ -42,19 +42,19 @@ pub fn build_transform_pipeline(
 ) -> Result<TransformPipeline, ProducerError> {
     let mut tp = TransformPipeline::new();
 
-    // Each transform is only added if it's needed.
+    // Each transform is only added if it's needed. Entity/table remap and
+    // column renames come first so later stages see the target-shaped row.
     tp = tp
         .add_if(!mapping.entities.is_empty(), || {
             TableMapper::new(mapping.entities.clone())
         })
         .add_if(!mapping.field_mappings.field_renames.is_empty(), || {
             FieldMapper::new(mapping.field_mappings.clone())
-        })
-        .add_if(!mapping.field_mappings.computed_fields.is_empty(), || {
-            ComputedTransform::new(mapping.clone(), env.clone())
         });
 
-    // WASM transforms run AFTER built-in transforms but BEFORE pruning/validation.
+    // WASM plugin transforms run BEFORE computed columns so that computed
+    // expressions (e.g. `when`) can reference plugin output columns. Plugin
+    // inputs are source columns, so plugins never depend on computed columns.
     for call in &pipeline.plugin_transforms {
         let plugin = plugin_registry
             .instantiate(&call.plugin_name)
@@ -70,6 +70,12 @@ pub fn build_transform_pipeline(
             call.input_mapping.clone(),
         ));
     }
+
+    // Computed columns (including `when`) evaluate top-to-bottom and may
+    // reference source columns, earlier computed columns, and plugin outputs.
+    tp = tp.add_if(!mapping.field_mappings.computed_fields.is_empty(), || {
+        ComputedTransform::new(mapping.clone(), env.clone())
+    });
 
     // Prune unmapped columns last, once plugin inputs have been consumed.
     tp = tp.add_if(mapped_columns_only, || FieldPruner::new(mapping.clone()));

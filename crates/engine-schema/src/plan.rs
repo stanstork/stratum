@@ -1,7 +1,7 @@
 use crate::{
     dep_graph::DependencyGraph,
     schema_ops::{SchemaOp, SchemaOps},
-    types::TypeEngine,
+    types::{ComputedTypes, TypeEngine},
 };
 use connectors::sql::{
     metadata::table::TableMetadata,
@@ -806,11 +806,20 @@ impl SchemaPlan {
             }
         };
 
+        // Computed columns are inferred in declaration order; each resolved type
+        // is recorded so a later computed column can reference an earlier one.
+        let mut computed_types = ComputedTypes::new();
+
         for computed in computed_fields {
             let column_name = &computed.name;
             let inferred_type = self
                 .type_engine
-                .infer_computed_type(computed, &metadata.columns(), &self.mapping)
+                .infer_computed_type(
+                    computed,
+                    &metadata.columns(),
+                    &computed_types,
+                    &self.mapping,
+                )
                 .await;
 
             if let Some((mut data_type, char_max_length)) = inferred_type {
@@ -824,6 +833,11 @@ impl SchemaPlan {
                         values: values.clone(),
                     };
                 }
+
+                computed_types.insert(
+                    column_name.to_ascii_lowercase(),
+                    (data_type.clone(), char_max_length),
+                );
 
                 defs.push(ColumnDef {
                     name: (*column_name).clone(),

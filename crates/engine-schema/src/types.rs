@@ -12,8 +12,14 @@ use model::{
     execution::expr::CompiledExpression,
     transform::{computed_field::ComputedField, mapping::TransformationMetadata},
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::warn;
+
+/// Canonical types of computed columns already resolved earlier in the same
+/// `select`, keyed by lowercased column name. Lets a computed column reference
+/// an earlier computed column (which isn't in the source metadata).
+pub type ComputedTypes = HashMap<String, (Type, Option<usize>)>;
 
 /// A thin newtype wrapper around `CompiledExpression` to implement
 /// `TypeInferencer` without touching the model crate.
@@ -34,6 +40,7 @@ pub trait TypeInferencer: Send + Sync {
     async fn infer_type(
         &self,
         columns: &[ColumnMetadata],
+        computed_types: &ComputedTypes,
         mapping: &TransformationMetadata,
         introspector: &Arc<dyn SchemaIntrospector>,
         source_dialect: Dialect,
@@ -82,12 +89,19 @@ impl TypeEngine {
         &self,
         computed: &ComputedField,
         columns: &[ColumnMetadata],
+        computed_types: &ComputedTypes,
         mapping: &TransformationMetadata,
     ) -> Option<(Type, Option<usize>)> {
         // Clone the expression node into wrapper and run inference.
         let expr = ExpressionWrapper(computed.expression.clone());
-        expr.infer_type(columns, mapping, &self.introspector, self.source_dialect)
-            .await
+        expr.infer_type(
+            columns,
+            computed_types,
+            mapping,
+            &self.introspector,
+            self.source_dialect,
+        )
+        .await
     }
 }
 
@@ -97,15 +111,21 @@ impl TypeInferencer for ExpressionWrapper {
     async fn infer_type(
         &self,
         columns: &[ColumnMetadata],
+        computed_types: &ComputedTypes,
         mapping: &TransformationMetadata,
         introspector: &Arc<dyn SchemaIntrospector>,
         source_dialect: Dialect,
     ) -> Option<(Type, Option<usize>)> {
         match &self.0 {
-            CompiledExpression::Identifier(identifier) => columns
-                .iter()
-                .find(|col| col.name.eq_ignore_ascii_case(identifier))
-                .map(|col| (source_dialect.to_canonical(col), col.char_max_length)),
+            CompiledExpression::Identifier(identifier) => computed_types
+                .get(&identifier.to_ascii_lowercase())
+                .cloned()
+                .or_else(|| {
+                    columns
+                        .iter()
+                        .find(|col| col.name.eq_ignore_ascii_case(identifier))
+                        .map(|col| (source_dialect.to_canonical(col), col.char_max_length))
+                }),
 
             CompiledExpression::Literal(value) => Some(match value {
                 Value::String(_) => (Type::Text { charset: None }, None),
@@ -162,10 +182,22 @@ impl TypeInferencer for ExpressionWrapper {
 
             CompiledExpression::Binary { left, right, .. } => {
                 let lt = ExpressionWrapper((**left).clone())
-                    .infer_type(columns, mapping, introspector, source_dialect)
+                    .infer_type(
+                        columns,
+                        computed_types,
+                        mapping,
+                        introspector,
+                        source_dialect,
+                    )
                     .await?;
                 let rt = ExpressionWrapper((**right).clone())
-                    .infer_type(columns, mapping, introspector, source_dialect)
+                    .infer_type(
+                        columns,
+                        computed_types,
+                        mapping,
+                        introspector,
+                        source_dialect,
+                    )
                     .await?;
                 Some(get_numeric_type(&lt.0, &rt.0))
             }
@@ -205,21 +237,38 @@ impl TypeInferencer for ExpressionWrapper {
             }
 
             // Single-segment DotPath is just a field reference
-            CompiledExpression::DotPath(segments) if segments.len() == 1 => columns
-                .iter()
-                .find(|col| col.name.eq_ignore_ascii_case(&segments[0]))
-                .map(|col| (source_dialect.to_canonical(col), col.char_max_length)),
+            CompiledExpression::DotPath(segments) if segments.len() == 1 => computed_types
+                .get(&segments[0].to_ascii_lowercase())
+                .cloned()
+                .or_else(|| {
+                    columns
+                        .iter()
+                        .find(|col| col.name.eq_ignore_ascii_case(&segments[0]))
+                        .map(|col| (source_dialect.to_canonical(col), col.char_max_length))
+                }),
 
             // Handle other expression types
             CompiledExpression::Unary { operand, .. } => {
                 ExpressionWrapper((**operand).clone())
-                    .infer_type(columns, mapping, introspector, source_dialect)
+                    .infer_type(
+                        columns,
+                        computed_types,
+                        mapping,
+                        introspector,
+                        source_dialect,
+                    )
                     .await
             }
 
             CompiledExpression::Grouped(expr) => {
                 ExpressionWrapper((**expr).clone())
-                    .infer_type(columns, mapping, introspector, source_dialect)
+                    .infer_type(
+                        columns,
+                        computed_types,
+                        mapping,
+                        introspector,
+                        source_dialect,
+                    )
                     .await
             }
 
@@ -230,11 +279,23 @@ impl TypeInferencer for ExpressionWrapper {
                 // Try to infer from first branch value, fallback to else
                 if let Some(branch) = branches.first() {
                     ExpressionWrapper(branch.value.clone())
-                        .infer_type(columns, mapping, introspector, source_dialect)
+                        .infer_type(
+                            columns,
+                            computed_types,
+                            mapping,
+                            introspector,
+                            source_dialect,
+                        )
                         .await
                 } else if let Some(else_val) = else_expr {
                     ExpressionWrapper((**else_val).clone())
-                        .infer_type(columns, mapping, introspector, source_dialect)
+                        .infer_type(
+                            columns,
+                            computed_types,
+                            mapping,
+                            introspector,
+                            source_dialect,
+                        )
                         .await
                 } else {
                     None

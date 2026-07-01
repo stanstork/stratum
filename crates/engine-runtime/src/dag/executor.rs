@@ -407,7 +407,6 @@ impl DagExecutor {
 
     fn finalize(self, failed_pipelines: HashSet<String>) -> Result<(), MigrationError> {
         if failed_pipelines.is_empty() {
-            info!("migration completed successfully");
             return Ok(());
         }
 

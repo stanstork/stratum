@@ -86,6 +86,19 @@ macro_rules! sql_filter_expr {
         ) -> Result<query_builder::ast::expr::Expr, $crate::error::DbError> {
             match expr {
                 $crate::sql::filter::expr::SqlFilterExpr::Leaf(cond) => {
+                    // NULL checks render as `col IS [NOT] NULL` (no bound value).
+                    if cond.comparator == "IS" || cond.comparator == "IS NOT" {
+                        return Ok(query_builder::ast::expr::Expr::IsNull {
+                            expr: Box::new(query_builder::ast::expr::Expr::Identifier(
+                                query_builder::ast::expr::Ident {
+                                    qualifier: Some(cond.table.clone()),
+                                    name: cond.column.clone(),
+                                },
+                            )),
+                            negated: cond.comparator == "IS NOT",
+                        });
+                    }
+
                     let op = match cond.comparator.as_str() {
                         "=" => Ok(query_builder::ast::expr::BinaryOperator::Eq),
                         "!=" => Ok(query_builder::ast::expr::BinaryOperator::NotEq),

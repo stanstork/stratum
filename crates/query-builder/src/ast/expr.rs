@@ -49,6 +49,10 @@ pub enum Expr {
     /// IN expression
     /// e.g., `id IN (1, 2, 3)` or `status IN ('active', 'pending')`
     In { expr: Box<Expr>, values: Vec<Expr> },
+
+    /// NULL check
+    /// e.g., `return_date IS NULL` or `return_date IS NOT NULL`
+    IsNull { expr: Box<Expr>, negated: bool },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

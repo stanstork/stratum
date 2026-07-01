@@ -165,12 +165,7 @@ equality       = { comparison ~ ((op_eq_eq | op_neq) ~ comparison)* }
 comparison     = { additive ~ ((op_gte | op_lte | op_gt | op_lt) ~ additive)* }
 additive       = { multiplicative ~ ((op_add | op_sub) ~ multiplicative)* }
 multiplicative = { is_null_check ~ ((op_mul | op_div) ~ is_null_check)* }
-
-is_null_check = { 
-    primary ~ (kw_is ~ kw_not ~ kw_null)?
-  | primary ~ (kw_is ~ kw_null)?
-  | primary
-}
+is_null_check  = { primary ~ (kw_is ~ kw_not? ~ kw_null)? }
 
 primary = _{
     kw_null

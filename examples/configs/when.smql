@@ -1,0 +1,51 @@
+// when.smql - Conditional column values and computed-column chains
+//
+// The `when` expression derives a column's value from other columns using
+// multi-branch conditions (evaluated top to bottom, first match wins). Computed
+// columns are evaluated in declaration order, so a later column - including a
+// `when` - can build on an earlier computed column.
+//
+// This example classifies Sakila films into price and length buckets without a
+// separate transformation tool: the logic lives inline in the pipeline.
+//
+// Run:
+//   stratum apply -c when.smql -e .env
+
+define {
+    mysql_url    = env("MYSQL_URL")
+    postgres_url = env("POSTGRES_URL")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+pipeline "classify_films" {
+    from { connection = connection.src  table = "film" }
+    to   { connection = connection.dst  table = "film_catalog" }
+
+    select {
+        film_id = film.film_id
+        title   = film.title
+
+        // Conditional value: bucket the rental rate into price tiers.
+        price_tier = when {
+            film.rental_rate >= 4.0 then "premium"
+            film.rental_rate >= 2.0 then "standard"
+            else "budget"
+        }
+
+        // Computed-column chain: `length_hours` is derived from a source column,
+        // and `length_label` branches on that earlier computed column.
+        length_hours = film.length / 60.0
+        length_label = when {
+            length_hours >= 2.0 then "feature"
+            length_hours >= 1.0 then "standard"
+            else "short"
+        }
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 1000
+    }
+}

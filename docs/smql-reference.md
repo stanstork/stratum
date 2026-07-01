@@ -29,11 +29,11 @@ SMQL (Stratum Migration Query Language) is a declarative, SQL-inspired language 
 
 ## Core Principles
 
-1. **Named pipelines** — not "migrations" or "resources"
-2. **Data-first language** — tables, columns, rows
-3. **SQL-inspired where it makes sense** — `where`, `with`, `select`
-4. **Declarative but opinionated** — clear intent over flexibility
-5. **Clear data flow** — `from -> to` is always explicit
+1. **Named pipelines** - not "migrations" or "resources"
+2. **Data-first language** - tables, columns, rows
+3. **SQL-inspired where it makes sense** - `where`, `with`, `select`
+4. **Declarative but opinionated** - clear intent over flexibility
+5. **Clear data flow** - `from -> to` is always explicit
 
 ---
 
@@ -377,8 +377,8 @@ select "users" {
 
 Data quality checks run per row before writing. Two rule types:
 
-- `assert` — on failure: `skip` the row, `fail` the pipeline, or `warn` and continue
-- `warn` — always continues, logs a warning
+- `assert` - on failure: `skip` the row, `fail` the pipeline, or `warn` and continue
+- `warn` - always continues, logs a warning
 
 ```smql
 validate {
@@ -463,7 +463,7 @@ paginate {
 
 **using strategies:**
 
-#### `"pk"` — Primary Key (default)
+#### `"pk"` - Primary Key (default)
 Best for tables with auto-increment IDs.
 
 ```smql
@@ -478,7 +478,7 @@ Generated query:
 WHERE id > :last_cursor ORDER BY id LIMIT :batch_size
 ```
 
-#### `"numeric"` — Numeric Column
+#### `"numeric"` - Numeric Column
 For paginating by any numeric column that isn't the PK.
 
 ```smql
@@ -496,7 +496,7 @@ WHERE (sequence_num > :last_cursor)
 ORDER BY sequence_num, id LIMIT :batch_size
 ```
 
-#### `"timestamp"` — Timestamp Column
+#### `"timestamp"` - Timestamp Column
 For incremental / CDC-like loads.
 
 ```smql
@@ -659,10 +659,40 @@ discount_rate = when {
 }
 ```
 
+Branches may use any expression - column references, arithmetic, functions,
+nested `when`, `is null` checks - **except a direct plugin call** (see below). A
+`when` can reference an earlier computed column in the same `select`; computed
+columns are evaluated top to bottom, so later ones build on earlier ones:
+
+```smql
+select {
+  net_total = orders.total - orders.discount   // computed column
+  tier      = when {                            // references it
+    net_total > 100 then "gold"
+    net_total > 50  then "silver"
+    else "bronze"
+  }
+}
+```
+
+A plugin call cannot appear *directly inside* a `when` branch, but you can
+assign the plugin output to its own column and branch on that column - plugin
+transforms run before computed columns, so the value is available:
+
+```smql
+select {
+  category = plugin.classify({ text: article.body })   // plugin -> own column
+  label    = when {                                      // then branch on it
+    category == "spam" then "blocked"
+    else "ok"
+  }
+}
+```
+
 ### Environment Variables
 
 ```smql
-env("VAR_NAME")           // required — error if missing
+env("VAR_NAME")           // required - error if missing
 env("VAR_NAME", "default") // optional with fallback
 ```
 
@@ -675,11 +705,11 @@ Graph references allow a pipeline to automatically discover and migrate all FK-d
 ### Single Table vs Graph Pipeline
 
 ```smql
-// Single table — table in both from and to
+// Single table - table in both from and to
 from { table = "orders" }
 to   { table = "orders_copy" }
 
-// Graph pipeline — table only in from; to uses map for renaming
+// Graph pipeline - table only in from; to uses map for renaming
 from {
   table = "orders"
   with references { data = cascade }
@@ -866,7 +896,7 @@ transform "normalize_email" {
 }
 
 // ================================================================
-// Dimensions (load first — no dependencies)
+// Dimensions (load first - no dependencies)
 // ================================================================
 
 pipeline "dim_customers" {

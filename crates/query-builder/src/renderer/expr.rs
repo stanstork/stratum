@@ -64,6 +64,11 @@ impl Render for Expr {
                 }
                 r.sql.push(')');
             }
+            Expr::IsNull { expr, negated } => {
+                expr.render(r);
+                r.sql
+                    .push_str(if *negated { " IS NOT NULL" } else { " IS NULL" });
+            }
         }
     }
 }
@@ -123,5 +128,45 @@ impl Render for FunctionCall {
             }
         }
         r.sql.push(')');
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        ast::expr::{Expr, Ident},
+        dialect::Postgres,
+        renderer::{Render, Renderer},
+    };
+
+    fn field(name: &str) -> Expr {
+        Expr::Identifier(Ident {
+            qualifier: None,
+            name: name.to_string(),
+        })
+    }
+
+    #[test]
+    fn renders_is_null_and_is_not_null() {
+        let pg = Postgres;
+
+        let mut r = Renderer::new(&pg);
+        Expr::IsNull {
+            expr: Box::new(field("return_date")),
+            negated: false,
+        }
+        .render(&mut r);
+        let (sql, params) = r.finish();
+        assert!(sql.ends_with(" IS NULL"), "got: {sql}");
+        assert!(sql.contains("return_date"));
+        assert!(params.is_empty(), "null checks bind no params");
+
+        let mut r = Renderer::new(&pg);
+        Expr::IsNull {
+            expr: Box::new(field("return_date")),
+            negated: true,
+        }
+        .render(&mut r);
+        assert!(r.finish().0.ends_with(" IS NOT NULL"));
     }
 }

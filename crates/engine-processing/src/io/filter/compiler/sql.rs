@@ -49,10 +49,43 @@ fn compile_sql_expr(expr: &CompiledExpression) -> Result<SqlFilterExpr, FilterCo
             }
         }
 
+        // NULL checks render as `col IS NULL` / `col IS NOT NULL`.
+        CompiledExpression::IsNull(inner) => Ok(SqlFilterExpr::leaf(null_condition(inner, "IS")?)),
+        CompiledExpression::IsNotNull(inner) => {
+            Ok(SqlFilterExpr::leaf(null_condition(inner, "IS NOT")?))
+        }
+
+        // Parentheses only affect precedence, which is already encoded in the tree.
+        CompiledExpression::Grouped(inner) => compile_sql_expr(inner),
+
         _ => Err(FilterCompileError::UnsupportedExpression(format!(
             "{expr:?}"
         ))),
     }
+}
+
+fn null_condition(
+    field: &CompiledExpression,
+    comparator: &str,
+) -> Result<Condition, FilterCompileError> {
+    let (table, column) = match field {
+        CompiledExpression::DotPath(segments) if segments.len() >= 2 => {
+            (segments[0].clone(), segments[1].clone())
+        }
+        CompiledExpression::Identifier(name) => (String::new(), name.clone()),
+        other => {
+            return Err(FilterCompileError::UnsupportedExpression(format!(
+                "null check on non-field expression: {other:?}"
+            )));
+        }
+    };
+
+    Ok(Condition {
+        table,
+        column,
+        comparator: comparator.to_string(),
+        value: "NULL".to_string(),
+    })
 }
 
 fn from_compiled_condition(

@@ -6,7 +6,7 @@ use model::{
         define::DefinitionInfo,
         errors::ConvertError,
         execution_config::{ExecutionConfig, ExecutionStrategy, FailureStrategy},
-        expr::{BinaryOp, CompiledExpression},
+        expr::{BinaryOp, CompiledExpression, UnaryOp, WhenBranch},
         pipeline::{
             BackoffStrategy, DataDestination, DataSource, ErrorHandling, FailedRowsAction,
             FailedRowsConfig, FailedRowsDestination, FileFormat, Filter, Join, LifecycleHooks,
@@ -23,7 +23,7 @@ use smql_syntax::ast::{
     block::{ConnectionBlock, DefineBlock, ExecutionBlock, PluginBlock},
     expr::{Expression, ExpressionKind},
     literal::Literal,
-    operator::BinaryOperator,
+    operator::{BinaryOperator, UnaryOperator},
     pipeline::{FromBlock, PipelineBlock, ToBlock},
     validation::ValidationKind,
 };
@@ -302,33 +302,30 @@ impl PlanBuilder {
 
         let connection = self.resolve_connection_from(from)?;
 
-        let filters = pipeline_block
-            .where_clauses
-            .iter()
-            .flat_map(|wc| {
-                wc.conditions.iter().map(|expr| Filter {
+        let mut filters = Vec::new();
+        for wc in &pipeline_block.where_clauses {
+            for expr in &wc.conditions {
+                filters.push(Filter {
                     label: wc.label.clone(),
-                    condition: self.compile_expression(expr).unwrap(),
-                })
-            })
-            .collect();
+                    condition: self.compile_expression(expr)?,
+                });
+            }
+        }
 
-        let joins = if let Some(with_block) = &pipeline_block.with_block {
-            with_block
-                .joins
-                .iter()
-                .map(|j| Join {
+        let mut joins = Vec::new();
+        if let Some(with_block) = &pipeline_block.with_block {
+            for j in &with_block.joins {
+                let condition = match &j.condition {
+                    Some(expr) => Some(self.compile_expression(expr)?),
+                    None => None,
+                };
+                joins.push(Join {
                     alias: j.alias.name.clone(),
                     table: j.table.name.clone(),
-                    condition: j
-                        .condition
-                        .as_ref()
-                        .map(|expr| self.compile_expression(expr).unwrap()),
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
+                    condition,
+                });
+            }
+        }
 
         let pagination = pipeline_block.paginate_block.as_ref().map(|p| {
             let strategy = p
@@ -531,17 +528,19 @@ impl PlanBuilder {
         pipeline_block: &PipelineBlock,
     ) -> Result<Vec<Transformation>, ConvertError> {
         if let Some(select) = &pipeline_block.select_block {
-            Ok(select
+            select
                 .fields
                 .iter()
                 // Plugin calls are routed to `plugin_transforms`, not regular
                 // expression transformations.
                 .filter(|f| !matches!(f.value.kind, ExpressionKind::PluginCall(_)))
-                .map(|f| Transformation {
-                    target_field: f.name.name.clone(),
-                    expression: self.compile_expression(&f.value).unwrap(),
+                .map(|f| {
+                    Ok(Transformation {
+                        target_field: f.name.name.clone(),
+                        expression: self.compile_expression(&f.value)?,
+                    })
                 })
-                .collect())
+                .collect()
         } else {
             Ok(Vec::new())
         }
@@ -595,11 +594,13 @@ impl PlanBuilder {
                 .fields
                 .iter()
                 .filter(|f| !matches!(f.value.kind, ExpressionKind::PluginCall(_)))
-                .map(|f| Transformation {
-                    target_field: f.name.name.clone(),
-                    expression: self.compile_expression(&f.value).unwrap(),
+                .map(|f| {
+                    Ok(Transformation {
+                        target_field: f.name.name.clone(),
+                        expression: self.compile_expression(&f.value)?,
+                    })
                 })
-                .collect();
+                .collect::<Result<Vec<_>, ConvertError>>()?;
             result.insert(named.table.to_ascii_lowercase(), transforms);
         }
         Ok(result)
@@ -616,24 +617,26 @@ impl PlanBuilder {
         let mut rules: Vec<ValidationRule> = validate
             .checks
             .iter()
-            .map(|check| ValidationRule {
-                label: check.label.clone(),
-                severity: match check.kind {
-                    ValidationKind::Assert => ValidationSeverity::Assert,
-                    ValidationKind::Warn => ValidationSeverity::Warn,
-                },
-                kind: RuleKind::Assert {
-                    check: self.compile_expression(&check.body.check).unwrap(),
-                },
-                message: check.body.message.clone(),
-                action: check
-                    .body
-                    .action
-                    .as_ref()
-                    .and_then(|a| Self::parse_validation_action(a))
-                    .unwrap_or(ValidationAction::Warn),
+            .map(|check| {
+                Ok(ValidationRule {
+                    label: check.label.clone(),
+                    severity: match check.kind {
+                        ValidationKind::Assert => ValidationSeverity::Assert,
+                        ValidationKind::Warn => ValidationSeverity::Warn,
+                    },
+                    kind: RuleKind::Assert {
+                        check: self.compile_expression(&check.body.check)?,
+                    },
+                    message: check.body.message.clone(),
+                    action: check
+                        .body
+                        .action
+                        .as_ref()
+                        .and_then(|a| Self::parse_validation_action(a))
+                        .unwrap_or(ValidationAction::Warn),
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, ConvertError>>()?;
 
         // WASM filter rules: `rule "x" { filter = plugin.name({...}) on_fail = skip }`
         for wr in &validate.wasm_rules {
@@ -1036,7 +1039,62 @@ impl PlanBuilder {
                     args: compiled_args,
                 })
             }
-            _ => Ok(CompiledExpression::Literal(Value::Null)),
+            ExpressionKind::Unary { operator, operand } => Ok(CompiledExpression::Unary {
+                op: Self::convert_unop(*operator),
+                operand: Box::new(self.compile_expression(operand)?),
+            }),
+            ExpressionKind::Array(elements) => {
+                let compiled = elements
+                    .iter()
+                    .map(|e| self.compile_expression(e))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(CompiledExpression::Array(compiled))
+            }
+            ExpressionKind::WhenExpression {
+                branches,
+                else_value,
+            } => {
+                let branches = branches
+                    .iter()
+                    .map(|b| {
+                        Ok(WhenBranch {
+                            condition: self.compile_expression(&b.condition)?,
+                            value: self.compile_expression(&b.value)?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, ConvertError>>()?;
+                let else_expr = match else_value {
+                    Some(e) => Some(Box::new(self.compile_expression(e)?)),
+                    None => None,
+                };
+                Ok(CompiledExpression::When {
+                    branches,
+                    else_expr,
+                })
+            }
+            ExpressionKind::IsNull(inner) => Ok(CompiledExpression::IsNull(Box::new(
+                self.compile_expression(inner)?,
+            ))),
+            ExpressionKind::IsNotNull(inner) => Ok(CompiledExpression::IsNotNull(Box::new(
+                self.compile_expression(inner)?,
+            ))),
+            ExpressionKind::Grouped(inner) => Ok(CompiledExpression::Grouped(Box::new(
+                self.compile_expression(inner)?,
+            ))),
+            ExpressionKind::PluginCall(_) => Err(ConvertError::Expression(
+                "plugin calls must be a top-level `select` field \
+                 (e.g. `col = plugin.name({...})`), not nested inside an expression. \
+                 Assign the plugin output to its own column first, then reference \
+                 that column"
+                    .to_string(),
+            )),
+        }
+    }
+
+    fn convert_unop(op: UnaryOperator) -> UnaryOp {
+        match op {
+            UnaryOperator::Not => UnaryOp::Not,
+            UnaryOperator::Negate => UnaryOp::Negate,
         }
     }
 
@@ -1486,6 +1544,77 @@ mod tests {
             CompiledExpression::Literal(Value::Boolean(b)) => assert!(b),
             _ => panic!("Expected boolean literal"),
         }
+    }
+
+    #[test]
+    fn test_compile_when_expression() {
+        let builder = PlanBuilder::default();
+
+        // when { status == "active" then "on" else "off" }
+        let condition = Expression::new(
+            ExpressionKind::Binary {
+                left: Box::new(make_ident_expr("status")),
+                operator: BinaryOperator::Equal,
+                right: Box::new(make_string_expr("active")),
+            },
+            test_span(),
+        );
+        let expr = Expression::new(
+            ExpressionKind::WhenExpression {
+                branches: vec![smql_syntax::ast::expr::WhenBranch {
+                    condition,
+                    value: make_string_expr("on"),
+                    span: test_span(),
+                }],
+                else_value: Some(Box::new(make_string_expr("off"))),
+            },
+            test_span(),
+        );
+
+        match builder.compile_expression(&expr).unwrap() {
+            CompiledExpression::When {
+                branches,
+                else_expr,
+            } => {
+                assert_eq!(branches.len(), 1);
+                assert!(matches!(
+                    branches[0].condition,
+                    CompiledExpression::Binary { .. }
+                ));
+                assert!(
+                    matches!(&branches[0].value, CompiledExpression::Literal(Value::String(s)) if s == "on")
+                );
+                assert!(
+                    matches!(else_expr.as_deref(), Some(CompiledExpression::Literal(Value::String(s))) if s == "off")
+                );
+            }
+            other => panic!("expected When, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_compile_is_null_and_grouped() {
+        let builder = PlanBuilder::default();
+
+        // `x is null` must compile to IsNull, not silently to NULL.
+        let is_null = Expression::new(
+            ExpressionKind::IsNull(Box::new(make_ident_expr("x"))),
+            test_span(),
+        );
+        assert!(matches!(
+            builder.compile_expression(&is_null).unwrap(),
+            CompiledExpression::IsNull(_)
+        ));
+
+        // Grouped `( x )` preserves the inner expression.
+        let grouped = Expression::new(
+            ExpressionKind::Grouped(Box::new(make_ident_expr("x"))),
+            test_span(),
+        );
+        assert!(matches!(
+            builder.compile_expression(&grouped).unwrap(),
+            CompiledExpression::Grouped(_)
+        ));
     }
 
     #[test]

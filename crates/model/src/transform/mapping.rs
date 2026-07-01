@@ -3,7 +3,7 @@ use crate::{
     execution::{expr::CompiledExpression, pipeline::Pipeline},
     transform::computed_field::ComputedField,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Manages field mappings and computed fields for entities in a pipeline.
 #[derive(Default, Clone, Debug)]
@@ -320,7 +320,21 @@ impl TransformationMetadata {
     pub fn new(pipeline: &Pipeline) -> Self {
         let entity_name_map = NameResolver::from_pipeline(pipeline);
         let field_mappings = FieldTransformations::from_pipeline(pipeline);
-        let foreign_fields = Self::extract_all_cross_entity_refs(&field_mappings);
+
+        // Source tables (the main `from` table plus any cascade tables). A
+        // `table.column` reference to one of these is a self-reference that
+        // reads the raw source column at runtime, not a cross-entity (join)
+        // lookup - so it must be kept out of `foreign_fields`.
+        let mut source_tables: HashSet<String> =
+            HashSet::from([pipeline.source.table.to_ascii_lowercase()]);
+        source_tables.extend(
+            pipeline
+                .named_transformations
+                .keys()
+                .map(|k| k.to_ascii_lowercase()),
+        );
+
+        let foreign_fields = Self::extract_all_cross_entity_refs(&field_mappings, &source_tables);
 
         Self {
             entities: entity_name_map,
@@ -381,6 +395,7 @@ impl TransformationMetadata {
     /// Extracts all cross-entity references from computed expressions, grouped by entity.
     fn extract_all_cross_entity_refs(
         field_mappings: &FieldTransformations,
+        source_tables: &HashSet<String>,
     ) -> HashMap<String, Vec<CrossEntityReference>> {
         let mut cross_entity_refs: HashMap<String, Vec<CrossEntityReference>> = HashMap::new();
 
@@ -394,8 +409,11 @@ impl TransformationMetadata {
                     &mut found,
                 );
 
-                // group them by entity
+                // group them by entity, skipping self-references to a source table
                 for ref_item in found {
+                    if source_tables.contains(&ref_item.entity.to_ascii_lowercase()) {
+                        continue;
+                    }
                     cross_entity_refs
                         .entry(ref_item.entity.clone())
                         .or_default()
@@ -971,5 +989,54 @@ mod tests {
         assert!(resolver.contains_source("first_name"));
         assert!(resolver.contains_source("last_name"));
         assert!(!resolver.contains_source("given_name")); // target name, not source
+    }
+
+    #[test]
+    fn source_table_self_refs_excluded_from_foreign_fields() {
+        let mut pipeline = make_test_pipeline();
+        pipeline.source.table = "actor".to_string();
+        pipeline.source.joins = vec![];
+        pipeline.transformations = vec![
+            Transformation {
+                target_field: "doubled".to_string(),
+                expression: CompiledExpression::Binary {
+                    left: Box::new(CompiledExpression::DotPath(vec![
+                        "actor".to_string(),
+                        "actor_id".to_string(),
+                    ])),
+                    op: BinaryOp::Multiply,
+                    right: Box::new(CompiledExpression::Literal(Value::Int(2))),
+                },
+            },
+            Transformation {
+                target_field: "tripled".to_string(),
+                expression: CompiledExpression::Binary {
+                    left: Box::new(CompiledExpression::DotPath(vec![
+                        "actor".to_string(),
+                        "actor_id".to_string(),
+                    ])),
+                    op: BinaryOp::Multiply,
+                    right: Box::new(CompiledExpression::Literal(Value::Int(3))),
+                },
+            },
+        ];
+
+        let mapping = TransformationMetadata::new(&pipeline);
+        assert!(
+            !mapping.foreign_fields.contains_key("actor"),
+            "source-table self-references leaked into foreign_fields: {:?}",
+            mapping.foreign_fields
+        );
+    }
+
+    #[test]
+    fn joined_entity_refs_kept_in_foreign_fields() {
+        // make_test_pipeline joins `users` and `orders`, referenced by
+        // computed fields `discount` and `final_price`.
+        let mapping = TransformationMetadata::new(&make_test_pipeline());
+        assert!(mapping.foreign_fields.contains_key("users"));
+        assert!(mapping.foreign_fields.contains_key("orders"));
+        // ...but not the source table itself.
+        assert!(!mapping.foreign_fields.contains_key("customers"));
     }
 }

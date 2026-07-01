@@ -8,12 +8,12 @@ use std::{path::PathBuf, sync::Arc};
 
 pub mod apply;
 pub mod pause;
+pub mod ping;
 pub mod plan;
 pub mod plugin;
 pub mod reset;
 pub mod resume;
 pub mod status;
-pub mod ping;
 pub mod verify;
 pub mod version;
 
@@ -292,9 +292,7 @@ pub async fn execute_command(
             verify::execute(config.clone(), output.clone(), env.clone()).await
         }
         Commands::Status { config } => status::execute(config.clone(), env).await,
-        Commands::Ping { url, format } => {
-            ping::execute(cli, url.clone(), format.clone()).await
-        }
+        Commands::Ping { url, format } => ping::execute(cli, url.clone(), format.clone()).await,
         Commands::Version => {
             version::execute();
             Ok(())
