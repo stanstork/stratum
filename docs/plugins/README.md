@@ -49,9 +49,9 @@ select {
 
 ```smql
 validate {
-  rule "positive" {
-    filter  = plugin.is_positive({ value: orders.amount })
-    on_fail = skip          # skip (drop row) | fail (abort pipeline)
+  assert "positive" {
+    check  = plugin.is_positive({ value: orders.amount })
+    action = skip          # skip (drop row) | fail (abort pipeline) | warn
   }
 }
 ```

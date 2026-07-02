@@ -15,7 +15,7 @@ use query_builder::{
         alter_table::AlterTableBuilder, copy::CopyBuilder, create_enum::CreateEnumBuilder,
         create_index::CreateIndexBuilder, create_sequence::CreateSequenceBuilder,
         create_table::CreateTableBuilder, drop_table::DropTableBuilder, insert::InsertBuilder,
-        merge::MergeBuilder, select::SelectBuilder,
+        merge::MergeBuilder, select::SelectBuilder, truncate_table::TruncateTableBuilder,
     },
     dialect::Dialect,
     renderer::{Render, Renderer},
@@ -346,6 +346,10 @@ impl<'a> QueryGenerator<'a> {
             builder = builder.if_exists();
         }
         self.render_ast(builder.build())
+    }
+
+    pub fn truncate_table(&self, table: &str) -> (String, Vec<Value>) {
+        self.render_ast(TruncateTableBuilder::new(table_ref!(table)).build())
     }
 
     pub fn add_foreign_key(

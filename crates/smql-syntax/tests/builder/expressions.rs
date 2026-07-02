@@ -142,15 +142,16 @@ fn test_build_plugin_call_with_bare_ident_input() {
 }
 
 #[test]
-fn test_build_wasm_rule_inside_validate_block() {
+fn test_build_plugin_check_inside_validate_block() {
+    use smql_syntax::ast::expr::ExpressionKind;
     let input = r#"
         pipeline "p" {
             from { connection = connection.src }
             to   { connection = connection.dst }
             validate {
-                rule "fraud_screen" {
-                    filter  = plugin.check_fraud({ amount: charges.amount })
-                    on_fail = skip
+                assert "fraud_screen" {
+                    check  = plugin.check_fraud({ amount: charges.amount })
+                    action = skip
                 }
             }
         }
@@ -160,18 +161,23 @@ fn test_build_wasm_rule_inside_validate_block() {
         .validate_block
         .as_ref()
         .expect("validate block");
-    assert!(validate.checks.is_empty(), "no asserts in this fixture");
-    assert_eq!(validate.wasm_rules.len(), 1);
-    let r = &validate.wasm_rules[0];
-    assert_eq!(r.name, "fraud_screen");
-    assert_eq!(r.filter.plugin_name, "check_fraud");
-    assert_eq!(r.filter.inputs.len(), 1);
-    assert_eq!(r.filter.inputs[0].plugin_field, "amount");
-    assert_eq!(r.on_fail, "skip");
+    assert_eq!(validate.checks.len(), 1);
+    let c = &validate.checks[0];
+    assert_eq!(c.label, "fraud_screen");
+    assert_eq!(c.body.action.as_deref(), Some("skip"));
+    match &c.body.check.kind {
+        ExpressionKind::PluginCall(call) => {
+            assert_eq!(call.plugin_name, "check_fraud");
+            assert_eq!(call.inputs.len(), 1);
+            assert_eq!(call.inputs[0].plugin_field, "amount");
+        }
+        other => panic!("expected PluginCall, got {:?}", other),
+    }
 }
 
 #[test]
-fn test_build_validate_block_mixed_assert_and_wasm() {
+fn test_build_validate_block_mixed_expression_and_plugin() {
+    use smql_syntax::ast::expr::ExpressionKind;
     let input = r#"
         pipeline "p" {
             from { connection = connection.src }
@@ -181,17 +187,20 @@ fn test_build_validate_block_mixed_assert_and_wasm() {
                     check   = charges.amount > 0
                     message = "amount must be positive"
                 }
-                rule "fraud_screen" {
-                    filter  = plugin.check_fraud({ amount: charges.amount })
-                    on_fail = skip
+                assert "fraud_screen" {
+                    check  = plugin.check_fraud({ amount: charges.amount })
+                    action = skip
                 }
             }
         }
     "#;
     let doc = parse(input).expect("should parse");
     let v = doc.pipelines[0].validate_block.as_ref().unwrap();
-    assert_eq!(v.checks.len(), 1);
+    assert_eq!(v.checks.len(), 2);
     assert_eq!(v.checks[0].label, "positive_amount");
-    assert_eq!(v.wasm_rules.len(), 1);
-    assert_eq!(v.wasm_rules[0].name, "fraud_screen");
+    assert_eq!(v.checks[1].label, "fraud_screen");
+    assert!(matches!(
+        v.checks[1].body.check.kind,
+        ExpressionKind::PluginCall(_)
+    ));
 }

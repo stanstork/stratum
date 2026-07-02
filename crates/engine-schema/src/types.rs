@@ -202,22 +202,46 @@ impl TypeInferencer for ExpressionWrapper {
                 Some(get_numeric_type(&lt.0, &rt.0))
             }
 
-            CompiledExpression::FunctionCall { name, .. } => {
+            CompiledExpression::FunctionCall { name, args } => {
                 match name.to_ascii_lowercase().as_str() {
-                    "lower" | "upper" | "concat" => Some((
+                    "lower" | "upper" | "trim" | "concat" | "env" => Some((
                         Type::Varchar {
                             length: None,
                             charset: None,
                         },
                         None,
                     )),
-                    "env" => Some((
-                        Type::Varchar {
-                            length: None,
-                            charset: None,
+                    "year" | "month" | "quarter" => Some((
+                        Type::Int {
+                            bits: IntSize::I32,
+                            unsigned: false,
+                            auto_increment: false,
                         },
                         None,
                     )),
+                    "date" => Some((Type::Date, None)),
+                    "now" => Some((
+                        Type::Timestamp {
+                            precision: None,
+                            with_tz: false,
+                        },
+                        None,
+                    )),
+                    // `coalesce` takes the type of its first argument.
+                    "coalesce" => match args.first() {
+                        Some(first) => {
+                            ExpressionWrapper(first.clone())
+                                .infer_type(
+                                    columns,
+                                    computed_types,
+                                    mapping,
+                                    introspector,
+                                    source_dialect,
+                                )
+                                .await
+                        }
+                        None => None,
+                    },
                     _ => None,
                 }
             }

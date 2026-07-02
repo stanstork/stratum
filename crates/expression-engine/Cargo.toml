@@ -8,6 +8,7 @@ license.workspace = true
 model = { path = "../model" }
 smql-syntax = { path = "../smql-syntax" }
 bigdecimal = "0.4"
+chrono = "0.4.39"
 tracing = "0.1"
 thiserror = "2.0"
 hex = "0.4"

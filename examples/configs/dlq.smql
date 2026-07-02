@@ -1,14 +1,17 @@
 // dlq.smql - Dead Letter Queue (DLQ): capturing rows that fail validation
 //
-// When a row fails a `validate` check with `action = fail`, Stratum can
-// route that row to a Dead Letter Queue instead of stopping the pipeline.
-// Configuring `on_error.failed_rows` writes the offending row - along with
-// its error details - to a separate destination table for later inspection
-// and reprocessing.
+// When a row fails a `validate` check with `action = fail`, Stratum writes the
+// offending row - along with its error details - to the dead-letter table
+// configured in `on_error.failed_rows`, and then aborts the pipeline. The DLQ
+// preserves the bad rows for inspection and reprocessing instead of losing
+// them when the run stops.
 //
-// This example migrates payment rows but rejects any with amount = 0.
-// Those zero-amount rows are saved to `payment_failures` in the destination
-// rather than crashing the pipeline.
+// (Note: `action = fail` stops the migration. Use `action = skip` to drop bad
+// rows and keep going - but skipped rows are NOT sent to the DLQ. The DLQ also
+// captures transformation/data errors, which do not stop the pipeline.)
+//
+// This example migrates payment rows and rejects any with amount = 0. The first
+// zero-amount payment is saved to `payment_failures` and the run then aborts.
 //
 // Run:
 //   stratum apply -c dlq.smql -e .env
@@ -40,11 +43,10 @@ pipeline "migrate_payments" {
         }
     }
 
-    // Any row that triggers a `fail` assertion ends up here.
-    // The pipeline continues processing remaining rows - nothing is silently lost.
+    // Any row that triggers the `fail` assertion is captured here before the
+    // pipeline aborts - so the bad row is preserved rather than silently lost.
     on_error {
         failed_rows {
-            action = "save_to_table"
             table {
                 connection = connection.dst
                 table      = "payment_failures"

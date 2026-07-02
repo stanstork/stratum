@@ -62,11 +62,26 @@ where
             Some(get_numeric_type(&lt, &rt))
         }
 
-        CompiledExpression::FunctionCall { name, .. } => match name.to_ascii_lowercase().as_str() {
-            "lower" | "upper" | "concat" | "env" => Some(Type::Varchar {
+        CompiledExpression::FunctionCall { name, args } => match name.to_ascii_lowercase().as_str()
+        {
+            "lower" | "upper" | "trim" | "concat" | "env" => Some(Type::Varchar {
                 length: None,
                 charset: None,
             }),
+            "year" | "month" | "quarter" => Some(Type::Int {
+                bits: IntSize::I32,
+                unsigned: false,
+                auto_increment: false,
+            }),
+            "date" => Some(Type::Date),
+            "now" => Some(Type::Timestamp {
+                precision: None,
+                with_tz: false,
+            }),
+            // `coalesce` takes the type of its first argument.
+            "coalesce" => args
+                .first()
+                .and_then(|first| infer_expression_type(first, column_lookup)),
             _ => None,
         },
 

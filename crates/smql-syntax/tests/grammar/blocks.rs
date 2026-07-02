@@ -328,34 +328,16 @@ pipeline "test" {
 }
 
 #[test]
-fn test_failed_rows_with_action_and_nested_block() {
+fn test_failed_rows_with_table_destination() {
     let input = r#"
 pipeline "test" {
   on_error {
     failed_rows {
-      action = "save_to_table"
-
       table {
         connection = connection.warehouse
         schema     = "errors"
         table      = "pipeline_failures"
       }
-    }
-  }
-}
-"#;
-    let result = SmqlParser::parse(Rule::program, input);
-    assert!(result.is_ok());
-}
-
-#[test]
-fn test_failed_rows_with_old_style_attributes() {
-    let input = r#"
-pipeline "test" {
-  on_error {
-    failed_rows {
-      action = "skip"
-      destination = connection.error_db.failed_rows
     }
   }
 }
@@ -447,15 +429,15 @@ plugin "stripe_src" {
 }
 
 #[test]
-fn test_parse_validate_block_with_wasm_rule() {
+fn test_parse_validate_block_with_plugin_check() {
     let input = r#"
 pipeline "p" {
     from { connection = connection.src }
     to   { connection = connection.dst }
     validate {
-        rule "fraud_screen" {
-            filter  = plugin.check_fraud({ amount: charges.amount, country: charges.country })
-            on_fail = skip
+        assert "fraud_screen" {
+            check  = plugin.check_fraud({ amount: charges.amount, country: charges.country })
+            action = skip
         }
     }
 }
@@ -465,7 +447,7 @@ pipeline "p" {
 }
 
 #[test]
-fn test_parse_validate_block_mixed_assert_and_wasm_rule() {
+fn test_parse_validate_block_mixed_expression_and_plugin_check() {
     let input = r#"
 pipeline "p" {
     from { connection = connection.src }
@@ -475,9 +457,9 @@ pipeline "p" {
             check = charges.amount > 0
             message = "amount must be positive"
         }
-        rule "fraud_screen" {
-            filter  = plugin.check_fraud({ amount: charges.amount })
-            on_fail = skip
+        assert "fraud_screen" {
+            check  = plugin.check_fraud({ amount: charges.amount })
+            action = skip
         }
     }
 }

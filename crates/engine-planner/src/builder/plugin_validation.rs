@@ -135,7 +135,7 @@ pub fn validate_transform_call(
     out
 }
 
-/// Validate a `validate { rule "..." { filter = plugin.x({...}) … } }` rule.
+/// Validate a plugin `check` in a `validate { assert "..." { check = plugin.x({...}) … } }` block.
 pub fn validate_filter_rule(
     pipeline: &str,
     rule: &ValidationRule,
@@ -151,7 +151,7 @@ pub fn validate_filter_rule(
             Diagnostic::info(
                 "PLUGIN_INPUT_SCHEMA_EMPTY",
                 &format!(
-                    "filter plugin '{}' (rule '{}') declares no input schema; skipping input type checks",
+                    "filter plugin '{}' (check '{}') declares no input schema; skipping input type checks",
                     plugin_name, rule.label
                 ),
             )
@@ -165,7 +165,7 @@ pub fn validate_filter_rule(
                 Diagnostic::error(
                     "PLUGIN_INPUT_UNMAPPED",
                     &format!(
-                        "filter rule '{}': plugin '{}' expects input field '{}' but the rule maps nothing to it",
+                        "filter check '{}': plugin '{}' expects input field '{}' but the check maps nothing to it",
                         rule.label, plugin_name, field.name
                     ),
                 )
@@ -178,7 +178,7 @@ pub fn validate_filter_rule(
                 Diagnostic::error(
                     "PLUGIN_INPUT_MISSING_COLUMN",
                     &format!(
-                        "filter rule '{}': input field '{}' maps to column '{}', which is not available",
+                        "filter check '{}': input field '{}' maps to column '{}', which is not available",
                         rule.label, field.name, src_col
                     ),
                 )
@@ -192,7 +192,7 @@ pub fn validate_filter_rule(
                 Diagnostic::warning(
                     "PLUGIN_INPUT_TYPE_LOSSY",
                     &format!(
-                        "filter rule '{}', field '{}': {} (column '{}' is {:?}, plugin expects {})",
+                        "filter check '{}', field '{}': {} (column '{}' is {:?}, plugin expects {})",
                         rule.label, field.name, note, src_col, src_ty, field.field_type
                     ),
                 )
@@ -202,7 +202,7 @@ pub fn validate_filter_rule(
                 Diagnostic::error(
                     "PLUGIN_INPUT_TYPE_MISMATCH",
                     &format!(
-                        "filter rule '{}', field '{}': plugin expects {}, column '{}' is {:?}",
+                        "filter check '{}', field '{}': plugin expects {}, column '{}' is {:?}",
                         rule.label, field.name, field.field_type, src_col, src_ty
                     ),
                 )

@@ -16,7 +16,10 @@ use engine_processing::{
 use model::integrity::{algorithm::HashAlgorithm, config::IntegrityConfig};
 use model::{
     events::migration::MigrationEvent,
-    execution::{pipeline::Pipeline, references::DataMode},
+    execution::{
+        pipeline::{Pipeline, WriteMode},
+        references::DataMode,
+    },
     records::batch::Batch,
 };
 use std::{
@@ -82,6 +85,10 @@ impl PipelineOrchestrator {
             info!("schema-only mode, skipping data migration");
             0
         } else {
+            // `replace` mode: clear the destination table before loading.
+            if matches!(self.pipeline.destination.mode, WriteMode::Replace) {
+                self.truncate_destination().await?;
+            }
             self.execute_pipeline().await?
         };
 
@@ -121,6 +128,16 @@ impl PipelineOrchestrator {
         }
 
         Ok(())
+    }
+
+    async fn truncate_destination(&self) -> Result<(), MigrationError> {
+        let table = &self.pipeline.destination.table;
+        info!(table = %table, "truncating destination table (replace mode)");
+        self.ctx
+            .destination
+            .truncate(table)
+            .await
+            .map_err(|e| MigrationError::PipelineFailed(e.to_string()))
     }
 
     fn is_schema_only(&self) -> bool {

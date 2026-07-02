@@ -34,6 +34,18 @@ pub fn eval_upper(args: &[Value], _ctx: &EvalContext) -> Result<Value> {
     }
 }
 
+/// Strip leading and trailing whitespace from a string
+pub fn eval_trim(args: &[Value], _ctx: &EvalContext) -> Result<Value> {
+    match args.first() {
+        Some(Value::String(s)) => Ok(Value::String(s.trim().to_string())),
+        Some(Value::Null) | None => Ok(Value::Null),
+        Some(other) => Err(ExpressionError::InvalidFunctionArgs {
+            function: "trim".to_string(),
+            message: format!("Expected string, got {:?}", other),
+        }),
+    }
+}
+
 /// Concatenate multiple values into a string
 pub fn eval_concat(args: &[Value], _ctx: &EvalContext) -> Result<Value> {
     let concatenated = args

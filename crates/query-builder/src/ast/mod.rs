@@ -10,3 +10,4 @@ pub mod expr;
 pub mod insert;
 pub mod merge;
 pub mod select;
+pub mod truncate_table;

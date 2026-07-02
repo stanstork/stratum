@@ -1,7 +1,7 @@
 use crate::io::sink::Sink;
 use async_trait::async_trait;
 use connectors::{
-    drivers::mysql::driver::MySqlDriver, sql::metadata::table::TableMetadata,
+    drivers::mysql::driver::MySqlDriver, error::DriverError, sql::metadata::table::TableMetadata,
     traits::writer::DataWriter,
 };
 use engine_core::schema::type_registry::{Dialect, TypeRegistry};
@@ -25,11 +25,11 @@ impl MySqlSink {
 
 #[async_trait]
 impl Sink for MySqlSink {
-    async fn write_batch(
-        &self,
-        meta: &TableMetadata,
-        rows: &[Record],
-    ) -> Result<u64, connectors::error::DriverError> {
+    async fn write_batch(&self, meta: &TableMetadata, rows: &[Record]) -> Result<u64, DriverError> {
         self.driver.write_batch(meta, rows).await
+    }
+
+    async fn truncate(&self, table: &str) -> Result<(), DriverError> {
+        self.driver.truncate(table).await
     }
 }

@@ -148,15 +148,7 @@ pub enum BackoffStrategy {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FailedRowsConfig {
-    pub action: FailedRowsAction,
     pub destination: Option<FailedRowsDestination>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum FailedRowsAction {
-    Skip,
-    Log,
-    SaveToTable,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -16,7 +16,7 @@ use crate::{
         span::Span,
         validation::{
             FailedRowsBlock, OnErrorBlock, RetryBlock, ValidateBlock, ValidationBody,
-            ValidationCheck, ValidationKind, WasmValidationRule,
+            ValidationCheck, ValidationKind,
         },
     },
     errors::BuildError,
@@ -502,50 +502,14 @@ fn build_field_mapping(pair: Pair<Rule>) -> BuildResult<FieldMapping> {
 fn build_validate_block(pair: Pair<Rule>) -> BuildResult<ValidateBlock> {
     let span = pair_to_span(&pair);
     let mut checks = Vec::new();
-    let mut wasm_rules = Vec::new();
 
     for inner in pair.into_inner() {
-        match inner.as_rule() {
-            Rule::validation_check => checks.push(build_validation_check(inner)?),
-            Rule::wasm_rule => wasm_rules.push(build_wasm_rule(inner)?),
-            _ => {}
+        if inner.as_rule() == Rule::validation_check {
+            checks.push(build_validation_check(inner)?);
         }
     }
 
-    Ok(ValidateBlock {
-        checks,
-        wasm_rules,
-        span,
-    })
-}
-
-fn build_wasm_rule(pair: Pair<Rule>) -> BuildResult<WasmValidationRule> {
-    let span = pair_to_span(&pair);
-    let mut name = String::new();
-    let mut filter: Option<PluginCall> = None;
-    let mut on_fail = String::new();
-
-    for inner in pair.into_inner() {
-        match inner.as_rule() {
-            Rule::lit_string => name = parse_string_literal(inner.as_str()),
-            Rule::plugin_call => filter = Some(build_plugin_call_inner(inner)?),
-            Rule::ident => on_fail = inner.as_str().to_string(),
-            _ => {}
-        }
-    }
-
-    let filter = filter.ok_or_else(|| BuildError {
-        message: format!("wasm rule '{}': missing `filter = plugin_call(...)`", name),
-        line: span.line,
-        column: span.column,
-    })?;
-
-    Ok(WasmValidationRule {
-        name,
-        filter,
-        on_fail,
-        span,
-    })
+    Ok(ValidateBlock { checks, span })
 }
 
 fn build_plugin_call_inner(pair: Pair<Rule>) -> BuildResult<PluginCall> {

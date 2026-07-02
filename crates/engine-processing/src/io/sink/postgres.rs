@@ -121,6 +121,10 @@ impl Sink for PostgresSink {
         Ok(count)
     }
 
+    async fn truncate(&self, table: &str) -> Result<(), DriverError> {
+        self.driver.truncate(table).await
+    }
+
     async fn support_fast_path(&self) -> Result<bool, SinkError> {
         let capabilities = self.driver.capabilities();
         // Fast path requires COPY protocol support

@@ -277,9 +277,9 @@ pipeline "fact_orders" {
   }
 
   paginate {
-    using      = "timestamp"
-    column     = orders.updated_at
-    tiebreaker = orders.id
+    strategy   = "timestamp"
+    cursor     = "orders.updated_at"
+    tiebreaker = "orders.id"
   }
 }
 ```
@@ -346,9 +346,9 @@ pipeline "customers" {
   }
 
   validate {
-    rule "positive_balance" {
-      filter  = plugin.is_positive({ value: customers.balance })   // filter plugin
-      on_fail = skip
+    assert "positive_balance" {
+      check  = plugin.is_positive({ value: customers.balance })   // filter plugin
+      action = skip
     }
   }
 }
@@ -417,6 +417,8 @@ Rough direction (not commitments):
 
 - Additional destinations (MySQL sink, more connectors)
 - Change-data-capture for incremental sync
+- Multiple-table union sources (`from` reading several tables)
+- Configurable connection pooling (pool size, timeouts)
 - Published binaries and crates
 - Plugin host capabilities (HTTP, key-value) beyond the current stubs
 

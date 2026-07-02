@@ -8,7 +8,8 @@ SMQL (Stratum Migration Query Language) is a declarative, SQL-inspired language 
 - [Top-Level Blocks](#top-level-blocks)
   - [connection](#connection)
   - [define](#define)
-  - [transform](#transform)
+  - [execution](#execution)
+  - [plugin](#plugin)
   - [pipeline](#pipeline)
 - [Pipeline Blocks](#pipeline-blocks)
   - [from](#from)
@@ -47,21 +48,12 @@ Defines a named data source or destination. Referenced inside pipelines via `con
 connection "mysql_prod" {
   driver = "mysql"
   url    = env("SOURCE_DB_URL")  // required
-
-  pool {
-    max_size = env("DB_POOL_SIZE", 20)  // optional, with default
-  }
 }
 
 connection "warehouse_pg" {
   driver = "postgres"
   url    = env("DEST_DB")
   schema = "analytics"   // optional (Postgres); defaults to "public"
-
-  pool {
-    max_size = 50
-    timeout  = "60s"
-  }
 }
 ```
 
@@ -72,12 +64,9 @@ Unqualified reads, writes, and created tables target it (via `search_path`), and
 metadata introspection is scoped to it. Defaults to `public`. The schema must
 already exist. For MySQL, the schema is the database in the connection URL.
 
-**pool options:**
-
-| Key | Type | Description |
-|-----|------|-------------|
-| `max_size` | integer | Maximum number of pooled connections |
-| `timeout` | string | Connection timeout (e.g. `"30s"`, `"60s"`) |
+> **Connection pooling is not yet configurable.** Pool sizing and connection
+> timeouts are planned; for now the driver defaults are used. Track it in the
+> roadmap.
 
 ---
 
@@ -107,30 +96,53 @@ select {
 
 ---
 
-### transform
+### execution
 
-Defines a reusable named transformation. Takes typed input, returns an expression output. Called in `select` blocks via `transform.<name>(arg)`.
+Optional top-level block (singleton, no name) that controls how the pipeline
+DAG runs. Independent pipelines at the same dependency level can run
+concurrently. Defaults to sequential, fail-fast.
 
 ```smql
-transform "normalize_email" {
-  input  = string
-  output = lower(trim(input))
-}
-
-transform "calculate_tax" {
-  input  = number
-  output = input * define.tax_rate
+execution {
+  strategy        = "parallel"   // "sequential" (default) | "parallel"
+  max_concurrency = 4            // required for "parallel"; 1-100
+  on_failure      = "continue"   // "fail_fast" (default) | "continue"
 }
 ```
 
-Usage in a pipeline:
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `strategy` | string | `"sequential"` | `"sequential"` runs pipelines one at a time; `"parallel"` runs independent pipelines (same DAG level) concurrently |
+| `max_concurrency` | integer (1-100) | – | Max pipelines running at once. **Required** when `strategy = "parallel"` |
+| `on_failure` | string | `"fail_fast"` | `"fail_fast"` stops the whole run on the first failure; `"continue"` skips a failed pipeline's dependents but keeps running independent ones |
+
+> `pipeline_timeout` / `total_timeout` (duration strings such as `"30s"`) are
+> accepted by the parser but not yet enforced.
+
+---
+
+### plugin
+
+Declares a WASM/JS plugin (one per name) usable as a transform, filter, source,
+or sink. A `.js` file is compiled to WASM on first use; a prebuilt `.wasm` is
+loaded as-is. Capabilities are denied by default (only logging is on).
 
 ```smql
-select {
-  email = transform.normalize_email(customers.email)
-  tax   = transform.calculate_tax(orders.subtotal)
+plugin "normalize" {
+  path = "plugins/normalize.js"   // required
+
+  // Optional capabilities / limits:
+  allow_http         = false
+  allow_log          = true
+  memory_limit_bytes = 134217728   // 128 MB
+  fuel_limit         = 100000000
+  timeout_ms         = 30000
 }
 ```
+
+Use it in `select` (`col = plugin.name({ field: source.col })`) or as a
+`validate` check (see [validate](#validate)). Full authoring guide, roles,
+capabilities, and resource limits: [docs/plugins/](plugins/README.md).
 
 ---
 
@@ -177,16 +189,17 @@ from {
 }
 ```
 
-**Multiple tables (implicit union):**
-```smql
+**Multiple-table union (planned - not yet implemented).** A `from` block
+currently reads a single `table`. The intended syntax, for reference only:
+
+```text
+// PLANNED - not yet supported
 from {
   connection = connection.mysql_prod
-  tables     = ["orders_2023", "orders_2024"]  // Union
+  tables     = ["orders_2023", "orders_2024"]   // implicit union
 }
-```
 
-**Explicit union with per-table filters:**
-```smql
+// PLANNED - per-table filters
 from {
   connection = connection.mysql_prod
   union {
@@ -224,14 +237,20 @@ to {
 }
 ```
 
-**mode values:**
+**mode values** - the destination's pre-load state (truncate vs. keep):
 
 | Mode | Behavior |
 |------|----------|
-| `"replace"` | Truncate destination table and reload |
-| `"append"` | Insert new rows, keep existing |
-| `"upsert"` | Insert or update on conflict |
-| `"merge"` | Full merge based on key columns |
+| `"append"` *(default)* | Load rows, keeping any existing ones |
+| `"replace"` | Truncate the destination table, then load |
+
+> **Row-level write strategy is a separate, currently-automatic axis.** How each
+> row is written is orthogonal to truncate-vs-append: when the destination
+> supports bulk COPY and the table has a primary key, rows are **upserted** (COPY
+> into a staging table, then MERGE on the primary key); otherwise they are plain
+> **inserted**. This is automatic and not yet configurable - choosing the strategy
+> and conflict keys explicitly (a planned `on_conflict` setting) isn't available,
+> and passing `mode = "upsert"` / `"merge"` is a build error.
 
 **With table renaming for graph pipelines:**
 ```smql
@@ -251,7 +270,8 @@ to {
 
 ### where
 
-Named row-level filter. The name makes it reusable and self-documenting.
+Row-level filter with an optional name. The name is a self-documenting label
+(it appears in plan output and diagnostics); it isn't referenced elsewhere.
 
 ```smql
 where "active_only" {
@@ -268,7 +288,7 @@ where "valid_orders" {
 }
 ```
 
-**Operators:** `==`, `!=`, `>`, `<`, `>=`, `<=`, `is null`, `is not null`, `matches "regex"`
+**Operators:** `==`, `!=`, `>`, `<`, `>=`, `<=`, `is null`, `is not null`
 
 ---
 
@@ -278,19 +298,28 @@ Compact multi-join syntax. Each line declares: `alias from table where join_cond
 
 ```smql
 with {
-  users     from users     where users.id == orders.user_id
-  products  from products  where products.id == order_items.product_id
-  regions   from regions   where regions.id == orders.region_id
+  order_items from order_items where order_items.order_id == orders.id
+  users       from users       where users.id == orders.user_id
+  products    from products     where products.id == order_items.product_id
+  regions     from regions      where regions.id == orders.region_id
 }
 ```
 
-All joined tables become available in `where`, `select`, and `validate` blocks.
+Every table used in a join condition must itself be joined (here `order_items`
+is joined before `products` references it). All joined tables become available in
+`where`, `select`, and `validate` blocks.
 
 ---
 
 ### select
 
 Field mapping block. Syntax is `destination_col = expression`.
+
+> **`select` *adds* columns; by default it doesn't restrict them.** With the
+> default `copy_columns = "all"`, the destination gets **every source column plus**
+> the ones you define here - so a `select` that lists a few columns still emits all
+> the others too. To output *only* the columns in `select`, set
+> `copy_columns = "map_only"` in [settings](#settings).
 
 **Simple column copy:**
 ```smql
@@ -347,20 +376,6 @@ select {
 }
 ```
 
-**`coalesce` (null fallback):**
-```smql
-select {
-  display_name = coalesce(customers.nickname, customers.name, "Anonymous")
-}
-```
-
-**Reusable transform:**
-```smql
-select {
-  email = transform.normalize_email(customers.email)
-}
-```
-
 **Named select for graph-referenced tables** (see [Graph References](#graph-references)):
 ```smql
 // Primary table (unnamed)
@@ -381,7 +396,7 @@ select "users" {
 
 ### validate
 
-Data quality checks run per row before writing. Two rule types:
+Data quality checks run per row before writing. Two check kinds:
 
 - `assert` - on failure: `skip` the row, `fail` the pipeline, or `warn` and continue
 - `warn` - always continues, logs a warning
@@ -395,8 +410,8 @@ validate {
   }
 
   assert "valid_email" {
-    check   = customer_email matches "^[^@]+@[^@]+\.[^@]+$"
-    message = "Invalid email format"
+    check   = customer_email is not null
+    message = "Email is required"
     action  = skip
   }
 
@@ -416,66 +431,116 @@ validate {
 
 | Action | Behavior |
 |--------|----------|
-| `skip` | Drop the row, continue pipeline |
-| `fail` | Abort the pipeline with an error |
-| `warn` | Log a warning, write the row |
+| `skip` | Drop the row and continue - the row is **not** written anywhere (no DLQ) |
+| `fail` | Send the row to the dead-letter queue (if configured), then abort the pipeline |
+| `warn` | Log a warning and write the row to the destination |
+
+> **DLQ routing:** only `fail` rows reach the dead-letter queue configured in
+> [`on_error.failed_rows`](#on_error). A `fail` row is written to the DLQ *and*
+> stops the pipeline; `skip` silently drops the row without persisting it. (The
+> DLQ also captures rows that hit transformation/data errors, which do not stop
+> the pipeline.)
+
+**Plugin checks** - a `check` can be a filter plugin call instead of an
+expression (see [plugin](#plugin)). The plugin returns a boolean verdict per
+row, and `action` decides what happens when it rejects:
+
+```smql
+validate {
+  assert "positive_balance" {
+    check  = plugin.is_positive({ value: customers.balance })
+    action = skip   // skip | fail | warn
+  }
+}
+```
+
+Expression checks are compiled and run by the expression engine; plugin checks
+are dispatched to the WASM/JS runtime by the same per-row validator. A plugin
+call is only allowed as the *entire* `check` - it cannot be embedded inside a
+larger expression. When a plugin rejects a row, the reason it returns is used as
+the failure message, so `message` is typically omitted for plugin checks.
 
 ---
 
 ### on_error
 
-Configures retry behavior, dead-letter routing, and alerting.
+Configures retry behavior and dead-letter routing for rows that fail
+validation or transformation.
 
 ```smql
 on_error {
+  // Retry transient read/write failures before giving up.
   retry {
     max_attempts = 3
-    backoff      = "5s"
+    delay_ms     = 500   // base delay; grows exponentially per attempt
   }
 
+  // Route failed rows to a dead-letter table instead of aborting.
   failed_rows {
-    table = "failed_orders"
-  }
-
-  alert {
-    email = "team@example.com"
+    table {
+      connection = connection.dst
+      table      = "payment_failures"
+      // schema  = "errors"   // optional (Postgres)
+    }
   }
 }
 ```
 
-**Compact form:**
+`failed_rows` needs a **nested destination block** - either `table { … }` (as
+above) or `file { … }` for a JSON dead-letter file:
+
 ```smql
 on_error {
-  retry      { max_attempts = 3, backoff = "5s" }
-  failed_rows { table = "errors" }
-  alert      { email = "team@example.com" }
+  failed_rows {
+    file {
+      path   = "/tmp/inventory_failures.jsonl"
+      format = "json"   // only "json" is supported today; optional
+    }
+  }
 }
 ```
+
+**Notes:**
+- `retry` reads `max_attempts` (default 3) and `delay_ms` (base delay, default
+  1000). The per-attempt delay grows exponentially from `delay_ms`; the backoff
+  strategy itself is not yet configurable.
+- A `failed_rows` block without a nested `table`/`file` destination just counts
+  failures without persisting them.
 
 ---
 
 ### paginate
 
-Controls how the source table is paginated. Required for large tables or incremental loads.
+Optional. Controls how the source table is paginated during a snapshot read.
+If omitted, Stratum uses offset-based pagination (the `default` strategy).
+Column names are given as **quoted strings**, not column references.
 
 ```smql
 paginate {
-  using      = "timestamp"
-  column     = orders.updated_at
-  tiebreaker = orders.id
+  strategy   = "timestamp"
+  cursor     = "updated_at"
+  tiebreaker = "id"
   timezone   = "UTC"
 }
 ```
 
-**using strategies:**
+**strategy values:**
 
-#### `"pk"` - Primary Key (default)
-Best for tables with auto-increment IDs.
+#### `"default"` - Offset / Limit (used when `paginate` is omitted)
+Plain `LIMIT/OFFSET` paging; no cursor column needed. Simplest, but slower on
+large tables because later pages scan past all earlier rows.
+
+```smql
+paginate { strategy = "default" }
+```
+
+#### `"pk"` - Primary Key
+Keyset pagination on a monotonic primary key.
 
 ```smql
 paginate {
-  using  = "pk"
-  column = orders.id  // defaults to id if omitted
+  strategy = "pk"
+  cursor   = "id"   // defaults to "id" if omitted
 }
 ```
 
@@ -485,13 +550,14 @@ WHERE id > :last_cursor ORDER BY id LIMIT :batch_size
 ```
 
 #### `"numeric"` - Numeric Column
-For paginating by any numeric column that isn't the PK.
+For paginating by any numeric column that isn't the PK. Requires a `tiebreaker`
+for stable ordering.
 
 ```smql
 paginate {
-  using      = "numeric"
-  column     = events.sequence_num
-  tiebreaker = events.id
+  strategy   = "numeric"
+  cursor     = "sequence_num"
+  tiebreaker = "id"
 }
 ```
 
@@ -503,13 +569,13 @@ ORDER BY sequence_num, id LIMIT :batch_size
 ```
 
 #### `"timestamp"` - Timestamp Column
-For incremental / CDC-like loads.
+For incremental / CDC-like loads. Requires a `tiebreaker`.
 
 ```smql
 paginate {
-  using      = "timestamp"
-  column     = orders.updated_at
-  tiebreaker = orders.id
+  strategy   = "timestamp"
+  cursor     = "updated_at"
+  tiebreaker = "id"
   timezone   = "UTC"
 }
 ```
@@ -525,10 +591,10 @@ ORDER BY updated_at, id LIMIT :batch_size
 
 | Key | Required | Description |
 |-----|----------|-------------|
-| `using` | Yes | Strategy: `"pk"`, `"numeric"`, `"timestamp"` |
-| `column` | Conditional | Pagination column. Defaults to `id` for `pk` |
-| `tiebreaker` | Conditional | PK for stable ordering when cursor is non-unique |
-| `timezone` | No | IANA timezone for timestamp strategy (default: `"UTC"`) |
+| `strategy` | No | `"default"` (offset), `"pk"`, `"numeric"`, or `"timestamp"`. Defaults to `"default"` |
+| `cursor` | Conditional | Pagination column name (string). Defaults to `"id"`; set it for `numeric`/`timestamp` |
+| `tiebreaker` | Conditional | PK column name (string) for stable ordering; **required** for `numeric` and `timestamp` |
+| `timezone` | No | IANA timezone for the `timestamp` strategy (default: `"UTC"`) |
 
 ---
 
@@ -563,9 +629,9 @@ Per-pipeline configuration overrides.
 
 ```smql
 settings {
-  batch_size = env("batch_size")
-  workers    = 4
-  checkpoint = every_batch
+  batch_size            = env("batch_size")
+  create_missing_tables = true
+  copy_columns          = "all"   // "all" | "map_only"
 }
 ```
 
@@ -574,10 +640,15 @@ settings {
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `batch_size` | integer | `1000` | Rows per batch |
-| `workers` | integer | `4` | Parallel worker count |
-| `checkpoint` | enum | `every_batch` | When to checkpoint state |
-| `create_missing_tables` | bool | `false` | Auto-create destination table if missing |
-| `offset_strategy` | string | `"pk"` | Default pagination strategy |
+| `create_missing_tables` | bool | `false` | Create the destination table if it doesn't exist |
+| `create_missing_columns` | bool | `false` | Add missing columns to an existing destination table |
+| `infer_schema` | bool | `false` | Infer the destination schema from the source |
+| `ignore_constraints` | bool | `false` | Skip creating foreign keys / constraints on the destination |
+| `cascade_schema` | bool | `false` | Also create schema for graph-referenced (cascaded) tables |
+| `copy_columns` | enum | `"all"` | `"all"` copies every source column; `"map_only"` copies only mapped/`select`ed columns |
+| `csv_header` | bool | `true` | (CSV) treat the first row as a header |
+| `csv_delimiter` | char | `,` | (CSV) field delimiter |
+| `csv_id_column` | string | – | (CSV) column to use as the row identifier |
 
 ---
 
@@ -592,6 +663,7 @@ Expressions are used in `select`, `where`, `validate` and `define`.
 42                    // integer
 3.14                  // float
 true / false          // boolean
+null                  // null
 "2024-01-01"          // date string
 ```
 
@@ -620,15 +692,16 @@ col > 100
 col >= define.cutoff_date
 col is null
 col is not null
-col matches "^[A-Z]+"   // regex match
 ```
 
 ### Logical Operators
 
 ```smql
 condition_a and condition_b
-condition_a or condition_b
+condition_a or  condition_b
 ```
+
+`&&` and `||` are accepted as aliases for `and` and `or`.
 
 ### Functions
 
@@ -639,11 +712,22 @@ condition_a or condition_b
 | `trim(s)` | Strip whitespace | `trim(users.name)` |
 | `concat(a, b, ...)` | String concatenation | `concat(users.first, " ", users.last)` |
 | `coalesce(a, b, ...)` | First non-null value | `coalesce(users.nick, users.name, "N/A")` |
-| `date(ts)` | Extract date part | `date(orders.created_at)` |
-| `year(ts)` | Extract year | `year(orders.created_at)` |
-| `month(ts)` | Extract month | `month(orders.created_at)` |
-| `quarter(ts)` | Extract quarter | `quarter(orders.created_at)` |
-| `now()` | Current timestamp | `now()` |
+| `date(ts)` | Date value (drops the time component) | `date(orders.created_at)` |
+| `year(ts)` | Year as an integer | `year(orders.created_at)` |
+| `month(ts)` | Month (1-12) as an integer | `month(orders.created_at)` |
+| `quarter(ts)` | Quarter (1-4) as an integer | `quarter(orders.created_at)` |
+| `now()` | Current UTC timestamp | `now()` |
+| `env(name, [default])` | Environment variable value | `env("REGION", "us-east-1")` |
+
+`date` returns the date with the time dropped, while `year`, `month`, and
+`quarter` return integers. They require a timestamp or date input - a
+non-temporal value (e.g. a string) raises an error - and return `null` when the
+input is `null`. `coalesce` returns the first non-null argument (or `null` if
+all are null) and takes the type of its first argument when a computed column is
+auto-created. `now()` returns the current UTC
+timestamp. `env("VAR")` requires the variable and fails if it is unset;
+`env("VAR", default)` returns the variable parsed to the default's type, or the
+default when the variable is unset (see [Environment Variables](#environment-variables)).
 
 ### `when` Expression
 
@@ -672,7 +756,7 @@ columns are evaluated top to bottom, so later ones build on earlier ones:
 
 ```smql
 select {
-  net_total = orders.total - orders.discount   // computed column
+  net_total = orders.total - orders.discount    // computed column
   tier      = when {                            // references it
     net_total > 100 then "gold"
     net_total > 50  then "silver"
@@ -687,7 +771,7 @@ transforms run before computed columns, so the value is available:
 
 ```smql
 select {
-  category = plugin.classify({ text: article.body })   // plugin -> own column
+  category = plugin.classify({ text: article.body })     // plugin -> own column
   label    = when {                                      // then branch on it
     category == "spam" then "blocked"
     else "ok"
@@ -697,10 +781,43 @@ select {
 
 ### Environment Variables
 
+`env(...)` reads a value from the environment at load time. It can be used
+anywhere an expression is valid - most commonly a `connection.url`, a `define`,
+or a setting - so secrets and per-environment values stay out of the config
+file.
+
 ```smql
-env("VAR_NAME")           // required - error if missing
-env("VAR_NAME", "default") // optional with fallback
+connection "src" {
+  driver = "postgres"
+  url    = env("DATABASE_URL")            // required
+}
+
+settings {
+  batch_size = env("BATCH_SIZE", 1000)    // optional, typed default
+}
 ```
+
+**Two forms:**
+
+| Form | Behavior |
+|------|----------|
+| `env("VAR")` | Required. Returns the variable as a string. Fails at load time if the variable is unset. |
+| `env("VAR", default)` | Optional. If the variable is set, its value is parsed to the **type of `default`**; if unset, `default` is used as-is. |
+
+**Type coercion** follows the default's type:
+
+| Default example | Env `"120"` becomes | Notes |
+|-----------------|---------------------|-------|
+| `env("N", 10)` | `120` (integer) | Non-negative integer default → unsigned |
+| `env("R", 1.5)` | `120.0` (float) | Whole-number floats accept integer input |
+| `env("FLAG", false)` | - | `"true"`/`"false"` (case-insensitive) → boolean |
+| `env("NAME", "x")` | `"120"` (string) | No coercion |
+
+If the variable is set but cannot be parsed to the default's type (e.g.
+`env("N", 10)` with `N="abc"`), loading fails with an error.
+
+**Resolution:** values come from the process environment, overlaid by a file
+passed with `-e/--env-file` (file values win on conflict).
 
 ---
 
@@ -863,7 +980,9 @@ pipeline "migrate_orders" {
 
 ## Complete Example
 
-E-Commerce pipeline showing all features:
+An e-commerce warehouse showing every pipeline block together - a star schema
+built from explicit dimension/fact pipelines, plus a graph-cascade pipeline
+that auto-follows FK references (`with references`, `map`, and named `select`).
 
 ```smql
 // ================================================================
@@ -876,6 +995,13 @@ define {
   active_status = "active"
 }
 
+// Run independent pipelines (e.g. the dimensions) concurrently.
+execution {
+  strategy        = "parallel"
+  max_concurrency = 3
+  on_failure      = "fail_fast"
+}
+
 // ================================================================
 // Connections
 // ================================================================
@@ -883,22 +1009,11 @@ define {
 connection "mysql_prod" {
   driver = "mysql"
   url    = env("source_db")
-  pool { max_size = 20 }
 }
 
 connection "postgres_warehouse" {
   driver = "postgres"
   url    = env("dest_db")
-  pool { max_size = 50 }
-}
-
-// ================================================================
-// Reusable transforms
-// ================================================================
-
-transform "normalize_email" {
-  input  = string
-  output = lower(trim(input))
 }
 
 // ================================================================
@@ -926,15 +1041,15 @@ pipeline "dim_customers" {
   select {
     customer_key    = customers.id
     customer_name   = customers.name
-    customer_email  = transform.normalize_email(customers.email)
+    customer_email  = lower(trim(customers.email))
     customer_segment = customers.segment
     created_at      = customers.created_at
   }
 
   validate {
     assert "valid_email" {
-      check   = customer_email matches "^[^@]+@[^@]+\.[^@]+$"
-      message = "Invalid email format"
+      check   = customer_email is not null
+      message = "Email is required"
       action  = skip
     }
   }
@@ -1013,15 +1128,16 @@ pipeline "fact_orders" {
 
   where "valid_orders" {
     orders.status == define.active_status
-    and orders.total > 0
-    and orders.created_at >= define.cutoff_date
+    orders.total > 0
+    orders.created_at >= define.cutoff_date
   }
 
-  // Join dimension tables
+  // Join related source tables (all in mysql_prod)
   with {
-    customers from dim_customers where customers.customer_key == orders.user_id
-    products  from dim_products  where products.product_key  == order_items.product_id
-    regions   from dim_regions   where regions.region_key    == orders.region_id
+    order_items from order_items where order_items.order_id == orders.id
+    customers   from customers   where customers.id == orders.user_id
+    products    from products     where products.id == order_items.product_id
+    regions     from regions      where regions.id == orders.region_id
   }
 
   select {
@@ -1032,14 +1148,18 @@ pipeline "fact_orders" {
     region_key    = orders.region_id
 
     // Customer dimensions
-    customer_name    = customers.customer_name
-    customer_email   = customers.customer_email
-    customer_segment = customers.customer_segment
+    customer_name    = customers.name
+    customer_email   = lower(trim(customers.email))
+    customer_segment = customers.segment
 
     // Product dimensions
-    product_name = products.product_name
+    product_name = products.name
     category     = products.category
     list_price   = products.price
+
+    // Region dimensions
+    region_name = regions.name
+    country     = regions.country
 
     // Order metrics
     quantity    = order_items.quantity
@@ -1091,25 +1211,28 @@ pipeline "fact_orders" {
     }
 
     warn "missing_customer" {
-      check   = customers.customer_key is not null
-      message = "Customer not found in dimension"
+      check   = customers.id is not null
+      message = "Customer not found"
     }
   }
 
   on_error {
     retry {
       max_attempts = 3
-      backoff      = "5s"
+      delay_ms     = 500
     }
     failed_rows {
-      table = "fact_orders_errors"
+      table {
+        connection = connection.postgres_warehouse
+        table      = "fact_orders_errors"
+      }
     }
   }
 
   paginate {
-    using      = "timestamp"
-    column     = orders.updated_at
-    tiebreaker = orders.id
+    strategy   = "timestamp"
+    cursor     = "orders.updated_at"
+    tiebreaker = "orders.id"
     timezone   = "UTC"
   }
 
@@ -1133,9 +1256,52 @@ pipeline "fact_orders" {
   }
 
   settings {
-    batch_size = env.batch_size
-    workers    = 8
-    checkpoint = every_batch
+    batch_size            = env("batch_size")
+    create_missing_tables = true
+  }
+}
+
+// ================================================================
+// Graph cascade - migrate a table and auto-follow its FK references
+// (an alternative to declaring each referenced table by hand)
+// ================================================================
+
+pipeline "suppliers_graph" {
+  description = "Migrate suppliers and everything they reference"
+
+  from {
+    connection = connection.mysql_prod
+    table      = "suppliers"
+
+    // Discover and migrate FK-dependent tables (contacts, addresses, ...)
+    with references {
+      data    = cascade          // copy referenced rows too (default: schema_only)
+      depth   = all              // follow every FK level
+      exclude = ["audit_*"]      // skip audit tables (wildcards allowed)
+    }
+  }
+
+  to {
+    connection = connection.postgres_warehouse
+    mode       = "replace"
+
+    // Rename tables at the destination; unmapped tables keep their names.
+    map {
+      suppliers = "dim_suppliers"
+      contacts  = "dim_contacts"
+    }
+  }
+
+  // Field mapping for the primary (entry) table.
+  select {
+    supplier_key = suppliers.id
+    supplier_name = suppliers.name
+  }
+
+  // Named select: field mapping for a referenced (cascaded) table.
+  select "contacts" {
+    contact_key = contacts.id
+    email       = lower(trim(contacts.email))
   }
 }
 ```

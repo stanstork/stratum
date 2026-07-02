@@ -32,4 +32,15 @@ impl DataWriter for MySqlDriver {
 
         Ok(result.affected_rows())
     }
+
+    async fn truncate(&self, table: &str) -> Result<(), DriverError> {
+        let (sql, _) = QueryGenerator::new(&dialect::MySql).truncate_table(table);
+        debug!(table = %table, "truncating table");
+
+        let mut conn = self.pool().get_conn().await?;
+        conn.query_drop(&sql)
+            .await
+            .map_err(|e| DriverError::QueryError(format!("{:?}", e)))?;
+        Ok(())
+    }
 }

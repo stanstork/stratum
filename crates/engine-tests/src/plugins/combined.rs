@@ -35,9 +35,9 @@ mod tests {
                 }}
 
                 validate {{
-                    rule "positive_id" {{
-                        filter  = plugin.posfilter({{ value: counter.id }})
-                        on_fail = skip
+                    assert "positive_id" {{
+                        check  = plugin.posfilter({{ value: counter.id }})
+                        action = skip
                     }}
                 }}
 

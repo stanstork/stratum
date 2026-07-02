@@ -79,6 +79,10 @@ impl Destination {
         self.sink.prepare().await
     }
 
+    pub async fn truncate(&self, table: &str) -> Result<(), DriverError> {
+        self.sink.truncate(table).await
+    }
+
     pub async fn finalize(&self) -> Result<(), DriverError> {
         self.sink.finalize().await
     }

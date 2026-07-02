@@ -252,9 +252,6 @@ impl SemanticValidator {
             for check in &validate.checks {
                 self.validate_expression(&check.body.check);
             }
-            for rule in &validate.wasm_rules {
-                self.validate_wasm_rule(rule);
-            }
         }
 
         if let Some(on_error) = &block.on_error_block {
@@ -429,19 +426,6 @@ impl SemanticValidator {
                 ));
             }
             _ => {}
-        }
-    }
-
-    /// Validate a WASM filter rule inside a `validate { … }` block: the
-    /// referenced plugin must be declared.
-    fn validate_wasm_rule(&mut self, rule: &crate::ast::validation::WasmValidationRule) {
-        if !self.symbols.plugins.contains_key(&rule.filter.plugin_name) {
-            self.issues.add_error(ValidationIssue::error(
-                ValidationIssueKind::UndefinedPlugin {
-                    name: rule.filter.plugin_name.clone(),
-                },
-                rule.filter.span,
-            ));
         }
     }
 

@@ -11,7 +11,7 @@ mod tests {
 
     /// Build an SMQL doc for `customer -> <dest>` with a single filter rule. The
     /// JS `test_filter` plugin is declared as `positive`.
-    fn smql(dest_table: &str, filter_field: &str, on_fail: &str) -> String {
+    fn smql(dest_table: &str, filter_field: &str, action: &str) -> String {
         format!(
             r#"
             plugin "positive" {{ path = "{plugin}" }}
@@ -35,9 +35,9 @@ mod tests {
                 }}
 
                 validate {{
-                    rule "must_be_positive" {{
-                        filter  = plugin.positive({{ value: customer.{field} }})
-                        on_fail = {on_fail}
+                    assert "must_be_positive" {{
+                        check  = plugin.positive({{ value: customer.{field} }})
+                        action = {action}
                     }}
                 }}
 
@@ -51,11 +51,11 @@ mod tests {
             plugin = fixture("test_filter_js.wasm"),
             dest = dest_table,
             field = filter_field,
-            on_fail = on_fail,
+            action = action,
         )
     }
 
-    /// `on_fail = skip` drops the rows the filter rejects (here: `active = 0`),
+    /// `action = skip` drops the rows the filter rejects (here: `active = 0`),
     /// migrating only the rows that pass.
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
@@ -104,7 +104,7 @@ mod tests {
         assert_eq!(migrated, total, "no rows should be filtered when all pass");
     }
 
-    /// `on_fail = fail` aborts the pipeline on the first rejected row; with a
+    /// `action = fail` aborts the pipeline on the first rejected row; with a
     /// single batch covering all customers, nothing is written.
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]

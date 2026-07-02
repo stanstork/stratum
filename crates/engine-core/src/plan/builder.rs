@@ -8,11 +8,10 @@ use model::{
         execution_config::{ExecutionConfig, ExecutionStrategy, FailureStrategy},
         expr::{BinaryOp, CompiledExpression, UnaryOp, WhenBranch},
         pipeline::{
-            BackoffStrategy, DataDestination, DataSource, ErrorHandling, FailedRowsAction,
-            FailedRowsConfig, FailedRowsDestination, FileFormat, Filter, Join, LifecycleHooks,
-            Pagination, Pipeline, PluginTransformCall, RetryConfig, Transformation,
-            ValidationAction, ValidationKind as RuleKind, ValidationRule, ValidationSeverity,
-            WriteMode,
+            BackoffStrategy, DataDestination, DataSource, ErrorHandling, FailedRowsConfig,
+            FailedRowsDestination, FileFormat, Filter, Join, LifecycleHooks, Pagination, Pipeline,
+            PluginTransformCall, RetryConfig, Transformation, ValidationAction,
+            ValidationKind as RuleKind, ValidationRule, ValidationSeverity, WriteMode,
         },
         plugin::PluginDecl,
         properties::Properties,
@@ -52,7 +51,7 @@ const ATTR_CURSOR: &str = "cursor";
 const ATTR_TIEBREAKER: &str = "tiebreaker";
 const ATTR_TIMEZONE: &str = "timezone";
 const ATTR_MAX_ATTEMPTS: &str = "max_attempts";
-const ATTR_ACTION: &str = "action";
+const ATTR_DELAY_MS: &str = "delay_ms";
 const ATTR_PATH: &str = "path";
 const ATTR_FORMAT: &str = "format";
 const ATTR_SCHEMA: &str = "schema";
@@ -85,8 +84,7 @@ const DEFAULT_CURSOR: &str = "id";
 
 // Write modes
 const MODE_INSERT: &str = "insert";
-const MODE_UPDATE: &str = "update";
-const MODE_UPSERT: &str = "upsert";
+const MODE_APPEND: &str = "append";
 const MODE_REPLACE: &str = "replace";
 
 // Validation actions
@@ -94,10 +92,6 @@ const ACTION_SKIP: &str = "skip";
 const ACTION_FAIL: &str = "fail";
 const ACTION_WARN: &str = "warn";
 const ACTION_CONTINUE: &str = "continue";
-
-// Failed rows actions
-const FAILED_ACTION_LOG: &str = "log";
-const FAILED_ACTION_SAVE_TO_TABLE: &str = "save_to_table";
 
 // File formats
 const FORMAT_JSON: &str = "json";
@@ -427,22 +421,21 @@ impl PlanBuilder {
             })
             .unwrap_or_default();
 
-        let mode = to
-            .attributes
-            .iter()
-            .find(|a| a.key.name == ATTR_MODE)
-            .and_then(|a| self.eval_with_definitions(&a.value).ok())
-            .and_then(|v| match v {
+        let mode = match to.attributes.iter().find(|a| a.key.name == ATTR_MODE) {
+            None => WriteMode::Insert,
+            Some(attr) => match self.eval_with_definitions(&attr.value)? {
                 Value::String(s) => match s.as_str() {
-                    MODE_INSERT => Some(WriteMode::Insert),
-                    MODE_UPDATE => Some(WriteMode::Update),
-                    MODE_UPSERT => Some(WriteMode::Upsert),
-                    MODE_REPLACE => Some(WriteMode::Replace),
-                    _ => None,
+                    MODE_INSERT | MODE_APPEND => WriteMode::Insert,
+                    MODE_REPLACE => WriteMode::Replace,
+                    other => {
+                        return Err(ConvertError::Plan(format!(
+                            "unknown write mode '{other}'; expected 'append' or 'replace'"
+                        )));
+                    }
                 },
-                _ => None,
-            })
-            .unwrap_or(WriteMode::Insert);
+                _ => return Err(ConvertError::Plan("mode must be a string".to_string())),
+            },
+        };
 
         let table_map = self.build_table_map(to)?;
 
@@ -614,46 +607,54 @@ impl PlanBuilder {
             return Ok(Vec::new());
         };
 
-        let mut rules: Vec<ValidationRule> = validate
+        validate
             .checks
             .iter()
             .map(|check| {
+                let action = check
+                    .body
+                    .action
+                    .as_ref()
+                    .and_then(|a| Self::parse_validation_action(a))
+                    .unwrap_or(ValidationAction::Warn);
+
+                // A plugin call as the predicate routes to the WASM filter path;
+                // any other expression is compiled for the expression engine.
+                let (kind, message) = match &check.body.check.kind {
+                    ExpressionKind::PluginCall(call) => {
+                        let message = if check.body.message.is_empty() {
+                            format!("row rejected by filter plugin '{}'", call.plugin_name)
+                        } else {
+                            check.body.message.clone()
+                        };
+                        (
+                            RuleKind::WasmFilter {
+                                plugin_name: call.plugin_name.clone(),
+                                input_mapping: Self::plugin_input_mapping(call),
+                            },
+                            message,
+                        )
+                    }
+                    _ => (
+                        RuleKind::Assert {
+                            check: self.compile_expression(&check.body.check)?,
+                        },
+                        check.body.message.clone(),
+                    ),
+                };
+
                 Ok(ValidationRule {
                     label: check.label.clone(),
                     severity: match check.kind {
                         ValidationKind::Assert => ValidationSeverity::Assert,
                         ValidationKind::Warn => ValidationSeverity::Warn,
                     },
-                    kind: RuleKind::Assert {
-                        check: self.compile_expression(&check.body.check)?,
-                    },
-                    message: check.body.message.clone(),
-                    action: check
-                        .body
-                        .action
-                        .as_ref()
-                        .and_then(|a| Self::parse_validation_action(a))
-                        .unwrap_or(ValidationAction::Warn),
+                    kind,
+                    message,
+                    action,
                 })
             })
-            .collect::<Result<Vec<_>, ConvertError>>()?;
-
-        // WASM filter rules: `rule "x" { filter = plugin.name({...}) on_fail = skip }`
-        for wr in &validate.wasm_rules {
-            rules.push(ValidationRule {
-                label: wr.name.clone(),
-                severity: ValidationSeverity::Assert,
-                kind: RuleKind::WasmFilter {
-                    plugin_name: wr.filter.plugin_name.clone(),
-                    input_mapping: Self::plugin_input_mapping(&wr.filter),
-                },
-                message: format!("row rejected by filter plugin '{}'", wr.filter.plugin_name),
-                action: Self::parse_validation_action(&wr.on_fail)
-                    .unwrap_or(ValidationAction::Fail),
-            });
-        }
-
-        Ok(rules)
+            .collect()
     }
 
     fn parse_validation_action(a: &str) -> Option<ValidationAction> {
@@ -685,144 +686,157 @@ impl PlanBuilder {
                     })
                     .unwrap_or(3);
 
+                // Base retry delay in milliseconds (optional, defaults to 1000).
+                let delay_ms = r
+                    .attributes
+                    .iter()
+                    .find(|a| a.key.name == ATTR_DELAY_MS)
+                    .and_then(|a| self.eval_with_definitions(&a.value).ok())
+                    .and_then(|v| match v {
+                        Value::Int(n) if n >= 0 => Some(n as u64),
+                        Value::Float(f) if f >= 0.0 => Some(f as u64),
+                        _ => None,
+                    })
+                    .unwrap_or(1000);
+
                 RetryConfig {
                     max_attempts,
-                    delay_ms: 1000,
+                    delay_ms,
+                    // Backoff strategy is not yet configurable from SMQL; the
+                    // per-attempt delay grows exponentially from `delay_ms`.
                     backoff: BackoffStrategy::Exponential,
                 }
             });
 
-            let failed_rows = on_error.failed_rows.as_ref().map(|fr| {
-                // Extract action from attributes (optional, defaults to Log)
-                let action = fr
-                    .attributes
-                    .iter()
-                    .find(|a| a.key.name == ATTR_ACTION)
-                    .and_then(|a| self.eval_with_definitions(&a.value).ok())
-                    .and_then(|v| match v {
-                        Value::String(s) => match s.as_str() {
-                            ACTION_SKIP => Some(FailedRowsAction::Skip),
-                            FAILED_ACTION_LOG => Some(FailedRowsAction::Log),
-                            FAILED_ACTION_SAVE_TO_TABLE => Some(FailedRowsAction::SaveToTable),
-                            _ => None,
-                        },
-                        _ => None,
-                    })
-                    .unwrap_or(FailedRowsAction::Log);
-
-                // Extract destination from nested blocks or attributes
-                let destination = if let Some(table_block) =
-                    fr.nested_blocks.iter().find(|b| b.kind == BLOCK_TABLE)
-                {
-                    // Parse table block
-                    let connection_name = table_block
-                        .attributes
-                        .iter()
-                        .find(|a| a.key.name == ATTR_CONNECTION)
-                        .and_then(|a| {
-                            if let ExpressionKind::DotNotation(path) = &a.value.kind {
-                                // connection.name format
-                                if path.segments.len() == 2
-                                    && path.segments[0] == KEYWORD_CONNECTION
-                                {
-                                    Some(path.segments[1].clone())
+            let failed_rows = on_error
+                .failed_rows
+                .as_ref()
+                .map(|fr| -> Result<FailedRowsConfig, ConvertError> {
+                    // Extract destination from nested blocks or attributes
+                    let destination = if let Some(table_block) =
+                        fr.nested_blocks.iter().find(|b| b.kind == BLOCK_TABLE)
+                    {
+                        // Parse table block
+                        let connection_name = table_block
+                            .attributes
+                            .iter()
+                            .find(|a| a.key.name == ATTR_CONNECTION)
+                            .and_then(|a| {
+                                if let ExpressionKind::DotNotation(path) = &a.value.kind {
+                                    // connection.name format
+                                    if path.segments.len() == 2
+                                        && path.segments[0] == KEYWORD_CONNECTION
+                                    {
+                                        Some(path.segments[1].clone())
+                                    } else {
+                                        None
+                                    }
                                 } else {
                                     None
                                 }
-                            } else {
-                                None
+                            });
+
+                        let schema = table_block
+                            .attributes
+                            .iter()
+                            .find(|a| a.key.name == ATTR_SCHEMA)
+                            .and_then(|a| self.eval_with_definitions(&a.value).ok())
+                            .and_then(|v| match v {
+                                Value::String(s) => Some(s),
+                                _ => None,
+                            });
+
+                        let table = table_block
+                            .attributes
+                            .iter()
+                            .find(|a| a.key.name == ATTR_TABLE)
+                            .and_then(|a| self.eval_with_definitions(&a.value).ok())
+                            .and_then(|v| match v {
+                                Value::String(s) => Some(s),
+                                _ => None,
+                            });
+
+                        if let (Some(conn_name), Some(tbl)) = (connection_name, table) {
+                            // Look up the connection from the connections map
+                            self.connections.get(&conn_name).map(|connection| {
+                                FailedRowsDestination::Table {
+                                    connection: connection.clone(),
+                                    table: tbl,
+                                    schema,
+                                }
+                            })
+                        } else {
+                            None
+                        }
+                    } else if let Some(file_block) =
+                        fr.nested_blocks.iter().find(|b| b.kind == BLOCK_FILE)
+                    {
+                        // Parse file block
+                        let path = file_block
+                            .attributes
+                            .iter()
+                            .find(|a| a.key.name == ATTR_PATH)
+                            .and_then(|a| self.eval_with_definitions(&a.value).ok())
+                            .and_then(|v| match v {
+                                Value::String(s) => Some(s),
+                                _ => None,
+                            });
+
+                        let explicit_format = file_block
+                            .attributes
+                            .iter()
+                            .find(|a| a.key.name == ATTR_FORMAT)
+                            .and_then(|a| self.eval_with_definitions(&a.value).ok())
+                            .and_then(|v| match v {
+                                Value::String(s) => match s.as_str() {
+                                    FORMAT_JSON => Some(FileFormat::Json),
+                                    FORMAT_CSV => Some(FileFormat::Csv),
+                                    FORMAT_PARQUET => Some(FileFormat::Parquet),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+
+                        match path {
+                            Some(p) => {
+                                // Resolve format: explicit wins, else infer from extension.
+                                let format = explicit_format.unwrap_or_else(|| {
+                                    let ext_csv = format!(".{}", FORMAT_CSV);
+                                    let ext_parquet = format!(".{}", FORMAT_PARQUET);
+                                    if p.ends_with(&ext_csv) {
+                                        FileFormat::Csv
+                                    } else if p.ends_with(&ext_parquet) {
+                                        FileFormat::Parquet
+                                    } else {
+                                        FileFormat::Json
+                                    }
+                                });
+
+                                // Only JSON dead-letter files are supported today;
+                                // reject others at plan time instead of failing mid-run.
+                                if !matches!(format, FileFormat::Json) {
+                                    let name = match format {
+                                        FileFormat::Csv => FORMAT_CSV,
+                                        FileFormat::Parquet => FORMAT_PARQUET,
+                                        FileFormat::Json => FORMAT_JSON,
+                                    };
+                                    return Err(ConvertError::Plan(format!(
+                                        "dead-letter file format '{name}' is not supported yet; \
+                                     only 'json' is available"
+                                    )));
+                                }
+
+                                Some(FailedRowsDestination::File { path: p, format })
                             }
-                        });
-
-                    let schema = table_block
-                        .attributes
-                        .iter()
-                        .find(|a| a.key.name == ATTR_SCHEMA)
-                        .and_then(|a| self.eval_with_definitions(&a.value).ok())
-                        .and_then(|v| match v {
-                            Value::String(s) => Some(s),
-                            _ => None,
-                        });
-
-                    let table = table_block
-                        .attributes
-                        .iter()
-                        .find(|a| a.key.name == ATTR_TABLE)
-                        .and_then(|a| self.eval_with_definitions(&a.value).ok())
-                        .and_then(|v| match v {
-                            Value::String(s) => Some(s),
-                            _ => None,
-                        });
-
-                    if let (Some(conn_name), Some(tbl)) = (connection_name, table) {
-                        // Look up the connection from the connections map
-                        self.connections.get(&conn_name).map(|connection| {
-                            FailedRowsDestination::Table {
-                                connection: connection.clone(),
-                                table: tbl,
-                                schema,
-                            }
-                        })
+                            None => None,
+                        }
                     } else {
                         None
-                    }
-                } else if let Some(file_block) =
-                    fr.nested_blocks.iter().find(|b| b.kind == BLOCK_FILE)
-                {
-                    // Parse file block
-                    let path = file_block
-                        .attributes
-                        .iter()
-                        .find(|a| a.key.name == ATTR_PATH)
-                        .and_then(|a| self.eval_with_definitions(&a.value).ok())
-                        .and_then(|v| match v {
-                            Value::String(s) => Some(s),
-                            _ => None,
-                        });
+                    };
 
-                    let format = file_block
-                        .attributes
-                        .iter()
-                        .find(|a| a.key.name == ATTR_FORMAT)
-                        .and_then(|a| self.eval_with_definitions(&a.value).ok())
-                        .and_then(|v| match v {
-                            Value::String(s) => match s.as_str() {
-                                FORMAT_JSON => Some(FileFormat::Json),
-                                FORMAT_CSV => Some(FileFormat::Csv),
-                                FORMAT_PARQUET => Some(FileFormat::Parquet),
-                                _ => None,
-                            },
-                            _ => None,
-                        });
-
-                    path.map(|p| FailedRowsDestination::File {
-                        path: p.clone(),
-                        format: format.unwrap_or_else(|| {
-                            // Auto-detect format from extension if not specified
-                            let ext_json = format!(".{}", FORMAT_JSON);
-                            let ext_csv = format!(".{}", FORMAT_CSV);
-                            let ext_parquet = format!(".{}", FORMAT_PARQUET);
-
-                            if p.ends_with(&ext_json) {
-                                FileFormat::Json
-                            } else if p.ends_with(&ext_csv) {
-                                FileFormat::Csv
-                            } else if p.ends_with(&ext_parquet) {
-                                FileFormat::Parquet
-                            } else {
-                                FileFormat::Json
-                            }
-                        }),
-                    })
-                } else {
-                    None
-                };
-
-                FailedRowsConfig {
-                    action,
-                    destination,
-                }
-            });
+                    Ok(FailedRowsConfig { destination })
+                })
+                .transpose()?;
 
             Ok(ErrorHandling { retry, failed_rows })
         } else {
@@ -1835,7 +1849,6 @@ mod tests {
                     },
                 ],
                 span: test_span(),
-                wasm_rules: vec![],
             }),
             on_error_block: None,
             paginate_block: None,
@@ -1873,7 +1886,10 @@ mod tests {
             validate_block: None,
             on_error_block: Some(OnErrorBlock {
                 retry: Some(RetryBlock {
-                    attributes: vec![make_attribute("max_attempts", make_number_expr(5.0))],
+                    attributes: vec![
+                        make_attribute("max_attempts", make_number_expr(5.0)),
+                        make_attribute("delay_ms", make_number_expr(500.0)),
+                    ],
                     span: test_span(),
                 }),
                 failed_rows: None,
@@ -1889,7 +1905,7 @@ mod tests {
         let error_handling = builder.build_error_handling(&pipeline).unwrap();
         let retry = error_handling.retry.unwrap();
         assert_eq!(retry.max_attempts, 5);
-        assert_eq!(retry.delay_ms, 1000);
+        assert_eq!(retry.delay_ms, 500);
         assert!(matches!(retry.backoff, BackoffStrategy::Exponential));
     }
 
@@ -1922,7 +1938,7 @@ mod tests {
             on_error_block: Some(OnErrorBlock {
                 retry: None,
                 failed_rows: Some(FailedRowsBlock {
-                    attributes: vec![make_attribute("action", make_string_expr("save_to_table"))],
+                    attributes: vec![],
                     nested_blocks: vec![make_nested_block(
                         "table",
                         vec![
@@ -1947,8 +1963,6 @@ mod tests {
 
         let error_handling = builder.build_error_handling(&pipeline).unwrap();
         let failed_rows = error_handling.failed_rows.unwrap();
-
-        assert!(matches!(failed_rows.action, FailedRowsAction::SaveToTable));
 
         match failed_rows.destination.unwrap() {
             FailedRowsDestination::Table {
@@ -2019,9 +2033,6 @@ mod tests {
         let error_handling = builder.build_error_handling(&pipeline).unwrap();
         let failed_rows = error_handling.failed_rows.unwrap();
 
-        // Should default to Log when no action specified
-        assert!(matches!(failed_rows.action, FailedRowsAction::Log));
-
         match failed_rows.destination.unwrap() {
             FailedRowsDestination::Table {
                 connection,
@@ -2054,12 +2065,12 @@ mod tests {
             on_error_block: Some(OnErrorBlock {
                 retry: None,
                 failed_rows: Some(FailedRowsBlock {
-                    attributes: vec![make_attribute("action", make_string_expr("log"))],
+                    attributes: vec![],
                     nested_blocks: vec![make_nested_block(
                         "file",
                         vec![
-                            make_attribute("path", make_string_expr("/data/errors.csv")),
-                            make_attribute("format", make_string_expr("csv")),
+                            make_attribute("path", make_string_expr("/data/errors.jsonl")),
+                            make_attribute("format", make_string_expr("json")),
                         ],
                     )],
                     span: test_span(),
@@ -2076,14 +2087,63 @@ mod tests {
         let error_handling = builder.build_error_handling(&pipeline).unwrap();
         let failed_rows = error_handling.failed_rows.unwrap();
 
-        assert!(matches!(failed_rows.action, FailedRowsAction::Log));
-
         match failed_rows.destination.unwrap() {
             FailedRowsDestination::File { path, format } => {
-                assert_eq!(path, "/data/errors.csv");
-                assert!(matches!(format, FileFormat::Csv));
+                assert_eq!(path, "/data/errors.jsonl");
+                assert!(matches!(format, FileFormat::Json));
             }
             _ => panic!("Expected File destination"),
+        }
+    }
+
+    #[test]
+    fn test_failed_rows_file_unsupported_format_is_rejected() {
+        let builder = PlanBuilder::default();
+
+        // Both an explicit csv format and a parquet extension must fail at
+        // plan time, since only JSON dead-letter files are supported.
+        for (path, format_attr) in [
+            ("/data/errors.csv", Some("csv")),
+            ("/data/errors.parquet", None),
+        ] {
+            let mut attrs = vec![make_attribute("path", make_string_expr(path))];
+            if let Some(f) = format_attr {
+                attrs.push(make_attribute("format", make_string_expr(f)));
+            }
+            let pipeline = PipelineBlock {
+                name: "test".to_string(),
+                description: None,
+                after: None,
+                from: None,
+                to: None,
+                where_clauses: vec![],
+                with_block: None,
+                select_block: None,
+                named_select_blocks: vec![],
+                validate_block: None,
+                on_error_block: Some(OnErrorBlock {
+                    retry: None,
+                    failed_rows: Some(FailedRowsBlock {
+                        attributes: vec![],
+                        nested_blocks: vec![make_nested_block("file", attrs)],
+                        span: test_span(),
+                    }),
+                    span: test_span(),
+                }),
+                paginate_block: None,
+                before_block: None,
+                after_block: None,
+                settings_block: None,
+                span: test_span(),
+            };
+
+            let err = builder
+                .build_error_handling(&pipeline)
+                .expect_err("non-json dead-letter file format should be rejected");
+            assert!(
+                err.to_string().contains("not supported"),
+                "unexpected error for {path}: {err}"
+            );
         }
     }
 
@@ -2109,7 +2169,7 @@ mod tests {
                         "file",
                         vec![make_attribute(
                             "path",
-                            make_string_expr("/logs/failed_rows.parquet"),
+                            make_string_expr("/logs/failed_rows.jsonl"),
                         )],
                     )],
                     span: test_span(),
@@ -2128,9 +2188,9 @@ mod tests {
 
         match failed_rows.destination.unwrap() {
             FailedRowsDestination::File { path, format } => {
-                assert_eq!(path, "/logs/failed_rows.parquet");
-                // Should auto-detect parquet from extension
-                assert!(matches!(format, FileFormat::Parquet));
+                assert_eq!(path, "/logs/failed_rows.jsonl");
+                // Defaults to JSON when the extension is not recognized.
+                assert!(matches!(format, FileFormat::Json));
             }
             _ => panic!("Expected File destination"),
         }

@@ -40,6 +40,18 @@ impl DataWriter for PgDriver {
         Ok(result)
     }
 
+    async fn truncate(&self, table: &str) -> Result<(), DriverError> {
+        let (sql, _) = QueryGenerator::new(&dialect::Postgres).truncate_table(table);
+        debug!(table = %table, "truncating table");
+
+        let client = self.client().write().await;
+        client
+            .batch_execute(&sql)
+            .await
+            .map_err(|e| DriverError::QueryError(format!("{:?}", e)))?;
+        Ok(())
+    }
+
     /// Write rows using PostgreSQL COPY protocol for maximum throughput.
     /// Transaction handling should be done by the caller (e.g., Sink).
     async fn copy_rows(

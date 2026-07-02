@@ -20,4 +20,9 @@ pub trait DataWriter: Driver {
     ) -> Result<u64, DriverError> {
         unimplemented!("copy_rows not implemented for this driver");
     }
+
+    /// Remove all rows from `table` (used by `replace` write mode).
+    async fn truncate(&self, _table: &str) -> Result<(), DriverError> {
+        unimplemented!("truncate not implemented for this driver");
+    }
 }

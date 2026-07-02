@@ -235,9 +235,9 @@ mod tests {
                     keep  = charges.id
                 }
                 validate {
-                    rule "fraud_screen" {
-                        filter  = plugin.check_fraud({ amount: charges.amount })
-                        on_fail = skip
+                    assert "fraud_screen" {
+                        check  = plugin.check_fraud({ amount: charges.amount })
+                        action = skip
                     }
                 }
             }

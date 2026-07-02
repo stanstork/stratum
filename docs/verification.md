@@ -476,8 +476,8 @@ Add a `paginate` block to every pipeline that uses integrity verification:
 
 ```smql
 paginate {
-    using  = "pk"
-    column = orders.id
+    strategy = "pk"
+    cursor   = "orders.id"
 }
 ```
 

@@ -1455,6 +1455,7 @@ name = "expression-engine"
 version = "0.1.0"
 dependencies = [
  "bigdecimal",
+ "chrono",
  "engine-core",
  "hex",
  "model",

@@ -36,4 +36,11 @@ pub trait Sink: Send + Sync {
     async fn finalize(&self) -> Result<(), DriverError> {
         Ok(())
     }
+
+    /// Clear the destination table before loading (`replace` write mode).
+    async fn truncate(&self, _table: &str) -> Result<(), DriverError> {
+        Err(DriverError::Unknown(
+            "truncate (replace mode) is not supported by this destination".to_string(),
+        ))
+    }
 }

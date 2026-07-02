@@ -538,7 +538,7 @@ pipeline "migrate_inventory_with_file_dlq" {
         failed_rows {
             file {
                 path   = "/tmp/inventory_failures.jsonl"
-                format = "Json"
+                format = "json"
             }
         }
     }

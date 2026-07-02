@@ -200,7 +200,7 @@ Calling a denied capability returns a `capability_denied` error.
 Return `Err(PluginError::…)` for expected failures (`invalid_input`, `internal`,
 …). Panics are caught and converted to a plugin error, so a bug in your handler
 fails the row rather than tearing down the instance. How that row is handled
-(skip, DLQ, abort) is controlled by the pipeline's `on_fail` / `on_error`.
+(skip, DLQ, abort) is controlled by the check's `action` / the pipeline's `on_error`.
 
 ## Verifying the build
 

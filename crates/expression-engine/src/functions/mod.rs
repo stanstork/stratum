@@ -1,3 +1,5 @@
+pub mod conditional;
+pub mod datetime;
 pub mod env;
 pub mod string;
 
@@ -27,7 +29,14 @@ impl FunctionRegistry {
         registry.register("env", env::eval_env);
         registry.register("lower", string::eval_lower);
         registry.register("upper", string::eval_upper);
+        registry.register("trim", string::eval_trim);
         registry.register("concat", string::eval_concat);
+        registry.register("coalesce", conditional::eval_coalesce);
+        registry.register("date", datetime::eval_date);
+        registry.register("year", datetime::eval_year);
+        registry.register("month", datetime::eval_month);
+        registry.register("quarter", datetime::eval_quarter);
+        registry.register("now", datetime::eval_now);
 
         registry
     }
@@ -72,10 +81,12 @@ mod tests {
     #[test]
     fn test_registry_has_builtin_functions() {
         let registry = FunctionRegistry::new();
-        assert!(registry.has_function("env"));
-        assert!(registry.has_function("lower"));
-        assert!(registry.has_function("upper"));
-        assert!(registry.has_function("concat"));
+        for name in [
+            "env", "lower", "upper", "trim", "concat", "coalesce", "date", "year", "month",
+            "quarter", "now",
+        ] {
+            assert!(registry.has_function(name), "missing function: {name}");
+        }
     }
 
     #[test]

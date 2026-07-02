@@ -1,9 +1,9 @@
-// filters.smql - filter plugins wired into `validate { rule … }`.
+// filters.smql - filter plugins used as validation checks.
 //
-// A WASM/JS filter rule:
-//     rule "name" { filter = plugin.<name>({ field: table.col }) on_fail = <action> }
-// `on_fail` is one of: skip (drop row), fail (abort pipeline). Reject reasons
-// from the plugin surface in logs / DLQ.
+// A filter plugin is a boolean predicate in an `assert`/`warn` check:
+//     assert "name" { check = plugin.<name>({ field: table.col }) action = <action> }
+// `action` is one of: skip (drop row), fail (abort pipeline), warn. Reject
+// reasons from the plugin surface in logs / DLQ.
 //
 //   plugin validate -c examples/plugins/configs/filters.smql
 //   stratum apply   -c examples/plugins/configs/filters.smql -e .env
@@ -25,9 +25,9 @@ pipeline "customers_clean" {
     to   { connection = connection.dst  table = "customer_clean" }
 
     validate {
-        rule "good_email" {
-            filter = plugin.email_valid({ email: customer.email })
-            on_fail = skip
+        assert "good_email" {
+            check  = plugin.email_valid({ email: customer.email })
+            action = skip
         }
     }
 
@@ -46,9 +46,9 @@ pipeline "films_bounded" {
     to   { connection = connection.dst  table = "film_bounded" }
 
     validate {
-        rule "length_in_range" {
-            filter = plugin.in_range({ value: film.length, max: film.rental_duration })
-            on_fail = skip
+        assert "length_in_range" {
+            check  = plugin.in_range({ value: film.length, max: film.rental_duration })
+            action = skip
         }
     }
 

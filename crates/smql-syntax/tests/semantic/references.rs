@@ -310,7 +310,7 @@ fn test_select_block_plugin_call_declared_plugin_passes() {
 }
 
 #[test]
-fn test_validate_wasm_rule_undefined_plugin() {
+fn test_validate_plugin_check_undefined_plugin() {
     let doc = parse(
         r#"
             connection "src" { driver = "mysql"    url = "u" }
@@ -319,9 +319,9 @@ fn test_validate_wasm_rule_undefined_plugin() {
                 from { connection = connection.src table = "x" }
                 to   { connection = connection.dst table = "x" }
                 validate {
-                    rule "fraud" {
-                        filter  = plugin.check_fraud({ amount: x.amount })
-                        on_fail = skip
+                    assert "fraud" {
+                        check  = plugin.check_fraud({ amount: x.amount })
+                        action = skip
                     }
                 }
             }
