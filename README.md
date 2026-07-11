@@ -72,8 +72,8 @@ ordering, resumability, or verification.
 
 | Role | Connector |
 |------|-----------|
-| Source | MySQL, CSV |
-| Destination | PostgreSQL (COPY fast-path) |
+| Source | MySQL, PostgreSQL, CSV |
+| Destination | PostgreSQL (COPY fast-path), MySQL (LOAD DATA fast-path) |
 
 ### Secure connections (TLS/SSL)
 
@@ -139,8 +139,8 @@ workloads, not yet battle-tested for unattended production use.
 
 **Current limitations:**
 
-- **Destinations:** PostgreSQL only (with COPY fast-path). MySQL and CSV are
-  supported as **sources** only.
+- **Destinations:** PostgreSQL (COPY fast-path) and MySQL (LOAD DATA fast-path).
+  CSV is supported as a **source** only.
 - **Snapshot/batch migration only** - change-data-capture (CDC) is planned but
   not implemented.
 - **Single-node:** execution and state (sled) are local to one machine; there is
@@ -415,7 +415,7 @@ Test fixtures and example configs are in [`examples/configs/`](examples/configs/
 
 Rough direction (not commitments):
 
-- Additional destinations (MySQL sink, more connectors)
+- Additional connectors and destinations
 - Change-data-capture for incremental sync
 - Multiple-table union sources (`from` reading several tables)
 - Configurable connection pooling (pool size, timeouts)
