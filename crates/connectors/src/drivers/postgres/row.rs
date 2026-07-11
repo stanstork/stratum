@@ -11,8 +11,25 @@ use model::{
 use rust_decimal::Decimal as RustDecimal;
 use std::{net::IpAddr, str::FromStr};
 use tokio_postgres::Row as PgRow;
-use tokio_postgres::types::Type as PgType;
+use tokio_postgres::types::{FromSql, Kind, Type as PgType};
 use uuid::Uuid;
+
+/// Reads any PostgreSQL enum value as its label text.
+struct PgEnumText(String);
+
+impl<'a> FromSql<'a> for PgEnumText {
+    fn from_sql(
+        _ty: &PgType,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        // Enum values are transmitted as their label text.
+        Ok(PgEnumText(std::str::from_utf8(raw)?.to_owned()))
+    }
+
+    fn accepts(ty: &PgType) -> bool {
+        matches!(ty.kind(), Kind::Enum(_))
+    }
+}
 
 /// Wrapper for PostgreSQL Row to implement RowDecoder
 pub struct PgRowDecoder<'a>(pub &'a PgRow);
@@ -261,6 +278,12 @@ fn extract_value(row: &PgRow, idx: usize, pg_type: &PgType) -> Option<Value> {
 
         // Network types
         PgType::INET => row.try_get::<_, IpAddr>(idx).ok().map(Value::IpAddr),
+
+        // Enum types: decode the label as text.
+        _ if matches!(pg_type.kind(), Kind::Enum(_)) => row
+            .try_get::<_, PgEnumText>(idx)
+            .ok()
+            .map(|e| Value::String(e.0)),
 
         // Arrays - handle text arrays as common case
         _ if pg_type.name().starts_with('_') => {

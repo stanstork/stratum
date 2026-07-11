@@ -1,17 +1,18 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        reset_postgres_schema,
-        utils::{
-            DbType, get_row_count, run_smql, run_smql_file, run_smql_full_integrity,
-            run_verify_smql,
+        harness::runner::{
+            DbType, get_row_count, run_smql, run_smql_full_integrity, run_verify_smql,
         },
+        reset_postgres_schema,
     };
     use tracing_test::traced_test;
 
+    /// Render a verify config for the MySQL -> PostgreSQL direction.
+    /// The file holds pipelines only; the harness supplies the connections.
     macro_rules! verify_config {
         ($name:expr) => {
-            concat!(env!("CARGO_MANIFEST_DIR"), "/configs/verify/", $name)
+            $crate::harness::Direction::MYSQL_TO_POSTGRES.config(concat!("verify/", $name))
         };
     }
 
@@ -21,7 +22,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_actor_matches() {
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("actor.smql")).expect("read smql");
+        let smql = verify_config!("actor.smql");
         run_smql(&smql, true).await.expect("apply failed");
         run_verify_smql(&smql).await.expect("verify failed");
     }
@@ -32,7 +33,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_payment_matches() {
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("payment.smql")).expect("read smql");
+        let smql = verify_config!("payment.smql");
         run_smql(&smql, true).await.expect("apply failed");
         run_verify_smql(&smql).await.expect("verify failed");
     }
@@ -46,11 +47,10 @@ mod tests {
         reset_postgres_schema().await;
         // Language must exist first to satisfy film's FK constraint.
         // No integrity receipt is needed for this prerequisite step.
-        run_smql_file(verify_config!("language.smql"))
+        run_smql(&verify_config!("language.smql"), false)
             .await
             .expect("language apply failed");
-        let film_smql =
-            std::fs::read_to_string(verify_config!("film.smql")).expect("read film smql");
+        let film_smql = verify_config!("film.smql");
         run_smql(&film_smql, true).await.expect("film apply failed");
         run_verify_smql(&film_smql)
             .await
@@ -63,8 +63,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_exact_batch_boundary() {
         reset_postgres_schema().await;
-        let smql =
-            std::fs::read_to_string(verify_config!("actor_exact_batch.smql")).expect("read smql");
+        let smql = verify_config!("actor_exact_batch.smql");
         run_smql(&smql, true).await.expect("apply failed");
         run_verify_smql(&smql).await.expect("verify failed");
     }
@@ -75,8 +74,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_partial_last_batch() {
         reset_postgres_schema().await;
-        let smql =
-            std::fs::read_to_string(verify_config!("actor_partial_batch.smql")).expect("read smql");
+        let smql = verify_config!("actor_partial_batch.smql");
         run_smql(&smql, true).await.expect("apply failed");
         run_verify_smql(&smql).await.expect("verify failed");
     }
@@ -87,8 +85,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_cascade_payment_matches() {
         reset_postgres_schema().await;
-        let smql =
-            std::fs::read_to_string(verify_config!("payment_cascade.smql")).expect("read smql");
+        let smql = verify_config!("payment_cascade.smql");
         run_smql(&smql, true).await.expect("cascade apply failed");
         run_verify_smql(&smql).await.expect("cascade verify failed");
     }
@@ -98,10 +95,10 @@ mod tests {
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_detects_modified_row() {
-        use crate::utils::execute;
+        use crate::harness::runner::execute;
 
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("actor.smql")).expect("read smql");
+        let smql = verify_config!("actor.smql");
         run_smql(&smql, true).await.expect("apply failed");
 
         execute("UPDATE actor SET first_name = 'TAMPERED' WHERE actor_id = 1").await;
@@ -115,10 +112,10 @@ mod tests {
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_detects_deleted_row() {
-        use crate::utils::execute;
+        use crate::harness::runner::execute;
 
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("actor.smql")).expect("read smql");
+        let smql = verify_config!("actor.smql");
         run_smql(&smql, true).await.expect("apply failed");
 
         execute("DELETE FROM actor WHERE actor_id = 1").await;
@@ -133,7 +130,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_no_receipt_is_not_error() {
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("actor.smql")).expect("read smql");
+        let smql = verify_config!("actor.smql");
         // Migrate without --integrity so no receipt is written.
         run_smql(&smql, false).await.expect("apply failed");
         run_verify_smql(&smql)
@@ -154,8 +151,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_where_filter_matches() {
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("payment_staff_filter.smql"))
-            .expect("read smql");
+        let smql = verify_config!("payment_staff_filter.smql");
 
         run_smql(&smql, true).await.expect("apply failed");
 
@@ -180,8 +176,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_skip_validation_matches() {
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("payment_skip_validation.smql"))
-            .expect("read smql");
+        let smql = verify_config!("payment_skip_validation.smql");
 
         run_smql(&smql, true).await.expect("apply failed");
 
@@ -205,8 +200,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_warn_validation_all_rows_present() {
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("actor_warn_validation.smql"))
-            .expect("read smql");
+        let smql = verify_config!("actor_warn_validation.smql");
 
         run_smql(&smql, true).await.expect("apply failed");
 
@@ -232,8 +226,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_filter_and_skip_combined() {
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("payment_filter_and_skip.smql"))
-            .expect("read smql");
+        let smql = verify_config!("payment_filter_and_skip.smql");
 
         run_smql(&smql, true).await.expect("apply failed");
 
@@ -263,8 +256,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_join_filter_timestamp_pagination() {
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("rental_join_filter_ts.smql"))
-            .expect("read smql");
+        let smql = verify_config!("rental_join_filter_ts.smql");
         run_smql(&smql, true).await.expect("apply failed");
         run_verify_smql(&smql).await.expect("verify failed");
     }
@@ -288,8 +280,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_cascade_with_numeric_pagination() {
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("payment_cascade_numeric.smql"))
-            .expect("read smql");
+        let smql = verify_config!("payment_cascade_numeric.smql");
         run_smql(&smql, true).await.expect("apply failed");
         run_verify_smql(&smql).await.expect("verify failed");
     }
@@ -302,11 +293,10 @@ mod tests {
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_filtered_detects_tampering() {
-        use crate::utils::execute;
+        use crate::harness::runner::execute;
 
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("payment_staff_filter.smql"))
-            .expect("read smql");
+        let smql = verify_config!("payment_staff_filter.smql");
 
         run_smql(&smql, true).await.expect("apply failed");
 
@@ -331,10 +321,10 @@ mod tests {
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_detects_inserted_row() {
-        use crate::utils::execute;
+        use crate::harness::runner::execute;
 
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("actor.smql")).expect("read smql");
+        let smql = verify_config!("actor.smql");
         run_smql(&smql, true).await.expect("apply failed");
 
         execute(
@@ -359,11 +349,10 @@ mod tests {
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_detects_tamper_in_computed_column() {
-        use crate::utils::execute;
+        use crate::harness::runner::execute;
 
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("rental_join_filter_ts.smql"))
-            .expect("read smql");
+        let smql = verify_config!("rental_join_filter_ts.smql");
         run_smql(&smql, true).await.expect("apply failed");
 
         execute(
@@ -389,11 +378,10 @@ mod tests {
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_cascade_detects_tamper_in_leaf_table() {
-        use crate::utils::execute;
+        use crate::harness::runner::execute;
 
         reset_postgres_schema().await;
-        let smql =
-            std::fs::read_to_string(verify_config!("payment_cascade.smql")).expect("read smql");
+        let smql = verify_config!("payment_cascade.smql");
         run_smql(&smql, true).await.expect("cascade apply failed");
 
         // Tamper with a customer row - a cascade leaf table
@@ -420,7 +408,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_pk_pagination() {
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("payment_pk.smql")).expect("read smql");
+        let smql = verify_config!("payment_pk.smql");
         run_smql(&smql, true).await.expect("apply failed");
         run_verify_smql(&smql).await.expect("verify failed");
     }
@@ -435,8 +423,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_numeric_pagination_no_cascade() {
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("payment_numeric_plain.smql"))
-            .expect("read smql");
+        let smql = verify_config!("payment_numeric_plain.smql");
         run_smql(&smql, true).await.expect("apply failed");
         run_verify_smql(&smql).await.expect("verify failed");
     }
@@ -450,8 +437,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_default_pagination_large_table() {
         reset_postgres_schema().await;
-        let smql =
-            std::fs::read_to_string(verify_config!("payment_default.smql")).expect("read smql");
+        let smql = verify_config!("payment_default.smql");
         run_smql(&smql, true).await.expect("apply failed");
         run_verify_smql(&smql).await.expect("verify failed");
     }
@@ -466,7 +452,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_empty_table() {
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("actor_empty.smql")).expect("read smql");
+        let smql = verify_config!("actor_empty.smql");
         run_smql(&smql, true).await.expect("apply failed");
         run_verify_smql(&smql)
             .await
@@ -482,8 +468,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_single_row() {
         reset_postgres_schema().await;
-        let smql =
-            std::fs::read_to_string(verify_config!("actor_single_row.smql")).expect("read smql");
+        let smql = verify_config!("actor_single_row.smql");
         run_smql(&smql, true).await.expect("apply failed");
 
         let dest_count = get_row_count("actor", "sakila", DbType::Postgres).await;
@@ -502,7 +487,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_many_null_columns() {
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("rental_plain.smql")).expect("read smql");
+        let smql = verify_config!("rental_plain.smql");
         run_smql(&smql, true).await.expect("apply failed");
         run_verify_smql(&smql).await.expect("verify failed");
     }
@@ -516,7 +501,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_idempotent() {
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("actor.smql")).expect("read smql");
+        let smql = verify_config!("actor.smql");
         run_smql(&smql, true).await.expect("apply failed");
         run_verify_smql(&smql).await.expect("first verify failed");
         // Run a second time - receipt and data are unchanged; must still pass
@@ -535,8 +520,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_dag_pipeline() {
         reset_postgres_schema().await;
-        let smql =
-            std::fs::read_to_string(verify_config!("dag_language_film.smql")).expect("read smql");
+        let smql = verify_config!("dag_language_film.smql");
         run_smql(&smql, true).await.expect("dag apply failed");
         run_verify_smql(&smql).await.expect("dag verify failed");
     }
@@ -548,7 +532,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_full_integrity_matches() {
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("actor.smql")).expect("read smql");
+        let smql = verify_config!("actor.smql");
         run_smql_full_integrity(&smql).await.expect("apply failed");
         run_verify_smql(&smql).await.expect("verify failed");
     }
@@ -559,14 +543,14 @@ mod tests {
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_full_integrity_detects_modified_row_at_index() {
-        use crate::utils::execute;
+        use crate::harness::runner::execute;
         use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan};
         use engine_verify::verifier::verify as run_verify;
         use smql_syntax::builder::parse;
         use std::sync::Arc;
 
         reset_postgres_schema().await;
-        let smql = std::fs::read_to_string(verify_config!("actor.smql")).expect("read smql");
+        let smql = verify_config!("actor.smql");
         run_smql_full_integrity(&smql).await.expect("apply failed");
 
         // Tamper with actor_id = 5 (the 5th row, index 4).

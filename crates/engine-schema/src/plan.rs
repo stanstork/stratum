@@ -287,8 +287,24 @@ impl SchemaPlan {
         SchemaOps { pre, post }
     }
 
-    /// Generate CREATE TYPE ... AS ENUM ops.
+    fn enum_type_name(&self, table: &str, column: &str) -> String {
+        self.metadata_graph
+            .get(table)
+            .and_then(|meta| meta.columns.get(column))
+            .map(|col| match self.type_engine.convert_column(col).0 {
+                Type::Enum { name, .. } if !name.is_empty() => name,
+                _ => column.to_string(),
+            })
+            .unwrap_or_else(|| column.to_string())
+    }
+
     fn enum_ops(&self) -> Vec<SchemaOp> {
+        // MySQL spells the variants inline in the column; `CREATE TYPE ... AS ENUM`
+        // is PostgreSQL-only syntax and would be a hard error there.
+        if !self.target_dialect.supports_enums() {
+            return Vec::new();
+        }
+
         let qgen = QueryGenerator::new(self.target_dialect.as_ref());
         let mut ops = Vec::new();
 
@@ -316,11 +332,12 @@ impl SchemaPlan {
             }
 
             let variants = Self::parse_enum(&enum_type);
-            let (sql, _) = qgen.create_enum(column, &variants);
+            let type_name = self.enum_type_name(table, column);
+            let (sql, _) = qgen.create_enum(&type_name, &variants);
 
             ops.push(SchemaOp {
                 sql,
-                description: format!("Create enum type '{}'", column),
+                description: format!("Create enum type '{}'", type_name),
                 idempotent: true,
                 skip_if_missing_ref: false,
             });
@@ -634,6 +651,10 @@ impl SchemaPlan {
     pub fn enum_queries(&self) -> HashSet<(String, String)> {
         let mut queries = HashSet::new();
 
+        if !self.target_dialect.supports_enums() {
+            return queries;
+        }
+
         for (table, column) in &self.enum_definitions {
             // Prefer full_column_type (e.g. "enum('G','PG','PG-13','R','NC-17')")
             // over data_type (which is just "enum" from MySQL INFORMATION_SCHEMA.DATA_TYPE).
@@ -658,8 +679,9 @@ impl SchemaPlan {
             }
 
             let variants = Self::parse_enum(&enum_type);
-            let (sql, _) =
-                QueryGenerator::new(self.target_dialect.as_ref()).create_enum(column, &variants);
+            let type_name = self.enum_type_name(table, column);
+            let (sql, _) = QueryGenerator::new(self.target_dialect.as_ref())
+                .create_enum(&type_name, &variants);
 
             queries.insert((sql, column.clone()));
         }
@@ -772,7 +794,10 @@ impl SchemaPlan {
                     data_type,
                     is_nullable: col.is_nullable,
                     is_primary_key: col.is_primary_key,
-                    default: col.default_value.clone(),
+                    default: col
+                        .default_value
+                        .as_deref()
+                        .map(|d| self.type_engine.normalize_default_expression(d)),
                     char_max_length,
                     generated_expression,
                     is_stored: col.is_stored,

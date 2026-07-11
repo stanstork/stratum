@@ -3,19 +3,20 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        plugins::fixture,
+        features::plugins::fixture,
         reset_postgres_schema,
-        utils::{
+        harness::runner::{
             DbType, assert_table_exists, get_cell_as_string, get_cell_as_usize, get_column_names,
             get_pg_column_type, get_row_count, run_smql,
         },
     };
+    use crate::harness::smql::dest_smql;
     use tracing_test::traced_test;
 
     /// Build a `wasm-source -> postgres` SMQL doc. `config_block` is inserted
     /// verbatim inside the plugin block (use "" for plugin defaults).
     fn smql(dest_table: &str, config_block: &str) -> String {
-        format!(
+        dest_smql(&format!(
             r#"
             plugin "feed" {{
                 path = "{plugin}"
@@ -23,7 +24,6 @@ mod tests {
             }}
 
             connection "src" {{ driver = "wasm"     plugin = "feed" }}
-            connection "dst" {{ driver = "postgres" url    = "postgres://user:password@localhost:5432/testdb" }}
 
             pipeline "ingest" {{
                 from {{ connection = connection.src table = "counter" }}
@@ -42,7 +42,7 @@ mod tests {
             plugin = fixture("test_source.wasm"),
             config = config_block,
             dest = dest_table,
-        )
+        ))
     }
 
     /// The destination table is created from the plugin's `output_schema` and all

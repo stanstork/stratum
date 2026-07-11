@@ -3,27 +3,27 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        plugins::fixture,
+        features::plugins::fixture,
         reset_postgres_schema,
-        utils::{
+        harness::runner::{
             DbType, assert_table_exists, get_cell_as_f64, get_column_names, get_pg_column_type,
             get_row_count, run_smql,
         },
     };
+    use crate::harness::smql::dest_smql;
     use tracing_test::traced_test;
 
     /// Build a `wasm source -> postgres` pipeline that exercises a transform
     /// plugin (select) and a filter plugin (validate) together. `total` source
     /// rows are generated.
     fn smql(dest_table: &str, total: u64) -> String {
-        format!(
+        dest_smql(&format!(
             r#"
             plugin "feed"     {{ path = "{source}" config {{ total = "{total}" page_size = "3" }} }}
             plugin "adder"    {{ path = "{transform}" }}
             plugin "posfilter" {{ path = "{filter}" }}
 
             connection "src" {{ driver = "wasm"     plugin = "feed" }}
-            connection "dst" {{ driver = "postgres" url    = "postgres://user:password@localhost:5432/testdb" }}
 
             pipeline "enrich" {{
                 from {{ connection = connection.src table = "counter" }}
@@ -52,7 +52,7 @@ mod tests {
             filter = fixture("test_filter.wasm"),
             dest = dest_table,
             total = total,
-        )
+        ))
     }
 
     /// Full pipeline: the table is created with the mapped column + transform

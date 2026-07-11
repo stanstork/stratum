@@ -3,20 +3,20 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        plugins::fixture,
+        features::plugins::fixture,
         reset_postgres_schema,
-        utils::{DbType, get_row_count, run_smql, run_smql_with_pause},
+        harness::runner::{DbType, get_row_count, run_smql, run_smql_with_pause},
+        harness::smql::dest_smql,
     };
 
     const TOTAL: i64 = 3000;
 
     fn smql() -> String {
-        format!(
+        dest_smql(&format!(
             r#"
             plugin "feed" {{ path = "{plugin}" config {{ total = "{total}" page_size = "50" }} }}
 
             connection "src" {{ driver = "wasm"     plugin = "feed" }}
-            connection "dst" {{ driver = "postgres" url = "postgres://user:password@localhost:5432/testdb" }}
 
             pipeline "resumable" {{
                 from {{ connection = connection.src table = "counter" }}
@@ -35,7 +35,7 @@ mod tests {
             "#,
             plugin = fixture("test_source.wasm"),
             total = TOTAL,
-        )
+        ))
     }
 
     /// Pause mid-migration, then resume to completion; every row lands exactly

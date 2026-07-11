@@ -50,7 +50,7 @@ fn render_add_column(col: &ColumnDef, r: &mut Renderer) {
     r.sql.push_str(&r.dialect.quote_identifier(&col.name));
     r.sql.push(' ');
     r.sql
-        .push_str(&r.dialect.render_data_type(&col.data_type, col.max_length));
+        .push_str(&r.dialect.format_type(&col.data_type, col.max_length));
 
     // Constraints
     if !col.is_nullable {

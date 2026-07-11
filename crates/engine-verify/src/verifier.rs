@@ -140,6 +140,17 @@ async fn verify_table(
         .values()
         .map(|c| (c.name.clone(), c.data_type.clone()))
         .collect();
+
+    // Pick the read strategy to reproduce the migration's read of this table.
+    let offset_strategy = if receipt.sorted_hashes {
+        OffsetStrategyFactory::keyset_over_pk(
+            OffsetStrategyFactory::default_strategy(),
+            table,
+            &meta.primary_keys,
+        )
+    } else {
+        OffsetStrategyFactory::keyset_over_pk(offset_strategy, table, &meta.primary_keys)
+    };
     let table_reader = create_table_reader(driver, meta, offset_strategy)?;
     let (actual_batch_roots, actual_row_hashes_by_batch) =
         read_and_hash(&table_reader, receipt, &col_types).await?;

@@ -2,7 +2,7 @@
 mod tests {
     use crate::{
         reset_postgres_schema,
-        utils::{DbType, assert_row_count, assert_table_exists, get_row_count, run_smql_file},
+        harness::runner::{DbType, assert_row_count, assert_table_exists, get_row_count, run_config},
     };
     use mysql_async::prelude::Queryable;
     use tracing_test::traced_test;
@@ -44,11 +44,8 @@ mod tests {
         reset_postgres_schema().await;
 
         // CARGO_MANIFEST_DIR = crates/engine-tests; configs live in configs/ inside this crate
-        let config = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/configs/schema-objects/p2-01-schema-only.smql"
-        );
-        run_smql_file(config)
+        let config = "schema-objects/p2-01-schema-only.smql";
+        run_config(config)
             .await
             .expect("schema-only migration failed");
 
@@ -85,11 +82,8 @@ mod tests {
     async fn cascade_migrates_schema_and_data_with_fk_integrity() {
         reset_postgres_schema().await;
 
-        let config = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/configs/schema-objects/p2-02-cascade-data.smql"
-        );
-        run_smql_file(config)
+        let config = "schema-objects/p2-02-cascade-data.smql";
+        run_config(config)
             .await
             .expect("cascade-data migration failed");
 
@@ -138,11 +132,8 @@ mod tests {
     async fn depth_limit_creates_only_direct_fk_tables() {
         reset_postgres_schema().await;
 
-        let config = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/configs/schema-objects/p2-04-depth-limit.smql"
-        );
-        run_smql_file(config)
+        let config = "schema-objects/p2-04-depth-limit.smql";
+        run_config(config)
             .await
             .expect("depth-limit migration failed");
 
@@ -191,11 +182,8 @@ mod tests {
     async fn enum_type_created_before_table_with_correct_labels() {
         reset_postgres_schema().await;
 
-        let config = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/configs/schema-objects/p2-08-enum-migration.smql"
-        );
-        run_smql_file(config).await.expect("enum-migration failed");
+        let config = "schema-objects/p2-08-enum-migration.smql";
+        run_config(config).await.expect("enum-migration failed");
 
         for table in &["language", "film"] {
             assert_table_exists(table, true).await;
@@ -253,11 +241,11 @@ mod tests {
             .await
             .expect("film.rating column not found")
             .get(0);
-        // The type converter maps MySQL ENUM -> PostgreSQL VARCHAR(255).
-        // The CREATE TYPE rating is created first (pre-DDL) to allow future migration to use it.
+        // MySQL ENUM -> the PostgreSQL enum type created above, not a VARCHAR fallback.
+        // information_schema reports any custom type as USER-DEFINED.
         assert_eq!(
-            col_type, "character varying",
-            "film.rating must be character varying (MySQL ENUM maps to VARCHAR), got '{col_type}'"
+            col_type, "USER-DEFINED",
+            "film.rating must use the 'rating' enum type, got '{col_type}'"
         );
 
         // Row count must match source
@@ -285,11 +273,8 @@ mod tests {
     async fn schema_dedup_across_pipelines_no_duplicate_errors() {
         reset_postgres_schema().await;
 
-        let config = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/configs/schema-objects/p2-07-schema-dedup.smql"
-        );
-        run_smql_file(config)
+        let config = "schema-objects/p2-07-schema-dedup.smql";
+        run_config(config)
             .await
             .expect("schema-dedup migration failed");
 
@@ -335,11 +320,8 @@ mod tests {
     async fn circular_fk_migrates_with_both_constraints_intact() {
         reset_postgres_schema().await;
 
-        let config = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/configs/schema-objects/p2-06-circular-fk.smql"
-        );
-        run_smql_file(config)
+        let config = "schema-objects/p2-06-circular-fk.smql";
+        run_config(config)
             .await
             .expect("circular-fk migration failed");
 
@@ -478,11 +460,8 @@ mod tests {
         reset_postgres_schema().await;
 
         let result = async {
-            let config = concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/configs/schema-objects/p2-09-generated-columns.smql"
-            );
-            run_smql_file(config)
+            let config = "schema-objects/p2-09-generated-columns.smql";
+            run_config(config)
                 .await
                 .expect("generated-columns migration failed");
 
@@ -603,11 +582,8 @@ mod tests {
     async fn exclusion_creates_only_non_excluded_tables() {
         reset_postgres_schema().await;
 
-        let config = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/configs/schema-objects/p2-05-exclusion.smql"
-        );
-        run_smql_file(config)
+        let config = "schema-objects/p2-05-exclusion.smql";
+        run_config(config)
             .await
             .expect("exclusion migration failed");
 
@@ -655,11 +631,8 @@ mod tests {
     async fn full_chain_fk_constraints_satisfied() {
         reset_postgres_schema().await;
 
-        let config = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/configs/schema-objects/p2-03-full-chain.smql"
-        );
-        run_smql_file(config)
+        let config = "schema-objects/p2-03-full-chain.smql";
+        run_config(config)
             .await
             .expect("full-chain migration failed");
 
@@ -703,11 +676,8 @@ mod tests {
     async fn table_rename_map_creates_renamed_tables_with_fk_integrity() {
         reset_postgres_schema().await;
 
-        let config = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/configs/schema-objects/p2-10-table-rename.smql"
-        );
-        run_smql_file(config)
+        let config = "schema-objects/p2-10-table-rename.smql";
+        run_config(config)
             .await
             .expect("table-rename migration failed");
 
@@ -771,11 +741,8 @@ mod tests {
     async fn full_sakila_warehouse_naming_with_computed_column() {
         reset_postgres_schema().await;
 
-        let config = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/configs/schema-objects/p2-11-full-sakila.smql"
-        );
-        run_smql_file(config)
+        let config = "schema-objects/p2-11-full-sakila.smql";
+        run_config(config)
             .await
             .expect("full-sakila warehouse migration failed");
 

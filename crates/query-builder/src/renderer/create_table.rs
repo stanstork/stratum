@@ -44,7 +44,7 @@ impl Render for ColumnDef {
         r.sql.push_str(&r.dialect.quote_identifier(&self.name));
         r.sql.push(' ');
         r.sql
-            .push_str(&r.dialect.render_data_type(&self.data_type, self.max_length));
+            .push_str(&r.dialect.format_type(&self.data_type, self.max_length));
 
         // Constraints
         if self.is_primary_key {

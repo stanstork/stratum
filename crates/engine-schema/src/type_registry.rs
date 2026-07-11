@@ -98,8 +98,38 @@ impl Dialect {
         }
     }
 
+    /// Normalize a column DEFAULT expression from this dialect's syntax.
+    /// PostgreSQL annotates default literals with `::type` casts (e.g.
+    /// `'G'::mpaa_rating`, `'{}'::text[]`, `0::numeric`), which are invalid
+    /// elsewhere; strip them, leaving the bare literal.
+    pub fn normalize_default_expression(&self, expr: &str) -> String {
+        match self {
+            Dialect::MySql => expr.to_owned(),
+            Dialect::Postgres => strip_pg_casts(expr),
+        }
+    }
+
+    /// Adjust a (source-normalized) DEFAULT expression for this dialect.
+    /// MySQL 8 requires non-literal/function defaults to be parenthesized, e.g.
+    /// `DEFAULT (CURRENT_DATE)`, `DEFAULT (now())` - unlike bare literals such as
+    /// `'G'` or `3`. PostgreSQL accepts either form, so it is left unchanged.
+    pub fn finalize_default_expression(&self, expr: &str) -> String {
+        match self {
+            Dialect::Postgres => expr.to_owned(),
+            Dialect::MySql => {
+                let trimmed = expr.trim();
+                if is_sql_literal(trimmed) || trimmed.starts_with('(') {
+                    trimmed.to_owned()
+                } else {
+                    // Function call or keyword expression (CURRENT_DATE, now(), ...).
+                    format!("({trimmed})")
+                }
+            }
+        }
+    }
+
     /// Convert to the query_builder Dialect trait object for SQL generation
-    pub fn as_query_dialect(&self) -> Box<dyn query_builder::dialect::Dialect> {
+    pub fn as_query_dialect(&self) -> Box<dyn query_builder::dialect::Dialect + Send + Sync> {
         match self {
             Dialect::MySql => Box::new(query_builder::dialect::MySql),
             Dialect::Postgres => Box::new(query_builder::dialect::Postgres),
@@ -107,14 +137,74 @@ impl Dialect {
     }
 }
 
-/// Build the registry of all known dialect pair converters.
-fn build_converters() -> HashMap<(Dialect, Dialect), Arc<dyn DialectConverter>> {
-    let mut map: HashMap<(Dialect, Dialect), Arc<dyn DialectConverter>> = HashMap::new();
+/// True when a DEFAULT expression is a bare SQL literal (string, number, or the
+/// keywords NULL/TRUE/FALSE) that needs no parenthesization in MySQL.
+fn is_sql_literal(expr: &str) -> bool {
+    let e = expr.trim();
+    if e.is_empty() {
+        return true; // nothing to wrap
+    }
+    // Quoted string literal.
+    if e.starts_with('\'') {
+        return true;
+    }
+    // Numeric literal (optionally signed / decimal).
+    if e.trim_start_matches(['-', '+'])
+        .chars()
+        .all(|c| c.is_ascii_digit() || c == '.')
+        && e.chars().any(|c| c.is_ascii_digit())
+    {
+        return true;
+    }
+    // Boolean / null keywords.
+    matches!(e.to_ascii_uppercase().as_str(), "NULL" | "TRUE" | "FALSE")
+}
 
-    map.insert((Dialect::MySql, Dialect::Postgres), Arc::new(MysqlToPg));
-    map.insert((Dialect::Postgres, Dialect::MySql), Arc::new(PgToMysql));
-
-    map
+/// Strip PostgreSQL `::type` cast annotations from a default expression, e.g.
+/// `'G'::mpaa_rating` -> `'G'`, `'{}'::text[]` -> `'{}'`, `0::numeric(10,2)` -> `0`.
+/// Only the cast suffix is removed; the underlying literal/function is preserved.
+fn strip_pg_casts(expr: &str) -> String {
+    let chars: Vec<char> = expr.chars().collect();
+    let mut out = String::with_capacity(expr.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == ':' && i + 1 < chars.len() && chars[i + 1] == ':' {
+            i += 2; // skip "::"
+            // Type name: identifier chars, dots (schema-qualified), and spaces so
+            // multi-word types like `character varying` are consumed whole.
+            while i < chars.len()
+                && (chars[i].is_alphanumeric()
+                    || chars[i] == '_'
+                    || chars[i] == '.'
+                    || chars[i] == ' ')
+            {
+                i += 1;
+            }
+            // Optional length/precision modifier, e.g. numeric(10,2), varchar(50).
+            if i < chars.len() && chars[i] == '(' {
+                let mut depth = 0;
+                while i < chars.len() {
+                    match chars[i] {
+                        '(' => depth += 1,
+                        ')' => depth -= 1,
+                        _ => {}
+                    }
+                    i += 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+            }
+            // Optional array marker(s), e.g. text[] or int[][].
+            while i + 1 < chars.len() && chars[i] == '[' && chars[i + 1] == ']' {
+                i += 2;
+            }
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
 }
 
 /// Registry for type mappings between source and destination databases.
@@ -154,18 +244,16 @@ impl TypeRegistry {
     /// Looks up the converter for (source, target) from the global registry.
     /// Same-dialect pairs use passthrough (no converter needed).
     pub fn new(source: Dialect, target: Dialect) -> Self {
-        let (converter, index_type_map) = if source == target {
-            (None, HashMap::new())
-        } else {
-            let converters = build_converters();
-            match converters.get(&(source, target)).cloned() {
-                Some(conv) => {
-                    let idx_map = conv.index_type_map();
-                    (Some(conv), idx_map)
-                }
-                None => (None, HashMap::new()),
-            }
+        let converter: Option<Arc<dyn DialectConverter>> = match (source, target) {
+            (Dialect::MySql, Dialect::Postgres) => Some(Arc::new(MysqlToPg)),
+            (Dialect::Postgres, Dialect::MySql) => Some(Arc::new(PgToMysql)),
+            _ => None,
         };
+
+        let index_type_map = converter
+            .as_ref()
+            .map(|c| c.index_type_map())
+            .unwrap_or_default();
 
         Self {
             custom_mappings: HashMap::new(),
@@ -250,6 +338,62 @@ mod tests {
     use model::core::types::IntSize;
 
     #[test]
+    fn strip_pg_casts_enum_default() {
+        assert_eq!(strip_pg_casts("'G'::mpaa_rating"), "'G'");
+    }
+
+    #[test]
+    fn strip_pg_casts_various() {
+        assert_eq!(strip_pg_casts("'{}'::text[]"), "'{}'");
+        assert_eq!(strip_pg_casts("0::numeric(10,2)"), "0");
+        assert_eq!(strip_pg_casts("''::character varying"), "''"); // multi-word type
+        assert_eq!(strip_pg_casts("'foo'::public.my_enum"), "'foo'");
+        // nextval keeps its call; the inner ::regclass cast is stripped.
+        assert_eq!(
+            strip_pg_casts("nextval('actor_actor_id_seq'::regclass)"),
+            "nextval('actor_actor_id_seq')"
+        );
+        // No cast: unchanged.
+        assert_eq!(strip_pg_casts("now()"), "now()");
+        assert_eq!(strip_pg_casts("false"), "false");
+    }
+
+    #[test]
+    fn mysql_wraps_function_defaults_but_not_literals() {
+        let my = Dialect::MySql;
+        assert_eq!(
+            my.finalize_default_expression("CURRENT_DATE"),
+            "(CURRENT_DATE)"
+        );
+        assert_eq!(my.finalize_default_expression("now()"), "(now())");
+        // Literals stay bare.
+        assert_eq!(my.finalize_default_expression("'G'"), "'G'");
+        assert_eq!(my.finalize_default_expression("4.99"), "4.99");
+        assert_eq!(my.finalize_default_expression("-3"), "-3");
+        assert_eq!(my.finalize_default_expression("false"), "false");
+        // Already parenthesized is untouched.
+        assert_eq!(my.finalize_default_expression("(now())"), "(now())");
+    }
+
+    #[test]
+    fn postgres_leaves_defaults_unchanged() {
+        assert_eq!(
+            Dialect::Postgres.finalize_default_expression("CURRENT_DATE"),
+            "CURRENT_DATE"
+        );
+    }
+
+    #[test]
+    fn normalize_default_only_affects_postgres() {
+        assert_eq!(
+            Dialect::Postgres.normalize_default_expression("'G'::mpaa_rating"),
+            "'G'"
+        );
+        // MySQL source defaults have no `::` casts; leave untouched.
+        assert_eq!(Dialect::MySql.normalize_default_expression("'G'"), "'G'");
+    }
+
+    #[test]
     fn test_mysql_to_postgres_integer_types() {
         let registry = TypeRegistry::new(Dialect::MySql, Dialect::Postgres);
 
@@ -270,6 +414,8 @@ mod tests {
         assert!(matches!(result, ConversionResult::Compatible { .. }));
     }
 
+    /// A MySQL ENUM maps to a native PostgreSQL enum with its variants intact; the
+    /// `CREATE TYPE ... AS ENUM` is emitted separately by `SchemaPlan::enum_ops`.
     #[test]
     fn test_mysql_enum_to_postgres() {
         let registry = TypeRegistry::new(Dialect::MySql, Dialect::Postgres);
@@ -278,8 +424,12 @@ mod tests {
             name: String::new(),
             values: vec!["active".to_string(), "inactive".to_string()],
         };
-        let result = registry.convert(&enum_type);
-        assert!(matches!(result, ConversionResult::RequiresTransform { .. }));
+        match registry.convert(&enum_type) {
+            ConversionResult::Exact(Type::Enum { values, .. }) => {
+                assert_eq!(values, vec!["active", "inactive"]);
+            }
+            other => panic!("expected an exact enum conversion, got {other:?}"),
+        }
     }
 
     #[test]

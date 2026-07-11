@@ -37,11 +37,12 @@ impl DbSourceEndpoint {
         root_table: &str,
         mapping: &TransformationMetadata,
         refs: &GraphReferences,
+        dest_dialect: Dialect,
     ) -> Result<(Option<SchemaOps>, Option<HashMap<String, TableMetadata>>), MigrationError> {
         let source_dialect = self.0.dialect();
         let result = dispatch_driver!(&self.0, |d| {
             let introspector: Arc<dyn SchemaIntrospector> = d.clone() as _;
-            let type_registry = Arc::new(TypeRegistry::new(source_dialect, Dialect::Postgres)); // TODO: from dest
+            let type_registry = Arc::new(TypeRegistry::new(source_dialect, dest_dialect));
             let expander = GraphExpander::new(introspector, type_registry, source_dialect);
             expander
                 .expand(root_table, refs, mapping, false, false)
@@ -64,7 +65,13 @@ impl SourceEndpoint for DbSourceEndpoint {
     ) -> Result<SourceArtifacts, MigrationError> {
         let (schema_ops, cascade_meta) = match &pipeline.source.graph_references {
             Some(refs) => {
-                self.expand_graph(&pipeline.source.table, mapping, refs)
+                let dest_driver = &pipeline.destination.connection.driver;
+                let dest_dialect = Dialect::parse(dest_driver).ok_or_else(|| {
+                    MigrationError::UnsupportedFormat(format!(
+                        "graph expansion requires a SQL destination dialect, but destination driver '{dest_driver}' is not a SQL dialect"
+                    ))
+                })?;
+                self.expand_graph(&pipeline.source.table, mapping, refs, dest_dialect)
                     .await?
             }
             None => (None, None),

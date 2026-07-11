@@ -5,9 +5,10 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        plugins::fixture,
+        features::plugins::fixture,
         reset_postgres_schema,
-        utils::{DbType, get_row_count, run_smql},
+        harness::runner::{DbType, get_row_count, run_smql},
+        harness::smql::feature_smql,
     };
     use std::time::{Duration, Instant};
 
@@ -16,10 +17,8 @@ mod tests {
     const MAX_PLUGIN_RUN: Duration = Duration::from_secs(120);
 
     fn baseline_smql(dest: &str) -> String {
-        format!(
+        feature_smql(&format!(
             r#"
-            connection "src" {{ driver = "mysql"    url = "mysql://sakila_user:qwerty123@localhost:3306/sakila" }}
-            connection "dst" {{ driver = "postgres" url = "postgres://user:password@localhost:5432/testdb" }}
 
             pipeline "bench" {{
                 from {{ connection = connection.src table = "payment" }}
@@ -38,16 +37,14 @@ mod tests {
             }}
             "#,
             dest = dest,
-        )
+        ))
     }
 
     fn plugin_smql(dest: &str) -> String {
-        format!(
+        feature_smql(&format!(
             r#"
             plugin "adder" {{ path = "{plugin}" }}
 
-            connection "src" {{ driver = "mysql"    url = "mysql://sakila_user:qwerty123@localhost:3306/sakila" }}
-            connection "dst" {{ driver = "postgres" url = "postgres://user:password@localhost:5432/testdb" }}
 
             pipeline "bench" {{
                 from {{ connection = connection.src table = "payment" }}
@@ -67,7 +64,7 @@ mod tests {
             "#,
             plugin = fixture("test_transform.wasm"),
             dest = dest,
-        )
+        ))
     }
 
     /// Reset, run the SMQL, and return the wall-clock duration.

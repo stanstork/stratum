@@ -14,13 +14,7 @@
 //   cursor     = non-unique numeric column (staff_id)
 //   tiebreaker = unique PK column (payment_id) - disambiguates equal cursor values
 
-define {
-    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
-    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
-}
 
-connection "src" { driver = "mysql"    url = define.mysql_url    }
-connection "dst" { driver = "postgres" url = define.postgres_url }
 
 pipeline "paginate_payment_numeric" {
     from { connection = connection.src  table = "payment" }

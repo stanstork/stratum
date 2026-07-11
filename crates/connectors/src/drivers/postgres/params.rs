@@ -5,7 +5,7 @@ use rust_decimal::Decimal as RustDecimal;
 use std::str::FromStr;
 use tokio_postgres::types::{IsNull, Json as PgJson, ToSql, Type, to_sql_checked};
 
-/// Integer parameter that accepts any PG integer column type (INT2/INT4/INT8).
+/// Numeric parameter that adapts to whatever numeric column it is compared against.
 #[derive(Debug)]
 struct FlexInt(i64);
 
@@ -18,11 +18,94 @@ impl ToSql for FlexInt {
         match *ty {
             Type::INT2 => (self.0 as i16).to_sql(ty, out),
             Type::INT4 => (self.0 as i32).to_sql(ty, out),
+            Type::FLOAT4 => (self.0 as f32).to_sql(ty, out),
+            Type::FLOAT8 => (self.0 as f64).to_sql(ty, out),
+            Type::NUMERIC => RustDecimal::from(self.0).to_sql(ty, out),
             _ => self.0.to_sql(ty, out),
         }
     }
     fn accepts(ty: &Type) -> bool {
-        matches!(*ty, Type::INT2 | Type::INT4 | Type::INT8)
+        matches!(
+            *ty,
+            Type::INT2 | Type::INT4 | Type::INT8 | Type::FLOAT4 | Type::FLOAT8 | Type::NUMERIC
+        )
+    }
+    to_sql_checked!();
+}
+
+/// Floating-point parameter that accepts any PG numeric column type.
+#[derive(Debug)]
+struct FlexFloat(f64);
+
+impl ToSql for FlexFloat {
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
+        match *ty {
+            Type::FLOAT4 => (self.0 as f32).to_sql(ty, out),
+            Type::INT2 => (self.0 as i16).to_sql(ty, out),
+            Type::INT4 => (self.0 as i32).to_sql(ty, out),
+            Type::INT8 => (self.0 as i64).to_sql(ty, out),
+            Type::NUMERIC => {
+                // Route through the decimal's text form: `f64 -> Decimal` has no
+                // direct lossless constructor.
+                let decimal = RustDecimal::from_str(&self.0.to_string())
+                    .map_err(|e| format!("cannot bind {} as NUMERIC: {e}", self.0))?;
+                decimal.to_sql(ty, out)
+            }
+            _ => self.0.to_sql(ty, out),
+        }
+    }
+    fn accepts(ty: &Type) -> bool {
+        matches!(
+            *ty,
+            Type::FLOAT4 | Type::FLOAT8 | Type::NUMERIC | Type::INT2 | Type::INT4 | Type::INT8
+        )
+    }
+    to_sql_checked!();
+}
+
+/// Text parameter that adapts to the column type PostgreSQL infers.
+#[derive(Debug)]
+struct FlexLiteral(String);
+
+impl ToSql for FlexLiteral {
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
+        let raw = self.0.trim();
+        match *ty {
+            Type::BOOL => match raw.to_ascii_lowercase().as_str() {
+                "true" | "t" | "1" | "yes" | "on" => true.to_sql(ty, out),
+                "false" | "f" | "0" | "no" | "off" => false.to_sql(ty, out),
+                other => Err(format!("cannot bind {other:?} as BOOL").into()),
+            },
+            Type::INT2 => raw.parse::<i16>()?.to_sql(ty, out),
+            Type::INT4 => raw.parse::<i32>()?.to_sql(ty, out),
+            Type::INT8 => raw.parse::<i64>()?.to_sql(ty, out),
+            Type::FLOAT4 => raw.parse::<f32>()?.to_sql(ty, out),
+            Type::FLOAT8 => raw.parse::<f64>()?.to_sql(ty, out),
+            Type::NUMERIC => RustDecimal::from_str(raw)?.to_sql(ty, out),
+            _ => self.0.to_sql(ty, out),
+        }
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        <String as ToSql>::accepts(ty)
+            || matches!(
+                *ty,
+                Type::BOOL
+                    | Type::INT2
+                    | Type::INT4
+                    | Type::INT8
+                    | Type::FLOAT4
+                    | Type::FLOAT8
+                    | Type::NUMERIC
+            )
     }
     to_sql_checked!();
 }
@@ -37,14 +120,15 @@ impl PgParam {
             // Numeric types
             Value::Int(i) => PgParam(Box::new(FlexInt(*i))),
             Value::UInt(u) => PgParam(Box::new(FlexInt(*u as i64))),
-            Value::Float(f) => PgParam(Box::new(*f)),
+            Value::Float(f) => PgParam(Box::new(FlexFloat(*f))),
             Value::Decimal(d) => {
                 let decimal = RustDecimal::from_str(&d.to_string()).unwrap_or_default();
                 PgParam(Box::new(decimal))
             }
 
-            // String
-            Value::String(s) => PgParam(Box::new(s.clone())),
+            // String. Bound flexibly: filter literals arrive as text regardless of
+            // the column they are compared against.
+            Value::String(s) => PgParam(Box::new(FlexLiteral(s.clone()))),
 
             // Binary
             Value::Binary(b) => PgParam(Box::new(b.clone())),

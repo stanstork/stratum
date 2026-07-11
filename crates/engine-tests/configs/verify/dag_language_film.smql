@@ -10,17 +10,16 @@
 // ignore_constraints on film avoids FK enforcement complications
 // (original_language_id is nullable and may reference nothing).
 
-define {
-    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
-    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
-}
 
-connection "src" { driver = "mysql"    url = define.mysql_url    }
-connection "dst" { driver = "postgres" url = define.postgres_url }
 
 pipeline "migrate_language" {
     from { connection = connection.src  table = "language" }
     to   { connection = connection.dst  table = "language" }
+
+    paginate {
+        strategy = "pk"
+        cursor   = "language.language_id"
+    }
 
     settings {
         create_missing_tables = true
@@ -33,6 +32,11 @@ pipeline "migrate_film" {
     to   { connection = connection.dst  table = "film" }
 
     after = ["migrate_language"]
+
+    paginate {
+        strategy = "pk"
+        cursor   = "film.film_id"
+    }
 
     settings {
         create_missing_tables = true

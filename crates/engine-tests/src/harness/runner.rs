@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use super::{TEST_MYSQL_URL_ORDERS, TEST_MYSQL_URL_SAKILA, TEST_PG_URL, mysql_pool};
+use crate::harness::{Direction, fixtures::mysql_pool};
 use crate::pg_pool;
 use connectors::{
     drivers::{csv::error::FileError, postgres::row::PgRowDecoder},
@@ -31,36 +31,6 @@ pub const ACTORS_TABLE_DDL: &str = r#"CREATE TABLE actor (
   last_name VARCHAR(45) NOT NULL,
   last_update TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );"#;
-
-/// A query that performs a multi-table join and selects specific columns.
-/// Primarily used for testing the LOAD statement.
-pub const ORDERS_FLAT_JOIN_QUERY: &str = r#"
-    SELECT orders.id AS id,
-        orders.user_id AS user_id,
-        orders.order_date AS order_date,
-        orders.total AS total,
-        users.email AS user_email,
-        order_items.price AS order_price,
-        products.name AS product_name
-    FROM orders
-    INNER JOIN users        ON users.id           = orders.user_id
-    INNER JOIN order_items  ON order_items.order_id = orders.id
-    INNER JOIN products     ON products.id        = order_items.id
-"#;
-
-/// A query that selects columns from the `orders` table with nested filters applied.
-/// This is primarily used for testing the FILTER statement.
-pub const ORDERS_FLAT_FILTER_QUERY: &str = r#"
-    SELECT orders.user_id AS user_id, 
-        orders.total AS total, 
-        orders.order_date AS order_date, 
-        orders.id AS id 
-    FROM orders AS orders 
-    INNER JOIN users AS users             ON users.id = orders.user_id 
-    INNER JOIN order_items AS order_items ON order_items.order_id = orders.id 
-    INNER JOIN products AS products       ON products.id = order_items.id 
-    WHERE (orders.total > 400 AND (users.id != 1 OR order_items.price < 1200))
-"#;
 
 /// DDL statement to precreate the `customers` table in Postgres.
 /// This is used for testing CSV data loading and transformations.
@@ -109,11 +79,13 @@ pub enum DbType {
     Postgres,
 }
 
-/// Read a `.smql` file and run it, resolving the path relative to the workspace root.
-pub async fn run_smql_file(path: &str) -> Result<(), MigrationError> {
-    let smql = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("failed to read SMQL file '{path}': {e}"));
-    run_smql(&smql, false).await
+/// Run a config from `configs/`, MySQL -> PostgreSQL.
+///
+/// The file holds pipelines only; connections come from the harness, so no test
+/// config contains a driver name or URL. `name` is relative to `configs/`, e.g.
+/// `"verify/film.smql"`.
+pub async fn run_config(name: &str) -> Result<(), MigrationError> {
+    run_smql(&Direction::MYSQL_TO_POSTGRES.config(name), false).await
 }
 
 /// Parse & run the SMQL plan, panicking on any error
@@ -498,16 +470,3 @@ pub fn file_row_count(file_path: &str, has_headers: bool) -> Result<usize, FileE
     Ok(data_rows)
 }
 
-/// Fill in the two `{mysql_url}` / `{pg_url}` placeholders
-fn templated_smql(template: &str, source_db: &str) -> String {
-    template
-        .replace(
-            "{mysql_url}",
-            match source_db {
-                "sakila" => TEST_MYSQL_URL_SAKILA,
-                "orders" => TEST_MYSQL_URL_ORDERS,
-                _ => "",
-            },
-        )
-        .replace("{pg_url}", TEST_PG_URL)
-}

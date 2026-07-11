@@ -1,11 +1,15 @@
 # Throwaway source + destination databases for trying Stratum locally.
 # Credentials match .env.example.
 #
-#   docker compose up -d        # start MySQL (seeded with Sakila) + PostgreSQL
-#   docker compose down -v      # stop and delete all data
+# MySQL is seeded with Sakila (a MySQL->PostgreSQL source) and an empty
+# `pagila_dest` database (the PostgreSQL->MySQL destination). PostgreSQL is seeded
+# with an empty `testdb` and the Pagila sample database.
 services:
   mysql:
     image: mysql:8
+    # `LOAD DATA LOCAL INFILE` is the MySQL fast path. Without it every write
+    # silently falls back to plain INSERTs.
+    command: ["--local-infile=1"]
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: sakila
@@ -17,6 +21,8 @@ services:
       # Seed the Sakila sample database (schema first, then data).
       - ./.github/testdata/sakila-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       - ./.github/testdata/sakila-data.sql:/docker-entrypoint-initdb.d/02-data.sql:ro
+      # Destination database + user for the PostgreSQL -> MySQL tests.
+      - ./.github/testdata/mysql-dest-init.sql:/docker-entrypoint-initdb.d/03-dest.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
       interval: 5s
@@ -31,6 +37,12 @@ services:
       POSTGRES_DB: testdb
     ports:
       - "5432:5432"
+    volumes:
+      # Creates the `pagila` database and loads the dumps. Runs after initdb, so
+      # `user` already exists and is the superuser here.
+      - ./.github/testdata/pagila-init.sh:/docker-entrypoint-initdb.d/01-pagila.sh:ro
+      - ./.github/testdata/pagila-schema.sql:/pagila-schema.sql:ro
+      - ./.github/testdata/pagila-data.sql:/pagila-data.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d testdb"]
       interval: 5s

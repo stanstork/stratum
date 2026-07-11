@@ -7,11 +7,30 @@ use uuid::Uuid;
 /// Coerce a value to match the target canonical type.
 /// This handles conversions like String -> Int, Binary -> Text, etc.
 pub(crate) fn coerce_value(value: Value, target_type: &Type) -> Value {
+    let value = coerce_boolean(value, target_type);
     let value = coerce_numeric(value, target_type);
     let value = coerce_temporal(value, target_type);
     let value = coerce_enum(value, target_type);
     let value = coerce_uuid(value, target_type);
     coerce_text(value, target_type)
+}
+
+fn coerce_boolean(value: Value, target_type: &Type) -> Value {
+    if !matches!(target_type, Type::Boolean) {
+        return value;
+    }
+
+    match value {
+        Value::Int(n) => Value::Boolean(n != 0),
+        Value::UInt(n) => Value::Boolean(n != 0),
+        Value::Float(f) => Value::Boolean(f != 0.0),
+        Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {
+            "1" | "t" | "true" | "y" | "yes" | "on" => Value::Boolean(true),
+            "0" | "f" | "false" | "n" | "no" | "off" => Value::Boolean(false),
+            _ => Value::String(s),
+        },
+        other => other,
+    }
 }
 
 fn coerce_uuid(value: Value, target_type: &Type) -> Value {

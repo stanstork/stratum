@@ -50,27 +50,33 @@ impl MySqlDriver {
             .map_err(|e| DriverError::QueryError(e.to_string()))?
             .ok_or_else(|| DriverError::QueryError("Failed to retrieve database version".into()))?;
 
+        // `LOAD DATA LOCAL INFILE` (fast-path bulk load) only works when the
+        // server has `local_infile` enabled. `@@GLOBAL.local_infile` returns 0/1.
+        let local_infile_enabled = conn
+            .query_first::<i64, _>("SELECT @@GLOBAL.local_infile")
+            .await
+            .map_err(|e| DriverError::QueryError(e.to_string()))?
+            .map(|v| v != 0)
+            .unwrap_or(false);
+
         // Drop connection explicitly or let it drop out of scope;
         // we're done with I/O here.
         drop(conn);
 
-        Ok(Self::resolve_capabilities(version))
+        Ok(Self::resolve_capabilities(version, local_infile_enabled))
     }
 
-    fn resolve_capabilities(version: String) -> Capabilities {
-        let version_lower = version.to_lowercase();
-        let is_mariadb = version_lower.contains("mariadb");
-
-        // TODO: RETURNING is supported in MariaDB 10.5+ (INSERT) and 10.0+ (DELETE).
-        // For accurate support, a SemVer parser would be ideal here.
-        let supports_returning = is_mariadb;
+    fn resolve_capabilities(version: String, local_infile_enabled: bool) -> Capabilities {
+        // MySQL has no `RETURNING`. MariaDB added `INSERT ... RETURNING` in 10.5;
+        // since our write path uses INSERT, gate the capability on that version.
+        let supports_returning = Self::mariadb_supports_returning(&version);
 
         Capabilities {
             version,
             transactions: true,
             savepoints: true,
-            copy_protocol: true, // Corresponds to LOAD DATA LOCAL INFILE
-            upsert: true,        // ON DUPLICATE KEY UPDATE
+            copy_protocol: local_infile_enabled, // LOAD DATA LOCAL INFILE requires server `local_infile=1`
+            upsert: true,                        // ON DUPLICATE KEY UPDATE
             returning_clause: supports_returning,
             json_type: true,   // Supported in MySQL 5.7+ and MariaDB 10.2+ (as alias)
             jsonb_type: false, // MySQL has JSON, but not a distinct JSONB binary type like PG
@@ -80,6 +86,37 @@ impl MySqlDriver {
             max_parameters: Some(MYSQL_MAX_PREPARED_STMT_PARAMS.into()),
             max_query_size: None, // Depends on server's max_allowed_packet, usually dynamic
         }
+    }
+
+    /// Returns `true` when the version string denotes MariaDB 10.5 or newer,
+    /// which is when `INSERT ... RETURNING` became available.
+    fn mariadb_supports_returning(version: &str) -> bool {
+        if !version.to_lowercase().contains("mariadb") {
+            return false;
+        }
+
+        // Strip the legacy `5.5.5-` compatibility prefix if present.
+        let core = version.strip_prefix("5.5.5-").unwrap_or(version);
+
+        // Parse the leading `major.minor` from the remaining string.
+        let mut parts = core.split('.');
+        let major: u32 = match parts.next().and_then(|p| p.parse().ok()) {
+            Some(v) => v,
+            None => return false,
+        };
+        // The minor segment may carry a suffix, e.g. `6-MariaDB`.
+        let minor: u32 = match parts.next().map(|p| {
+            p.chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse()
+                .unwrap_or(0)
+        }) {
+            Some(v) => v,
+            None => return false,
+        };
+
+        (major, minor) >= (10, 5)
     }
 }
 

@@ -7,7 +7,7 @@ use crate::{
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_postgres::Client;
-use tracing::info;
+use tracing::{info, warn};
 
 const PG_MAX_PREPARED_STMT_PARAMS: usize = 65535;
 
@@ -83,26 +83,61 @@ impl PgDriver {
 
         let version: String = row.get(0);
 
-        Ok(Self::resolve_capabilities(version))
+        let has_postgis: bool = client
+            .query_one(
+                "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'postgis')",
+                &[],
+            )
+            .await
+            .map_err(|e| DriverError::QueryError(e.to_string()))?
+            .get(0);
+
+        Ok(Self::resolve_capabilities(version, has_postgis))
     }
 
-    fn resolve_capabilities(version: String) -> Capabilities {
+    /// Resolves server capabilities from the version string and PostGIS probe.
+    fn resolve_capabilities(version: String, has_postgis: bool) -> Capabilities {
+        // If the version string can't be parsed (should not happen for real
+        // servers), assume a modern release rather than disabling features.
+        let ver = Self::parse_pg_version(&version).unwrap_or_else(|| {
+            warn!(version = %version, "could not parse PostgreSQL version; assuming latest");
+            (u32::MAX, 0)
+        });
+        let at_least = |major: u32, minor: u32| ver >= (major, minor);
+
         Capabilities {
             version,
+            // Present in every supported PostgreSQL release.
             transactions: true,
             savepoints: true,
             copy_protocol: true,
-            upsert: true,
-            returning_clause: true,
-            json_type: true,
-            jsonb_type: true,
             array_type: true,
-            uuid_type: true,
-            geometry_type: true,
+            // Gated at the release that introduced each feature.
+            returning_clause: at_least(8, 2),
+            uuid_type: at_least(8, 3),
+            json_type: at_least(9, 2),
+            jsonb_type: at_least(9, 4),
+            upsert: at_least(9, 5), // INSERT ... ON CONFLICT
+            geometry_type: has_postgis,
             max_parameters: Some(PG_MAX_PREPARED_STMT_PARAMS),
             max_query_size: None,
         }
     }
+
+    fn parse_pg_version(version: &str) -> Option<(u32, u32)> {
+        // The version number is the second whitespace-separated token.
+        let token = version.split_whitespace().nth(1)?;
+        let mut parts = token.split('.');
+        let major = leading_u32(parts.next()?)?;
+        let minor = parts.next().and_then(leading_u32).unwrap_or(0);
+        Some((major, minor))
+    }
+}
+
+/// Parses the leading run of ASCII digits (handles suffixes like `17beta1`).
+fn leading_u32(s: &str) -> Option<u32> {
+    let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
 }
 
 /// Set the session `search_path` so unqualified names resolve to `schema`.

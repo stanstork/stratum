@@ -18,7 +18,7 @@ impl IntoCanonical for PgTypeConverter {
                 canonical: Type::Int {
                     bits: IntSize::I16,
                     unsigned: false,
-                    auto_increment: false,
+                    auto_increment: col.is_auto_increment,
                 },
                 fidelity: Fidelity::Lossless,
                 value_transform: None,
@@ -28,7 +28,7 @@ impl IntoCanonical for PgTypeConverter {
                 canonical: Type::Int {
                     bits: IntSize::I32,
                     unsigned: false,
-                    auto_increment: false,
+                    auto_increment: col.is_auto_increment,
                 },
                 fidelity: Fidelity::Lossless,
                 value_transform: None,
@@ -269,6 +269,20 @@ impl IntoCanonical for PgTypeConverter {
                         }),
                     },
                     fidelity: Fidelity::Lossless,
+                    value_transform: None,
+                    warnings: vec![],
+                }
+            }
+
+            // Enum
+            other if col.is_enum() => {
+                let values = col.enum_values();
+                TypeMapping {
+                    canonical: Type::Enum {
+                        name: other.to_string(),
+                        values,
+                    },
+                    fidelity: Fidelity::Equivalent,
                     value_transform: None,
                     warnings: vec![],
                 }

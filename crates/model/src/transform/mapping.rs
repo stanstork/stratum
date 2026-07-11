@@ -55,6 +55,10 @@ pub struct TransformationMetadata {
 
     /// Columns produced by plugin transforms (`select { col = plugin.x({...}) }`).
     pub plugin_columns: Vec<(String, Type)>,
+
+    /// Source tables actually migrated (created) by this run: the `from` table
+    /// plus any cascade-discovered tables.
+    pub migrated_tables: HashSet<String>,
 }
 
 impl FieldTransformations {
@@ -341,7 +345,13 @@ impl TransformationMetadata {
             field_mappings,
             foreign_fields,
             plugin_columns: Vec::new(),
+            migrated_tables: source_tables,
         }
+    }
+
+    /// Whether `table` is one of the tables this run migrates (creates).
+    pub fn migrates(&self, table: &str) -> bool {
+        self.migrated_tables.contains(&table.to_ascii_lowercase())
     }
 
     /// Stamp the resolved plugin transform output columns.
@@ -355,7 +365,8 @@ impl TransformationMetadata {
     }
 
     /// Returns a clone with identity entries added for any table in `tables` not already mapped.
-    /// Used by graph expansion so FK filters treat all discovered tables as in-scope.
+    /// Used by graph expansion so all discovered tables are treated as migrated and
+    /// their inter-table foreign keys are recreated.
     pub fn with_extra_sources(&self, tables: &[String]) -> Self {
         let mut augmented = self.clone();
         for t in tables {
@@ -370,6 +381,7 @@ impl TransformationMetadata {
                 .target_to_source
                 .entry(lower.clone())
                 .or_insert_with(|| lower.clone());
+            augmented.migrated_tables.insert(lower);
         }
         augmented
     }

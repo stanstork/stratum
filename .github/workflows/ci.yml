@@ -156,12 +156,36 @@ jobs:
                   GRANT ALL PRIVILEGES ON DATABASE testdb TO "user";
                   SQL
 
+            - name: Seed Pagila (PostgreSQL source for MySQL-destination tests)
+              env:
+                  PGPASSWORD: postgres
+              run: |
+                  psql -h localhost -U postgres -d postgres -c 'CREATE DATABASE pagila OWNER "user";'
+
+                  # The dump assigns ownership to a `postgres` role, which exists here.
+                  psql -h localhost -U postgres -d pagila -v ON_ERROR_STOP=1 \
+                      -f .github/testdata/pagila-schema.sql
+                  psql -h localhost -U postgres -d pagila -v ON_ERROR_STOP=1 \
+                      -f .github/testdata/pagila-data.sql
+
+                  # Objects end up owned by `postgres`; the tests connect as `user`.
+                  psql -h localhost -U postgres -d pagila <<'SQL'
+                  GRANT USAGE ON SCHEMA public TO "user";
+                  GRANT SELECT ON ALL TABLES IN SCHEMA public TO "user";
+                  GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO "user";
+                  SQL
+
             - name: Setup MySQL (users + dbs + grants)
               run: |
                   mysql -h 127.0.0.1 -P 3306 -uroot -proot <<'SQL'
-                  -- Databases
+                  -- `LOAD DATA LOCAL INFILE` is the MySQL fast path; without this
+                  -- every write silently falls back to plain INSERTs.
+                  SET GLOBAL local_infile = 1;
+
+                  -- Databases. `stratum_dest` is the scratch MySQL destination for
+                  -- the source x destination matrix; it is emptied by each test.
                   CREATE DATABASE IF NOT EXISTS sakila;
-                  CREATE DATABASE IF NOT EXISTS testdb;
+                  CREATE DATABASE IF NOT EXISTS stratum_dest;
 
                   -- Users
                   CREATE USER IF NOT EXISTS 'sakila_user'@'%' IDENTIFIED BY 'qwerty123';
@@ -169,7 +193,7 @@ jobs:
 
                   -- Grants
                   GRANT ALL PRIVILEGES ON sakila.* TO 'sakila_user'@'%';
-                  GRANT ALL PRIVILEGES ON testdb.* TO 'user'@'%';
+                  GRANT ALL PRIVILEGES ON stratum_dest.* TO 'user'@'%';
                   FLUSH PRIVILEGES;
                   SQL
 
@@ -180,10 +204,6 @@ jobs:
                   # Seed Sakila data as root
                   mysql -h 127.0.0.1 -P 3306 -uroot -proot sakila \
                       < .github/testdata/sakila-data.sql
-
-                  # Seed Orders DB
-                  mysql -h 127.0.0.1 -P 3306 -uuser -ppassword testdb \
-                      < .github/testdata/testdb.sql
 
             - name: Setup Rust cache
               uses: Swatinem/rust-cache@v2

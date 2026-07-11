@@ -19,4 +19,5 @@ pub struct IndexColumnDef {
     pub name: String,
     pub sort_order: SortOrder,
     pub nulls_order: NullsOrder,
+    pub prefix_length: Option<u32>,
 }

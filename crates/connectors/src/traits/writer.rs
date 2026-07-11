@@ -14,15 +14,11 @@ pub trait DataWriter: Driver {
     /// Write rows using optimized bulk protocol (COPY/LOAD DATA).
     async fn copy_rows(
         &self,
-        _table: &str,
-        _columns: &[ColumnMetadata],
-        _rows: &[Record],
-    ) -> Result<u64, DriverError> {
-        unimplemented!("copy_rows not implemented for this driver");
-    }
+        table: &str,
+        columns: &[ColumnMetadata],
+        rows: &[Record],
+    ) -> Result<u64, DriverError>;
 
     /// Remove all rows from `table` (used by `replace` write mode).
-    async fn truncate(&self, _table: &str) -> Result<(), DriverError> {
-        unimplemented!("truncate not implemented for this driver");
-    }
+    async fn truncate(&self, table: &str) -> Result<(), DriverError>;
 }

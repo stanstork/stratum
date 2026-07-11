@@ -3,31 +3,28 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        plugins::fixture,
+        features::plugins::fixture,
         reset_postgres_schema,
-        utils::{DbType, get_row_count, run_smql},
+        harness::runner::{DbType, get_row_count, run_smql},
     };
+    use crate::harness::smql::source_smql;
     use tracing_test::traced_test;
 
     /// Build a `mysql -> wasm sink` SMQL doc draining `actor` into `test_sink`
     /// (declared `sink`) with `expect` rows. Only `id` is produced, matching the
     /// sink's declared input.
     fn smql(expect: i64) -> String {
-        format!(
+        source_smql(&format!(
             r#"
             plugin "sink" {{
                 path = "{plugin}"
                 config {{ expect = "{expect}" }}
             }}
 
-            connection "mysql_source" {{
-                driver = "mysql"
-                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
-            }}
             connection "wasm_sink" {{ driver = "wasm" plugin = "sink" }}
 
             pipeline "drain_actor" {{
-                from {{ connection = connection.mysql_source table = "actor" }}
+                from {{ connection = connection.src table = "actor" }}
                 to   {{ connection = connection.wasm_sink   table = "sink" }}
 
                 select {{ id = actor.actor_id }}
@@ -37,7 +34,7 @@ mod tests {
             "#,
             plugin = fixture("test_sink.wasm"),
             expect = expect,
-        )
+        ))
     }
 
     /// Every source row drains through the sink: with `expect` = the source row
