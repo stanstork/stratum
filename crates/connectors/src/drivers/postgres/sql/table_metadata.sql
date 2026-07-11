@@ -1,19 +1,20 @@
 WITH primary_keys AS (
-  SELECT kcu.table_name, kcu.column_name, kcu.ordinal_position::int AS pk_position
-  FROM information_schema.table_constraints AS tc
-  JOIN information_schema.key_column_usage AS kcu
-    ON tc.constraint_name = kcu.constraint_name
-    AND tc.table_schema = kcu.table_schema
-    AND tc.table_name = kcu.table_name
-  WHERE tc.table_schema = '{schema}' AND tc.table_name = '{table}' AND tc.constraint_type = 'PRIMARY KEY'
+  SELECT a.attname AS column_name, k.ord::int AS pk_position
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+  JOIN unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord) ON true
+  JOIN pg_attribute a ON a.attrelid = rel.oid AND a.attnum = k.attnum
+  WHERE nsp.nspname = '{schema}' AND rel.relname = '{table}' AND con.contype = 'p'
 ),
 unique_constraints AS (
-  SELECT kcu.table_name, kcu.column_name
-  FROM information_schema.table_constraints AS tc
-  JOIN information_schema.key_column_usage AS kcu
-    ON tc.constraint_name = kcu.constraint_name
-    AND tc.table_schema = kcu.table_schema
-  WHERE tc.table_schema = '{schema}' AND tc.table_name = '{table}' AND tc.constraint_type = 'UNIQUE'
+  SELECT a.attname AS column_name
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+  JOIN unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord) ON true
+  JOIN pg_attribute a ON a.attrelid = rel.oid AND a.attnum = k.attnum
+  WHERE nsp.nspname = '{schema}' AND rel.relname = '{table}' AND con.contype = 'u'
 )
 SELECT
   c.ordinal_position,
