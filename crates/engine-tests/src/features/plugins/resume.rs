@@ -4,9 +4,9 @@
 mod tests {
     use crate::{
         features::plugins::fixture,
-        reset_postgres_schema,
         harness::runner::{DbType, get_row_count, run_smql, run_smql_with_pause},
         harness::smql::dest_smql,
+        reset_postgres_schema,
     };
 
     const TOTAL: i64 = 3000;

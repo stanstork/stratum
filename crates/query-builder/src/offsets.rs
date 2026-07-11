@@ -88,7 +88,7 @@ fn append_where(
 }
 
 fn limit_expr(limit: usize) -> Expr {
-    value(Value::Int(limit as i64))
+    value(Value::Int(i64::try_from(limit).unwrap_or(i64::MAX)))
 }
 
 fn offset_expr(offset: usize) -> Expr {

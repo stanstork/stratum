@@ -6,9 +6,9 @@
 mod tests {
     use crate::{
         features::plugins::fixture,
-        reset_postgres_schema,
         harness::runner::{DbType, get_row_count, run_smql},
         harness::smql::feature_smql,
+        reset_postgres_schema,
     };
     use std::time::{Duration, Instant};
 

@@ -2,12 +2,12 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::harness::smql::source_smql;
     use crate::{
         features::plugins::fixture,
-        reset_postgres_schema,
         harness::runner::{DbType, get_row_count, run_smql},
+        reset_postgres_schema,
     };
-    use crate::harness::smql::source_smql;
     use tracing_test::traced_test;
 
     /// Build a `mysql -> wasm sink` SMQL doc draining `actor` into `test_sink`

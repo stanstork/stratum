@@ -2,12 +2,14 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::harness::smql::feature_smql;
     use crate::{
         features::plugins::fixture,
+        harness::runner::{
+            DbType, assert_table_exists, get_cell_as_usize, get_row_count, run_smql,
+        },
         reset_postgres_schema,
-        harness::runner::{DbType, assert_table_exists, get_cell_as_usize, get_row_count, run_smql},
     };
-    use crate::harness::smql::feature_smql;
     use tracing_test::traced_test;
 
     /// Build an SMQL doc for `customer -> <dest>` with a single filter rule. The

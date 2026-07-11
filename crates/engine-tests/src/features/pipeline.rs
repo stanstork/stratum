@@ -2,14 +2,14 @@
 mod tests {
     use std::{fs, path::PathBuf};
 
+    use crate::harness::smql::feature_smql;
     use crate::{
-        reset_postgres_schema,
         harness::runner::{
-            ACTORS_TABLE_DDL, DbType,
-            PIPELINE_FAILURES_TABLE_DDL, assert_column_exists, assert_row_count,
-            assert_table_exists, execute, fetch_rows, get_cell_as_string, get_cell_as_usize,
-            get_row_count, run_smql,
+            ACTORS_TABLE_DDL, DbType, PIPELINE_FAILURES_TABLE_DDL, assert_column_exists,
+            assert_row_count, assert_table_exists, execute, fetch_rows, get_cell_as_string,
+            get_cell_as_usize, get_row_count, run_smql,
         },
+        reset_postgres_schema,
     };
     use engine_core::plan::execution::ExecutionPlan as CoreExecutionPlan;
     use engine_planner::{
@@ -19,7 +19,6 @@ mod tests {
     use engine_processing::EnvContext;
     use engine_runtime::dag::builder::DagBuilder;
     use smql_syntax::builder::parse;
-    use crate::harness::smql::feature_smql;
     use tracing_test::traced_test;
 
     // Test Settings: Default (no special flags).
@@ -30,7 +29,8 @@ mod tests {
     async fn missing_table_not_created_without_setting() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
             pipeline "migrate_actor" {
                 from {
                     connection = connection.src
@@ -41,7 +41,8 @@ mod tests {
                     table      = "actor"
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
         assert_table_exists("actor", false).await;
@@ -57,7 +58,8 @@ mod tests {
     async fn create_missing_tables_creates_table_and_copies_data() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
             pipeline "migrate_actor" {
                 from {
                     connection = connection.src
@@ -71,7 +73,8 @@ mod tests {
                     create_missing_tables = true
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
 
@@ -95,7 +98,8 @@ mod tests {
         // Create the actor table in Postgres without the full_name column
         execute(ACTORS_TABLE_DDL).await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
             pipeline "migrate_actor" {
                 from {
                     connection = connection.src
@@ -112,7 +116,8 @@ mod tests {
                     create_missing_columns = true
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
 
@@ -136,7 +141,8 @@ mod tests {
         // Create the actor table in Postgres
         execute(ACTORS_TABLE_DDL).await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
             pipeline "migrate_actor" {
                 from {
                     connection = connection.src
@@ -147,7 +153,8 @@ mod tests {
                     table      = "actor"
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
         assert_row_count("actor", "sakila", "actor").await;
@@ -168,7 +175,8 @@ mod tests {
     async fn create_table_with_computed_column_and_ignore_constraints() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
             pipeline "migrate_actor" {
                 from {
                     connection = connection.src
@@ -186,7 +194,8 @@ mod tests {
                     ignore_constraints    = true
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
 
@@ -218,7 +227,8 @@ mod tests {
     async fn validation_skip_and_warn_actions_filter_rows() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
 
             // Pipeline 1: Test SKIP action - skip rows with invalid payments
             pipeline "migrate_payments_skip_invalid" {
@@ -399,7 +409,8 @@ mod tests {
                     phone = address.phone
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
 
@@ -485,7 +496,8 @@ mod tests {
     async fn validation_on_joined_tables_and_computed_fields() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
 
             // Pipeline: Test validation with joined tables and transformed fields
             pipeline "migrate_film_actors" {
@@ -617,7 +629,8 @@ mod tests {
                     }
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
 
@@ -716,7 +729,8 @@ mod tests {
     async fn validation_fail_action_stops_pipeline() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
 
             pipeline "migrate_actors_with_fail" {
                 from {
@@ -752,7 +766,8 @@ mod tests {
                     last_name = actor.last_name
                 }
             }
-        "#);
+        "#,
+        );
 
         // Run the migration with fail validation
         let _ = run_smql(&tmpl, false).await;
@@ -804,7 +819,8 @@ mod tests {
         // Create the DLQ table before running the migration
         execute(PIPELINE_FAILURES_TABLE_DDL).await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
 
             pipeline "migrate_actors_strict_validation" {
                 from {
@@ -847,7 +863,8 @@ mod tests {
                     }
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
 
@@ -909,7 +926,8 @@ mod tests {
         // Clean up previous test file if exists
         let _ = std::fs::remove_file(dlq_path);
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
 
             pipeline "migrate_payments_file_dlq" {
                 from {
@@ -944,7 +962,8 @@ mod tests {
                     }
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
 
@@ -1033,7 +1052,8 @@ mod tests {
 
         execute(ACTORS_TABLE_DDL).await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
             pipeline "migrate_actor_with_before_hooks" {
                 from {
                     connection = connection.src
@@ -1057,7 +1077,8 @@ mod tests {
                     last_name  = actor.last_name
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
 
@@ -1088,7 +1109,8 @@ mod tests {
 
         execute(ACTORS_TABLE_DDL).await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
             pipeline "migrate_actor_with_after_hooks" {
                 from {
                     connection = connection.src
@@ -1113,7 +1135,8 @@ mod tests {
                     last_name  = actor.last_name
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
 
@@ -1148,7 +1171,8 @@ mod tests {
 
         execute(ACTORS_TABLE_DDL).await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
             pipeline "migrate_actor_full_lifecycle" {
                 from {
                     connection = connection.src
@@ -1180,7 +1204,8 @@ mod tests {
                     last_name  = actor.last_name
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
 

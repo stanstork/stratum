@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use crate::{
-        reset_postgres_schema,
-        harness::runner::{assert_row_count, assert_table_exists, run_smql},
-    };
     use crate::harness::smql::feature_smql;
+    use crate::{
+        harness::runner::{assert_row_count, assert_table_exists, run_smql},
+        reset_postgres_schema,
+    };
     use tracing_test::traced_test;
 
     // Test DAG: Simple sequential dependencies (A -> B -> C)
@@ -21,7 +21,8 @@ mod tests {
     async fn tc_dag_01_sequential_dependencies() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
 
             // First pipeline - no dependencies
             pipeline "copy_actors" {
@@ -73,7 +74,8 @@ mod tests {
                     ignore_constraints    = true
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
 
@@ -101,7 +103,8 @@ mod tests {
     async fn tc_dag_02_parallel_execution() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
 
             // Root pipeline - no dependencies
             pipeline "copy_actors" {
@@ -171,7 +174,8 @@ mod tests {
                     ignore_constraints    = true
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
 
@@ -203,7 +207,8 @@ mod tests {
     async fn tc_dag_03_diamond_dependencies() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
 
             // Level 0: Root
             pipeline "copy_actors" {
@@ -291,7 +296,8 @@ mod tests {
                     ignore_constraints    = true
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
 
@@ -321,7 +327,8 @@ mod tests {
     async fn tc_dag_04_independent_pipelines() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
 
             // All independent pipelines
             pipeline "copy_actors" {
@@ -367,7 +374,8 @@ mod tests {
                     ignore_constraints    = true
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
 
@@ -393,7 +401,8 @@ mod tests {
     async fn tc_dag_05_complex_dependencies() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
 
             // Level 0: Two independent roots
             pipeline "copy_actors" {
@@ -495,7 +504,8 @@ mod tests {
                     ignore_constraints    = true
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
 
@@ -531,7 +541,8 @@ mod tests {
     async fn tc_dag_07_failure_continue_independent() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
             execution {
                 max_concurrency = 8
                 on_failure = "continue"
@@ -629,7 +640,8 @@ mod tests {
                     ignore_constraints    = true
                 }
             }
-        "#);
+        "#,
+        );
 
         // This should fail but continue with independent pipelines
         let _ = run_smql(&tmpl, false).await;
@@ -657,7 +669,8 @@ mod tests {
     async fn tc_dag_06_wide_dependencies() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(r#"
+        let tmpl = feature_smql(
+            r#"
             execution {
                 strategy = "parallel"
                 max_concurrency = 8
@@ -746,7 +759,8 @@ mod tests {
                     create_missing_tables = true
                 }
             }
-        "#);
+        "#,
+        );
 
         let _ = run_smql(&tmpl, false).await;
 

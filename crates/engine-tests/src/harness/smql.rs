@@ -151,6 +151,9 @@ mod invariants {
                 checked += 1;
             }
         }
-        assert!(checked > 30, "expected to check every config, saw {checked}");
+        assert!(
+            checked > 30,
+            "expected to check every config, saw {checked}"
+        );
     }
 }

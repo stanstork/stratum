@@ -323,7 +323,7 @@ impl DbSourceReader {
             .columns(columns)
             .joins(extra_joins)
             .filter(filter_clause)
-            .limit(i64::MAX as usize)
+            .limit(usize::MAX)
             .cursor(Cursor::None)
             .strategy(OffsetStrategyFactory::default_strategy());
 

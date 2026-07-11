@@ -1,16 +1,15 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        reset_postgres_schema,
         harness::runner::{run_smql, run_verify_smql},
+        reset_postgres_schema,
     };
     use tracing_test::traced_test;
 
     /// Render a Phase-2 schema config for the MySQL -> PostgreSQL direction.
     macro_rules! phase2_config {
         ($name:expr) => {
-            $crate::harness::Direction::MYSQL_TO_POSTGRES
-                .config(concat!("schema-objects/", $name))
+            $crate::harness::Direction::MYSQL_TO_POSTGRES.config(concat!("schema-objects/", $name))
         };
     }
 
@@ -23,8 +22,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_cascade_payment() {
         reset_postgres_schema().await;
-        let smql =
-            phase2_config!("p2-02-cascade-data.smql");
+        let smql = phase2_config!("p2-02-cascade-data.smql");
         run_smql(&smql, true).await.expect("apply failed");
         run_verify_smql(&smql).await.expect("verify failed");
     }
@@ -37,8 +35,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_full_chain() {
         reset_postgres_schema().await;
-        let smql =
-            phase2_config!("p2-03-full-chain.smql");
+        let smql = phase2_config!("p2-03-full-chain.smql");
         run_smql(&smql, true).await.expect("apply failed");
         run_verify_smql(&smql).await.expect("verify failed");
     }
@@ -51,8 +48,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_circular_fk() {
         reset_postgres_schema().await;
-        let smql =
-            phase2_config!("p2-06-circular-fk.smql");
+        let smql = phase2_config!("p2-06-circular-fk.smql");
         run_smql(&smql, true).await.expect("apply failed");
         run_verify_smql(&smql).await.expect("verify failed");
     }
@@ -150,8 +146,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_table_rename() {
         reset_postgres_schema().await;
-        let smql =
-            phase2_config!("p2-10-table-rename.smql");
+        let smql = phase2_config!("p2-10-table-rename.smql");
         run_smql(&smql, true).await.expect("apply failed");
         run_verify_smql(&smql).await.expect("verify failed");
     }
@@ -166,8 +161,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_full_sakila() {
         reset_postgres_schema().await;
-        let smql =
-            phase2_config!("p2-11-full-sakila.smql");
+        let smql = phase2_config!("p2-11-full-sakila.smql");
         run_smql(&smql, true).await.expect("apply failed");
         run_verify_smql(&smql).await.expect("verify failed");
     }

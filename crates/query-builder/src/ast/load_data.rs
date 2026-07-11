@@ -9,8 +9,8 @@ pub struct LoadData {
     /// Conflict handling for rows that collide on a primary/unique key.
     pub on_conflict: LoadDataConflict,
     pub fields_terminated_by: String, // inner literal, e.g. r"\t"
-    pub fields_escaped_by: String, // inner literal, e.g. r"\\"
-    pub lines_terminated_by: String, // inner literal, e.g. r"\n"
+    pub fields_escaped_by: String,    // inner literal, e.g. r"\\"
+    pub lines_terminated_by: String,  // inner literal, e.g. r"\n"
 }
 
 /// How `LOAD DATA` resolves rows that collide on a primary/unique key.

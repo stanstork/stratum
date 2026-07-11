@@ -2,15 +2,15 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::harness::smql::dest_smql;
     use crate::{
         features::plugins::fixture,
-        reset_postgres_schema,
         harness::runner::{
             DbType, assert_table_exists, get_cell_as_string, get_cell_as_usize, get_column_names,
             get_pg_column_type, get_row_count, run_smql,
         },
+        reset_postgres_schema,
     };
-    use crate::harness::smql::dest_smql;
     use tracing_test::traced_test;
 
     /// Build a `wasm-source -> postgres` SMQL doc. `config_block` is inserted

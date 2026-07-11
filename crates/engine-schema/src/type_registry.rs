@@ -168,6 +168,27 @@ fn strip_pg_casts(expr: &str) -> String {
     let mut out = String::with_capacity(expr.len());
     let mut i = 0;
     while i < chars.len() {
+        // Inside a single-quoted string literal, `::` is data, not a cast (e.g.
+        // `'foo::bar'::text`). Copy the literal verbatim; a doubled `''` is an
+        // escaped quote that stays within the string, a lone `'` closes it.
+        if chars[i] == '\'' {
+            out.push(chars[i]);
+            i += 1;
+            while i < chars.len() {
+                out.push(chars[i]);
+                if chars[i] == '\'' {
+                    if i + 1 < chars.len() && chars[i + 1] == '\'' {
+                        out.push(chars[i + 1]);
+                        i += 2;
+                        continue;
+                    }
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
         if chars[i] == ':' && i + 1 < chars.len() && chars[i + 1] == ':' {
             i += 2; // skip "::"
             // Type name: identifier chars, dots (schema-qualified), and spaces so
@@ -356,6 +377,18 @@ mod tests {
         // No cast: unchanged.
         assert_eq!(strip_pg_casts("now()"), "now()");
         assert_eq!(strip_pg_casts("false"), "false");
+    }
+
+    #[test]
+    fn strip_pg_casts_preserves_colons_in_string_literals() {
+        // `::` inside a string literal is data, not a cast, and must survive
+        // while the trailing cast is still stripped.
+        assert_eq!(strip_pg_casts("'foo::bar'::text"), "'foo::bar'");
+        assert_eq!(strip_pg_casts("'a::b::c'::varchar(10)"), "'a::b::c'");
+        // Doubled '' escape keeps the literal intact.
+        assert_eq!(strip_pg_casts("'it''s::ok'::text"), "'it''s::ok'");
+        // Bare literal with colons, no cast.
+        assert_eq!(strip_pg_casts("'x::y'"), "'x::y'");
     }
 
     #[test]

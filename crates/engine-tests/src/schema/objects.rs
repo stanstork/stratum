@@ -1,8 +1,10 @@
 #[cfg(test)]
 mod tests {
     use crate::{
+        harness::runner::{
+            DbType, assert_row_count, assert_table_exists, get_row_count, run_config,
+        },
         reset_postgres_schema,
-        harness::runner::{DbType, assert_row_count, assert_table_exists, get_row_count, run_config},
     };
     use mysql_async::prelude::Queryable;
     use tracing_test::traced_test;

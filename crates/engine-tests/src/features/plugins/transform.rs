@@ -2,15 +2,15 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::harness::smql::feature_smql;
     use crate::{
         features::plugins::fixture,
-        reset_postgres_schema,
         harness::runner::{
             DbType, assert_column_exists, assert_table_exists, get_cell_as_f64, get_column_names,
             get_pg_column_type, get_row_count, run_smql,
         },
+        reset_postgres_schema,
     };
-    use crate::harness::smql::feature_smql;
     use tracing_test::traced_test;
 
     /// Build an SMQL doc for a `film -> <dest>` pipeline whose `select` block is

@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use crate::{
-        reset_postgres_schema,
-        harness::runner::{DbType, get_row_count, run_smql, run_smql_with_pause},
-    };
     use crate::harness::smql::feature_smql;
+    use crate::{
+        harness::runner::{DbType, get_row_count, run_smql, run_smql_with_pause},
+        reset_postgres_schema,
+    };
     use tracing_test::traced_test;
 
     /// MySQL `film` (1000 rows, film_id PK) -> Postgres, only the mapped columns

@@ -469,4 +469,3 @@ pub fn file_row_count(file_path: &str, has_headers: bool) -> Result<usize, FileE
 
     Ok(data_rows)
 }
-

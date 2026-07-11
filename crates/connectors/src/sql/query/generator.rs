@@ -98,13 +98,12 @@ impl<'a> QueryGenerator<'a> {
         // Build the final AST
         // Note: When using random ordering, we skip pagination to avoid adding ORDER BY clauses
         // that would conflict with ORDER BY RANDOM()
+        let limit = i64::try_from(request.limit).unwrap_or(i64::MAX);
         let select_ast = if request.order_random {
-            select
-                .limit(value!(Value::Int(request.limit as i64)))
-                .build()
+            select.limit(value!(Value::Int(limit))).build()
         } else {
             select
-                .limit(value!(Value::Int(request.limit as i64)))
+                .limit(value!(Value::Int(limit)))
                 .paginate(request.strategy.clone(), &request.cursor, request.limit)
                 .build()
         };

@@ -69,7 +69,11 @@ impl MySqlDriver {
     /// stored as-is rather than being replaced by a generated id.
     async fn write_conn(&self) -> Result<mysql_async::Conn, DriverError> {
         let mut conn = self.pool().get_conn().await?;
-        conn.query_drop("SET SESSION sql_mode = CONCAT(@@sql_mode, ',NO_AUTO_VALUE_ON_ZERO')")
+        // CONCAT_WS + NULLIF avoids a leading comma when @@sql_mode is empty or
+        // NULL (plain CONCAT would yield ",NO_AUTO_VALUE_ON_ZERO", a syntax error).
+        conn.query_drop(
+            "SET SESSION sql_mode = CONCAT_WS(',', NULLIF(@@sql_mode, ''), 'NO_AUTO_VALUE_ON_ZERO')",
+        )
             .await
             .map_err(|e| DriverError::QueryError(format!("{:?}", e)))?;
         Ok(conn)
