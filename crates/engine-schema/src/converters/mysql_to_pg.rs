@@ -109,14 +109,7 @@ fn convert_type(source: &Type) -> ConversionResult {
         Type::Boolean => ConversionResult::Exact(source.clone()),
         Type::Uuid => ConversionResult::Exact(source.clone()),
 
-        // ENUM -> VARCHAR (PostgreSQL has native ENUM but requires CREATE TYPE)
-        Type::Enum { .. } => ConversionResult::RequiresTransform {
-            target: Type::Varchar {
-                length: Some(255),
-                charset: None,
-            },
-            transform: TypeTransform::CastToString,
-        },
+        Type::Enum { .. } => ConversionResult::Exact(source.clone()),
 
         // SET -> Array of text
         Type::Set { .. } => ConversionResult::RequiresTransform {

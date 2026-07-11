@@ -107,18 +107,7 @@ impl PostgresSink {
 #[async_trait]
 impl Sink for PostgresSink {
     async fn write_batch(&self, meta: &TableMetadata, rows: &[Record]) -> Result<u64, DriverError> {
-        if rows.is_empty() {
-            return Ok(0);
-        }
-
-        let ordered_cols = self.ordered_columns(meta);
-
-        // Use copy_rows for efficient bulk insert
-        let count = self
-            .driver
-            .copy_rows(&meta.name, &ordered_cols, rows)
-            .await?;
-        Ok(count)
+        self.driver.write_batch(meta, rows).await
     }
 
     async fn truncate(&self, table: &str) -> Result<(), DriverError> {

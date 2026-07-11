@@ -6,6 +6,7 @@ pub mod create_sequence;
 pub mod create_table;
 pub mod drop_table;
 pub mod insert;
+pub mod load_data;
 pub mod merge;
 pub mod select;
 pub mod truncate_table;

@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
+    use crate::harness::smql::feature_smql;
     use crate::{
+        harness::runner::{DbType, get_row_count, run_smql, run_smql_with_pause},
         reset_postgres_schema,
-        utils::{DbType, get_row_count, run_smql, run_smql_with_pause},
     };
     use tracing_test::traced_test;
 
@@ -10,10 +11,8 @@ mod tests {
     /// (avoids ENUM/SET so the created table is simple). Small batches so a pause
     /// reliably lands mid-migration.
     fn smql(dest: &str) -> String {
-        format!(
+        feature_smql(&format!(
             r#"
-            connection "src" {{ driver = "mysql"    url = "mysql://sakila_user:qwerty123@localhost:3306/sakila" }}
-            connection "dst" {{ driver = "postgres" url = "postgres://user:password@localhost:5432/testdb" }}
 
             pipeline "copy_film" {{
                 from {{ connection = connection.src table = "film" }}
@@ -32,7 +31,7 @@ mod tests {
             }}
             "#,
             dest = dest,
-        )
+        ))
     }
 
     async fn distinct_film_ids(table: &str) -> i64 {

@@ -30,6 +30,7 @@ impl CreateIndexBuilder {
             expr: name.into(),
             sort_order: None,
             nulls: None,
+            prefix_length: None,
         });
         self
     }
@@ -44,6 +45,7 @@ impl CreateIndexBuilder {
             expr: name.into(),
             sort_order,
             nulls,
+            prefix_length: None,
         });
         self
     }

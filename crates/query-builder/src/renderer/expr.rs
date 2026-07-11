@@ -110,7 +110,7 @@ impl Render for FunctionCall {
         // Handle dialect-specific function names
         let function_name = if self.name == "RANDOM" && self.args.is_empty() {
             // Use dialect-specific random function (RANDOM() for PostgreSQL, RAND() for MySQL)
-            r.dialect.random_function().trim_end_matches("()")
+            r.dialect.random_fn().trim_end_matches("()")
         } else {
             &self.name
         };

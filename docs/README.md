@@ -18,6 +18,7 @@ Stratum is a declarative data pipeline engine that safely migrates data and sche
 
 **Destinations:**
 - PostgreSQL (with COPY fast-path)
+- MySQL (with LOAD DATA fast-path)
 
 ## Core Features
 

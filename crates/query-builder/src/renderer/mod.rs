@@ -12,6 +12,7 @@ pub mod create_table;
 pub mod drop_table;
 pub mod expr;
 pub mod insert;
+pub mod load_data;
 pub mod merge;
 pub mod select;
 pub mod truncate_table;
@@ -47,7 +48,7 @@ impl<'a> Renderer<'a> {
 
     pub fn add_param(&mut self, value: Value) {
         self.params.push(value);
-        let placeholder = self.dialect.get_placeholder(self.params.len() - 1);
+        let placeholder = self.dialect.placeholder(self.params.len() - 1);
         self.sql.push_str(&placeholder);
     }
 

@@ -92,12 +92,16 @@ impl PipelineAnalysisResources {
             d.clone() as Arc<dyn SchemaIntrospector>
         });
 
+        let dest_introspector = dispatch_driver!(&dst_driver, |d| {
+            d.clone() as Arc<dyn SchemaIntrospector>
+        });
+
         let validated_settings = builder
             .validate_settings(
                 pipeline,
                 &core_data_source,
                 &core_data_destination,
-                introspector.as_ref(),
+                dest_introspector.as_ref(),
             )
             .await?;
 

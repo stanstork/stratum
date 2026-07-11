@@ -6,13 +6,7 @@
 //
 // Condition: skip payments with amount > 5.00 (high-value rentals).
 
-define {
-    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
-    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
-}
 
-connection "src" { driver = "mysql"    url = define.mysql_url    }
-connection "dst" { driver = "postgres" url = define.postgres_url }
 
 pipeline "migrate_payment_low" {
     from { connection = connection.src  table = "payment" }

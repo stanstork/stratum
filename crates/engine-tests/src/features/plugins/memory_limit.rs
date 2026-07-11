@@ -2,10 +2,11 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::harness::smql::feature_smql;
     use crate::{
-        plugins::fixture,
+        features::plugins::fixture,
+        harness::runner::{DbType, get_row_count, run_smql},
         reset_postgres_schema,
-        utils::{DbType, get_row_count, run_smql},
     };
     use tracing_test::traced_test;
 
@@ -14,7 +15,7 @@ mod tests {
     /// `test_alloc` transform draining `actor` (200 rows) into `<dest>`, capped at
     /// `limit_bytes`, allocating `alloc_mb` MiB per row.
     fn alloc_smql(dest: &str, limit_bytes: u64, alloc_mb: u64) -> String {
-        format!(
+        feature_smql(&format!(
             r#"
             plugin "al" {{
                 path = "{plugin}"
@@ -22,8 +23,6 @@ mod tests {
                 config {{ alloc_mb = "{alloc}" }}
             }}
 
-            connection "src" {{ driver = "mysql"    url = "mysql://sakila_user:qwerty123@localhost:3306/sakila" }}
-            connection "dst" {{ driver = "postgres" url = "postgres://user:password@localhost:5432/testdb" }}
 
             pipeline "stress" {{
                 from {{ connection = connection.src table = "actor" }}
@@ -45,7 +44,7 @@ mod tests {
             limit = limit_bytes,
             alloc = alloc_mb,
             dest = dest,
-        )
+        ))
     }
 
     /// Allocating well under the limit (16 MiB under 64 MiB) succeeds for every row.
@@ -84,12 +83,10 @@ mod tests {
     async fn runaway_allocation_is_contained() {
         reset_postgres_schema().await;
 
-        let doc = format!(
+        let doc = feature_smql(&format!(
             r#"
             plugin "hog" {{ path = "{plugin}" memory_limit_bytes = {limit} }}
 
-            connection "src" {{ driver = "mysql"    url = "mysql://sakila_user:qwerty123@localhost:3306/sakila" }}
-            connection "dst" {{ driver = "postgres" url = "postgres://user:password@localhost:5432/testdb" }}
 
             pipeline "stress_hog" {{
                 from {{ connection = connection.src table = "actor" }}
@@ -109,7 +106,7 @@ mod tests {
             "#,
             plugin = fixture("test_memory_hog.wasm"),
             limit = 32 * 1024 * 1024,
-        );
+        ));
 
         let _ = run_smql(&doc, false).await;
 

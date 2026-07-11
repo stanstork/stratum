@@ -9,13 +9,15 @@ use query_builder::{
         create_index::IndexColumnExpr,
         expr::{BinaryOp, BinaryOperator, Expr, FunctionCall, Ident},
         insert::{ConflictAction, ConflictAssignment, Insert, OnConflict},
+        load_data::LoadDataConflict,
         merge::MergeAssignment,
     },
     builder::{
         alter_table::AlterTableBuilder, copy::CopyBuilder, create_enum::CreateEnumBuilder,
         create_index::CreateIndexBuilder, create_sequence::CreateSequenceBuilder,
         create_table::CreateTableBuilder, drop_table::DropTableBuilder, insert::InsertBuilder,
-        merge::MergeBuilder, select::SelectBuilder, truncate_table::TruncateTableBuilder,
+        load_data::LoadDataBuilder, merge::MergeBuilder, select::SelectBuilder,
+        truncate_table::TruncateTableBuilder,
     },
     dialect::Dialect,
     renderer::{Render, Renderer},
@@ -96,13 +98,12 @@ impl<'a> QueryGenerator<'a> {
         // Build the final AST
         // Note: When using random ordering, we skip pagination to avoid adding ORDER BY clauses
         // that would conflict with ORDER BY RANDOM()
+        let limit = i64::try_from(request.limit).unwrap_or(i64::MAX);
         let select_ast = if request.order_random {
-            select
-                .limit(value!(Value::Int(request.limit as i64)))
-                .build()
+            select.limit(value!(Value::Int(limit))).build()
         } else {
             select
-                .limit(value!(Value::Int(request.limit as i64)))
+                .limit(value!(Value::Int(limit)))
                 .paginate(request.strategy.clone(), &request.cursor, request.limit)
                 .build()
         };
@@ -181,6 +182,27 @@ impl<'a> QueryGenerator<'a> {
             .build();
 
         let (sql, _) = self.render_ast(copy_ast);
+        sql
+    }
+
+    pub fn load_data_infile(
+        &self,
+        table: &str,
+        columns: &[ColumnMetadata],
+        on_conflict: LoadDataConflict,
+    ) -> String {
+        let column_names = columns
+            .iter()
+            .filter(|col| !col.is_generated)
+            .map(|col| col.name.as_str())
+            .collect::<Vec<_>>();
+
+        let load_ast = LoadDataBuilder::new(table_ref!(table))
+            .columns(&column_names)
+            .on_conflict(on_conflict)
+            .build();
+
+        let (sql, _) = self.render_ast(load_ast);
         sql
     }
 
@@ -288,9 +310,8 @@ impl<'a> QueryGenerator<'a> {
         ignore_constraints: bool,
         temp: bool,
     ) -> (String, Vec<Value>) {
-        // Find all primary key columns upfront
         let primary_keys: Vec<String> = if ignore_constraints {
-            vec![]
+            Vec::new()
         } else {
             columns
                 .iter()
@@ -299,15 +320,24 @@ impl<'a> QueryGenerator<'a> {
                 .collect()
         };
 
-        let initial_builder = if temp {
-            CreateTableBuilder::new(table_ref!(table)).temporary()
-        } else {
-            CreateTableBuilder::new(table_ref!(table))
-        };
+        // MySQL rejects AUTO_INCREMENT on a column that belongs to no key (1075),
+        // which is exactly what `ignore_constraints` produces. Drop the attribute
+        // rather than emit invalid DDL. PostgreSQL's SERIAL needs no key.
+        let drop_auto_inc = primary_keys.is_empty() && self.dialect.auto_inc_requires_key();
+
+        let mut initial_builder = CreateTableBuilder::new(table_ref!(table));
+        if temp {
+            initial_builder = initial_builder.temporary();
+        }
 
         let builder_with_cols = columns.iter().fold(initial_builder, |builder, col| {
-            let mut col_builder =
-                builder.column(&col.name, col.data_type.clone(), col.char_max_length);
+            let mut data_type = col.data_type.clone();
+
+            if drop_auto_inc && let Type::Int { auto_increment, .. } = &mut data_type {
+                *auto_increment = false;
+            }
+
+            let mut col_builder = builder.column(&col.name, data_type, col.char_max_length);
 
             // Only add PRIMARY KEY to the column definition if it's the *only* primary key.
             if primary_keys.len() == 1 && primary_keys[0] == col.name.as_str() {
@@ -405,6 +435,7 @@ impl<'a> QueryGenerator<'a> {
                     expr: name,
                     sort_order,
                     nulls,
+                    prefix_length: col.prefix_length,
                 }
             })
             .collect();
@@ -481,7 +512,7 @@ impl<'a> QueryGenerator<'a> {
         keys_batch: usize,
     ) -> String {
         self.dialect
-            .build_key_existence_query(table_name, key_columns, keys_batch)
+            .key_existence_query(table_name, key_columns, keys_batch)
     }
 
     /// Generates a validation estimation query that counts failures and total rows

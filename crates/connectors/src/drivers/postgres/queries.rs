@@ -10,12 +10,24 @@ pub const COUNT_NO_FILTER: &str = "SELECT COUNT(*) AS count FROM {table}";
 pub const COUNT_ROWS_FAST: &str = include_str!("sql/count_rows_fast.sql");
 
 pub const TABLE_EXISTS_SQL: &str = include_str!("sql/table_exists.sql");
-pub const LIST_TABLES_SQL: &str = "SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_type = 'BASE TABLE'";
+
+// Lists the *logical* tables of a schema: ordinary tables ('r') and partitioned
+// parents ('p'). Individual partitions are an implementation detail - reading the
+// parent returns every partition's rows - so `relispartition` children are hidden.
+pub const LIST_TABLES_SQL: &str = "\
+SELECT c.relname \
+FROM pg_class c \
+JOIN pg_namespace n ON n.oid = c.relnamespace \
+WHERE n.nspname = $1::text \
+  AND c.relkind IN ('r', 'p') \
+  AND NOT c.relispartition \
+ORDER BY c.relname";
+
 pub const TABLE_METADATA_SQL: &str = include_str!("sql/table_metadata.sql");
 pub const INDEX_METADATA_SQL: &str = include_str!("sql/index_metadata.sql");
 pub const FK_METADATA_SQL: &str = include_str!("sql/fk_metadata.sql");
 pub const REFERRING_TABLES_SQL: &str = include_str!("sql/table_referencing.sql");
-pub const TABLE_SIZE_SQL: &str = "SELECT pg_total_relation_size($1) AS size_bytes;";
+pub const TABLE_SIZE_SQL: &str = "SELECT pg_total_relation_size($1::text::regclass) AS size_bytes;";
 pub const UNIQUE_CONSTRAINT_METADATA_SQL: &str = include_str!("sql/unique_constraint_metadata.sql");
 pub const CHECK_CONSTRAINT_METADATA_SQL: &str = include_str!("sql/check_constraint_metadata.sql");
 

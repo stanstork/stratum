@@ -81,6 +81,14 @@ impl TypeEngine {
         self.source_dialect.normalize_generated_expression(expr)
     }
 
+    /// Normalize a column DEFAULT expression from the source dialect for target DDL.
+    pub fn normalize_default_expression(&self, expr: &str) -> String {
+        let stripped = self.source_dialect.normalize_default_expression(expr);
+        self.type_registry
+            .target_dialect()
+            .finalize_default_expression(&stripped)
+    }
+
     pub fn type_registry(&self) -> &TypeRegistry {
         &self.type_registry
     }

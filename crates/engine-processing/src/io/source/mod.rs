@@ -21,7 +21,7 @@ use model::{
 };
 use query_builder::{
     dialect::{self, Dialect},
-    offsets::OffsetStrategy,
+    offsets::{OffsetStrategy, OffsetStrategyFactory},
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -89,6 +89,13 @@ impl Source {
         // Fetch primary table metadata upfront so the reader always knows which
         // columns to select, even for simple (non-cascade) pipelines.
         let primary_meta = driver.table_metadata(&name).await.ok();
+
+        let offset_strategy = match &primary_meta {
+            Some(meta) => {
+                OffsetStrategyFactory::keyset_over_pk(offset_strategy, &name, &meta.primary_keys)
+            }
+            None => offset_strategy,
+        };
 
         let primary = Self::build_primary_reader(
             &name,

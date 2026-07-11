@@ -236,25 +236,25 @@ impl IntoCanonical for MySqlTypeConverter {
                 warnings: vec![],
             },
 
-            // Enum
+            // Enum. The variants live in `full_column_type` ("enum('G','PG')"), not in `data_type`.
             "enum" => TypeMapping {
                 canonical: Type::Enum {
                     name: col.name.clone(),
-                    values: vec![], // Values would need to be extracted from column_type
+                    values: col.enum_values(),
                 },
                 fidelity: Fidelity::Equivalent,
                 value_transform: None,
-                warnings: vec!["Enum values need to be extracted from column_type".to_string()],
+                warnings: vec![],
             },
 
-            // Set
+            // Set - same shape as enum: variants come from `full_column_type`.
             "set" => TypeMapping {
                 canonical: Type::Set {
-                    values: vec![], // Values would need to be extracted from column_type
+                    values: col.enum_values(),
                 },
                 fidelity: Fidelity::Equivalent,
                 value_transform: None,
-                warnings: vec!["Set values need to be extracted from column_type".to_string()],
+                warnings: vec![],
             },
 
             // Geometry types

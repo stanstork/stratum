@@ -57,9 +57,9 @@ impl TableMetadata {
     pub fn enums(table: &TableMetadata) -> Vec<ColumnMetadata> {
         table
             .columns
-            .iter()
-            .filter(|(_name, col)| col.data_type.eq_ignore_ascii_case("enum"))
-            .map(|(_name, col)| col.clone())
+            .values()
+            .filter(|col| col.is_enum())
+            .cloned()
             .collect()
     }
 

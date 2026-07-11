@@ -1,9 +1,10 @@
 WITH primary_keys AS (
-    SELECT kcu.TABLE_NAME, kcu.COLUMN_NAME
+    SELECT kcu.TABLE_NAME, kcu.COLUMN_NAME, kcu.ORDINAL_POSITION AS PK_POSITION
     FROM information_schema.TABLE_CONSTRAINTS tc
     JOIN information_schema.KEY_COLUMN_USAGE kcu
         ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
         AND tc.TABLE_NAME = kcu.TABLE_NAME
+        AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
     WHERE tc.TABLE_NAME = ?
     AND tc.TABLE_SCHEMA = DATABASE()
     AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
@@ -14,6 +15,7 @@ unique_constraints AS (
     JOIN information_schema.KEY_COLUMN_USAGE kcu
         ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
         AND tc.TABLE_NAME = kcu.TABLE_NAME
+        AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
     WHERE tc.TABLE_NAME = ?
     AND tc.TABLE_SCHEMA = DATABASE()
     AND tc.CONSTRAINT_TYPE = 'UNIQUE'
@@ -29,6 +31,7 @@ SELECT
     c.NUMERIC_PRECISION AS numeric_precision,
     c.NUMERIC_SCALE AS numeric_scale,
     EXISTS (SELECT 1 FROM primary_keys pk WHERE pk.COLUMN_NAME = c.COLUMN_NAME) AS is_primary_key,
+    (SELECT pk.PK_POSITION FROM primary_keys pk WHERE pk.COLUMN_NAME = c.COLUMN_NAME) AS pk_position,
     EXISTS (SELECT 1 FROM unique_constraints uq WHERE uq.COLUMN_NAME = c.COLUMN_NAME) AS is_unique,
     c.EXTRA LIKE '%auto_increment%' AS is_auto_increment,
     c.COLUMN_COMMENT AS column_comment,

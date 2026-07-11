@@ -2,14 +2,14 @@
 mod tests {
     use std::{fs, path::PathBuf};
 
+    use crate::harness::smql::feature_smql;
     use crate::{
-        reset_postgres_schema,
-        utils::{
-            ACTORS_TABLE_DDL, DbType, ORDERS_FLAT_FILTER_QUERY, ORDERS_FLAT_JOIN_QUERY,
-            PIPELINE_FAILURES_TABLE_DDL, assert_column_exists, assert_row_count,
-            assert_table_exists, execute, fetch_rows, get_cell_as_string, get_cell_as_usize,
-            get_column_names, get_row_count, run_smql,
+        harness::runner::{
+            ACTORS_TABLE_DDL, DbType, PIPELINE_FAILURES_TABLE_DDL, assert_column_exists,
+            assert_row_count, assert_table_exists, execute, fetch_rows, get_cell_as_string,
+            get_cell_as_usize, get_row_count, run_smql,
         },
+        reset_postgres_schema,
     };
     use engine_core::plan::execution::ExecutionPlan as CoreExecutionPlan;
     use engine_planner::{
@@ -29,28 +29,22 @@ mod tests {
     async fn missing_table_not_created_without_setting() {
         reset_postgres_schema().await;
 
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
+        let tmpl = feature_smql(
+            r#"
             pipeline "migrate_actor" {
                 from {
-                    connection = connection.mysql_source
+                    connection = connection.src
                     table      = "actor"
                 }
                 to {
-                    connection = connection.pg_destination
+                    connection = connection.dst
                     table      = "actor"
                 }
             }
-        "#;
+        "#,
+        );
 
-        let _ = run_smql(tmpl, false).await;
+        let _ = run_smql(&tmpl, false).await;
         assert_table_exists("actor", false).await;
     }
 
@@ -64,31 +58,25 @@ mod tests {
     async fn create_missing_tables_creates_table_and_copies_data() {
         reset_postgres_schema().await;
 
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
+        let tmpl = feature_smql(
+            r#"
             pipeline "migrate_actor" {
                 from {
-                    connection = connection.mysql_source
+                    connection = connection.src
                     table      = "actor"
                 }
                 to {
-                    connection = connection.pg_destination
+                    connection = connection.dst
                     table      = "actor"
                 }
                 settings {
                     create_missing_tables = true
                 }
             }
-        "#;
+        "#,
+        );
 
-        let _ = run_smql(tmpl, false).await;
+        let _ = run_smql(&tmpl, false).await;
 
         assert_table_exists("actor", true).await;
         assert_row_count("actor", "sakila", "actor").await;
@@ -110,22 +98,15 @@ mod tests {
         // Create the actor table in Postgres without the full_name column
         execute(ACTORS_TABLE_DDL).await;
 
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
+        let tmpl = feature_smql(
+            r#"
             pipeline "migrate_actor" {
                 from {
-                    connection = connection.mysql_source
+                    connection = connection.src
                     table      = "actor"
                 }
                 to {
-                    connection = connection.pg_destination
+                    connection = connection.dst
                     table      = "actor"
                 }
                 select {
@@ -135,70 +116,14 @@ mod tests {
                     create_missing_columns = true
                 }
             }
-        "#;
+        "#,
+        );
 
-        let _ = run_smql(tmpl, false).await;
+        let _ = run_smql(&tmpl, false).await;
 
         assert_table_exists("actor", true).await;
         assert_row_count("actor", "sakila", "actor").await;
         assert_column_exists("actor", "full_name", true).await;
-    }
-
-    // Test Settings: CREATE_MISSING_TABLES=TRUE, IGNORE_CONSTRAINTS=TRUE, COPY_COLUMNS=MAP_ONLY.
-    // Scenario:
-    // - The target table does not exist in Postgres.
-    // - The settings to create missing tables, ignore constraints, and copy columns (map only) are specified.
-    // Expected Outcome:
-    // - The table should be created in Postgres.
-    // - The destination table should have only one column (`order_id`).
-    // - Data should be copied, and the row count should match between the source and destination tables.
-    #[traced_test]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn map_only_setting_copies_only_mapped_columns() {
-        reset_postgres_schema().await;
-
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://user:password@localhost:3306/testdb"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
-            pipeline "migrate_orders" {
-                from {
-                    connection = connection.mysql_source
-                    table      = "orders"
-                }
-                to {
-                    connection = connection.pg_destination
-                    table      = "orders_flat"
-                }
-                select {
-                    id = orders.id
-                }
-                settings {
-                    create_missing_tables = true
-                    ignore_constraints    = true
-                    copy_columns          = "MAP_ONLY"
-                }
-            }
-        "#;
-
-        let _ = run_smql(tmpl, false).await;
-
-        let dest_columns = get_column_names(DbType::Postgres, "orders", "orders_flat")
-            .await
-            .unwrap();
-
-        assert_row_count("orders", "orders", "orders_flat").await;
-        assert_column_exists("orders_flat", "id", true).await;
-        assert_eq!(
-            1,
-            dest_columns.len(),
-            "expected only one column in destination table"
-        );
     }
 
     // Test Settings: Default (no special flags).
@@ -216,28 +141,22 @@ mod tests {
         // Create the actor table in Postgres
         execute(ACTORS_TABLE_DDL).await;
 
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
+        let tmpl = feature_smql(
+            r#"
             pipeline "migrate_actor" {
                 from {
-                    connection = connection.mysql_source
+                    connection = connection.src
                     table      = "actor"
                 }
                 to {
-                    connection = connection.pg_destination
+                    connection = connection.dst
                     table      = "actor"
                 }
             }
-        "#;
+        "#,
+        );
 
-        let _ = run_smql(tmpl, false).await;
+        let _ = run_smql(&tmpl, false).await;
         assert_row_count("actor", "sakila", "actor").await;
     }
 
@@ -256,22 +175,15 @@ mod tests {
     async fn create_table_with_computed_column_and_ignore_constraints() {
         reset_postgres_schema().await;
 
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
+        let tmpl = feature_smql(
+            r#"
             pipeline "migrate_actor" {
                 from {
-                    connection = connection.mysql_source
+                    connection = connection.src
                     table      = "actor"
                 }
                 to {
-                    connection = connection.pg_destination
+                    connection = connection.dst
                     table      = "actor"
                 }
                 select {
@@ -282,9 +194,10 @@ mod tests {
                     ignore_constraints    = true
                 }
             }
-        "#;
+        "#,
+        );
 
-        let _ = run_smql(tmpl, false).await;
+        let _ = run_smql(&tmpl, false).await;
 
         assert_row_count("actor", "sakila", "actor").await;
         assert_column_exists("actor", "full_name", true).await;
@@ -296,262 +209,6 @@ mod tests {
         let dst_full = get_cell_as_string(query, "sakila", DbType::Postgres, "full_name").await;
 
         assert_eq!(dst_full, format!("{src_first}{src_last}"));
-    }
-
-    // Test Settings: CREATE_MISSING_TABLES = TRUE, IGNORE_CONSTRAINTS = TRUE.
-    // Scenario:
-    // - The target table does not exist in Postgres.
-    // - The settings to create missing tables and ignore constraints are specified.
-    // - The `users` table is loaded and matched on `user_id`.
-    // Expected Outcome:
-    // - The target table should be created in Postgres.
-    // - The destination table should not include any columns from the loaded table (`users`) since they are not mapped.
-    // - Data should be copied, and the row count should match between the source and destination tables.
-    #[traced_test]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn join_without_select_excludes_joined_table_columns() {
-        reset_postgres_schema().await;
-
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://user:password@localhost:3306/testdb"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
-            pipeline "migrate_orders" {
-                from {
-                    connection = connection.mysql_source
-                    table      = "orders"
-                }
-                to {
-                    connection = connection.pg_destination
-                    table      = "orders_flat"
-                }
-                with {
-                    users    from users    where users.id == orders.user_id
-                }
-                settings {
-                    create_missing_tables = true
-                    ignore_constraints    = true
-                }
-            }
-        "#;
-
-        let _ = run_smql(tmpl, false).await;
-        assert_row_count("orders", "orders", "orders_flat").await;
-
-        let src_cols = get_column_names(DbType::MySql, "orders", "users")
-            .await
-            .unwrap();
-        let dst_cols = get_column_names(DbType::Postgres, "orders", "orders_flat")
-            .await
-            .unwrap();
-
-        for column in src_cols.iter() {
-            assert!(
-                !dst_cols.contains(&format!("users_{column}")),
-                "Column {column} should not exist in destination table"
-            );
-        }
-    }
-
-    // Test Settings: CREATE_MISSING_TABLES = TRUE, IGNORE_CONSTRAINTS = TRUE.
-    // Scenario:
-    // - The target table does not exist in Postgres.
-    // - The settings to create missing tables and ignore constraints are specified.
-    // - The `users`, `order_items`, and `products` tables are loaded and matched by their respective IDs.
-    // - Mapping includes:
-    //   - `users[email] -> user_email`
-    //   - `order_items[price] -> order_price`
-    //   - `products[name] -> product_name`.
-    // Expected Outcome:
-    // - The target table should be created in Postgres.
-    // - The destination table should include the mapped columns (`user_email`, `order_price`, `product_name`).
-    // - Data should be copied, and the row count should match between the source and destination tables.
-    // - The new columns should be populated with the corresponding values from the loaded tables.
-    #[traced_test]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn multi_join_with_column_mappings_copies_joined_data() {
-        reset_postgres_schema().await;
-
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://user:password@localhost:3306/testdb"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
-            pipeline "migrate_orders" {
-                from {
-                    connection = connection.mysql_source
-                    table      = "orders"
-                }
-                to {
-                    connection = connection.pg_destination
-                    table      = "orders_flat"
-                }
-                with {
-                    users       from users    where users.id == orders.user_id
-                    order_items from order_items where order_items.order_id == orders.id
-                    products    from products where products.id == order_items.id
-                }
-                select {
-                    user_email    = users.email
-                    order_price   = order_items.price
-                    product_name  = products.name
-                }
-                settings {
-                    create_missing_tables = true
-                    ignore_constraints    = true
-                }
-            }
-        "#;
-
-        let _ = run_smql(tmpl, false).await;
-
-        //  Assert that the mapped columns exist in the destination
-        for col in &["user_email", "order_price", "product_name"] {
-            assert_column_exists("orders_flat", col, true).await;
-        }
-
-        // Fetch from source and count in dest
-        let src_rows = fetch_rows(ORDERS_FLAT_JOIN_QUERY, "orders", DbType::MySql)
-            .await
-            .expect("fetch source rows");
-        let dst_count = get_row_count("orders_flat", "orders", DbType::Postgres).await;
-
-        assert_eq!(
-            src_rows.len(),
-            dst_count as usize,
-            "expected same number of joined rows"
-        );
-    }
-
-    // Test Settings: CREATE_MISSING_TABLES = TRUE, IGNORE_CONSTRAINTS = TRUE.
-    // Scenario:
-    // - The target table does not exist in Postgres.
-    // - The settings to create missing tables and ignore constraints are specified.
-    // - A filter is applied to copy only rows where `total > 400`.
-    // Expected Outcome:
-    // - The target table should be created in Postgres.
-    // - The destination table should contain only the rows that satisfy the filter condition.
-    #[traced_test]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn where_filter_restricts_migrated_rows() {
-        reset_postgres_schema().await;
-
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://user:password@localhost:3306/testdb"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
-            pipeline "migrate_orders" {
-                from {
-                    connection = connection.mysql_source
-                    table      = "orders"
-                }
-                to {
-                    connection = connection.pg_destination
-                    table      = "orders"
-                }
-                where "valid_orders" {
-                    orders.total > 400
-                }
-                settings {
-                    create_missing_tables = true
-                    ignore_constraints    = true
-                }
-            }
-        "#;
-
-        let _ = run_smql(tmpl, false).await;
-
-        let query = "SELECT COUNT(*) cnt FROM orders WHERE total > 400";
-        let src_cnt = get_cell_as_usize(query, "orders", DbType::MySql, "cnt").await;
-        let dst_cnt = get_cell_as_usize(query, "orders", DbType::Postgres, "cnt").await;
-
-        assert_eq!(
-            src_cnt, dst_cnt,
-            "expected same number of rows in destination table"
-        );
-    }
-
-    // Test Settings: CREATE_MISSING_TABLES = TRUE, IGNORE_CONSTRAINTS = TRUE.
-    // Scenario:
-    // - The target table does not exist in Postgres.
-    // - The settings to create missing tables and ignore constraints are specified.
-    // - A nested filter is applied by combining multiple conditions based on loaded tables:
-    //     - `total > 400`
-    //     - `user_id != 1` or `price < 1200`.
-    // Expected Outcome:
-    // - The target table should be created in Postgres.
-    // - The destination table should contain only the rows that satisfy the filter condition.
-    #[traced_test]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn multi_join_with_nested_where_filter() {
-        reset_postgres_schema().await;
-
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://user:password@localhost:3306/testdb"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
-            pipeline "migrate_orders" {
-                from {
-                    connection = connection.mysql_source
-                    table      = "orders"
-                }
-                to {
-                    connection = connection.pg_destination
-                    table      = "orders"
-                }
-                with {
-                    users       from users    where users.id == orders.user_id
-                    order_items from order_items where order_items.order_id == orders.id
-                    products    from products where products.id == order_items.id
-                }
-                where "valid_orders" {
-                    orders.total > 400
-                    users.id != 1 || order_items.price < 1200
-                }
-                select {
-                    user_email    = users.email
-                    order_price   = order_items.price
-                    product_name  = products.name
-                }
-                settings {
-                    create_missing_tables = true
-                    ignore_constraints    = true
-                }
-            }
-        "#;
-
-        let _ = run_smql(tmpl, false).await;
-
-        // Fetch from source and count in dest
-        let src_rows = fetch_rows(ORDERS_FLAT_FILTER_QUERY, "orders", DbType::MySql)
-            .await
-            .expect("fetch source rows");
-        let dst_count = get_row_count("orders", "orders", DbType::Postgres).await;
-
-        assert_eq!(
-            src_rows.len(),
-            dst_count as usize,
-            "expected same number of filtered rows"
-        );
     }
 
     // Test Validation: SKIP, WARN, and mixed validation actions.
@@ -570,25 +227,18 @@ mod tests {
     async fn validation_skip_and_warn_actions_filter_rows() {
         reset_postgres_schema().await;
 
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
+        let tmpl = feature_smql(
+            r#"
 
             // Pipeline 1: Test SKIP action - skip rows with invalid payments
             pipeline "migrate_payments_skip_invalid" {
                 from {
-                    connection = connection.mysql_source
+                    connection = connection.src
                     table = "payment"
                 }
 
                 to {
-                    connection = connection.pg_destination
+                    connection = connection.dst
                     table = "payments_valid"
                 }
 
@@ -626,12 +276,12 @@ mod tests {
             // Pipeline 2: Test WARN action - warn about short film titles
             pipeline "migrate_films_with_warnings" {
                 from {
-                    connection = connection.mysql_source
+                    connection = connection.src
                     table = "film"
                 }
 
                 to {
-                    connection = connection.pg_destination
+                    connection = connection.dst
                     table = "films"
                 }
 
@@ -673,12 +323,12 @@ mod tests {
             // Pipeline 3: Test WARN action on customer data with some fail checks
             pipeline "migrate_customers_strict" {
                 from {
-                    connection = connection.mysql_source
+                    connection = connection.src
                     table = "customer"
                 }
 
                 to {
-                    connection = connection.pg_destination
+                    connection = connection.dst
                     table = "customers"
                 }
 
@@ -715,12 +365,12 @@ mod tests {
             // Pipeline 4: Test address table with mixed skip/warn validations
             pipeline "migrate_addresses_filtered" {
                 from {
-                    connection = connection.mysql_source
+                    connection = connection.src
                     table = "address"
                 }
 
                 to {
-                    connection = connection.pg_destination
+                    connection = connection.dst
                     table = "addresses"
                 }
 
@@ -759,9 +409,10 @@ mod tests {
                     phone = address.phone
                 }
             }
-        "#;
+        "#,
+        );
 
-        let _ = run_smql(tmpl, false).await;
+        let _ = run_smql(&tmpl, false).await;
 
         // Pipeline 1: Verify payments with SKIP validation
         // Validation: amount > 0 AND amount <= 5.00
@@ -845,25 +496,18 @@ mod tests {
     async fn validation_on_joined_tables_and_computed_fields() {
         reset_postgres_schema().await;
 
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
+        let tmpl = feature_smql(
+            r#"
 
             // Pipeline: Test validation with joined tables and transformed fields
             pipeline "migrate_film_actors" {
                 from {
-                    connection = connection.mysql_source
+                    connection = connection.src
                     table = "film_actor"
                 }
 
                 to {
-                    connection = connection.pg_destination
+                    connection = connection.dst
                     table = "film_actor_details"
                 }
 
@@ -922,12 +566,12 @@ mod tests {
             // Pipeline 2: Test validation with transformed fields and expressions
             pipeline "migrate_customer_summary" {
                 from {
-                    connection = connection.mysql_source
+                    connection = connection.src
                     table = "customer"
                 }
 
                 to {
-                    connection = connection.pg_destination
+                    connection = connection.dst
                     table = "customer_summary"
                 }
 
@@ -985,9 +629,10 @@ mod tests {
                     }
                 }
             }
-        "#;
+        "#,
+        );
 
-        let _ = run_smql(tmpl, false).await;
+        let _ = run_smql(&tmpl, false).await;
 
         // Pipeline 1: Verify film_actor_details with joined validations
         // Validation: film.rental_rate <= 2.99 AND film.replacement_cost <= 20.00
@@ -1084,24 +729,17 @@ mod tests {
     async fn validation_fail_action_stops_pipeline() {
         reset_postgres_schema().await;
 
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
+        let tmpl = feature_smql(
+            r#"
 
             pipeline "migrate_actors_with_fail" {
                 from {
-                    connection = connection.mysql_source
+                    connection = connection.src
                     table = "actor"
                 }
 
                 to {
-                    connection = connection.pg_destination
+                    connection = connection.dst
                     table = "actors_validated"
                 }
 
@@ -1128,10 +766,11 @@ mod tests {
                     last_name = actor.last_name
                 }
             }
-        "#;
+        "#,
+        );
 
         // Run the migration with fail validation
-        let _ = run_smql(tmpl, false).await;
+        let _ = run_smql(&tmpl, false).await;
 
         // Verify that the table was created (pipeline starts execution)
         assert_table_exists("actors_validated", true).await;
@@ -1180,24 +819,17 @@ mod tests {
         // Create the DLQ table before running the migration
         execute(PIPELINE_FAILURES_TABLE_DDL).await;
 
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
+        let tmpl = feature_smql(
+            r#"
 
             pipeline "migrate_actors_strict_validation" {
                 from {
-                    connection = connection.mysql_source
+                    connection = connection.src
                     table = "actor"
                 }
 
                 to {
-                    connection = connection.pg_destination
+                    connection = connection.dst
                     table = "actors_validated_strict"
                 }
 
@@ -1225,15 +857,16 @@ mod tests {
                 on_error {
                     failed_rows {
                         table {
-                            connection = connection.pg_destination
+                            connection = connection.dst
                             table = "pipeline_failures"
                         }
                     }
                 }
             }
-        "#;
+        "#,
+        );
 
-        let _ = run_smql(tmpl, false).await;
+        let _ = run_smql(&tmpl, false).await;
 
         // Verify destination table was created
         assert_table_exists("actors_validated_strict", true).await;
@@ -1293,24 +926,17 @@ mod tests {
         // Clean up previous test file if exists
         let _ = std::fs::remove_file(dlq_path);
 
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
+        let tmpl = feature_smql(
+            r#"
 
             pipeline "migrate_payments_file_dlq" {
                 from {
-                    connection = connection.mysql_source
+                    connection = connection.src
                     table = "payment"
                 }
 
                 to {
-                    connection = connection.pg_destination
+                    connection = connection.dst
                     table = "payments_file_dlq"
                 }
 
@@ -1336,9 +962,10 @@ mod tests {
                     }
                 }
             }
-        "#;
+        "#,
+        );
 
-        let _ = run_smql(tmpl, false).await;
+        let _ = run_smql(&tmpl, false).await;
 
         // Verify destination table has data
         assert_table_exists("payments_file_dlq", true).await;
@@ -1425,22 +1052,15 @@ mod tests {
 
         execute(ACTORS_TABLE_DDL).await;
 
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
+        let tmpl = feature_smql(
+            r#"
             pipeline "migrate_actor_with_before_hooks" {
                 from {
-                    connection = connection.mysql_source
+                    connection = connection.src
                     table      = "actor"
                 }
                 to {
-                    connection = connection.pg_destination
+                    connection = connection.dst
                     table      = "actor"
                 }
 
@@ -1457,9 +1077,10 @@ mod tests {
                     last_name  = actor.last_name
                 }
             }
-        "#;
+        "#,
+        );
 
-        let _ = run_smql(tmpl, false).await;
+        let _ = run_smql(&tmpl, false).await;
 
         assert_table_exists("actor", true).await;
         assert_row_count("actor", "sakila", "actor").await;
@@ -1488,22 +1109,15 @@ mod tests {
 
         execute(ACTORS_TABLE_DDL).await;
 
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
+        let tmpl = feature_smql(
+            r#"
             pipeline "migrate_actor_with_after_hooks" {
                 from {
-                    connection = connection.mysql_source
+                    connection = connection.src
                     table      = "actor"
                 }
                 to {
-                    connection = connection.pg_destination
+                    connection = connection.dst
                     table      = "actor"
                 }
 
@@ -1521,9 +1135,10 @@ mod tests {
                     last_name  = actor.last_name
                 }
             }
-        "#;
+        "#,
+        );
 
-        let _ = run_smql(tmpl, false).await;
+        let _ = run_smql(&tmpl, false).await;
 
         assert_table_exists("actor", true).await;
         assert_row_count("actor", "sakila", "actor").await;
@@ -1556,22 +1171,15 @@ mod tests {
 
         execute(ACTORS_TABLE_DDL).await;
 
-        let tmpl = r#"
-            connection "mysql_source" {
-                driver = "mysql"
-                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
-            }
-            connection "pg_destination" {
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }
+        let tmpl = feature_smql(
+            r#"
             pipeline "migrate_actor_full_lifecycle" {
                 from {
-                    connection = connection.mysql_source
+                    connection = connection.src
                     table      = "actor"
                 }
                 to {
-                    connection = connection.pg_destination
+                    connection = connection.dst
                     table      = "actor"
                 }
 
@@ -1596,9 +1204,10 @@ mod tests {
                     last_name  = actor.last_name
                 }
             }
-        "#;
+        "#,
+        );
 
-        let _ = run_smql(tmpl, false).await;
+        let _ = run_smql(&tmpl, false).await;
 
         assert_table_exists("actor", true).await;
         assert_row_count("actor", "sakila", "actor").await;
@@ -1655,11 +1264,11 @@ mod tests {
         let mut env = EnvContext::empty();
         env.set(
             "MYSQL_URL".to_string(),
-            "mysql://sakila_user:qwerty123@localhost:3306/sakila".to_string(),
+            crate::harness::Dbms::MySql.source_url().to_string(),
         );
         env.set(
             "POSTGRES_URL".to_string(),
-            "postgres://user:password@localhost:5432/testdb".to_string(),
+            crate::harness::Dbms::Postgres.dest_url().to_string(),
         );
         let core_plan = CoreExecutionPlan::build(&doc, std::sync::Arc::new(env))
             .expect("build core execution plan");

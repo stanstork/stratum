@@ -30,11 +30,11 @@ impl IntoDestination for PgDriver {
 }
 
 impl IntoDestination for MySqlDriver {
-    fn into_destination(self: Arc<Self>, table: &str, source_dialect: Dialect) -> Destination {
+    fn into_destination(self: Arc<Self>, table: &str, _source_dialect: Dialect) -> Destination {
         Destination {
             name: table.to_string(),
             format: DataFormat::MySql,
-            sink: Arc::new(MySqlSink::new(self, source_dialect)),
+            sink: Arc::new(MySqlSink::new(self)),
         }
     }
 }

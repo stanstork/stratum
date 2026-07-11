@@ -20,14 +20,17 @@ use model::{
     pagination::{cursor::Cursor, page::FetchResult},
     records::Record,
 };
-use query_builder::offsets::OffsetStrategy;
+use query_builder::offsets::{OffsetStrategy, OffsetStrategyFactory};
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::Instant,
 };
 
 pub struct DbSourceReader {
+    /// Primary keys of related rows already emitted, keyed by table.
+    emitted_related: Mutex<HashMap<String, HashSet<String>>>,
+
     /// The underlying DataReader for fetching rows from the source database.
     reader: Arc<dyn DataReader>,
 
@@ -59,6 +62,7 @@ impl DbSourceReader {
         offset_strategy: Arc<dyn OffsetStrategy>,
     ) -> Self {
         DbSourceReader {
+            emitted_related: Mutex::new(HashMap::new()),
             reader,
             primary_meta: None,
             related_meta: HashMap::new(),
@@ -311,17 +315,17 @@ impl DbSourceReader {
             .as_ref()
             .map(|f| f.for_table(table, &extra_joins));
 
-        // Related table fetches in cascade mode must retrieve ALL rows that satisfy the
-        // IN-clause - not just batch_size rows. Using batch_size as the limit would silently
-        // truncate the related result when more rows match than the primary batch size.
+        // Related table fetches in cascade mode retrieve ALL rows satisfying the
+        // IN-clause in one shot (limit = MAX, no cursor), so they neither paginate
+        // nor need an ORDER BY.
         let mut builder = FetchRowsRequestBuilder::new(table.to_string())
             .alias(table.to_string())
             .columns(columns)
             .joins(extra_joins)
             .filter(filter_clause)
-            .limit(i64::MAX as usize)
+            .limit(usize::MAX)
             .cursor(Cursor::None)
-            .strategy(self.offset_strategy.clone());
+            .strategy(OffsetStrategyFactory::default_strategy());
 
         if let Some((col, values)) = in_clause {
             builder = builder.in_clause(col, values);
@@ -416,7 +420,7 @@ impl DbSourceReader {
         // store is fetched before address, allowing store's address_id values to be
         // included in address's IN-clause.
         let mut all_fetched: HashMap<String, Vec<Record>> = HashMap::new();
-        all_fetched.insert(primary_name, primary_rows);
+        all_fetched.insert(primary_name.clone(), primary_rows);
 
         let mut remaining: HashSet<String> = self.related_meta.keys().cloned().collect();
 
@@ -460,12 +464,55 @@ impl DbSourceReader {
             }
         }
 
-        let rows: Vec<Record> = all_fetched.into_values().flatten().collect();
+        // Primary rows are cursor-paginated and therefore always new. Related rows
+        // are re-fetched by every batch that references them, so emit each only once.
+        let rows = self.dedup_related_rows(all_fetched, &primary_name);
 
         let next_cursor =
             self.compute_next_cursor(primary_last_row.as_ref(), &cursor, batch_size, reached_end);
 
         Ok((rows, next_cursor, reached_end))
+    }
+
+    /// Flatten fetched tables into a single row stream, dropping related rows that
+    /// earlier batches already emitted. Tables without a primary key cannot be
+    /// identified across batches and are passed through unchanged.
+    fn dedup_related_rows(
+        &self,
+        all_fetched: HashMap<String, Vec<Record>>,
+        primary_name: &str,
+    ) -> Vec<Record> {
+        let mut rows = Vec::new();
+        let mut emitted = self
+            .emitted_related
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        for (table, table_rows) in all_fetched {
+            if table == primary_name {
+                rows.extend(table_rows);
+                continue;
+            }
+
+            let pk_cols = self
+                .meta_for(&table)
+                .map(|m| m.primary_keys.clone())
+                .unwrap_or_default();
+
+            if pk_cols.is_empty() {
+                rows.extend(table_rows);
+                continue;
+            }
+
+            let seen = emitted.entry(table).or_default();
+            for row in table_rows {
+                if seen.insert(pk_signature(&row, &pk_cols)) {
+                    rows.push(row);
+                }
+            }
+        }
+
+        rows
     }
 
     async fn fetch_single(
@@ -550,4 +597,17 @@ impl SourceReader for DbSourceReader {
             reached_end,
         })
     }
+}
+
+/// Stable identity for a row within its table, used to detect related rows that
+/// an earlier cascade batch already emitted.
+fn pk_signature(row: &Record, pk_cols: &[String]) -> String {
+    let mut sig = String::new();
+    for (i, col) in pk_cols.iter().enumerate() {
+        if i > 0 {
+            sig.push('\u{1}'); // delimiter that cannot appear in a rendered value
+        }
+        sig.push_str(&format!("{:?}", row.get_value(col)));
+    }
+    sig
 }

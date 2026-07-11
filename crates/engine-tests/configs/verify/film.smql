@@ -15,19 +15,22 @@
 //   last_update     TIMESTAMP
 //
 // Only film itself is migrated (no FKs followed).
-// Tests ENUM -> varchar, SET -> text, DECIMAL, YEAR, nullable columns.
+// Tests ENUM -> PostgreSQL enum, SET -> text[], DECIMAL, YEAR, nullable columns.
+//
+// `paginate` is required: with integrity enabled, an unordered read returns rows
+// in physical order, which differs between source and destination and makes
+// `verify` report a spurious mismatch.
 
-define {
-    mysql_url    = env("MYSQL_URL", "mysql://sakila_user:qwerty123@localhost:3306/sakila")
-    postgres_url = env("POSTGRES_URL", "postgres://user:password@localhost:5432/testdb")
-}
 
-connection "src" { driver = "mysql"    url = define.mysql_url    }
-connection "dst" { driver = "postgres" url = define.postgres_url }
 
 pipeline "migrate_film" {
     from { connection = connection.src  table = "film" }
     to   { connection = connection.dst  table = "film" }
+
+    paginate {
+        strategy = "pk"
+        cursor   = "film.film_id"
+    }
 
     settings {
         create_missing_tables = true

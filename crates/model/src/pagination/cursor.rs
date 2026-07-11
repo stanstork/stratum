@@ -1,3 +1,4 @@
+use crate::core::value::Value;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -60,6 +61,15 @@ pub enum Cursor {
         pk_col: QualCol,
         ts: i64, // timestamp in microseconds
         id: u64, // tie-breaker id
+    },
+
+    /// Keyset cursor over an ordered list of columns (typically a primary key),
+    /// each with its last-seen value. Paginates with a lexicographic
+    /// `(k1, k2, ...) > (v1, v2, ...)` comparison and `ORDER BY k1, k2, ...`.
+    /// Handles composite and non-integer keys, unlike the variants above.
+    Keyset {
+        keys: Vec<QualCol>,
+        values: Vec<Value>,
     },
 
     /// Opaque cursor produced and consumed by a WASM source plugin.

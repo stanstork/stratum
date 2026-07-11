@@ -31,14 +31,17 @@ index_columns AS (
             WHEN a.attnum > 0 THEN a.attname
             ELSE pg_get_indexdef(idx.oid, a.attnum, true)  -- expression
         END AS column_name,
-        CASE 
-            WHEN opt.option & 1 = 1 THEN 'DESC'
-            ELSE 'ASC'
+        -- Casing must match the Rust `SortOrder` / `NullsOrder` serde variants
+        -- ("Asc"/"Desc", "First"/"Last"/"Default"), since these are deserialized
+        -- straight from the aggregated JSON below.
+        CASE
+            WHEN opt.option & 1 = 1 THEN 'Desc'
+            ELSE 'Asc'
         END AS sort_order,
-        CASE 
-            WHEN opt.option & 2 = 2 THEN 'FIRST'
-            WHEN opt.option & 4 = 4 THEN 'LAST'
-            ELSE 'DEFAULT'
+        CASE
+            WHEN opt.option & 2 = 2 THEN 'First'
+            WHEN opt.option & 4 = 4 THEN 'Last'
+            ELSE 'Default'
         END AS nulls_order,
         CASE 
             WHEN a.attnum > 0 THEN false
@@ -75,7 +78,9 @@ SELECT
      WHERE unnest LIKE 'fillfactor=%') AS fill_factor,
     d.size_bytes,
     d.comment,
-    -- Aggregate columns with metadata as JSON
+    -- Aggregate columns with metadata as JSON. Cast to text: the row decoder
+    -- reads this as a string, and tokio-postgres will not decode a `json` OID
+    -- into String (it would silently fall back to an empty column list).
     json_agg(
         json_build_object(
             'name', ic.column_name,
@@ -85,7 +90,7 @@ SELECT
             'opclass', ic.opclass,
             'prefix_length', ic.prefix_length
         ) ORDER BY ic.attnum
-    ) AS columns
+    )::text AS columns
 FROM index_details d
 JOIN index_columns ic 
     ON ic.schema_name = d.schema_name 

@@ -37,6 +37,11 @@ pub trait OffsetStrategy: Send + Sync {
 
     /// Returns the name of the offset strategy.
     fn name(&self) -> String;
+
+    /// Whether this is the fallback OFFSET strategy with no deterministic order.
+    fn is_default(&self) -> bool {
+        false
+    }
 }
 
 pub struct PkOffset {
@@ -58,6 +63,12 @@ pub struct DefaultOffset {
     pub offset: usize,
 }
 
+/// Keyset pagination over an ordered list of key columns (typically the primary
+/// key). Deterministic and correct for composite and non-integer keys.
+pub struct KeysetOffset {
+    pub keys: Vec<QualCol>,
+}
+
 /// Helper for constructing a binary expression.
 fn binary_expr(left: Expr, op: BinaryOperator, right: Expr) -> Expr {
     Expr::BinaryOp(Box::new(BinaryOp { left, op, right }))
@@ -77,7 +88,7 @@ fn append_where(
 }
 
 fn limit_expr(limit: usize) -> Expr {
-    value(Value::Int(limit as i64))
+    value(Value::Int(i64::try_from(limit).unwrap_or(i64::MAX)))
 }
 
 fn offset_expr(offset: usize) -> Expr {
@@ -389,10 +400,87 @@ impl OffsetStrategy for DefaultOffset {
         })
     }
 
+    fn is_default(&self) -> bool {
+        true
+    }
+
     fn name(&self) -> String {
         "default".to_string()
     }
 }
+
+impl KeysetOffset {
+    /// `(k1 > v1) OR (k1 = v1 AND k2 > v2) OR ...` - a strict lexicographic
+    /// "greater than the cursor" over the key columns.
+    fn after(&self, values: &[Value]) -> Option<Expr> {
+        let n = self.keys.len().min(values.len());
+        if n == 0 {
+            return None;
+        }
+        let mut terms: Vec<Expr> = Vec::with_capacity(n);
+        for i in 0..n {
+            // ki > vi, with equality on every earlier key prepended.
+            let mut term = binary_expr(
+                ident_q(&self.keys[i]),
+                BinaryOperator::Gt,
+                value(values[i].clone()),
+            );
+            for (key, val) in self.keys[..i].iter().zip(&values[..i]) {
+                let eq = binary_expr(ident_q(key), BinaryOperator::Eq, value(val.clone()));
+                term = binary_expr(eq, BinaryOperator::And, term);
+            }
+            terms.push(term);
+        }
+        terms
+            .into_iter()
+            .reduce(|a, b| binary_expr(a, BinaryOperator::Or, b))
+    }
+}
+
+impl OffsetStrategy for KeysetOffset {
+    fn apply_to_builder(
+        &self,
+        mut builder: SelectBuilder<FromState>,
+        cursor: &Cursor,
+        limit: usize,
+    ) -> SelectBuilder<FromState> {
+        if let Cursor::Keyset { values, .. } = cursor
+            && let Some(predicate) = self.after(values)
+        {
+            builder = append_where(builder, predicate);
+        }
+        for key in &self.keys {
+            builder = builder.order_by(ident_q(key), Some(OrderDir::Asc));
+        }
+        builder = builder.limit(limit_expr(limit));
+        builder
+    }
+
+    fn next_cursor(&self, row: &Record) -> Cursor {
+        let values: Vec<Value> = self.keys.iter().map(|k| row.get_value(&k.column)).collect();
+        // A NULL key value cannot anchor a `>` boundary; fall back rather than
+        // silently skip or repeat rows. (Primary keys are non-null, so this only
+        // guards misuse.)
+        if values.iter().any(|v| matches!(v, Value::Null)) {
+            return Cursor::None;
+        }
+        Cursor::Keyset {
+            keys: self.keys.clone(),
+            values,
+        }
+    }
+
+    fn clone_box(&self) -> Box<dyn OffsetStrategy> {
+        Box::new(KeysetOffset {
+            keys: self.keys.clone(),
+        })
+    }
+
+    fn name(&self) -> String {
+        "keyset".to_string()
+    }
+}
+
 pub struct OffsetStrategyFactory;
 
 impl OffsetStrategyFactory {
@@ -481,6 +569,8 @@ impl OffsetStrategyFactory {
                 tz: chrono_tz::UTC,
             }),
 
+            Cursor::Keyset { keys, .. } => Arc::new(KeysetOffset { keys: keys.clone() }),
+
             Cursor::Default { offset } => Arc::new(DefaultOffset { offset: *offset }),
 
             Cursor::None => Arc::new(DefaultOffset { offset: 0 }), // start from beginning
@@ -525,6 +615,28 @@ impl OffsetStrategyFactory {
     pub fn default_strategy() -> Arc<dyn OffsetStrategy> {
         Arc::new(DefaultOffset { offset: 0 })
     }
+
+    /// Upgrade the fallback OFFSET strategy to keyset pagination over `table`'s
+    /// primary key, which is deterministic. A non-default (user-configured)
+    /// strategy is returned unchanged.
+    pub fn keyset_over_pk(
+        strategy: Arc<dyn OffsetStrategy>,
+        table: &str,
+        primary_keys: &[String],
+    ) -> Arc<dyn OffsetStrategy> {
+        if strategy.is_default() && !primary_keys.is_empty() {
+            let keys = primary_keys
+                .iter()
+                .map(|col| QualCol {
+                    table: table.to_string(),
+                    column: col.clone(),
+                })
+                .collect();
+            Arc::new(KeysetOffset { keys })
+        } else {
+            strategy
+        }
+    }
 }
 
 fn extract_numeric_value(val: &Value) -> Option<i128> {
@@ -540,5 +652,115 @@ fn extract_numeric_value(val: &Value) -> Option<i128> {
         }
         Value::String(s) => s.parse::<i128>().ok(),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod keyset_tests {
+    use super::*;
+    use crate::builder::select::SelectBuilder;
+    use crate::dialect::Postgres;
+    use crate::renderer::{Render, Renderer};
+    use model::core::types::Type;
+    use model::core::value::{FieldValue, Value};
+    use model::records::Record;
+
+    fn qc(col: &str) -> QualCol {
+        QualCol {
+            table: "t".to_string(),
+            column: col.to_string(),
+        }
+    }
+
+    fn render(cursor: &Cursor, keys: &[&str]) -> String {
+        let strat = KeysetOffset {
+            keys: keys.iter().map(|c| qc(c)).collect(),
+        };
+        let builder = SelectBuilder::new().select(vec![ident_q(&qc("a"))]).from(
+            crate::ast::common::TableRef {
+                schema: None,
+                name: "t".into(),
+            },
+            Some("t"),
+        );
+        let ast = strat.apply_to_builder(builder, cursor, 100).build();
+        let dialect = Postgres;
+        let mut r = Renderer::new(&dialect);
+        ast.render(&mut r);
+        r.finish().0
+    }
+
+    #[test]
+    fn first_page_orders_by_all_keys_no_where() {
+        let sql = render(&Cursor::None, &["actor_id", "film_id"]);
+        assert!(
+            sql.contains(r#"ORDER BY "t"."actor_id" ASC, "t"."film_id" ASC"#),
+            "got: {sql}"
+        );
+        assert!(!sql.contains("WHERE"), "first page has no cursor: {sql}");
+    }
+
+    #[test]
+    fn composite_cursor_is_lexicographic() {
+        let cursor = Cursor::Keyset {
+            keys: vec![qc("actor_id"), qc("film_id")],
+            values: vec![Value::Int(5), Value::Int(9)],
+        };
+        let sql = render(&cursor, &["actor_id", "film_id"]);
+        // (actor_id > 5) OR (actor_id = 5 AND film_id > 9)
+        assert!(sql.contains("WHERE"), "{sql}");
+        assert!(sql.contains(r#""t"."actor_id" >"#), "{sql}");
+        assert!(sql.contains(r#""t"."actor_id" ="#), "{sql}");
+        assert!(sql.contains(r#""t"."film_id" >"#), "{sql}");
+    }
+
+    #[test]
+    fn next_cursor_reads_all_key_values() {
+        let strat = KeysetOffset {
+            keys: vec![qc("actor_id"), qc("film_id")],
+        };
+        let row = Record {
+            schema: "t".into(),
+            fields: vec![
+                FieldValue {
+                    name: "actor_id".into(),
+                    value: Some(Value::Int(3)),
+                    data_type: Type::Boolean,
+                },
+                FieldValue {
+                    name: "film_id".into(),
+                    value: Some(Value::Int(7)),
+                    data_type: Type::Boolean,
+                },
+            ],
+            op_type: Default::default(),
+        };
+        match strat.next_cursor(&row) {
+            Cursor::Keyset { values, .. } => assert_eq!(values.len(), 2),
+            other => panic!("expected keyset cursor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn default_upgrades_to_keyset_only_with_pk() {
+        let d = OffsetStrategyFactory::default_strategy();
+        assert_eq!(
+            OffsetStrategyFactory::keyset_over_pk(d.clone(), "t", &["id".into()]).name(),
+            "keyset"
+        );
+        // No PK -> stays default.
+        assert_eq!(
+            OffsetStrategyFactory::keyset_over_pk(d.clone(), "t", &[]).name(),
+            "default"
+        );
+        // A configured (non-default) strategy is untouched even with a PK.
+        let pk = OffsetStrategyFactory::from_cursor(&Cursor::Pk {
+            pk_col: qc("id"),
+            id: 0,
+        });
+        assert_eq!(
+            OffsetStrategyFactory::keyset_over_pk(pk, "t", &["id".into()]).name(),
+            "pk"
+        );
     }
 }

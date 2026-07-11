@@ -2,35 +2,28 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::harness::smql::feature_smql;
     use crate::{
-        plugins::fixture,
-        reset_postgres_schema,
-        utils::{
+        features::plugins::fixture,
+        harness::runner::{
             DbType, assert_column_exists, assert_table_exists, get_cell_as_f64, get_column_names,
             get_pg_column_type, get_row_count, run_smql,
         },
+        reset_postgres_schema,
     };
     use tracing_test::traced_test;
 
     /// Build an SMQL doc for a `film -> <dest>` pipeline whose `select` block is
     /// supplied by the caller. The `test_transform` plugin is declared as `adder`.
     fn smql(dest_table: &str, select_block: &str, extra_settings: &str) -> String {
-        format!(
+        feature_smql(&format!(
             r#"
             plugin "adder" {{ path = "{plugin}" }}
 
-            connection "mysql_source" {{
-                driver = "mysql"
-                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
-            }}
-            connection "pg_destination" {{
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }}
 
             pipeline "migrate_film_priced" {{
-                from {{ connection = connection.mysql_source  table = "film" }}
-                to   {{ connection = connection.pg_destination table = "{dest}" }}
+                from {{ connection = connection.src  table = "film" }}
+                to   {{ connection = connection.dst table = "{dest}" }}
 
                 select {{
                     {select}
@@ -46,7 +39,7 @@ mod tests {
             dest = dest_table,
             select = select_block,
             extra = extra_settings,
-        )
+        ))
     }
 
     /// The plugin output column is created in the new table and every source row is migrated.

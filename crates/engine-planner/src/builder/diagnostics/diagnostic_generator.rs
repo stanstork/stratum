@@ -368,7 +368,7 @@ impl DiagnosticGenerator {
                     .conditions
                     .iter()
                     .filter(|c| !c.indexed)
-                    .map(|c| format!("{}.{}", &join.source_table, &c.right.column))
+                    .map(|c| format!("{}.{}", join.source_table, c.right.column))
                     .collect();
 
                 let suggestion = if unindexed_columns.len() == 1 {

@@ -325,7 +325,8 @@ Column types are passed in `IntegrityConfig.column_types` and used on both the w
 - **NaN float**: Encoded as `0x00` (Null). NaN has undefined equality semantics.
 - **Missing column**: Treated as Null. Handles nullable columns absent from a record.
 - **Timestamp timezones**: Normalized to UTC before encoding.
-- **Enum type names**: String value only. MySQL `ENUM` -> PostgreSQL `VARCHAR` produces identical bytes.
+- **Enum type names**: Hashed by their string label, so equivalent values across a
+  MySQL `ENUM` and a PostgreSQL enum produce identical bytes regardless of the type name.
 
 ---
 

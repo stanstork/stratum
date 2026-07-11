@@ -15,8 +15,13 @@ use connectors::{
     },
     traits::introspector::SchemaIntrospector,
 };
-use model::transform::mapping::TransformationMetadata;
+use model::{core::types::Type, transform::mapping::TransformationMetadata};
 use std::sync::Arc;
+
+/// Key prefix used when a target dialect (MySQL) cannot index an unbounded
+/// TEXT/BLOB column outright. 255 chars stays within InnoDB's 3072-byte key
+/// limit even for 4-byte utf8mb4 characters.
+const TEXT_INDEX_PREFIX_LEN: u32 = 255;
 
 /// Responsible for orchestrating metadata retrieval and populating a robust SchemaPlan.
 pub struct SchemaPlanner {
@@ -55,7 +60,7 @@ impl SchemaPlanner {
         let mut plan = self.init_plan()?;
 
         self.add_table_details(&mut plan, table, &meta);
-        self.add_index_details(&mut plan, table, &indexes);
+        self.add_index_details(&mut plan, table, &meta, &indexes);
         self.add_sequence_details(&mut plan, table, &meta);
         self.add_constraint_details(&mut plan, table).await?;
 
@@ -77,12 +82,17 @@ impl SchemaPlanner {
             self.source_dialect,
         );
 
-        Ok(SchemaPlan::new(
+        let mut plan = SchemaPlan::new(
             type_engine,
             self.ignore_constraints,
             self.mapped_columns_only,
             self.mapping.clone(),
-        ))
+        );
+
+        // Render DDL in the destination's dialect.
+        plan.set_target_dialect(self.type_registry.target_dialect().as_query_dialect());
+
+        Ok(plan)
     }
 
     /// Helper to populate SchemaPlan with table definitions.
@@ -92,11 +102,12 @@ impl SchemaPlanner {
 
         plan.add_metadata(table, meta.clone());
 
-        // Process Foreign Keys: Filter by what is actually being migrated/mapped
+        // Only recreate a foreign key when its referenced table is also migrated
+        // (created) in this run.
         let fks_to_add: Vec<_> = meta
             .fk_defs()
             .into_iter()
-            .filter(|fk| self.mapping.entities.contains_source(&fk.referenced_table))
+            .filter(|fk| self.mapping.migrates(&fk.referenced_table))
             .collect();
 
         plan.add_fk_defs(&meta.name, fks_to_add);
@@ -109,8 +120,22 @@ impl SchemaPlanner {
 
     /// Populate SchemaPlan with index definitions from introspected metadata.
     /// Converts source `IndexType` to target dialect via TypeRegistry.
-    fn add_index_details(&self, plan: &mut SchemaPlan, table: &str, indexes: &[IndexMetadata]) {
+    fn add_index_details(
+        &self,
+        plan: &mut SchemaPlan,
+        table: &str,
+        meta: &TableMetadata,
+        indexes: &[IndexMetadata],
+    ) {
         let resolved_table = self.mapping.entities.resolve(table);
+
+        // MySQL cannot index an unbounded TEXT/BLOB column without a key prefix;
+        // PostgreSQL has no prefix syntax at all.
+        let target_supports_prefix = self
+            .type_registry
+            .target_dialect()
+            .as_query_dialect()
+            .supports_index_prefix();
 
         let index_defs: Vec<IndexDef> = indexes
             .iter()
@@ -126,6 +151,9 @@ impl SchemaPlanner {
                             .resolve(&resolved_table, &col.name),
                         sort_order: col.sort_order.clone(),
                         nulls_order: col.nulls_order.clone(),
+                        prefix_length: target_supports_prefix
+                            .then(|| self.index_prefix_for(plan, meta, &col.name))
+                            .flatten(),
                     })
                     .collect();
 
@@ -143,6 +171,20 @@ impl SchemaPlanner {
         if !index_defs.is_empty() {
             plan.add_index_defs(table, index_defs);
         }
+    }
+
+    /// Key prefix required to index `column` in the target dialect, if any.
+    fn index_prefix_for(
+        &self,
+        plan: &SchemaPlan,
+        meta: &TableMetadata,
+        column: &str,
+    ) -> Option<u32> {
+        let col = meta.columns.get(column)?;
+        let (target_type, _) = plan.type_engine().convert_column(col);
+
+        matches!(target_type, Type::Text { .. } | Type::Blob { .. })
+            .then_some(TEXT_INDEX_PREFIX_LEN)
     }
 
     /// Populate SchemaPlan with UNIQUE and CHECK constraint definitions from introspected metadata.

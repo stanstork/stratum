@@ -1,25 +1,36 @@
-use crate::io::sink::Sink;
+use crate::io::{error::SinkError, sink::Sink};
 use async_trait::async_trait;
 use connectors::{
-    drivers::mysql::driver::MySqlDriver, error::DriverError, sql::metadata::table::TableMetadata,
-    traits::writer::DataWriter,
+    drivers::mysql::driver::MySqlDriver,
+    error::DriverError,
+    sql::metadata::{column::ColumnMetadata, table::TableMetadata},
+    traits::{driver::Driver, writer::DataWriter},
 };
-use engine_core::schema::type_registry::{Dialect, TypeRegistry};
 use model::records::Record;
+use query_builder::ast::load_data::LoadDataConflict;
 use std::sync::Arc;
+use tracing::debug;
 
 pub struct MySqlSink {
     driver: Arc<MySqlDriver>,
-    _type_registry: TypeRegistry,
+    on_conflict: LoadDataConflict,
 }
 
 impl MySqlSink {
-    pub fn new(driver: Arc<MySqlDriver>, source_dialect: Dialect) -> Self {
-        let type_registry = TypeRegistry::new(source_dialect, Dialect::MySql);
+    pub fn new(driver: Arc<MySqlDriver>) -> Self {
         Self {
             driver,
-            _type_registry: type_registry,
+            on_conflict: LoadDataConflict::Default,
         }
+    }
+
+    pub fn with_on_conflict(mut self, on_conflict: LoadDataConflict) -> Self {
+        self.on_conflict = on_conflict;
+        self
+    }
+
+    fn columns(&self, table: &TableMetadata) -> Vec<ColumnMetadata> {
+        table.columns.values().cloned().collect()
     }
 }
 
@@ -31,5 +42,36 @@ impl Sink for MySqlSink {
 
     async fn truncate(&self, table: &str) -> Result<(), DriverError> {
         self.driver.truncate(table).await
+    }
+
+    async fn support_fast_path(&self) -> Result<bool, SinkError> {
+        let capabilities = self.driver.capabilities();
+        // Fast path requires LOAD DATA INFILE support
+        Ok(capabilities.copy_protocol)
+    }
+
+    async fn write_fast_path(
+        &self,
+        table: &TableMetadata,
+        rows: &[Record],
+    ) -> Result<(), SinkError> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+
+        if table.primary_keys.is_empty() {
+            return Err(SinkError::FastPathNotSupported(
+                "Table has no primary keys".to_string(),
+            ));
+        }
+
+        let columns = self.columns(table);
+
+        debug!(table = %table.name, rows = rows.len(), on_conflict = ?self.on_conflict, "fast-path LOAD DATA");
+
+        self.driver
+            .load_data(&table.name, &columns, rows, self.on_conflict)
+            .await?;
+        Ok(())
     }
 }

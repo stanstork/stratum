@@ -2,32 +2,27 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::harness::smql::feature_smql;
     use crate::{
-        plugins::fixture,
+        features::plugins::fixture,
+        harness::runner::{
+            DbType, assert_table_exists, get_cell_as_usize, get_row_count, run_smql,
+        },
         reset_postgres_schema,
-        utils::{DbType, assert_table_exists, get_cell_as_usize, get_row_count, run_smql},
     };
     use tracing_test::traced_test;
 
     /// Build an SMQL doc for `customer -> <dest>` with a single filter rule. The
     /// JS `test_filter` plugin is declared as `positive`.
     fn smql(dest_table: &str, filter_field: &str, action: &str) -> String {
-        format!(
+        feature_smql(&format!(
             r#"
             plugin "positive" {{ path = "{plugin}" }}
 
-            connection "mysql_source" {{
-                driver = "mysql"
-                url    = "mysql://sakila_user:qwerty123@localhost:3306/sakila"
-            }}
-            connection "pg_destination" {{
-                driver = "postgres"
-                url    = "postgres://user:password@localhost:5432/testdb"
-            }}
 
             pipeline "filter_customers" {{
-                from {{ connection = connection.mysql_source  table = "customer" }}
-                to   {{ connection = connection.pg_destination table = "{dest}" }}
+                from {{ connection = connection.src  table = "customer" }}
+                to   {{ connection = connection.dst table = "{dest}" }}
 
                 select {{
                     customer_id = customer.customer_id
@@ -52,7 +47,7 @@ mod tests {
             dest = dest_table,
             field = filter_field,
             action = action,
-        )
+        ))
     }
 
     /// `action = skip` drops the rows the filter rejects (here: `active = 0`),

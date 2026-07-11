@@ -34,11 +34,11 @@ impl MetadataProvider {
         columns: HashMap<String, ColumnMetadata>,
         fks: Vec<ForeignKeyMetadata>,
     ) -> Result<TableMetadata, DriverError> {
-        let primary_keys: Vec<String> = columns
-            .values()
-            .filter(|col| col.is_primary_key)
-            .map(|col| col.name.clone())
-            .collect();
+        let mut pk_cols: Vec<&ColumnMetadata> =
+            columns.values().filter(|col| col.is_primary_key).collect();
+        pk_cols.sort_by_key(|col| (col.pk_position.unwrap_or(u32::MAX), col.ordinal));
+
+        let primary_keys: Vec<String> = pk_cols.into_iter().map(|col| col.name.clone()).collect();
 
         Ok(TableMetadata {
             name: table.to_string(),
@@ -49,6 +49,15 @@ impl MetadataProvider {
             referenced_tables: HashMap::new(),
             referencing_tables: HashMap::new(),
         })
+    }
+
+    /// Clone `metadata` without its nested reference maps.
+    fn shallow_link(metadata: &TableMetadata) -> TableMetadata {
+        TableMetadata {
+            referenced_tables: HashMap::new(),
+            referencing_tables: HashMap::new(),
+            ..metadata.clone()
+        }
     }
 
     fn build_metadata_graph_recursive<'a>(
@@ -105,18 +114,18 @@ impl MetadataProvider {
 
                 metadata
                     .referenced_tables
-                    .insert(ref_table.clone(), ref_metadata.clone());
+                    .insert(ref_table.clone(), Self::shallow_link(&ref_metadata));
 
                 graph
                     .entry(ref_table.clone())
                     .and_modify(|t| {
                         t.referencing_tables
-                            .insert(table_name.to_string(), metadata.clone());
+                            .insert(table_name.to_string(), Self::shallow_link(metadata));
                     })
                     .or_insert_with(|| {
                         let mut t = ref_metadata.clone();
                         t.referencing_tables
-                            .insert(table_name.to_string(), metadata.clone());
+                            .insert(table_name.to_string(), Self::shallow_link(metadata));
                         t
                     });
             }
@@ -141,18 +150,18 @@ impl MetadataProvider {
 
                 metadata
                     .referencing_tables
-                    .insert(ref_table.clone(), ref_metadata.clone());
+                    .insert(ref_table.clone(), Self::shallow_link(&ref_metadata));
 
                 graph
                     .entry(ref_table.clone())
                     .and_modify(|t| {
                         t.referenced_tables
-                            .insert(table_name.to_string(), metadata.clone());
+                            .insert(table_name.to_string(), Self::shallow_link(metadata));
                     })
                     .or_insert_with(|| {
                         let mut t = ref_metadata.clone();
                         t.referenced_tables
-                            .insert(table_name.to_string(), metadata.clone());
+                            .insert(table_name.to_string(), Self::shallow_link(metadata));
                         t
                     });
             }

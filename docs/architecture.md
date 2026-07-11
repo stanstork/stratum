@@ -148,7 +148,7 @@ Sink (BatchWriter)
 | Module | Description |
 |--------|-------------|
 | `io/source/` | `Source` wraps `Arc<dyn DataReader>` + `Arc<dyn SchemaIntrospector>`; `DbSourceReader` handles pagination |
-| `io/sink/` | `Sink` trait with `write_batch()`; `PostgresSink` uses COPY protocol |
+| `io/sink/` | `Sink` trait with `write_batch()`; `PostgresSink` uses COPY, `MySqlSink` uses LOAD DATA |
 | `io/destination.rs` | `Destination` wraps typed `Arc<PgDriver>` or future driver types |
 | `io/driver.rs` | `SchemaDriver` trait alias used by planner analyzers |
 | `io/filter/` | `FilterCompiler` trait; `SqlFilterCompiler` emits WHERE clauses |
@@ -203,7 +203,7 @@ Driver (Send + Sync + 'static)
 
 | Driver | Read | Write | Schema | Notes |
 |--------|------|-------|--------|-------|
-| `MySqlDriver` | ✅ | ✅ | ✅ | `mysql_async`, TINYINT(1)->Boolean |
+| `MySqlDriver` | ✅ | ✅ | ✅ | `mysql_async`, LOAD DATA fast-path, TINYINT(1)->Boolean |
 | `PgDriver` | ✅ | ✅ | ✅ | `tokio-postgres`, COPY protocol |
 | CSV | ✅ | — | limited | streaming parse |
 

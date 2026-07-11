@@ -3,20 +3,18 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        plugins::fixture,
+        features::plugins::fixture,
+        harness::runner::{execute, run_smql, run_verify_smql},
         reset_postgres_schema,
-        utils::{execute, run_smql, run_verify_smql},
     };
     use tracing_test::traced_test;
 
     /// MySQL `film` -> Postgres with a transform plugin output, integrity on.
     fn transform_smql(dest: &str) -> String {
-        format!(
+        crate::harness::smql::feature_smql(&format!(
             r#"
             plugin "adder" {{ path = "{plugin}" }}
 
-            connection "src" {{ driver = "mysql"    url = "mysql://sakila_user:qwerty123@localhost:3306/sakila" }}
-            connection "dst" {{ driver = "postgres" url = "postgres://user:password@localhost:5432/testdb" }}
 
             pipeline "verify_transform" {{
                 from {{ connection = connection.src table = "film" }}
@@ -36,17 +34,16 @@ mod tests {
             "#,
             plugin = fixture("test_transform.wasm"),
             dest = dest,
-        )
+        ))
     }
 
     /// WASM source -> Postgres, integrity on.
     fn source_smql(dest: &str) -> String {
-        format!(
+        crate::harness::smql::feature_smql(&format!(
             r#"
             plugin "feed" {{ path = "{plugin}" config {{ total = "50" page_size = "7" }} }}
 
             connection "src" {{ driver = "wasm"     plugin = "feed" }}
-            connection "dst" {{ driver = "postgres" url = "postgres://user:password@localhost:5432/testdb" }}
 
             pipeline "verify_source" {{
                 from {{ connection = connection.src table = "counter" }}
@@ -65,7 +62,7 @@ mod tests {
             "#,
             plugin = fixture("test_source.wasm"),
             dest = dest,
-        )
+        ))
     }
 
     /// A transform-plugin migration verifies cleanly: the receipt (hashed after

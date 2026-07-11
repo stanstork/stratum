@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::{plugins::fixture, reset_postgres_schema, utils::run_smql};
+    use crate::{features::plugins::fixture, harness::runner::run_smql, reset_postgres_schema};
     use tracing_test::traced_test;
 
     /// Build a `wasm source -> wasm sink` SMQL doc: `test_source` emits `total`

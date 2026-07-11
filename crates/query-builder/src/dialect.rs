@@ -14,17 +14,17 @@ pub trait Dialect: Send + Sync {
     ///
     /// - PostgreSQL uses `$1`, `$2`, etc.
     /// - MySQL uses `?`
-    fn get_placeholder(&self, index: usize) -> String;
+    fn placeholder(&self, index: usize) -> String;
 
     /// Renders a generic `Type` into a database-specific SQL type string.
-    fn render_data_type(&self, data_type: &Type, max_length: Option<usize>) -> String;
+    fn format_type(&self, data_type: &Type, max_length: Option<usize>) -> String;
 
     /// Returns the name of the dialect (e.g., "PostgreSQL", "MySQL").
     fn name(&self) -> String;
 
     /// Generates the SQL query and a corresponding list of parameters to bind
     /// for efficiently checking the existence of multiple composite keys.
-    fn build_key_existence_query(
+    fn key_existence_query(
         &self,
         table_name: &str,
         key_columns: &[String],
@@ -36,7 +36,61 @@ pub trait Dialect: Send + Sync {
     /// - PostgreSQL uses `RANDOM()`
     /// - MySQL uses `RAND()`
     /// - SQLite uses `RANDOM()`
-    fn random_function(&self) -> &'static str;
+    fn random_fn(&self) -> &'static str;
+
+    /// Whether `CREATE INDEX ... IF NOT EXISTS` is supported.
+    /// MySQL has no such clause (MariaDB does); PostgreSQL does.
+    fn supports_index_if_not_exists(&self) -> bool {
+        true
+    }
+
+    /// Whether `CREATE INDEX CONCURRENTLY` is supported (PostgreSQL only).
+    fn supports_index_concurrently(&self) -> bool {
+        true
+    }
+
+    /// Whether partial indexes (`CREATE INDEX ... WHERE <cond>`) are supported.
+    /// PostgreSQL yes; MySQL no.
+    fn supports_partial_index(&self) -> bool {
+        true
+    }
+
+    /// Whether per-column `NULLS FIRST/LAST` ordering is supported in an index.
+    /// PostgreSQL yes; MySQL no.
+    fn supports_index_nulls(&self) -> bool {
+        true
+    }
+
+    /// Whether the index method (`USING btree`) is written *before* the column
+    /// list, as in PostgreSQL (`ON tbl USING btree (col)`). MySQL requires it
+    /// after the column list (`ON tbl (col) USING BTREE`).
+    fn index_method_before_cols(&self) -> bool {
+        true
+    }
+
+    /// Whether an index column may carry a key prefix length, e.g. `` `col`(255) ``.
+    /// MySQL requires one to index TEXT/BLOB columns; PostgreSQL has no such syntax.
+    fn supports_index_prefix(&self) -> bool {
+        false
+    }
+
+    /// Whether an auto-incrementing column must belong to a key.
+    ///
+    /// MySQL rejects `AUTO_INCREMENT` on a column that is not the first column of
+    /// some key (error 1075), so the attribute must be dropped when a table is
+    /// created without constraints. PostgreSQL's `SERIAL` is only a column default
+    /// and needs no key.
+    fn auto_inc_requires_key(&self) -> bool {
+        false
+    }
+
+    /// Whether the dialect has standalone enum types (`CREATE TYPE ... AS ENUM`).
+    ///
+    /// PostgreSQL does. MySQL spells the variants inline in the column
+    /// (`ENUM('a','b')`), so emitting a `CREATE TYPE` for it is a syntax error.
+    fn supports_enums(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -47,12 +101,12 @@ impl Dialect for Postgres {
         format!(r#""{ident}""#)
     }
 
-    fn get_placeholder(&self, index: usize) -> String {
+    fn placeholder(&self, index: usize) -> String {
         // PostgreSQL uses $1, $2, etc.
         format!("${}", index + 1)
     }
 
-    fn render_data_type(&self, data_type: &Type, max_length: Option<usize>) -> String {
+    fn format_type(&self, data_type: &Type, max_length: Option<usize>) -> String {
         use model::core::types::{FloatSize, GeomKind, IntSize, IntervalFields};
 
         match data_type {
@@ -143,7 +197,7 @@ impl Dialect for Postgres {
                 None => "bit".to_string(),
             },
             Type::Array { element } => {
-                format!("{}[]", self.render_data_type(element, None))
+                format!("{}[]", self.format_type(element, None))
             }
             Type::Enum { name, .. } => name.clone(),
             Type::Set { .. } => "text[]".to_string(),
@@ -166,7 +220,7 @@ impl Dialect for Postgres {
         "PostgreSQL".into()
     }
 
-    fn build_key_existence_query(
+    fn key_existence_query(
         &self,
         table_name: &str,
         key_columns: &[String],
@@ -221,8 +275,12 @@ impl Dialect for Postgres {
         )
     }
 
-    fn random_function(&self) -> &'static str {
+    fn random_fn(&self) -> &'static str {
         "RANDOM()"
+    }
+
+    fn supports_enums(&self) -> bool {
+        true
     }
 }
 
@@ -234,12 +292,12 @@ impl Dialect for MySql {
         format!(r#"`{ident}`"#)
     }
 
-    fn get_placeholder(&self, _index: usize) -> String {
+    fn placeholder(&self, _index: usize) -> String {
         // MySQL uses ?
         "?".into()
     }
 
-    fn render_data_type(&self, data_type: &Type, max_length: Option<usize>) -> String {
+    fn format_type(&self, data_type: &Type, max_length: Option<usize>) -> String {
         use model::core::types::{FloatSize, GeomKind, IntSize};
 
         match data_type {
@@ -345,7 +403,7 @@ impl Dialect for MySql {
             Type::Cidr => "VARCHAR(45)".to_string(),
             Type::MacAddr => "VARCHAR(17)".to_string(),
             Type::Composite { .. } => "JSON".to_string(),
-            Type::Domain { base_type, .. } => self.render_data_type(base_type, max_length),
+            Type::Domain { base_type, .. } => self.format_type(base_type, max_length),
             Type::Unknown { fallback_ddl, .. } => fallback_ddl.clone(),
         }
     }
@@ -354,7 +412,7 @@ impl Dialect for MySql {
         "MySQL".into()
     }
 
-    fn build_key_existence_query(
+    fn key_existence_query(
         &self,
         _table_name: &str,
         _key_columns: &[String],
@@ -363,7 +421,35 @@ impl Dialect for MySql {
         todo!("Implement batch key existence query for MySQL")
     }
 
-    fn random_function(&self) -> &'static str {
+    fn random_fn(&self) -> &'static str {
         "RAND()"
+    }
+
+    fn supports_index_if_not_exists(&self) -> bool {
+        false
+    }
+
+    fn supports_index_concurrently(&self) -> bool {
+        false
+    }
+
+    fn supports_partial_index(&self) -> bool {
+        false
+    }
+
+    fn supports_index_nulls(&self) -> bool {
+        false
+    }
+
+    fn index_method_before_cols(&self) -> bool {
+        false
+    }
+
+    fn supports_index_prefix(&self) -> bool {
+        true
+    }
+
+    fn auto_inc_requires_key(&self) -> bool {
+        true
     }
 }

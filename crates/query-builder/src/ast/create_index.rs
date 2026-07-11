@@ -21,4 +21,5 @@ pub struct IndexColumnExpr {
     pub expr: String,
     pub sort_order: Option<String>,
     pub nulls: Option<String>,
+    pub prefix_length: Option<u32>,
 }

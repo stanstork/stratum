@@ -57,7 +57,7 @@ use engine_core::{
         type_registry::{Dialect, TypeRegistry},
     },
 };
-use engine_processing::io::{destination::Destination, format::DataFormat, source::Source};
+use engine_processing::io::{destination::Destination, source::Source};
 use engine_runtime::dag::Dag;
 use engine_wasm::registry::{PluginRegistry, load_registry};
 use model::execution::flags::IntegrityMode;
@@ -592,9 +592,12 @@ impl ReportBuilder {
         settings: &ValidatedSettings,
     ) -> ReportBuilderResult<SchemaPlan> {
         let view = PipelineSettingsView::new(settings);
-        let target_dialect = DataFormat::parse(&pipeline.destination.connection.driver)
-            .map(|f| f.to_dialect())
-            .unwrap_or(Dialect::Postgres);
+        let dest_driver = &pipeline.destination.connection.driver;
+        let target_dialect = Dialect::parse(dest_driver).ok_or_else(|| {
+            ReportBuilderError::Config(format!(
+                "destination driver '{dest_driver}' is not a SQL dialect"
+            ))
+        })?;
         let type_registry = TypeRegistry::new(source_dialect, target_dialect);
         let planner = SchemaPlanner::new(
             introspector.clone(),
