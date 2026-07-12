@@ -1,12 +1,5 @@
-use crate::drivers::csv::adapter::CsvAdapter;
 use model::core::types::Type;
 use serde::Serialize;
-use std::sync::Arc;
-
-pub trait MetadataHelper {
-    fn adapter(&self) -> Arc<CsvAdapter>;
-    fn set_metadata(&mut self, meta: CsvMetadata);
-}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CsvColumnMetadata {

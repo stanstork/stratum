@@ -55,14 +55,29 @@ connection "warehouse_pg" {
   url    = env("DEST_DB")
   schema = "analytics"   // optional (Postgres); defaults to "public"
 }
+
+connection "customers_csv" {
+  driver      = "csv"
+  url         = "data/customers.csv"  // required: path to the file
+  delimiter   = ","                   // optional; default ",". Use "\t" for TSV
+  has_headers = true                  // optional; default true
+  pk_column   = "id"                  // optional; marks the primary key of the created table
+}
 ```
 
-**Supported drivers:** `"mysql"`, `"postgres"`
+**Supported drivers:** `"mysql"`, `"postgres"`, `"csv"` (source only)
 
 **`schema`** (Postgres only, optional): scopes the connection to a schema.
 Unqualified reads, writes, and created tables target it (via `search_path`), and
 metadata introspection is scoped to it. Defaults to `public`. The schema must
 already exist. For MySQL, the schema is the database in the connection URL.
+
+**CSV connections** point `url` at a file path and are supported as a **source**
+only. Parsing options live on the connection (not the pipeline `settings` block):
+`delimiter` (default `,`; the escapes `\t`, `\n`, `\r` are recognized, so use
+`"\t"` for TSV), `has_headers` (default `true`), and `pk_column` (optional; marks
+that column as the primary key of the inferred destination table). Column types
+are inferred by sampling the file.
 
 > **Connection pooling is not yet configurable.** Pool sizing and connection
 > timeouts are planned; for now the driver defaults are used. Track it in the
@@ -646,9 +661,6 @@ settings {
 | `ignore_constraints` | bool | `false` | Skip creating foreign keys / constraints on the destination |
 | `cascade_schema` | bool | `false` | Also create schema for graph-referenced (cascaded) tables |
 | `copy_columns` | enum | `"all"` | `"all"` copies every source column; `"map_only"` copies only mapped/`select`ed columns |
-| `csv_header` | bool | `true` | (CSV) treat the first row as a header |
-| `csv_delimiter` | char | `,` | (CSV) field delimiter |
-| `csv_id_column` | string | – | (CSV) column to use as the row identifier |
 
 ---
 

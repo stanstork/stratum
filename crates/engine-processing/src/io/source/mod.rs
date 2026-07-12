@@ -6,9 +6,15 @@ use crate::io::{
     },
     format::DataFormat,
     linked::LinkedSource,
-    source::{db_reader::DbSourceReader, reader::SourceReader, wasm_reader::WasmSourceReader},
+    source::{
+        csv::reader::CsvSourceReader, db::reader::DbSourceReader, reader::SourceReader,
+        wasm::reader::WasmSourceReader,
+    },
 };
 use connectors::{
+    drivers::csv::{
+        adapter::CsvAdapter, metadata::CsvMetadata, settings::CsvSettings, source::CsvDataSource,
+    },
     error::DriverError,
     sql::metadata::table::TableMetadata,
     traits::{introspector::SchemaIntrospector, reader::DataReader},
@@ -25,10 +31,10 @@ use query_builder::{
 };
 use std::{collections::HashMap, sync::Arc};
 
-pub mod db_reader;
-pub mod plugin_introspector;
+pub mod csv;
+pub mod db;
 pub mod reader;
-pub mod wasm_reader;
+pub mod wasm;
 
 #[derive(Clone)]
 pub struct Source {
@@ -63,6 +69,38 @@ impl Source {
             primary: reader,
             linked: None, // joins not supported for WASM sources
             filter: None, // filter pushdown not supported; rely on validate{} rules
+        })
+    }
+
+    pub fn from_csv(
+        pipeline: &Pipeline,
+        path: &str,
+        settings: CsvSettings,
+        meta: CsvMetadata,
+    ) -> Result<Self, DriverError> {
+        let name = pipeline.source.table.clone();
+        let adapter = CsvAdapter::new(path, settings)
+            .map_err(|e| DriverError::ConnectionError(format!("open CSV '{path}': {e}")))?;
+
+        let filter = match Self::create_filter(pipeline, &DataFormat::Csv)? {
+            Some(Filter::Csv(f)) => Some(f),
+            _ => None,
+        };
+
+        // Stamp the inferred schema with the logical table name so emitted
+        // records (and destination-table creation) use it, not the file path.
+        let mut meta = meta;
+        meta.name = name.clone();
+        let data_source = CsvDataSource::new(adapter, filter, meta);
+
+        let reader = Arc::new(CsvSourceReader::new(data_source, name.clone()));
+
+        Ok(Source {
+            name,
+            format: DataFormat::Csv,
+            primary: reader,
+            linked: None,
+            filter: None,
         })
     }
 

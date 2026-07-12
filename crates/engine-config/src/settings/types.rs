@@ -13,9 +13,6 @@ pub struct Settings {
     pub copy_columns: CopyColumns,
     pub batch_size: usize,
     pub cascade_schema: bool,
-    pub csv_header: bool,
-    pub csv_delimiter: char,
-    pub csv_id_column: Option<String>,
 }
 
 impl Settings {
@@ -35,9 +32,6 @@ impl Settings {
                 .unwrap_or(CopyColumns::All),
             batch_size: map.get_usize("batch_size").unwrap_or(0),
             cascade_schema: map.get_bool("cascade_schema").unwrap_or(false),
-            csv_header: map.get_bool("csv_header").unwrap_or(true),
-            csv_delimiter: map.get_char("csv_delimiter").unwrap_or(','),
-            csv_id_column: map.get_string("csv_id_column"),
         }
     }
 }
