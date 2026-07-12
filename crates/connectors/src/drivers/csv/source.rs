@@ -3,48 +3,46 @@ use model::{
     pagination::{cursor::Cursor, page::FetchResult},
     records::{OpType, Record},
 };
-use std::sync::Arc;
 use tracing::warn;
 
 use crate::drivers::csv::{
     adapter::CsvAdapter,
     error::FileError,
     filter::CsvFilter,
-    metadata::{CsvMetadata, MetadataHelper, normalize_col_name},
+    metadata::{CsvMetadata, normalize_col_name},
+    settings::CsvSettings,
     types::CsvType,
 };
 
-pub trait FileDataSource: MetadataHelper + Send + Sync {
-    type Error;
-
-    fn fetch(&mut self, batch_size: usize, cursor: Cursor) -> Result<FetchResult, Self::Error>;
+/// Open `path` and sample it to infer the column schema (names, types,
+/// nullability, primary key). Used to describe a CSV source before reading it.
+pub async fn infer_metadata(path: &str, settings: CsvSettings) -> Result<CsvMetadata, FileError> {
+    CsvAdapter::new(path, settings)?.fetch_metadata(path).await
 }
 
 pub struct CsvDataSource {
     pub adapter: CsvAdapter,
-    pub primary_meta: Option<CsvMetadata>,
+    pub primary_meta: CsvMetadata,
     pub filter: Option<CsvFilter>,
     /// Tracks how many rows have been consumed from the file.
     rows_read: usize,
 }
 
 impl CsvDataSource {
-    pub fn new(adapter: CsvAdapter, filter: Option<CsvFilter>) -> Self {
+    pub fn new(adapter: CsvAdapter, filter: Option<CsvFilter>, meta: CsvMetadata) -> Self {
         CsvDataSource {
             adapter,
             filter,
-            primary_meta: None,
+            primary_meta: meta,
             rows_read: 0,
         }
     }
-}
 
-impl FileDataSource for CsvDataSource {
-    type Error = FileError;
-
-    fn fetch(&mut self, batch_size: usize, cursor: Cursor) -> Result<FetchResult, Self::Error> {
+    /// Read up to `batch_size` rows starting at `cursor` (a `Default { offset }`
+    /// row offset), applying the optional filter row-by-row.
+    pub fn fetch(&mut self, batch_size: usize, cursor: Cursor) -> Result<FetchResult, FileError> {
         let start = std::time::Instant::now();
-        let meta = self.primary_meta.clone().expect("Metadata not set");
+        let meta = self.primary_meta.clone();
         let entity_name = meta.name.clone();
 
         // Pre-map headers -> ColumnMetadata
@@ -176,15 +174,5 @@ impl FileDataSource for CsvDataSource {
             row_count,
             took_ms,
         })
-    }
-}
-
-impl MetadataHelper for CsvDataSource {
-    fn adapter(&self) -> Arc<CsvAdapter> {
-        Arc::new(self.adapter.clone())
-    }
-
-    fn set_metadata(&mut self, meta: CsvMetadata) {
-        self.primary_meta = Some(meta);
     }
 }

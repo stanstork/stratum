@@ -24,7 +24,7 @@ use model::{
     transform::mapping::TransformationMetadata,
 };
 use query_builder::offsets::OffsetStrategy;
-pub use source::{DbSourceEndpoint, WasmSourceEndpoint};
+pub use source::{CsvSourceEndpoint, DbSourceEndpoint, WasmSourceEndpoint};
 use std::sync::Arc;
 
 mod destination;
@@ -121,6 +121,7 @@ pub async fn resolve_source(
             registry: registry.clone(),
             plugin: wasm_plugin_name(conn)?,
         })),
+        Some(DataFormat::Csv) => Ok(Box::new(CsvSourceEndpoint::new(conn).await?)),
         _ => Ok(Box::new(DbSourceEndpoint(exec.resolve_driver(conn).await?))),
     }
 }

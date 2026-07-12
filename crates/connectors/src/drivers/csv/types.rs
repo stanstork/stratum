@@ -24,13 +24,6 @@ fn chain() -> Vec<Type> {
             unsigned: false,
             auto_increment: false,
         },
-        Type::Decimal {
-            precision: None,
-            scale: None,
-        },
-        Type::Float {
-            bits: FloatSize::F32,
-        },
         Type::Float {
             bits: FloatSize::F64,
         },

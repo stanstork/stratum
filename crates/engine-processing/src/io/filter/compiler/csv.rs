@@ -1,6 +1,9 @@
 use crate::io::filter::compiler::{FilterCompileError, FilterCompiler};
 use connectors::drivers::csv::filter::{CsvComparator, CsvCondition, CsvFilter, CsvFilterExpr};
-use model::execution::expr::{BinaryOp, CompiledExpression};
+use model::{
+    core::value::Value,
+    execution::expr::{BinaryOp, CompiledExpression},
+};
 use std::str::FromStr;
 
 pub struct CsvFilterCompiler;
@@ -62,10 +65,23 @@ fn from_compiled_condition(
 
 fn format_expr_value(expr: &CompiledExpression) -> Result<String, Box<dyn std::error::Error>> {
     match expr {
-        CompiledExpression::Literal(value) => Ok(format!("{:?}", value)),
+        CompiledExpression::Literal(value) => Ok(literal_to_string(value)),
         CompiledExpression::Identifier(name) => Ok(name.clone()),
         CompiledExpression::DotPath(segments) => Ok(segments.join(".")),
         _ => Err(format!("Unsupported expression type for filter value: {:?}", expr).into()),
+    }
+}
+
+/// Render a literal `Value` as the bare string a CSV cell would contain.
+fn literal_to_string(value: &Value) -> String {
+    match value {
+        Value::Int(v) => v.to_string(),
+        Value::UInt(v) => v.to_string(),
+        Value::Float(v) => v.to_string(),
+        Value::Decimal(v) => v.to_string(),
+        Value::String(v) => v.clone(),
+        Value::Boolean(v) => v.to_string(),
+        other => format!("{other:?}"),
     }
 }
 

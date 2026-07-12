@@ -1,7 +1,11 @@
 use super::{SourceArtifacts, SourceEndpoint};
 use crate::error::MigrationError;
 use async_trait::async_trait;
-use connectors::{sql::metadata::table::TableMetadata, traits::introspector::SchemaIntrospector};
+use connectors::{
+    drivers::csv::{metadata::CsvMetadata, settings::CsvSettings, source::infer_metadata},
+    sql::metadata::table::TableMetadata,
+    traits::introspector::SchemaIntrospector,
+};
 use engine_core::{
     dispatch_driver,
     drivers::DriverRef,
@@ -12,10 +16,13 @@ use engine_core::{
         type_registry::{Dialect, TypeRegistry},
     },
 };
-use engine_processing::io::source::{Source, plugin_introspector::PluginIntrospector};
+use engine_processing::io::source::{
+    Source, csv::introspector::CsvIntrospector, wasm::introspector::PluginIntrospector,
+};
 use engine_wasm::registry::PluginRegistry;
 use model::{
     execution::{
+        connection::Connection,
         pipeline::Pipeline,
         references::{DataMode, GraphReferences},
     },
@@ -29,6 +36,40 @@ pub struct DbSourceEndpoint(pub DriverRef);
 pub struct WasmSourceEndpoint {
     pub registry: Arc<PluginRegistry>,
     pub plugin: String,
+}
+
+pub struct CsvSourceEndpoint {
+    path: String,
+    settings: CsvSettings,
+    meta: CsvMetadata,
+}
+
+impl CsvSourceEndpoint {
+    pub async fn new(conn: &Connection) -> Result<Self, MigrationError> {
+        let path = conn.properties.get_string("url").ok_or_else(|| {
+            MigrationError::PipelineFailed(format!(
+                "csv connection '{}' is missing required property `url` (the file path)",
+                conn.name
+            ))
+        })?;
+        let delimiter = conn
+            .properties
+            .get_string("delimiter")
+            .and_then(|s| s.chars().next())
+            .unwrap_or(',');
+        let has_headers = conn.properties.get_bool("has_headers").unwrap_or(true);
+        let pk_column = conn.properties.get_string("pk_column");
+        let settings = CsvSettings::new(delimiter, has_headers, pk_column);
+
+        let meta = infer_metadata(&path, settings.clone()).await.map_err(|e| {
+            MigrationError::PipelineFailed(format!("infer CSV schema '{path}': {e}"))
+        })?;
+        Ok(Self {
+            path,
+            settings,
+            meta,
+        })
+    }
 }
 
 impl DbSourceEndpoint {
@@ -135,6 +176,42 @@ impl SourceEndpoint for WasmSourceEndpoint {
         }
         let introspector =
             Arc::new(PluginIntrospector::new(&meta.output_schema, dest_dialect)) as Arc<_>;
+        Some((introspector, dest_dialect))
+    }
+}
+
+#[async_trait]
+impl SourceEndpoint for CsvSourceEndpoint {
+    async fn build(
+        &self,
+        pipeline: &Pipeline,
+        _mapping: &TransformationMetadata,
+        _offset_strategy: Arc<dyn OffsetStrategy>,
+    ) -> Result<SourceArtifacts, MigrationError> {
+        let source = Source::from_csv(
+            pipeline,
+            &self.path,
+            self.settings.clone(),
+            self.meta.clone(),
+        )?;
+        Ok(SourceArtifacts {
+            source,
+            schema_ops: None,
+            cascade_tables: Vec::new(),
+        })
+    }
+
+    fn dialect(&self) -> Option<Dialect> {
+        None
+    }
+
+    fn schema_introspector(
+        &self,
+        dest_dialect: Dialect,
+    ) -> Option<(Arc<dyn SchemaIntrospector>, Dialect)> {
+        // Describe the sampled CSV schema in the destination dialect so a
+        // `csv -> db` pipeline can create the destination table.
+        let introspector = Arc::new(CsvIntrospector::new(&self.meta, dest_dialect)) as Arc<_>;
         Some((introspector, dest_dialect))
     }
 }
