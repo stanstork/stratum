@@ -55,7 +55,12 @@ impl CsvSourceEndpoint {
         let delimiter = conn
             .properties
             .get_string("delimiter")
-            .and_then(|s| s.chars().next())
+            .map(|s| match s.as_str() {
+                "\\t" => '\t',
+                "\\n" => '\n',
+                "\\r" => '\r',
+                _ => s.chars().next().unwrap_or(','),
+            })
             .unwrap_or(',');
         let has_headers = conn.properties.get_bool("has_headers").unwrap_or(true);
         let pk_column = conn.properties.get_string("pk_column");

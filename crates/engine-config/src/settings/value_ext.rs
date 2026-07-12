@@ -14,9 +14,6 @@ pub trait CanonicalValueMapExt {
 
     /// Extract a usize value from various numeric types, returning None if negative or wrong type.
     fn get_usize(&self, key: &str) -> Option<usize>;
-
-    /// Extract the first character from a string value.
-    fn get_char(&self, key: &str) -> Option<char>;
 }
 
 impl CanonicalValueMapExt for HashMap<String, Value> {
@@ -39,13 +36,6 @@ impl CanonicalValueMapExt for HashMap<String, Value> {
             Value::Int(i) if *i >= 0 => Some(*i as usize),
             Value::UInt(u) => Some(*u as usize),
             Value::Float(f) if *f >= 0.0 => Some(*f as usize),
-            _ => None,
-        })
-    }
-
-    fn get_char(&self, key: &str) -> Option<char> {
-        self.get(key).and_then(|v| match v {
-            Value::String(s) => s.chars().next(),
             _ => None,
         })
     }
@@ -103,24 +93,5 @@ mod tests {
         map.insert("negative".to_string(), Value::Int(-42));
 
         assert_eq!(map.get_usize("negative"), None);
-    }
-
-    #[test]
-    fn test_get_char() {
-        let mut map = HashMap::new();
-        map.insert("comma".to_string(), Value::String(",".to_string()));
-        map.insert("letter".to_string(), Value::String("abc".to_string()));
-
-        assert_eq!(map.get_char("comma"), Some(','));
-        assert_eq!(map.get_char("letter"), Some('a'));
-        assert_eq!(map.get_char("missing"), None);
-    }
-
-    #[test]
-    fn test_get_char_empty_string() {
-        let mut map = HashMap::new();
-        map.insert("empty".to_string(), Value::String("".to_string()));
-
-        assert_eq!(map.get_char("empty"), None);
     }
 }

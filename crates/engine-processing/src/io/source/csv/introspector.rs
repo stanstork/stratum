@@ -51,7 +51,7 @@ impl CsvIntrospector {
                 // base type name in `data_type`, the parametrized form in
                 // `full_column_type` (MySQL keys `tinyint(1)` -> boolean off it),
                 // and precision/scale/length in their own fields.
-                let base = ddl.split('(').next().unwrap_or(&ddl).trim().to_string();
+                let base = ddl.split('(').next().unwrap_or(&ddl).trim().to_lowercase();
                 let (num_precision, num_scale) = match &col.data_type {
                     Type::Decimal { precision, scale } => {
                         (precision.map(|p| p as u32), scale.map(|s| s as u32))

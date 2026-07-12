@@ -82,17 +82,20 @@ pub trait CsvType {
 impl CsvType for Type {
     fn promote(&self, value: &str) -> Type {
         let chain = chain();
-        // Find our index in the promotion chain (fallback to start)
-        let start = chain
-            .iter()
-            .position(|t| self.is_same_base_type(t))
-            .unwrap_or(0);
-        // Find the first type from here onward that can parse the value
-        chain[start..]
-            .iter()
-            .find(|t| can_parse(t, value))
-            .cloned()
-            .unwrap_or(Type::Text { charset: None })
+        match chain.iter().position(|t| self.is_same_base_type(t)) {
+            Some(start) => chain[start..]
+                .iter()
+                .find(|t| can_parse(t, value))
+                .cloned()
+                .unwrap_or(Type::Text { charset: None }),
+            None => {
+                if can_parse(self, value) {
+                    self.clone()
+                } else {
+                    Type::Text { charset: None }
+                }
+            }
+        }
     }
 
     fn data_type(&self) -> Type {
@@ -192,5 +195,45 @@ trait TypeBaseComparison {
 impl TypeBaseComparison for Type {
     fn is_same_base_type(&self, other: &Type) -> bool {
         std::mem::discriminant(self) == std::mem::discriminant(other)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CsvType;
+    use model::core::types::{FloatSize, IntSize, Type};
+
+    fn int16() -> Type {
+        Type::Int {
+            bits: IntSize::I16,
+            unsigned: false,
+            auto_increment: false,
+        }
+    }
+
+    #[test]
+    fn promote_widens_int_to_float_then_text() {
+        // Int accommodates a fractional value by widening to F64 (double).
+        assert!(matches!(
+            int16().promote("95.5"),
+            Type::Float {
+                bits: FloatSize::F64
+            }
+        ));
+        // A non-numeric value widens all the way to Text.
+        assert!(matches!(int16().promote("hello"), Type::Text { .. }));
+    }
+
+    #[test]
+    fn promote_never_demotes_a_type_outside_the_chain() {
+        // Decimal is not in the promotion chain; an int-looking value must not
+        // demote it to Int.
+        let decimal = Type::Decimal {
+            precision: None,
+            scale: None,
+        };
+        assert!(matches!(decimal.promote("42"), Type::Decimal { .. }));
+        // A value it cannot represent widens to Text, not Int.
+        assert!(matches!(decimal.promote("hello"), Type::Text { .. }));
     }
 }
