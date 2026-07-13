@@ -203,8 +203,8 @@ impl MappingAnalyzer {
         let is_lossy = self.check_lossy_risk(source, target);
         let method = self.conversion_method(source, target);
 
-        let source_name = format!("{:?}", source);
-        let target_name = format!("{:?}", target);
+        let source_name = source.name();
+        let target_name = target.name();
 
         let warning = if is_lossy {
             Some(format!(

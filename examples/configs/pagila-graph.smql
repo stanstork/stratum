@@ -64,6 +64,52 @@ pipeline "graph_from_rental" {
         connection = connection.mysql
     }
 
+    // The root `select` maps the `from` table (rental). Field renames here only
+    // touch the rental table.
+    select {
+        rental_id    = rental.rental_id
+        rental_date  = rental.rental_date
+        inventory_id = rental.inventory_id
+        customer_id  = rental.customer_id
+        return_date  = rental.return_date
+        staff_id     = rental.staff_id
+        updated_at   = rental.last_update   // rename last_update -> updated_at
+    }
+
+    // NAMED SELECTS: each discovered table can override its own field mapping.
+
+    // dim-style rename of customer's name fields.
+    select "customer" {
+        customer_id   = customer.customer_id
+        store_id      = customer.store_id
+        given_name    = customer.first_name   // first_name  -> given_name
+        family_name   = customer.last_name    // last_name   -> family_name
+        email         = customer.email
+        address_id    = customer.address_id
+        activebool    = customer.activebool
+        registered_at = customer.create_date  // create_date -> registered_at
+        last_update   = customer.last_update
+        active        = customer.active
+    }
+
+    // warehouse-style rename of film's rental fields.
+    select "film" {
+        film_id              = film.film_id
+        title                = film.title
+        description          = film.description
+        year                 = film.release_year      // release_year    -> year
+        language_id          = film.language_id
+        original_language_id = film.original_language_id
+        rent_days            = film.rental_duration    // rental_duration -> rent_days
+        price                = film.rental_rate        // rental_rate     -> price
+        length               = film.length
+        replacement_cost     = film.replacement_cost
+        rating               = film.rating
+        last_update          = film.last_update
+        special_features     = film.special_features
+        fulltext             = film.fulltext
+    }
+
     settings {
         create_missing_tables = true
         batch_size            = 500

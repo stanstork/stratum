@@ -117,6 +117,14 @@ pub enum Commands {
         )]
         output: Option<String>,
 
+        /// Emit the full machine-readable JSON report instead of the human summary
+        #[arg(long)]
+        json: bool,
+
+        /// Print the exact CREATE / ALTER DDL the migration would run
+        #[arg(long)]
+        ddl: bool,
+
         /// Enable sample data collection in the plan output
         #[arg(long, short = 's')]
         sample: bool,

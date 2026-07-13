@@ -142,6 +142,7 @@ mod tests {
                 memory_mb: 50,
             },
             sample: None,
+            cascade_tables: Vec::new(),
         };
 
         let plan = engine_planner::plan::execution::migration_report::MigrationReport {
@@ -202,6 +203,7 @@ mod tests {
                 memory_mb: 100,
             },
             sample: None,
+            cascade_tables: Vec::new(),
         };
 
         let plan = engine_planner::plan::execution::migration_report::MigrationReport {
@@ -279,6 +281,7 @@ mod tests {
                 memory_mb: 50,
             },
             sample: None,
+            cascade_tables: Vec::new(),
         };
 
         // No dependencies, stage 0 -> Queued

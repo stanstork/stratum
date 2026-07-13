@@ -56,4 +56,9 @@ impl Cli {
             Commands::Apply { pretty: true, .. } | Commands::Resume { pretty: true, .. }
         )
     }
+
+    /// Returns true if running the `plan` command.
+    pub fn is_plan_mode(&self) -> bool {
+        matches!(self.command, Commands::Plan { .. })
+    }
 }

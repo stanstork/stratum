@@ -10,6 +10,7 @@ use crate::{
         endpoint::{is_wasm_pipeline, resolve_destination, resolve_source},
         errors::{ConnectionError, ReportBuilderError, ReportBuilderResult, SourceAnalyzerError},
         estimator::{DurationEstimator, ResourceEstimator},
+        graph::GraphAnalyzer,
         infra::{
             pipeline_analysis::{PipelineAnalysisResources, PipelineSettingsView},
             plan_metadata::MetadataGenerator,
@@ -62,6 +63,7 @@ use engine_runtime::dag::Dag;
 use engine_wasm::registry::{PluginRegistry, load_registry};
 use model::execution::flags::IntegrityMode;
 use model::execution::pipeline::RetryConfig as CoreRetryConfig;
+use model::execution::row_count::RowCount;
 use model::{
     core::value::Value,
     execution::{
@@ -91,6 +93,7 @@ pub mod endpoint;
 pub mod errors;
 pub mod estimator;
 pub mod explain;
+pub mod graph;
 pub mod infra;
 pub mod plugin_validation;
 pub mod summary;
@@ -257,12 +260,35 @@ impl ReportBuilder {
                 .await;
         }
 
+        // Graph/cascade path: the pipeline expands from a root table into its FK
+        // closure, so the single-table analyzer chain doesn't apply.
+        if pipeline.source.graph_references.is_some() {
+            return GraphAnalyzer::new(self)
+                .analyze(pipeline, dag, connections, plugin_registry)
+                .await;
+        }
+
+        self.analyze_db_pipeline(pipeline, dag, connections, plugin_registry, None)
+            .await
+    }
+
+    /// The ordinary DB <-> DB analyzer chain: prepare resources, run analysis, assemble.
+    /// `row_total_override` replaces the source's total row count before estimation
+    /// (used by the cascade parent, whose honest total is summed across the closure).
+    async fn analyze_db_pipeline(
+        &self,
+        pipeline: &Pipeline,
+        dag: &Dag,
+        connections: &mut ConnectionPool,
+        plugin_registry: &Arc<PluginRegistry>,
+        row_total_override: Option<RowCount>,
+    ) -> ReportBuilderResult<PipelinePlan> {
         // Prepare physical adapters and metadata caches via specialized resource container
         let resources =
             PipelineAnalysisResources::create(pipeline, connections, self, plugin_registry).await?;
 
         // Run specific analysis (schema validation, sampling, join analysis)
-        let analysis_report = self
+        let mut analysis_report = self
             .run_pipeline_analysis(pipeline, &resources, plugin_registry)
             .await
             .map_err(|e| {
@@ -271,6 +297,11 @@ impl ReportBuilder {
                     pipeline.name, e.message
                 )))
             })?;
+
+        if let Some(total) = row_total_override {
+            analysis_report.source.total_rows = total;
+            analysis_report.source.filtered_rows = None;
+        }
 
         // Final assembly of the plan
         self.assemble_pipeline_plan(pipeline, dag, resources, analysis_report)
@@ -324,6 +355,7 @@ impl ReportBuilder {
             diagnostics: Vec::new(),
             estimations: Default::default(),
             sample: None,
+            cascade_tables: Vec::new(),
         })
     }
 
@@ -394,6 +426,7 @@ impl ReportBuilder {
             diagnostics,
             estimations,
             sample: Some(report.sample),
+            cascade_tables: Vec::new(),
         })
     }
 

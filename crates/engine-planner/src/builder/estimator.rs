@@ -318,8 +318,12 @@ impl ResourceEstimator {
         pipelines
             .iter()
             .map(|p| {
-                let row_bytes =
-                    p.mappings.len() as f64 * 100.0 * p.source.effective_row_count().value as f64;
+                let cols = if p.mappings.is_empty() {
+                    p.source.columns.len()
+                } else {
+                    p.mappings.len()
+                };
+                let row_bytes = cols as f64 * 100.0 * p.source.effective_row_count().value as f64;
                 (row_bytes * 2.0) / (1024.0 * 1024.0) // Read + Write, convert to MB
             })
             .sum()

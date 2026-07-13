@@ -15,9 +15,10 @@ mod config;
 mod env;
 mod error;
 mod logger;
-mod output;
+mod plan_summary;
 mod pretty_printer;
 mod shutdown;
+mod spinner;
 mod tui;
 mod version;
 

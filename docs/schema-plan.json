@@ -1,0 +1,797 @@
+{
+  "plan_id": "77c44908-1f86-4b92-8f1c-ca7a099844e7",
+  "generated_at": "2026-07-13T14:49:59.598740769Z",
+  "engine_version": "0.1.0",
+  "config_hash": "fa0cb8d44363a7a270e0cfa8e650088255e4b0becc418326b457c0f358865d28",
+  "config_path": "examples/configs/schema.smql",
+  "execution_settings": {
+    "strategy": "sequential",
+    "max_concurrency": 1,
+    "on_failure": "fail_fast"
+  },
+  "defines": {
+    "constants": [
+      {
+        "name": "mysql_url",
+        "value": "mysql://sakila_user:****@localhost:3306/sakila",
+        "source": {
+          "environment": {
+            "var_name": "MYSQL_URL"
+          }
+        }
+      },
+      {
+        "name": "postgres_url",
+        "value": "postgres://user:****@localhost:5432/testdb",
+        "source": {
+          "environment": {
+            "var_name": "POSTGRES_URL"
+          }
+        }
+      }
+    ],
+    "env_vars_used": [
+      {
+        "var_name": "postgres_url",
+        "was_set": false,
+        "used_default": false,
+        "value": "postgres://user:****@localhost:5432/testdb"
+      },
+      {
+        "var_name": "mysql_url",
+        "was_set": false,
+        "used_default": false,
+        "value": "mysql://sakila_user:****@localhost:3306/sakila"
+      }
+    ]
+  },
+  "connections": [
+    {
+      "name": "dst",
+      "driver": "postgres",
+      "url_masked": "postgres://user:****@localhost:5432/testdb",
+      "status": {
+        "connected": {
+          "latency_ms": 102,
+          "version": "PostgreSQL 16.11 (Debian 16.11-1.pgdg13+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+        }
+      },
+      "role": "destination"
+    },
+    {
+      "name": "src",
+      "driver": "my_sql",
+      "url_masked": "mysql://sakila_user:****@localhost:3306/sakila",
+      "status": {
+        "connected": {
+          "latency_ms": 10,
+          "version": "8.4.7"
+        }
+      },
+      "role": "source"
+    }
+  ],
+  "pipelines": [
+    {
+      "name": "migrate_customer",
+      "execution_order": 0,
+      "execution_stage": 0,
+      "depends_on": [],
+      "source": {
+        "connection": "src",
+        "table": "customer",
+        "fqn": "customer",
+        "driver": "my_sql",
+        "total_rows": {
+          "value": 599,
+          "is_estimated": true,
+          "confidence": 0.8
+        },
+        "columns": [
+          {
+            "name": "first_name",
+            "data_type": "varchar",
+            "nullable": false,
+            "max_length": 45,
+            "is_primary_key": false,
+            "is_auto_increment": false
+          },
+          {
+            "name": "address_id",
+            "data_type": "smallint",
+            "nullable": false,
+            "is_primary_key": false,
+            "is_auto_increment": false
+          },
+          {
+            "name": "email",
+            "data_type": "varchar",
+            "nullable": true,
+            "max_length": 50,
+            "is_primary_key": false,
+            "is_auto_increment": false
+          },
+          {
+            "name": "active",
+            "data_type": "tinyint",
+            "nullable": false,
+            "is_primary_key": false,
+            "is_auto_increment": false
+          },
+          {
+            "name": "last_name",
+            "data_type": "varchar",
+            "nullable": false,
+            "max_length": 45,
+            "is_primary_key": false,
+            "is_auto_increment": false
+          },
+          {
+            "name": "create_date",
+            "data_type": "datetime",
+            "nullable": false,
+            "is_primary_key": false,
+            "is_auto_increment": false
+          },
+          {
+            "name": "last_update",
+            "data_type": "timestamp",
+            "nullable": true,
+            "is_primary_key": false,
+            "is_auto_increment": false
+          },
+          {
+            "name": "store_id",
+            "data_type": "tinyint",
+            "nullable": false,
+            "is_primary_key": false,
+            "is_auto_increment": false
+          },
+          {
+            "name": "customer_id",
+            "data_type": "smallint",
+            "nullable": false,
+            "is_primary_key": true,
+            "is_auto_increment": true
+          }
+        ],
+        "primary_key": [
+          "customer_id"
+        ],
+        "indexes": [
+          {
+            "name": "idx_fk_address_id",
+            "columns": [
+              "address_id"
+            ],
+            "is_unique": false,
+            "is_primary": false
+          },
+          {
+            "name": "idx_fk_store_id",
+            "columns": [
+              "store_id"
+            ],
+            "is_unique": false,
+            "is_primary": false
+          },
+          {
+            "name": "idx_last_name",
+            "columns": [
+              "last_name"
+            ],
+            "is_unique": false,
+            "is_primary": false
+          },
+          {
+            "name": "PRIMARY",
+            "columns": [
+              "customer_id"
+            ],
+            "is_unique": true,
+            "is_primary": true
+          }
+        ],
+        "size_bytes": 131072,
+        "last_analyzed": "2026-07-13T14:49:59.929226722Z"
+      },
+      "destination": {
+        "connection": "dst",
+        "table": "users",
+        "fqn": "users",
+        "driver": "postgres",
+        "exists": false,
+        "mode": "append",
+        "columns": [],
+        "data_impact": {
+          "action": "create",
+          "description": "Table will be created with new data",
+          "is_destructive": false
+        }
+      },
+      "filters": [],
+      "joins": [
+        {
+          "alias": "addr",
+          "source_table": "address",
+          "join_type": "inner",
+          "conditions": [
+            {
+              "left": {
+                "table": "addr",
+                "column": "address_id"
+              },
+              "right": {
+                "table": "customer",
+                "column": "address_id"
+              },
+              "expression": "(`addr`.`address_id` = `customer`.`address_id`)",
+              "indexed": true
+            }
+          ],
+          "columns_used": [
+            "address"
+          ],
+          "table_rows": {
+            "value": 603,
+            "is_estimated": true,
+            "confidence": 0.8
+          },
+          "match_rate": 0.95
+        },
+        {
+          "alias": "city",
+          "source_table": "city",
+          "join_type": "inner",
+          "conditions": [
+            {
+              "left": {
+                "table": "city",
+                "column": "city_id"
+              },
+              "right": {
+                "table": "addr",
+                "column": "city_id"
+              },
+              "expression": "(`city`.`city_id` = `addr`.`city_id`)",
+              "indexed": true
+            }
+          ],
+          "columns_used": [
+            "city"
+          ],
+          "table_rows": {
+            "value": 600,
+            "is_estimated": true,
+            "confidence": 0.8
+          },
+          "match_rate": 0.95
+        }
+      ],
+      "mappings": [
+        {
+          "target": "id",
+          "source": {
+            "type": "column",
+            "table": "customer",
+            "column": "customer_id"
+          },
+          "mapping_type": "direct",
+          "source_type": "Int { bits: I16, unsigned: false, auto_increment: true }",
+          "target_type": "Int { bits: I16, unsigned: false, auto_increment: true }",
+          "nullable": false
+        },
+        {
+          "target": "full_name",
+          "source": {
+            "type": "function",
+            "name": "concat",
+            "args": [
+              "customer.first_name",
+              "' '",
+              "customer.last_name"
+            ]
+          },
+          "mapping_type": "generated",
+          "source_type": "Varchar { length: None, charset: None }",
+          "target_type": "Varchar { length: None, charset: None }",
+          "nullable": true
+        },
+        {
+          "target": "email",
+          "source": {
+            "type": "column",
+            "table": "customer",
+            "column": "email"
+          },
+          "mapping_type": "direct",
+          "source_type": "Varchar { length: Some(50), charset: Some(\"utf8mb4\") }",
+          "target_type": "Varchar { length: Some(50), charset: Some(\"utf8mb4\") }",
+          "nullable": true
+        },
+        {
+          "target": "is_active",
+          "source": {
+            "type": "column",
+            "table": "customer",
+            "column": "active"
+          },
+          "mapping_type": "direct",
+          "source_type": "Boolean",
+          "target_type": "Boolean",
+          "nullable": false
+        },
+        {
+          "target": "registered_at",
+          "source": {
+            "type": "column",
+            "table": "customer",
+            "column": "create_date"
+          },
+          "mapping_type": "direct",
+          "source_type": "Timestamp { precision: None, with_tz: false }",
+          "target_type": "Timestamp { precision: None, with_tz: false }",
+          "nullable": false
+        },
+        {
+          "target": "city",
+          "source": {
+            "type": "column",
+            "table": "city",
+            "column": "city"
+          },
+          "mapping_type": "lookup",
+          "source_type": "Varchar { length: Some(50), charset: Some(\"utf8mb4\") }",
+          "target_type": "Varchar { length: Some(50), charset: Some(\"utf8mb4\") }",
+          "nullable": true
+        },
+        {
+          "target": "address",
+          "source": {
+            "type": "column",
+            "table": "address",
+            "column": "address"
+          },
+          "mapping_type": "lookup",
+          "source_type": "Varchar { length: Some(50), charset: Some(\"utf8mb4\") }",
+          "target_type": "Varchar { length: Some(50), charset: Some(\"utf8mb4\") }",
+          "nullable": true
+        }
+      ],
+      "validations": [],
+      "error_handling": {
+        "retry": {
+          "max_attempts": 5,
+          "backoff": {
+            "type": "exponential",
+            "initial_delay": "250ms",
+            "max_delay": "5s"
+          }
+        },
+        "after_max_retries": "fail"
+      },
+      "pagination": {
+        "strategy": "pk",
+        "cursor_column": {
+          "table": "customer",
+          "column": "customer_id"
+        },
+        "column_indexed": true
+      },
+      "hooks": {
+        "before": [],
+        "after": [],
+        "before_count": 0,
+        "after_count": 0
+      },
+      "settings": {
+        "batch_size": 500,
+        "copy_columns": "MapOnly",
+        "create_missing_tables": true,
+        "dry_run": true,
+        "workers": 1,
+        "checkpoint": "every_batch"
+      },
+      "data_flow_summary": {
+        "direct_columns": 4,
+        "renamed_columns": 0,
+        "computed_columns": 0,
+        "conditional_columns": 0,
+        "lookup_columns": 2,
+        "generated_columns": 1,
+        "excluded_columns": [
+          "first_name",
+          "address_id",
+          "last_name",
+          "last_update",
+          "store_id"
+        ],
+        "new_columns": [
+          "id",
+          "full_name",
+          "is_active",
+          "registered_at",
+          "city",
+          "address"
+        ],
+        "type_conversions": 0,
+        "unsafe_conversions": 0,
+        "join_count": 2,
+        "cross_connection_joins": 0,
+        "assert_count": 0,
+        "warn_count": 0
+      },
+      "schema_changes": [
+        {
+          "change_type": "create_table",
+          "entity": "users",
+          "description": "Create new table 'users'",
+          "ddl": "CREATE TABLE \"users\" (\n\t\"id\" smallserial PRIMARY KEY NOT NULL,\n\t\"email\" varchar(50),\n\t\"is_active\" boolean NOT NULL,\n\t\"registered_at\" timestamp NOT NULL,\n\t\"full_name\" varchar,\n\t\"city\" varchar(50),\n\t\"address\" varchar(50)\n);",
+          "is_breaking": false,
+          "is_reversible": true
+        }
+      ],
+      "diagnostics": [
+        {
+          "level": "info",
+          "code": "TABLE_WILL_BE_CREATED",
+          "message": "Destination table 'users' will be created",
+          "pipeline": "migrate_customer"
+        }
+      ],
+      "estimations": {
+        "duration": {
+          "min_seconds": 1,
+          "likely_seconds": 2,
+          "max_seconds": 3,
+          "formatted": "2s"
+        },
+        "rows_per_second": 6400,
+        "batches": 2,
+        "memory_mb": 32
+      },
+      "sample": {
+        "enabled": false,
+        "sample_size": 0,
+        "sampling_method": "first",
+        "rows": [],
+        "stats": {
+          "ok": 0,
+          "warnings": 0,
+          "skipped": 0,
+          "errors": 0
+        }
+      }
+    },
+    {
+      "name": "migrate_payment",
+      "execution_order": 1,
+      "execution_stage": 1,
+      "depends_on": [
+        "migrate_customer"
+      ],
+      "source": {
+        "connection": "src",
+        "table": "payment",
+        "fqn": "payment",
+        "driver": "my_sql",
+        "total_rows": {
+          "value": 16500,
+          "is_estimated": true,
+          "confidence": 0.8
+        },
+        "columns": [
+          {
+            "name": "payment_id",
+            "data_type": "smallint",
+            "nullable": false,
+            "is_primary_key": true,
+            "is_auto_increment": true
+          },
+          {
+            "name": "rental_id",
+            "data_type": "int",
+            "nullable": true,
+            "is_primary_key": false,
+            "is_auto_increment": false
+          },
+          {
+            "name": "amount",
+            "data_type": "decimal",
+            "nullable": false,
+            "is_primary_key": false,
+            "is_auto_increment": false
+          },
+          {
+            "name": "customer_id",
+            "data_type": "smallint",
+            "nullable": false,
+            "is_primary_key": false,
+            "is_auto_increment": false
+          },
+          {
+            "name": "staff_id",
+            "data_type": "tinyint",
+            "nullable": false,
+            "is_primary_key": false,
+            "is_auto_increment": false
+          },
+          {
+            "name": "payment_date",
+            "data_type": "datetime",
+            "nullable": false,
+            "is_primary_key": false,
+            "is_auto_increment": false
+          },
+          {
+            "name": "last_update",
+            "data_type": "timestamp",
+            "nullable": true,
+            "is_primary_key": false,
+            "is_auto_increment": false
+          }
+        ],
+        "primary_key": [
+          "payment_id"
+        ],
+        "indexes": [
+          {
+            "name": "fk_payment_rental",
+            "columns": [
+              "rental_id"
+            ],
+            "is_unique": false,
+            "is_primary": false
+          },
+          {
+            "name": "idx_fk_customer_id",
+            "columns": [
+              "customer_id"
+            ],
+            "is_unique": false,
+            "is_primary": false
+          },
+          {
+            "name": "idx_fk_staff_id",
+            "columns": [
+              "staff_id"
+            ],
+            "is_unique": false,
+            "is_primary": false
+          },
+          {
+            "name": "PRIMARY",
+            "columns": [
+              "payment_id"
+            ],
+            "is_unique": true,
+            "is_primary": true
+          }
+        ],
+        "size_bytes": 2228224,
+        "last_analyzed": "2026-07-13T14:50:00.055374662Z"
+      },
+      "destination": {
+        "connection": "dst",
+        "table": "payments",
+        "fqn": "payments",
+        "driver": "postgres",
+        "exists": false,
+        "mode": "append",
+        "columns": [],
+        "data_impact": {
+          "action": "create",
+          "description": "Table will be created with new data",
+          "is_destructive": false
+        }
+      },
+      "filters": [],
+      "joins": [],
+      "mappings": [
+        {
+          "target": "id",
+          "source": {
+            "type": "column",
+            "table": "payment",
+            "column": "payment_id"
+          },
+          "mapping_type": "direct",
+          "source_type": "Int { bits: I16, unsigned: false, auto_increment: true }",
+          "target_type": "Int { bits: I16, unsigned: false, auto_increment: true }",
+          "nullable": false
+        },
+        {
+          "target": "customer_id",
+          "source": {
+            "type": "column",
+            "table": "payment",
+            "column": "customer_id"
+          },
+          "mapping_type": "direct",
+          "source_type": "Int { bits: I16, unsigned: false, auto_increment: false }",
+          "target_type": "Int { bits: I16, unsigned: false, auto_increment: false }",
+          "nullable": false
+        },
+        {
+          "target": "amount",
+          "source": {
+            "type": "column",
+            "table": "payment",
+            "column": "amount"
+          },
+          "mapping_type": "direct",
+          "source_type": "Decimal { precision: Some(5), scale: Some(2) }",
+          "target_type": "Decimal { precision: Some(5), scale: Some(2) }",
+          "nullable": false
+        },
+        {
+          "target": "paid_at",
+          "source": {
+            "type": "column",
+            "table": "payment",
+            "column": "payment_date"
+          },
+          "mapping_type": "direct",
+          "source_type": "Timestamp { precision: None, with_tz: false }",
+          "target_type": "Timestamp { precision: None, with_tz: false }",
+          "nullable": false
+        }
+      ],
+      "validations": [],
+      "error_handling": {
+        "retry": {
+          "max_attempts": 5,
+          "backoff": {
+            "type": "exponential",
+            "initial_delay": "250ms",
+            "max_delay": "5s"
+          }
+        },
+        "after_max_retries": "fail"
+      },
+      "pagination": {
+        "strategy": "pk",
+        "cursor_column": {
+          "table": "payment",
+          "column": "payment_id"
+        },
+        "column_indexed": true
+      },
+      "hooks": {
+        "before": [],
+        "after": [],
+        "before_count": 0,
+        "after_count": 0
+      },
+      "settings": {
+        "batch_size": 1000,
+        "copy_columns": "MapOnly",
+        "create_missing_tables": true,
+        "dry_run": true,
+        "workers": 1,
+        "checkpoint": "every_batch"
+      },
+      "data_flow_summary": {
+        "direct_columns": 4,
+        "renamed_columns": 0,
+        "computed_columns": 0,
+        "conditional_columns": 0,
+        "lookup_columns": 0,
+        "generated_columns": 0,
+        "excluded_columns": [
+          "rental_id",
+          "staff_id",
+          "last_update"
+        ],
+        "new_columns": [
+          "id",
+          "paid_at"
+        ],
+        "type_conversions": 0,
+        "unsafe_conversions": 0,
+        "join_count": 0,
+        "cross_connection_joins": 0,
+        "assert_count": 0,
+        "warn_count": 0
+      },
+      "schema_changes": [
+        {
+          "change_type": "create_table",
+          "entity": "payments",
+          "description": "Create new table 'payments'",
+          "ddl": "CREATE TABLE \"payments\" (\n\t\"id\" smallserial PRIMARY KEY NOT NULL,\n\t\"customer_id\" smallint NOT NULL,\n\t\"amount\" numeric(5,2) NOT NULL,\n\t\"paid_at\" timestamp NOT NULL\n);",
+          "is_breaking": false,
+          "is_reversible": true
+        }
+      ],
+      "diagnostics": [
+        {
+          "level": "info",
+          "code": "TABLE_WILL_BE_CREATED",
+          "message": "Destination table 'payments' will be created",
+          "pipeline": "migrate_payment"
+        }
+      ],
+      "estimations": {
+        "duration": {
+          "min_seconds": 2,
+          "likely_seconds": 3,
+          "max_seconds": 4,
+          "formatted": "3s"
+        },
+        "rows_per_second": 9000,
+        "batches": 17,
+        "memory_mb": 32
+      },
+      "sample": {
+        "enabled": false,
+        "sample_size": 0,
+        "sampling_method": "first",
+        "rows": [],
+        "stats": {
+          "ok": 0,
+          "warnings": 0,
+          "skipped": 0,
+          "errors": 0
+        }
+      }
+    }
+  ],
+  "execution_order": [
+    {
+      "stage": 0,
+      "pipelines": [
+        "migrate_customer"
+      ],
+      "estimated_duration": {
+        "min_seconds": 1,
+        "likely_seconds": 2,
+        "max_seconds": 3,
+        "formatted": "2s"
+      }
+    },
+    {
+      "stage": 1,
+      "pipelines": [
+        "migrate_payment"
+      ],
+      "estimated_duration": {
+        "min_seconds": 2,
+        "likely_seconds": 3,
+        "max_seconds": 4,
+        "formatted": "3s"
+      }
+    }
+  ],
+  "summary": {
+    "total_pipelines": 2,
+    "total_connections": 2,
+    "total_source_rows": {
+      "value": 17099,
+      "is_estimated": true,
+      "confidence": 0.8
+    },
+    "total_target_rows": {
+      "value": 0,
+      "is_estimated": true
+    },
+    "total_schema_changes": 2,
+    "status": "ready",
+    "error_count": 0,
+    "warning_count": 0
+  },
+  "diagnostics": [],
+  "estimations": {
+    "duration": {
+      "min_seconds": 3,
+      "likely_seconds": 5,
+      "max_seconds": 7,
+      "formatted": "5s"
+    },
+    "peak_memory_mb": 32,
+    "network_transfer_mb": 13.388,
+    "disk_usage_mb": 20,
+    "total_batches": 19
+  },
+  "is_executable": true
+}

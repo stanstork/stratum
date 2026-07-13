@@ -1,3 +1,4 @@
+pub mod cascade;
 pub mod data_flow_summary;
 pub mod destination;
 pub mod plan;
