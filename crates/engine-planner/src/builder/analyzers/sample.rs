@@ -16,8 +16,19 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use connectors::sql::{query::generator::QueryGenerator, request::FetchRowsRequestBuilder};
-use engine_processing::io::driver::SchemaDriver;
+use connectors::sql::{
+    query::generator::QueryGenerator,
+    request::{FetchRowsRequest, FetchRowsRequestBuilder},
+};
+use engine_processing::io::{
+    driver::SchemaDriver,
+    filter::{
+        compiler::{FilterCompiler, sql::SqlFilterCompiler},
+        utils::combine_filters,
+    },
+    format::DataFormat,
+    linked::LinkedSource,
+};
 use engine_processing::{
     EnvContext,
     producer::build_transform_pipeline,
@@ -90,7 +101,7 @@ impl<S: SchemaDriver> SampleCollector<S> {
     ) -> Result<SampleDataPreview, SampleCollectorError> {
         let start = Instant::now();
 
-        let (mut source_rows, query) = self.fetch_sample(pipeline, masking, ctx).await?;
+        let (mut source_rows, query) = self.fetch_sample(pipeline, mapping, masking, ctx).await?;
         if source_rows.is_empty() {
             return Ok(self.empty_preview(start, query));
         }
@@ -347,13 +358,64 @@ impl<S: SchemaDriver> SampleCollector<S> {
         }
     }
 
-    async fn fetch_sample<D: SchemaDriver>(
+    /// Build the `SELECT` request the sample runs: the source table's columns
+    /// (plus any `with { }` join columns so computed fields can resolve), the
+    /// `where` filter, and the sampling method (first / random / by-id).
+    async fn build_sample_request(
         &self,
         pipeline: &Pipeline,
-        masking: &MaskingPolicy,
-        ctx: &AnalysisContext<S, D>,
-    ) -> Result<(Vec<Record>, Option<SampleQuery>), SampleCollectorError> {
-        let mut request = FetchRowsRequestBuilder::new(pipeline.source.table.clone())
+        mapping: &TransformationMetadata,
+    ) -> Result<FetchRowsRequest, SampleCollectorError> {
+        let table = || pipeline.source.table.clone();
+        let query_err = |e: String| SampleCollectorError::QueryExecutionFailed {
+            table: table(),
+            error: e,
+        };
+
+        let source_meta = self
+            .src_driver
+            .table_metadata(&pipeline.source.table)
+            .await
+            .map_err(|e| query_err(e.to_string()))?;
+        let mut columns = source_meta.select_fields();
+
+        let mut joins = Vec::new();
+        if !pipeline.source.joins.is_empty() {
+            let format =
+                DataFormat::parse(&pipeline.source.connection.driver).ok_or_else(|| {
+                    query_err(format!(
+                        "unsupported source driver '{}'",
+                        pipeline.source.connection.driver
+                    ))
+                })?;
+            if let Some(LinkedSource::Table(join_source)) = LinkedSource::new(
+                self.src_driver.clone(),
+                &format,
+                &pipeline.source.joins,
+                mapping,
+            )
+            .await
+            .map_err(|e| query_err(e.to_string()))?
+            {
+                columns.extend(join_source.fields());
+                joins = join_source.clauses.clone();
+            }
+        }
+
+        let filter_clause = match combine_filters(&pipeline.source.filters) {
+            Some(cond) => Some(
+                SqlFilterCompiler::compile(&cond)
+                    .map_err(|e| query_err(e.to_string()))?
+                    .for_table(&pipeline.source.table, &joins),
+            ),
+            None => None,
+        };
+
+        let mut request = FetchRowsRequestBuilder::new(table())
+            .alias(table())
+            .columns(columns)
+            .joins(joins)
+            .filter(filter_clause)
             .limit(self.config.size)
             .build();
 
@@ -376,6 +438,17 @@ impl<S: SchemaDriver> SampleCollector<S> {
             SamplingMethod::First => {}
         }
 
+        Ok(request)
+    }
+
+    async fn fetch_sample<D: SchemaDriver>(
+        &self,
+        pipeline: &Pipeline,
+        mapping: &TransformationMetadata,
+        masking: &MaskingPolicy,
+        ctx: &AnalysisContext<S, D>,
+    ) -> Result<(Vec<Record>, Option<SampleQuery>), SampleCollectorError> {
+        let request = self.build_sample_request(pipeline, mapping).await?;
         let dialect = ctx.source_dialect.as_query_dialect();
         let generator = QueryGenerator::new(dialect.as_ref());
         let (sql, params) = generator.select(&request);

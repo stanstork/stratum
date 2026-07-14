@@ -52,7 +52,8 @@ SMQL -> ExecutionPlan -> DAG Executor
 
 | Document | Description |
 |----------|-------------|
+| [plan.md](plan.md) | Reading `stratum plan` - the summary layout, flags, sampling, and the magnitude bar |
 | [architecture.md](architecture.md) | Full crate map, layer breakdown, design decisions |
 | [smql-reference.md](smql-reference.md) | SMQL v2.1 language reference with examples |
-| [verification.md](verification.md) | Cryptographic verification — Merkle trees, proof storage, verify command |
-| [plugins/](plugins/README.md) | WASM plugins — roles, runtimes (native Rust / JS-QuickJS), authoring, CLI |
+| [verification.md](verification.md) | Cryptographic verification - Merkle trees, proof storage, verify command |
+| [plugins/](plugins/README.md) | WASM plugins - roles, runtimes (native Rust / JS-QuickJS), authoring, CLI |

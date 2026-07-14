@@ -3,7 +3,8 @@ use crate::{
     commands::{Commands, SampleMethod},
     config,
     error::CliError,
-    output,
+    plan_summary,
+    spinner::Spinner,
 };
 use engine_core::context::env::EnvContext;
 use engine_planner::{
@@ -12,7 +13,7 @@ use engine_planner::{
 };
 use engine_runtime::dag::builder::DagBuilder;
 use model::core::value::Value;
-use std::{path::Path, sync::Arc};
+use std::{io::IsTerminal, path::Path, sync::Arc};
 use tracing::info;
 
 /// Executes the plan command (dry-run migration planning)
@@ -20,6 +21,8 @@ pub async fn execute(cli: &Cli, commands: &Commands, env: Arc<EnvContext>) -> Re
     if let Commands::Plan {
         config,
         output: output_path,
+        json,
+        ddl,
         sample,
         sample_size,
         sample_method,
@@ -47,18 +50,38 @@ pub async fn execute(cli: &Cli, commands: &Commands, env: Arc<EnvContext>) -> Re
             *exact_where,
         );
 
-        // Build detailed report
+        let show_spinner = std::io::stderr().is_terminal()
+            && !cli.quiet
+            && !*json
+            && cli.verbose == 0
+            && cli.log_level.is_none();
+        let spinner =
+            show_spinner.then(|| Spinner::start("Analyzing migration plan…", !cli.no_color));
+
         let report_builder = ReportBuilder::new(plan_config);
         let report = report_builder
             .build(&core_plan, &dag, Path::new(&config_path))
-            .await?;
+            .await;
 
-        // Output results
+        drop(spinner);
+        let report = report?;
+
+        // Render either the human summary (default) or the full JSON document
+        // (`--json`, for CI). Color only when writing to a real terminal.
+        let to_file = output_path.is_some();
+        let rendered = if *json {
+            // The full machine-readable report (for CI / tooling).
+            serde_json::to_string_pretty(&report)?
+        } else {
+            let color = !to_file && !cli.no_color && std::io::stdout().is_terminal();
+            plan_summary::render(&report, color, *ddl)
+        };
+
         match output_path {
-            Some(path) => output::write_report(report, path.to_string()).await?,
+            Some(path) => tokio::fs::write(path, rendered).await?,
             None => {
                 if !cli.quiet {
-                    output::print_report(report).await?;
+                    print!("{rendered}");
                 }
             }
         }

@@ -68,3 +68,41 @@ pipeline "migrate_customer" {
         copy_columns          = "MAP_ONLY"
     }
 }
+
+// A second pipeline, ordered after the first. Payments reference customers, so
+// `after = ["migrate_customer"]` makes this run once the users table is ready -
+// which puts it on a second execution stage (visible in `stratum plan`).
+pipeline "migrate_payment" {
+    from { connection = connection.src  table = "payment" }
+    to   { connection = connection.dst  table = "payments" }
+
+    after = ["migrate_customer"]
+
+    select {
+        // Rename: payment_id -> id
+        id          = payment.payment_id
+
+        // Keep the customer reference so payments join back to users
+        customer_id = payment.customer_id
+
+        // Keep the money as-is
+        amount      = payment.amount
+
+        // Rename: payment_date -> paid_at
+        paid_at     = payment.payment_date
+
+        // Note: staff_id, rental_id, last_update intentionally dropped -
+        // internal FK / audit fields not needed in the destination.
+    }
+
+    paginate {
+        strategy = "pk"
+        cursor   = "payment.payment_id"
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 1000
+        copy_columns          = "MAP_ONLY"
+    }
+}

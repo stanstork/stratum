@@ -187,11 +187,17 @@ docker compose down -v
 ## Usage
 
 ```bash
-# Analyze migration plan (dry run, no changes)
+# Analyze migration plan (dry run, no changes) - prints a human summary
 stratum plan -c migration.smql
 
-# Plan with sample data preview
+# Full machine-readable report (for CI / tooling)
+stratum plan -c migration.smql --json
+
+# Preview transformed sample rows in the summary
 stratum plan -c migration.smql --sample --sample-size 10
+
+# Print the exact CREATE / ALTER DDL the migration would run
+stratum plan -c migration.smql --ddl
 
 # Execute migration
 stratum apply -c migration.smql
@@ -226,6 +232,17 @@ stratum reset  -c migration.smql   # clear all state for a migration
 # Plugin tooling (compile / inspect / validate / test WASM & JS plugins)
 stratum plugin --help
 ```
+
+> **`plan` summary vs `--json`.** The default `plan` output is a compact human
+> summary. `--json` emits the **complete** report it's built from - every column
+> with its type and indexes, the full row-count objects (`value` / `is_estimated`
+> / `confidence`), all mappings and joins, per-pipeline diagnostics *including* the
+> routine `info` notes the summary collapses, execution stages, and full resource
+> estimations - plus run metadata (`plan_id`, `config_hash`, resolved `defines`).
+> Use the summary to read, `--json` to gate CI or feed tooling. `stdout` carries
+> only the report, so `stratum plan --json > plan.json` is always valid JSON. See
+> [docs/plan.md](docs/plan.md#the---json-report) for the shape, and
+> [docs/schema-plan.json](docs/schema-plan.json) for a complete example report.
 
 **Global flags:**
 
@@ -387,6 +404,7 @@ Stratum stores pipeline state in `~/.stratum/state/` (sled embedded KV). If a mi
 
 | Document | Description |
 |----------|-------------|
+| [docs/plan.md](docs/plan.md) | Reading `stratum plan` - the summary, flags, sampling, and the magnitude bar |
 | [docs/smql-reference.md](docs/smql-reference.md) | Full SMQL v2.1 language reference |
 | [docs/architecture.md](docs/architecture.md) | Crate map, design decisions, data flow |
 | [docs/plugins/](docs/plugins/README.md) | WASM plugins - roles, native Rust & JS (QuickJS) runtimes, authoring, CLI |

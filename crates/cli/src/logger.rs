@@ -14,7 +14,7 @@ pub fn init(cli: &Cli, is_tui_mode: bool, is_pretty_mode: bool) {
     } else if cli.log_file.is_some() {
         init_dual_logger(cli, env_filter);
     } else {
-        init_stdout_logger(cli, env_filter);
+        init_stderr_logger(cli, env_filter);
     }
 }
 
@@ -40,6 +40,7 @@ fn determine_log_level(cli: &Cli) -> Level {
     }
 
     match cli.verbose {
+        0 if cli.is_plan_mode() => Level::ERROR,
         0 => Level::INFO,
         1 => Level::DEBUG,
         _ => Level::TRACE,
@@ -141,26 +142,27 @@ fn init_dual_logger(cli: &Cli, env_filter: EnvFilter) {
         .with_writer(std::sync::Arc::new(file))
         .with_ansi(false); // No colors in file
 
-    let stdout_layer = fmt::layer()
-        .with_writer(std::io::stdout)
+    let stderr_layer = fmt::layer()
+        .with_writer(std::io::stderr)
         .with_ansi(!cli.no_color);
 
     tracing_subscriber::registry()
         .with(env_filter)
         .with(file_layer)
-        .with(stdout_layer)
+        .with(stderr_layer)
         .init();
 }
 
-/// Initializes stdout-only logging
-fn init_stdout_logger(cli: &Cli, env_filter: EnvFilter) {
-    let stdout_layer = fmt::layer()
-        .with_writer(std::io::stdout)
+/// Initializes stderr-only logging. Logs go to stderr so stdout is reserved for
+/// program output (the `plan` summary, `--json`, etc.).
+fn init_stderr_logger(cli: &Cli, env_filter: EnvFilter) {
+    let stderr_layer = fmt::layer()
+        .with_writer(std::io::stderr)
         .with_ansi(!cli.no_color);
 
     tracing_subscriber::registry()
         .with(env_filter)
-        .with(stdout_layer)
+        .with(stderr_layer)
         .init();
 }
 

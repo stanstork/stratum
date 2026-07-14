@@ -83,10 +83,10 @@ impl DataFlowAnalyzer {
         let source_column_names: HashSet<_> =
             source.columns.iter().map(|c| c.name.clone()).collect();
 
-        // Dropped columns: only when copy_columns is MapOnly
-        summary.dropped_columns = match settings.copy_columns {
+        // Excluded columns: only when copy_columns is MapOnly
+        summary.excluded_columns = match settings.copy_columns {
             CopyColumns::MapOnly => {
-                // Only mapped columns are copied, others are dropped
+                // Only mapped columns are copied, the rest are excluded
                 source
                     .columns
                     .iter()

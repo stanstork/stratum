@@ -5,8 +5,8 @@ use crate::plan::{
     hooks::plan::HooksPlan,
     pagination::plan::PaginationPlan,
     pipeline::{
-        data_flow_summary::DataFlowSummary, destination::DestinationPlan,
-        settings::PipelineSettings, source::SourcePlan,
+        cascade::CascadeTablePlan, data_flow_summary::DataFlowSummary,
+        destination::DestinationPlan, settings::PipelineSettings, source::SourcePlan,
     },
     sample::preview::SampleDataPreview,
     schema::change::SchemaChange,
@@ -60,4 +60,10 @@ pub struct PipelinePlan {
     // ─── Sample Data (optional) ────
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sample: Option<SampleDataPreview>,
+
+    // ─── Cascade (graph pipelines only) ────
+    /// Per-table breakdown for a graph/cascade pipeline (`with references`).
+    /// Empty for ordinary single-table pipelines.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub cascade_tables: Vec<CascadeTablePlan>,
 }

@@ -2,6 +2,7 @@ pub use engine_core::schema::metadata_cache::{CacheStats, MetadataCache};
 
 use connectors::drivers::{mysql::driver::MySqlDriver, postgres::driver::PgDriver};
 use engine_core::{drivers::DriverRef, schema::type_registry::Dialect};
+use model::execution::row_count::RowCount;
 use std::sync::Arc;
 
 /// Unified handle for metadata cache (mirrors DriverRef variants).
@@ -24,6 +25,14 @@ impl MetadataCacheRef {
                 dialect,
                 timeout,
             ))),
+        }
+    }
+
+    /// Total (unfiltered) row count for `table`, dispatched over the driver variant.
+    pub async fn count_rows(&self, table: &str) -> RowCount {
+        match self {
+            MetadataCacheRef::Postgres(c) => c.count_rows(table, None).await,
+            MetadataCacheRef::MySql(c) => c.count_rows(table, None).await,
         }
     }
 }
