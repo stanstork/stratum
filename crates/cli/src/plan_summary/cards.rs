@@ -284,7 +284,7 @@ fn conversion_branches(mappings: &[ColumnMapping], s: &Sty) -> Vec<Branch> {
         }
     }
     let mut ordered: Vec<_> = groups.into_iter().collect();
-    ordered.sort_by_key(|((_, _, safe), _)| !*safe);
+    ordered.sort_by_key(|entry| !entry.0.2);
 
     ordered
         .into_iter()
