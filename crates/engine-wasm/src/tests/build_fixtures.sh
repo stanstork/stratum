@@ -17,8 +17,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 FIXTURES_DIR="$SCRIPT_DIR/fixtures"
 RUST_PLUGINS_DIR="$SCRIPT_DIR/plugins/rust"
 JS_PLUGINS_DIR="$SCRIPT_DIR/plugins/js"
-JS_SDK_DIR="$REPO_ROOT/crates/sdk/stratum-plugin-sdk-js"
-RUNTIME_WASM="$FIXTURES_DIR/stratum-plugin-js-runtime.wasm"
+RUNTIME_WASM="$REPO_ROOT/crates/sdk/stratum-plugin-compiler/assets/stratum-plugin-js-runtime.wasm"
 
 TARGET="${1:-all}"
 
@@ -52,14 +51,10 @@ build_js() {
     mkdir -p "$(dirname "$RUNTIME_WASM")"
     cp "$JS_RUNTIME_DIR/target/wasm32-wasip1/release/stratum_plugin_js_runtime.wasm" "$RUNTIME_WASM"
 
-    # 2. Make `@stratum/plugin-sdk` resolvable by esbuild. esbuild walks up from
-    #    the plugin file looking for node_modules, so symlink the SDK package in
-    #    next to the plugins.
-    mkdir -p "$JS_PLUGINS_DIR/node_modules/@stratum"
-    ln -sfn "$JS_SDK_DIR" "$JS_PLUGINS_DIR/node_modules/@stratum/plugin-sdk"
-
-    # 3. A thin wrapper so the compiler can invoke esbuild via npx (single
-    #    binary path; npx --yes fetches esbuild on first use).
+    # 2. A thin wrapper so the compiler can invoke esbuild via npx (single
+    #    binary path; npx --yes fetches esbuild on first use). The compiler
+    #    supplies `@stratum/plugin-sdk` to esbuild itself (embedded + aliased),
+    #    so no node_modules setup is needed here.
     ESBUILD_WRAPPER="$SCRIPT_DIR/.esbuild-npx.sh"
     cat > "$ESBUILD_WRAPPER" <<'EOF'
 #!/usr/bin/env bash
@@ -67,7 +62,7 @@ exec npx --yes esbuild "$@"
 EOF
     chmod +x "$ESBUILD_WRAPPER"
 
-    # 4. Compile each plugin into its own patched runtime copy. Fixtures are
+    # 3. Compile each plugin into its own patched runtime copy. Fixtures are
     #    suffixed _js so they sit beside the Rust fixtures without colliding.
     for js in "$JS_PLUGINS_DIR"/test_*.js; do
         name=$(basename "$js" .js)

@@ -6,6 +6,36 @@ use std::process::Command;
 
 mod error;
 
+/// The JS plugin runtime WASM, embedded at build time. This is the runtime the
+/// compiler patches each bundle into; shipping it inside the crate means any
+/// consumer can compile `.js` plugins with no external file, env var, or CWD
+/// blob. Regenerate with `engine-wasm/src/tests/build_fixtures.sh js`.
+static DEFAULT_RUNTIME_WASM: &[u8] = include_bytes!("../assets/stratum-plugin-js-runtime.wasm");
+
+/// The `@stratum/plugin-sdk` JavaScript source, embedded so
+/// `require("@stratum/plugin-sdk")` resolves with no `node_modules` on disk.
+/// Materialized to a temp dir and aliased into esbuild at bundle time, so a
+/// plugin compiles from any working directory. Keep this list in sync with the
+/// SDK crate's `src/`.
+const SDK_FILES: &[(&str, &str)] = &[
+    (
+        "index.js",
+        include_str!("../../stratum-plugin-sdk-js/src/index.js"),
+    ),
+    (
+        "registry.js",
+        include_str!("../../stratum-plugin-sdk-js/src/registry.js"),
+    ),
+    (
+        "http.js",
+        include_str!("../../stratum-plugin-sdk-js/src/http.js"),
+    ),
+    (
+        "log.js",
+        include_str!("../../stratum-plugin-sdk-js/src/log.js"),
+    ),
+];
+
 /// Size of the `USER_JS` placeholder baked into the runtime WASM.
 /// Must match `stratum-plugin-js-runtime/src/metadata.rs`.
 const USER_JS_CAP: usize = 4 * 1024 * 1024;
@@ -25,10 +55,12 @@ pub struct CompileOpts {
     pub source_map: bool,
     /// Override the esbuild binary instead of using the one on `PATH`.
     pub esbuild_path: Option<PathBuf>,
-    /// Override the runtime WASM blob to patch. Defaults to
-    /// `$STRATUM_JS_RUNTIME` or `stratum-plugin-js-runtime.wasm` in the CWD.
+    /// Override the runtime WASM blob to patch. When unset, falls back to
+    /// `$STRATUM_JS_RUNTIME`, then `runtime_wasm_bytes`, then the runtime
+    /// embedded in this crate.
     pub runtime_wasm: Option<PathBuf>,
     /// Runtime WASM bytes to patch when no path override / env var is set.
+    /// When empty or `None`, the crate's embedded runtime is used.
     pub runtime_wasm_bytes: Option<Cow<'static, [u8]>>,
 }
 
@@ -216,6 +248,28 @@ fn command_for(program: &Path) -> Command {
     Command::new(program)
 }
 
+/// Write the embedded SDK to a content-addressed temp dir (once) and return the
+/// path to its `index.js`, for use as an esbuild `--alias` target.
+fn materialize_sdk() -> Result<PathBuf, CompileError> {
+    let mut hasher = blake3::Hasher::new();
+    for (name, body) in SDK_FILES {
+        hasher.update(name.as_bytes());
+        hasher.update(body.as_bytes());
+    }
+    let key = hasher.finalize().to_hex();
+    let dir = std::env::temp_dir().join(format!("stratum-plugin-sdk-{}", &key.as_str()[..16]));
+    let index = dir.join("index.js");
+    if !index.is_file() {
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| CompileError::Io(format!("creating SDK dir {}: {e}", dir.display())))?;
+        for (name, body) in SDK_FILES {
+            std::fs::write(dir.join(name), body)
+                .map_err(|e| CompileError::Io(format!("writing SDK file {name}: {e}")))?;
+        }
+    }
+    Ok(index)
+}
+
 /// Bundle the user's JS together with `@stratum/plugin-sdk` into a single
 /// self-contained IIFE script, exposing the SDK's metadata/dispatch hooks on
 /// `globalThis`. Shells out to esbuild (subprocess for v1).
@@ -232,6 +286,11 @@ fn bundle_with_esbuild(input: &Path, opts: &CompileOpts) -> Result<String, Compi
         }
     };
 
+    // Resolve `@stratum/plugin-sdk` to the embedded copy regardless of the
+    // plugin's location, so no `node_modules` is required and the SDK always
+    // matches this binary's runtime ABI.
+    let sdk_index = materialize_sdk()?;
+
     cmd.arg(input)
         .arg("--bundle")
         .arg("--format=iife")
@@ -239,7 +298,11 @@ fn bundle_with_esbuild(input: &Path, opts: &CompileOpts) -> Result<String, Compi
         // `neutral` ignores package.json `main`/`module` unless we name the
         // resolution fields explicitly, so the SDK's `"main"` would not resolve.
         .arg("--main-fields=module,main")
-        .arg("--target=es2020");
+        .arg("--target=es2020")
+        .arg(format!(
+            "--alias:@stratum/plugin-sdk={}",
+            sdk_index.display()
+        ));
     if opts.minify {
         cmd.arg("--minify");
     }
@@ -419,7 +482,11 @@ fn validate_exports(wasm: &[u8], role: &str) -> Result<(), CompileError> {
     Ok(())
 }
 
-/// Locate the pre-built runtime WASM.
+/// Locate the runtime WASM to patch. Resolution order: an explicit
+/// `runtime_wasm` path, then `$STRATUM_JS_RUNTIME`, then a caller-supplied
+/// `runtime_wasm_bytes` override, and finally the runtime embedded in this crate
+/// ([`DEFAULT_RUNTIME_WASM`]). The last step means a plain compile always works
+/// with no external file or env var.
 fn load_runtime_wasm(opts: &CompileOpts) -> Result<Vec<u8>, CompileError> {
     // Explicit path override, then env var.
     if let Some(path) = opts
@@ -435,20 +502,12 @@ fn load_runtime_wasm(opts: &CompileOpts) -> Result<Vec<u8>, CompileError> {
         });
     }
 
-    // Host-embedded runtime (e.g. CLI baked it in with `include_bytes!`).
+    // Host-supplied runtime override (non-empty), else the embedded default.
     if let Some(bytes) = &opts.runtime_wasm_bytes
         && !bytes.is_empty()
     {
         return Ok(bytes.to_vec());
     }
 
-    // Last resort: a copy sitting in the current directory.
-    let cwd = PathBuf::from("stratum-plugin-js-runtime.wasm");
-    std::fs::read(&cwd).map_err(|e| {
-        CompileError::Io(format!(
-            "could not read runtime WASM at {}: {e}. \
-             Build it with `build_fixtures.sh js` (--runtime-wasm) or set STRATUM_JS_RUNTIME.",
-            cwd.display()
-        ))
-    })
+    Ok(DEFAULT_RUNTIME_WASM.to_vec())
 }

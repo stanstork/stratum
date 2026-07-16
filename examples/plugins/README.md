@@ -10,16 +10,12 @@ examples/plugins/
 
 ## Setup
 
-The JS plugins `require("@stratum/plugin-sdk")`. esbuild resolves it from a
-`node_modules` symlink - create it once:
+esbuild (or `npx esbuild`) must be on `PATH` - that's the only requirement. The
+`@stratum/plugin-sdk` package the plugins `require(...)` is bundled into the CLI
+and supplied to esbuild automatically, so these compile with no `npm install`.
 
-```bash
-mkdir -p examples/plugins/js/node_modules/@stratum
-ln -sfn ../../../../../crates/sdk/stratum-plugin-sdk-js \
-        examples/plugins/js/node_modules/@stratum/plugin-sdk
-```
-
-esbuild (or `npx esbuild`) must be on `PATH`.
+(A `node_modules/@stratum/plugin-sdk` symlink is committed next to the plugins so
+editors and `node --test` resolve the SDK too; it isn't needed to compile.)
 
 ```bash
 alias s='cargo run -p cli --'   # or ./target/debug/cli

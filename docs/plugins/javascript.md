@@ -53,11 +53,12 @@ stratum plugin compile plugins/upper.js -o plugins/upper.wasm
 
 ### Requirements
 
-JS compilation needs **esbuild** (or Node.js for `npx esbuild`) available at
-plan/apply time, and `@stratum/plugin-sdk` resolvable from the plugin's
-directory (esbuild bundles it in). Prebuilt `.wasm` plugins have neither
-requirement. See [`examples/plugins/README.md`](../../examples/plugins/README.md)
-for the `node_modules` setup used by the examples.
+JS compilation needs only **esbuild** (or Node.js for `npx esbuild`) available at
+plan/apply time. The `@stratum/plugin-sdk` package is bundled into the CLI and
+handed to esbuild automatically, so a `.js` plugin compiles from **any
+directory** - no `npm install`, no `node_modules`, no `STRATUM_JS_RUNTIME`. The
+bundled SDK always matches the runtime baked into your binary. Prebuilt `.wasm`
+plugins need neither esbuild nor Node.
 
 ## Authoring API
 
