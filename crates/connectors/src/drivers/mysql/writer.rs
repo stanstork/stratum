@@ -8,7 +8,7 @@ use crate::{
         metadata::{column::ColumnMetadata, table::TableMetadata},
         query::generator::QueryGenerator,
     },
-    traits::{encoder::CopyValueEncoder, writer::DataWriter},
+    traits::writer::DataWriter,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -111,12 +111,11 @@ impl MySqlDriver {
                 if i > 0 {
                     buff.push('\t');
                 }
-                let field = row.get(&col.name);
-                let encoded = match field.and_then(|f| f.value.clone()) {
-                    Some(value) => encoder.encode_value(&value),
-                    None => encoder.encode_null(),
-                };
-                buff.push_str(&encoded);
+                // Borrow the value and append straight into the batch buffer.
+                match row.get(&col.name).and_then(|f| f.value.as_ref()) {
+                    Some(value) => encoder.write_value(value, &mut buff),
+                    None => buff.push_str("\\N"),
+                }
             }
             buff.push('\n');
         }

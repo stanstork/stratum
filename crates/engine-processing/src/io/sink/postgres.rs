@@ -1,7 +1,7 @@
 use crate::io::{error::SinkError, sink::Sink};
 use async_trait::async_trait;
 use connectors::{
-    drivers::postgres::{driver::PgDriver, types::PgTypeConverter},
+    drivers::postgres::{config::PgConflictAction, driver::PgDriver, types::PgTypeConverter},
     error::DriverError,
     sql::{
         metadata::{column::ColumnMetadata, table::TableMetadata},
@@ -12,7 +12,7 @@ use connectors::{
     },
 };
 use engine_core::schema::type_registry::{Dialect, TypeRegistry};
-use model::{core::convert::IntoCanonical, records::Record};
+use model::{core::convert::IntoCanonical, execution::pipeline::WriteMode, records::Record};
 use query_builder::dialect::Postgres as PgDialect;
 use std::sync::Arc;
 use tracing::debug;
@@ -21,13 +21,42 @@ use uuid::Uuid;
 pub struct PostgresSink {
     driver: Arc<PgDriver>,
     type_registry: TypeRegistry,
+    on_conflict: Option<PgConflictAction>,
+    use_conflict_resolution: bool,
 }
 
 impl PostgresSink {
-    pub fn new(driver: Arc<PgDriver>, source_dialect: Dialect) -> Self {
+    pub fn new(
+        driver: Arc<PgDriver>,
+        source_dialect: Dialect,
+        write_mode: WriteMode,
+        on_conflict: Option<PgConflictAction>,
+    ) -> Self {
         Self {
             driver,
             type_registry: TypeRegistry::new(source_dialect, Dialect::Postgres),
+            on_conflict,
+            use_conflict_resolution: matches!(write_mode, WriteMode::Upsert | WriteMode::Update),
+        }
+    }
+
+    /// The conflict action to apply for `table`, or `None` to COPY directly.
+    ///
+    /// Resolving a conflict needs a key to conflict *on*, so a table without a
+    /// primary key always falls back to a direct `COPY` - the only thing
+    /// possible - rather than failing the write.
+    fn conflict_action_for(&self, table: &TableMetadata) -> Option<PgConflictAction> {
+        if table.primary_keys.is_empty() {
+            return None;
+        }
+
+        match self.on_conflict {
+            // Explicit setting wins.
+            Some(action) => Some(action),
+            // Otherwise the write mode decides: upsert modes reconcile rows.
+            None => self
+                .use_conflict_resolution
+                .then_some(PgConflictAction::DoUpdate),
         }
     }
 
@@ -80,22 +109,18 @@ impl PostgresSink {
         meta: &TableMetadata,
         staging_table: &str,
         columns: &[ColumnMetadata],
+        action: PgConflictAction,
     ) -> Result<(), SinkError> {
-        if meta.primary_keys.is_empty() {
-            return Err(SinkError::FastPathNotSupported(
-                "Table has no primary keys".to_string(),
-            ));
-        }
-
         let capabilities = self.driver.capabilities();
         let generator = QueryGenerator::new(&PgDialect);
+        let do_update = matches!(action, PgConflictAction::DoUpdate);
 
         // PostgreSQL 15+ supports MERGE, earlier versions use ON CONFLICT
         // The upsert path works for both
         let (sql, params) = if capabilities.upsert {
-            generator.upsert_from_staging(meta, staging_table, columns)
+            generator.upsert_from_staging(meta, staging_table, columns, do_update)
         } else {
-            generator.merge_from_staging(meta, staging_table, columns)
+            generator.merge_from_staging(meta, staging_table, columns, do_update)
         };
 
         debug!(sql = %sql, "merging staging table");
@@ -129,14 +154,6 @@ impl Sink for PostgresSink {
             return Ok(());
         }
 
-        if table.primary_keys.is_empty() {
-            return Err(SinkError::FastPathNotSupported(
-                "Table has no primary keys".to_string(),
-            ));
-        }
-
-        let staging_table = format!("__stratum_stage_{}", Uuid::new_v4().simple());
-
         // Exclude generated columns - they're computed by the DB and cannot be inserted directly.
         let ordered_cols: Vec<_> = self
             .ordered_columns(table)
@@ -144,43 +161,46 @@ impl Sink for PostgresSink {
             .filter(|c| !c.is_generated)
             .collect();
 
+        // No conflict resolution needed (or possible): COPY straight into the target.
+        let Some(action) = self.conflict_action_for(table) else {
+            self.driver
+                .copy_rows(&table.name, &ordered_cols, rows)
+                .await?;
+            return Ok(());
+        };
+
+        let staging_table = format!("__stratum_stage_{}", Uuid::new_v4().simple());
+
         debug!(table = %staging_table, "using staging table");
 
-        // Begin transaction
         let tx = self.driver.begin().await?;
 
-        // Create staging table
         if let Err(e) = self.create_staging_table(table, &staging_table).await {
             let _ = tx.rollback().await;
             return Err(e);
         }
 
-        // Copy rows into staging table using DataWriter
-        let copy_result = self
+        // Copy rows into the staging table, then merge into the target.
+        if let Err(err) = self
             .driver
             .copy_rows(&staging_table, &ordered_cols, rows)
-            .await;
-
-        if let Err(err) = copy_result {
+            .await
+        {
             let _ = self.drop_staging_table(&staging_table).await;
             let _ = tx.rollback().await;
             return Err(err.into());
         }
 
-        // Merge from staging into target
         let merge_result = self
-            .merge_staging(table, &staging_table, &ordered_cols)
+            .merge_staging(table, &staging_table, &ordered_cols, action)
             .await;
-
-        // Drop staging table
         let drop_result = self.drop_staging_table(&staging_table).await;
 
-        // Check results before committing
+        // Check both before committing so a failure rolls back cleanly.
         if let Err(e) = merge_result {
             let _ = tx.rollback().await;
             return Err(e);
         }
-
         if let Err(e) = drop_result {
             let _ = tx.rollback().await;
             return Err(e);

@@ -1,8 +1,8 @@
 use super::{
     create_cols::CreateMissingColumnsSetting, create_tables::CreateMissingTablesSetting,
     driver::SchemaDriver, endpoint::Endpoint, endpoint::SchemaSource, error::SettingsError,
-    infer_schema::InferSchemaSetting, traits::MigrationSetting, types::Settings,
-    validated::ValidatedSettings, validator::SettingsValidator,
+    traits::MigrationSetting, types::Settings, validated::ValidatedSettings,
+    validator::SettingsValidator,
 };
 use crate::settings::SchemaSettingContext;
 use connectors::traits::introspector::SchemaIntrospector;
@@ -31,7 +31,6 @@ where
 
     let introspector = dst_driver.clone() as Arc<dyn SchemaIntrospector>;
     let validator = SettingsValidator::new(
-        &ctx.source,
         &ctx.destination,
         introspector.as_ref(),
         is_dry_run,
@@ -81,11 +80,6 @@ where
 
     let schema_ctx = SchemaSettingContext::new(source_info, dest_info, &ctx.mapping, validated);
     let mut all_settings: Vec<Box<dyn MigrationSetting>> = Vec::new();
-
-    if validated.infer_schema() {
-        let infer_schema_setting = InferSchemaSetting::new(schema_ctx.clone()).await;
-        all_settings.push(Box::new(infer_schema_setting));
-    }
 
     if validated.create_missing_tables() {
         let missing_tables_setting = CreateMissingTablesSetting::new(schema_ctx.clone()).await;

@@ -1,4 +1,4 @@
-use super::{DestinationEndpoint, HookPhase, SourceEndpoint};
+use super::{BulkLoadGuard, DestinationEndpoint, HookPhase, SourceEndpoint};
 use crate::error::MigrationError;
 use async_trait::async_trait;
 use connectors::sql::metadata::{column::ColumnMetadata, table::TableMetadata};
@@ -69,7 +69,23 @@ impl DestinationEndpoint for DbDestinationEndpoint {
         let src_dialect = source_dialect.unwrap_or_else(|| self.0.dialect());
         let dest = dispatch_driver!(&self.0, |d| {
             d.clone()
-                .into_destination(&pipeline.destination.table, src_dialect)
+                .into_destination(&pipeline.destination, src_dialect)
+        });
+        Ok(dest)
+    }
+
+    async fn build_lane(
+        &self,
+        pipeline: &Pipeline,
+        source_dialect: Option<Dialect>,
+    ) -> Result<Destination, MigrationError> {
+        let src_dialect = source_dialect.unwrap_or_else(|| self.0.dialect());
+        let fresh = self.0.reconnect().await.map_err(|e| {
+            MigrationError::PipelineFailed(format!("opening a lane write connection failed: {e}"))
+        })?;
+        let dest = dispatch_driver!(&fresh, |d| {
+            d.clone()
+                .into_destination(&pipeline.destination, src_dialect)
         });
         Ok(dest)
     }
@@ -102,6 +118,22 @@ impl DestinationEndpoint for DbDestinationEndpoint {
             .await?
         });
         Ok(result)
+    }
+
+    async fn prepare_bulk_load(
+        &self,
+        metas: &[TableMetadata],
+    ) -> Result<BulkLoadGuard, MigrationError> {
+        let rebuild = self.0.drop_primary_keys(metas).await.map_err(|e| {
+            MigrationError::PipelineFailed(format!("drop PK for bulk load failed: {e}"))
+        })?;
+        Ok(BulkLoadGuard { rebuild })
+    }
+
+    async fn finish_bulk_load(&self, guard: BulkLoadGuard) -> Result<(), MigrationError> {
+        self.0.execute_ddl(&guard.rebuild).await.map_err(|e| {
+            MigrationError::PipelineFailed(format!("PK rebuild after bulk load failed: {e}"))
+        })
     }
 
     async fn apply_schema_ops(&self, ops: &[SchemaOp], phase: &str) -> Result<(), MigrationError> {

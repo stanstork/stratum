@@ -657,9 +657,7 @@ settings {
 | `batch_size` | integer | `1000` | Rows per batch |
 | `create_missing_tables` | bool | `false` | Create the destination table if it doesn't exist |
 | `create_missing_columns` | bool | `false` | Add missing columns to an existing destination table |
-| `infer_schema` | bool | `false` | Infer the destination schema from the source |
 | `ignore_constraints` | bool | `false` | Skip creating foreign keys / constraints on the destination |
-| `cascade_schema` | bool | `false` | Also create schema for graph-referenced (cascaded) tables |
 | `copy_columns` | enum | `"all"` | `"all"` copies every source column; `"map_only"` copies only mapped/`select`ed columns |
 
 ---

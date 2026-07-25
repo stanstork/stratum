@@ -58,7 +58,7 @@ use engine_core::{
         type_registry::{Dialect, TypeRegistry},
     },
 };
-use engine_processing::io::{destination::Destination, source::Source};
+use engine_processing::io::destination::Destination;
 use engine_runtime::dag::Dag;
 use engine_wasm::registry::{PluginRegistry, load_registry};
 use model::execution::flags::IntegrityMode;
@@ -604,13 +604,11 @@ impl ReportBuilder {
     pub(crate) async fn validate_settings(
         &self,
         pipeline: &Pipeline,
-        source: &Source,
         dest: &Destination,
         introspector: &dyn SchemaIntrospector,
     ) -> ReportBuilderResult<ValidatedSettings> {
         let settings = Settings::from_map(&pipeline.settings);
-        let validator =
-            SettingsValidator::new(source, dest, introspector, true, IntegrityMode::Off);
+        let validator = SettingsValidator::new(dest, introspector, true, IntegrityMode::Off);
         validator.validate(&settings).await.map_err(|e| {
             ReportBuilderError::Config(format!("Validation failed for {}: {}", pipeline.name, e))
         })

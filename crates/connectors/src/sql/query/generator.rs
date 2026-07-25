@@ -111,6 +111,19 @@ impl<'a> QueryGenerator<'a> {
         self.render_ast(select_ast)
     }
 
+    /// `SELECT MIN(col) AS lo, MAX(col) AS hi FROM table` - the range probe used
+    /// to split an integer key into parallel scan lanes.
+    pub fn select_key_range(&self, table: &str, column: &str) -> (String, Vec<Value>) {
+        let lo = Expr::FunctionCall(FunctionCall::min(Expr::column(column))).alias("lo");
+        let hi = Expr::FunctionCall(FunctionCall::max(Expr::column(column))).alias("hi");
+        let select_ast = SelectBuilder::new()
+            .select(vec![lo, hi])
+            .from(table_ref!(table), None)
+            .build();
+
+        self.render_ast(select_ast)
+    }
+
     pub fn insert_batch<T>(
         &self,
         meta: &TableMetadata,
@@ -167,7 +180,21 @@ impl<'a> QueryGenerator<'a> {
         self.render_ast(builder.build())
     }
 
-    pub fn copy_from_stdin(&self, table: &str, columns: &[ColumnMetadata]) -> String {
+    pub fn copy_from_stdin_text(&self, table: &str, columns: &[ColumnMetadata]) -> String {
+        self.copy_from_stdin_with(table, columns, "csv, NULL '\\N'")
+    }
+
+    /// `COPY ... FROM STDIN WITH (FORMAT binary)` for the binary COPY fast path.
+    pub fn copy_from_stdin_binary(&self, table: &str, columns: &[ColumnMetadata]) -> String {
+        self.copy_from_stdin_with(table, columns, "binary")
+    }
+
+    fn copy_from_stdin_with(
+        &self,
+        table: &str,
+        columns: &[ColumnMetadata],
+        format: &str,
+    ) -> String {
         let column_names = columns
             .iter()
             .filter(|col| !col.is_generated)
@@ -178,7 +205,7 @@ impl<'a> QueryGenerator<'a> {
             .columns(&column_names)
             .direction(CopyDirection::From)
             .endpoint(CopyEndpoint::Stdin)
-            .option("FORMAT", Some("csv, NULL '\\N'"))
+            .option("FORMAT", Some(format))
             .build();
 
         let (sql, _) = self.render_ast(copy_ast);
@@ -211,6 +238,7 @@ impl<'a> QueryGenerator<'a> {
         meta: &TableMetadata,
         staging: &str,
         columns: &[ColumnMetadata],
+        do_update: bool,
     ) -> (String, Vec<Value>) {
         let target_ref = table_ref!(meta.name);
         let staging_ref = table_ref!(staging);
@@ -233,7 +261,7 @@ impl<'a> QueryGenerator<'a> {
             })
             .collect();
 
-        builder = if assignments.is_empty() {
+        builder = if !do_update || assignments.is_empty() {
             builder.when_matched_do_nothing()
         } else {
             builder.when_matched_update(assignments)
@@ -255,6 +283,7 @@ impl<'a> QueryGenerator<'a> {
         meta: &TableMetadata,
         staging_table: &str,
         columns: &[ColumnMetadata],
+        do_update: bool,
     ) -> (String, Vec<Value>) {
         let pk_set = primary_key_set(meta);
         let staging_alias = "s";
@@ -273,7 +302,11 @@ impl<'a> QueryGenerator<'a> {
         } else {
             Some(OnConflict {
                 columns: meta.primary_keys.clone(),
-                action: self.build_conflict_action(columns, &pk_set),
+                action: if do_update {
+                    self.build_conflict_action(columns, &pk_set)
+                } else {
+                    ConflictAction::DoNothing
+                },
             })
         };
 
@@ -380,6 +413,19 @@ impl<'a> QueryGenerator<'a> {
 
     pub fn truncate_table(&self, table: &str) -> (String, Vec<Value>) {
         self.render_ast(TruncateTableBuilder::new(table_ref!(table)).build())
+    }
+
+    /// `ALTER TABLE … ADD PRIMARY KEY (cols)` for the given table.
+    pub fn add_primary_key(&self, table: &str, columns: &[String]) -> (String, Vec<Value>) {
+        let ast = AlterTableBuilder::new(table_ref!(table))
+            .add_primary_key(columns)
+            .build();
+        self.render_ast(ast)
+    }
+
+    /// Dialect-specific DDL to drop a table's primary key.
+    pub fn drop_primary_key(&self, table: &str) -> String {
+        self.dialect.drop_primary_key(table)
     }
 
     pub fn add_foreign_key(

@@ -1,0 +1,72 @@
+# Dedicated databases for the Stratum vs pgloader benchmark.
+#
+# Server tuning notes (identical for every tool measured - this cannot bias
+# the comparison, both tools talk to the same instances):
+#   MySQL (source, read-only during measured runs):
+#     --local-infile=1                     LOAD DATA fast path for clients
+#     --skip-log-bin                       no binlog; speeds up data generation
+#     --innodb-flush-log-at-trx-commit=2   relaxed durability; source is
+#                                          regenerable benchmark data
+#     --innodb-buffer-pool-size=1G         hold the working set in memory
+#   PostgreSQL (destination, where the measured writes land):
+#     shared_buffers=1GB                   reasonable for a load benchmark
+#     max_wal_size=8GB                     avoid checkpoint storms mid-load
+#     fsync/synchronous_commit             left ON (defaults) - loads are
+#                                          measured with real durability
+services:
+  mysql-bench:
+    image: mysql:8.0
+    container_name: stratum-bench-mysql
+    command:
+      [
+        "--local-infile=1",
+        "--skip-log-bin",
+        "--innodb-flush-log-at-trx-commit=2",
+        "--innodb-buffer-pool-size=1G",
+        "--default-authentication-plugin=mysql_native_password",
+      ]
+    environment:
+      MYSQL_ROOT_PASSWORD: bench
+      MYSQL_DATABASE: sakila
+      MYSQL_USER: bench
+      MYSQL_PASSWORD: bench
+    ports:
+      - "33307:3306"
+    volumes:
+      # Seed the Sakila sample database (schema first, then data).
+      - ../.github/testdata/sakila-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ../.github/testdata/sakila-data.sql:/docker-entrypoint-initdb.d/02-data.sql:ro
+      - bench-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pbench"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  postgres-bench:
+    image: postgres:16
+    container_name: stratum-bench-postgres
+    command:
+      [
+        "postgres",
+        "-c", "shared_buffers=1GB",
+        "-c", "max_wal_size=8GB",
+        "-c", "checkpoint_timeout=15min",
+      ]
+    environment:
+      POSTGRES_USER: bench
+      POSTGRES_PASSWORD: bench
+      POSTGRES_DB: bench
+    ports:
+      - "54329:5432"
+    volumes:
+      - bench-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bench -d bench"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  bench-mysql-data:
+  bench-pg-data:

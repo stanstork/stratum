@@ -551,6 +551,7 @@ mod tests {
                 ],
                 pagination: None,
                 graph_references: None,
+                tuning: HashMap::new(),
             },
             destination: DataDestination {
                 connection: Connection {
@@ -562,6 +563,7 @@ mod tests {
                 table: "customers_clean".to_string(),
                 mode: WriteMode::Insert,
                 table_map: HashMap::new(),
+                tuning: HashMap::new(),
             },
             transformations: vec![
                 // Simple field rename: id = id

@@ -1,4 +1,6 @@
+use crate::channel::BatchEnvelope;
 use crate::context::PipelineContext;
+use crate::io::destination::Destination;
 use crate::{
     consumer::components::{coordinator::BatchCoordinator, writer::BatchWriter},
     error::ConsumerError,
@@ -9,7 +11,6 @@ use connectors::sql::metadata::table::TableMetadata;
 use engine_core::{metrics::Metrics, retry::RetryPolicy};
 use engine_infra::shutdown::ShutdownSignal;
 use engine_state::models::CheckpointStage;
-use model::records::batch::Batch;
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 
@@ -56,19 +57,19 @@ pub struct Consumer {
 impl Consumer {
     pub async fn new(
         ctx: &PipelineContext,
-        batch_rx: mpsc::Receiver<Batch>,
+        destination: Destination,
+        batch_rx: mpsc::Receiver<BatchEnvelope>,
         dest_metadata: Vec<TableMetadata>,
+        part_id: &str,
         shutdown: ShutdownSignal,
         metrics: Metrics,
     ) -> Self {
         let run_id = ctx.run_id.clone();
         let item_id = ctx.item_id.clone();
-        let destination = ctx.destination.clone();
         let pipeline = ctx.pipeline.clone();
         let state_store = ctx.state.clone();
 
-        let part_id = "part-0".to_string();
-        let ids = ItemId::new(run_id, item_id, part_id);
+        let ids = ItemId::new(run_id, item_id, part_id.to_string());
 
         let meta = dest_metadata;
 
@@ -210,6 +211,17 @@ impl Consumer {
                 Ok(ConsumerStatus::Finished)
             }
         }
+    }
+
+    /// Await the next batch from the producer (cancel-safe). `None` means the
+    /// producer closed the channel and it is drained.
+    pub async fn recv_batch(&mut self) -> Option<BatchEnvelope> {
+        self.coordinator.recv().await
+    }
+
+    /// Write one received batch (COPY + checkpoint + metrics).
+    pub async fn write(&mut self, envelope: &BatchEnvelope) -> Result<(), ConsumerError> {
+        self.coordinator.process_batch(&envelope.batch).await
     }
 
     pub async fn stop(&mut self) -> Result<(), ConsumerError> {

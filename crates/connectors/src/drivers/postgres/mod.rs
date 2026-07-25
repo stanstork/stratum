@@ -1,7 +1,7 @@
-pub mod coercion;
+pub mod config;
 pub mod ddl;
 pub mod driver;
-pub mod encoder;
+pub mod encoding;
 pub mod executor;
 pub mod introspector;
 pub mod params;

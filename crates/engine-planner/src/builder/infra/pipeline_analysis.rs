@@ -85,7 +85,7 @@ impl PipelineAnalysisResources {
         let source_dialect = src_driver.dialect();
         let core_data_destination = dispatch_driver!(dst_driver.clone(), |d| {
             d.clone()
-                .into_destination(&pipeline.destination.table, source_dialect)
+                .into_destination(&pipeline.destination, source_dialect)
         });
 
         let introspector = dispatch_driver!(&src_driver, |d| {
@@ -99,7 +99,6 @@ impl PipelineAnalysisResources {
         let validated_settings = builder
             .validate_settings(
                 pipeline,
-                &core_data_source,
                 &core_data_destination,
                 dest_introspector.as_ref(),
             )

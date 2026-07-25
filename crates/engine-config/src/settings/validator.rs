@@ -4,13 +4,12 @@ use crate::settings::{
     validated::{ValidatedSettings, ValidatedSettingsBuilder},
 };
 use connectors::traits::introspector::SchemaIntrospector;
-use engine_processing::io::{destination::Destination, format::DataFormat, source::Source};
+use engine_processing::io::{destination::Destination, format::DataFormat};
 use model::execution::flags::IntegrityMode;
 use tracing::{debug, warn};
 
 /// Validates migration settings before they are applied.
 pub struct SettingsValidator<'a> {
-    source: &'a Source,
     destination: &'a Destination,
     introspector: &'a dyn SchemaIntrospector,
     dry_run: bool,
@@ -19,14 +18,12 @@ pub struct SettingsValidator<'a> {
 
 impl<'a> SettingsValidator<'a> {
     pub fn new(
-        source: &'a Source,
         destination: &'a Destination,
         introspector: &'a dyn SchemaIntrospector,
         dry_run: bool,
         integrity: IntegrityMode,
     ) -> Self {
         Self {
-            source,
             destination,
             introspector,
             dry_run,
@@ -43,8 +40,7 @@ impl<'a> SettingsValidator<'a> {
         self.validate_batch_size(settings, &mut builder);
         self.validate_copy_columns(settings, &mut builder);
         self.validate_ignore_constraints(settings, &mut builder, &mut errors);
-        self.validate_infer_schema(settings, &mut builder, &mut errors)
-            .await?;
+        self.validate_lanes(settings, &mut builder);
         self.validate_create_tables(settings, &mut builder, &mut errors)
             .await?;
         self.validate_create_columns(settings, &mut builder, &mut errors)
@@ -53,8 +49,6 @@ impl<'a> SettingsValidator<'a> {
         if !errors.is_empty() {
             return Err(SettingsError::ValidationFailed(errors));
         }
-
-        self.check_conflicts(&builder)?;
 
         let validated = builder.build();
         debug!("settings validation completed");
@@ -79,6 +73,19 @@ impl<'a> SettingsValidator<'a> {
         builder.copy_columns = Some(settings.copy_columns);
     }
 
+    fn validate_lanes(&self, settings: &Settings, builder: &mut ValidatedSettingsBuilder) {
+        if settings.lanes > 0 {
+            let clamped = settings.lanes.clamp(1, 32);
+            if clamped != settings.lanes {
+                warn!(
+                    lanes = settings.lanes,
+                    clamped, "lanes out of range, clamped to [1, 32]"
+                );
+            }
+            builder.lanes = Some(clamped);
+        }
+    }
+
     fn validate_ignore_constraints(
         &self,
         settings: &Settings,
@@ -93,34 +100,6 @@ impl<'a> SettingsValidator<'a> {
             }
             builder.ignore_constraints = Some(true);
         }
-    }
-
-    async fn validate_infer_schema(
-        &self,
-        settings: &Settings,
-        builder: &mut ValidatedSettingsBuilder,
-        errors: &mut Vec<String>,
-    ) -> Result<(), SettingsError> {
-        if !settings.infer_schema {
-            return Ok(());
-        }
-
-        // Check format compatibility
-        if !self.is_supported_schema_inference() {
-            errors.push(format!(
-                "infer_schema is not supported for {} -> {} migration",
-                self.source.format, self.destination.format
-            ));
-            return Ok(());
-        }
-
-        // Check if table already exists
-        if self.destination_exists().await? {
-            warn!("create_missing_tables enabled but destination already exists, will skip");
-        }
-
-        builder.infer_schema = Some(true);
-        Ok(())
     }
 
     async fn validate_create_tables(
@@ -175,43 +154,10 @@ impl<'a> SettingsValidator<'a> {
         Ok(())
     }
 
-    fn check_conflicts(&self, builder: &ValidatedSettingsBuilder) -> Result<(), SettingsError> {
-        let mut conflicts = Vec::new();
-
-        // Conflict: infer_schema + create_missing_tables
-        if builder.infer_schema.unwrap_or(false) && builder.create_missing_tables.unwrap_or(false) {
-            conflicts.push(
-                "Cannot use both infer_schema and create_missing_tables (infer_schema includes table creation)"
-                    .to_string(),
-            );
-        }
-
-        // Conflict: infer_schema + create_missing_columns
-        if builder.infer_schema.unwrap_or(false) && builder.create_missing_columns.unwrap_or(false)
-        {
-            warn!(
-                "infer_schema and create_missing_columns both enabled; infer_schema takes precedence"
-            );
-        }
-
-        if !conflicts.is_empty() {
-            return Err(SettingsError::ConflictingSettings(conflicts));
-        }
-
-        Ok(())
-    }
-
     fn is_sql_destination(&self) -> bool {
         matches!(
             self.destination.format,
             DataFormat::Postgres | DataFormat::MySql
-        )
-    }
-
-    fn is_supported_schema_inference(&self) -> bool {
-        matches!(
-            (self.source.format, self.destination.format),
-            (DataFormat::MySql, DataFormat::Postgres)
         )
     }
 
@@ -225,7 +171,6 @@ impl<'a> SettingsValidator<'a> {
         debug!(
             batch_size = settings.batch_size(),
             copy_columns = ?settings.copy_columns(),
-            infer_schema = settings.infer_schema(),
             create_missing_tables = settings.create_missing_tables(),
             create_missing_columns = settings.create_missing_columns(),
             ignore_constraints = settings.ignore_constraints(),

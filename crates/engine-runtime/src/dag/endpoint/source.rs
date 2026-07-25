@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use connectors::{
     drivers::csv::{metadata::CsvMetadata, settings::CsvSettings, source::infer_metadata},
     sql::metadata::table::TableMetadata,
-    traits::introspector::SchemaIntrospector,
+    traits::{introspector::SchemaIntrospector, reader::DataReader},
 };
 use engine_core::{
     dispatch_driver,
@@ -137,6 +137,12 @@ impl SourceEndpoint for DbSourceEndpoint {
 
     fn dialect(&self) -> Option<Dialect> {
         Some(self.0.dialect())
+    }
+
+    async fn int_key_range(&self, table: &str) -> Option<(String, u64, u64)> {
+        dispatch_driver!(&self.0, |d| d.int_key_range(table).await)
+            .ok()
+            .flatten()
     }
 
     fn schema_introspector(

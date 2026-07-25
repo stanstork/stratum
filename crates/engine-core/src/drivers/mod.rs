@@ -3,7 +3,7 @@ use connectors::{
     drivers::{mysql::driver::MySqlDriver, postgres::driver::PgDriver},
     error::DriverError,
     sql::metadata::table::TableMetadata,
-    traits::introspector::SchemaIntrospector,
+    traits::{ddl::DdlWriter, introspector::SchemaIntrospector},
 };
 use model::execution::connection::Connection;
 use std::sync::Arc;
@@ -47,8 +47,36 @@ impl DriverRef {
         }
     }
 
+    /// A driver handle backed by its own connection, so a parallel lane writes
+    /// independently of the others. Postgres is a single connection, so this
+    /// opens a fresh one (same URL/schema); MySQL is already pool-backed and its
+    /// pool hands out concurrent connections, so it is reused as-is.
+    pub async fn reconnect(&self) -> Result<DriverRef, DriverError> {
+        match self {
+            Self::Postgres(d) => {
+                let fresh = PgDriver::connect_with_schema(d.url(), d.schema()).await?;
+                Ok(DriverRef::Postgres(Arc::new(fresh)))
+            }
+            Self::MySql(_) => Ok(self.clone()),
+        }
+    }
+
     pub async fn table_metadata(&self, table: &str) -> Result<TableMetadata, DriverError> {
         dispatch_driver!(self, |d| Ok(d.table_metadata(table).await?))
+    }
+
+    /// Drop each table's primary key before a bulk load, returning the DDL to
+    /// rebuild them afterwards.
+    pub async fn drop_primary_keys(
+        &self,
+        metas: &[TableMetadata],
+    ) -> Result<Vec<String>, DriverError> {
+        dispatch_driver!(self, |d| d.drop_primary_keys(metas).await)
+    }
+
+    /// Execute a sequence of DDL statements against this driver, in order.
+    pub async fn execute_ddl(&self, statements: &[String]) -> Result<(), DriverError> {
+        dispatch_driver!(self, |d| d.execute_ddl(statements).await)
     }
 
     /// Extract PostgreSQL driver if this is a Postgres variant.

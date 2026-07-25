@@ -1,4 +1,4 @@
-use super::{queries::escape_identifier, tls};
+use super::{config::CopyFormat, queries::escape_identifier, tls};
 use crate::{
     error::DriverError,
     sql::metadata::capabilities::Capabilities,
@@ -20,6 +20,7 @@ pub struct PgDriver {
     url: String,
     schema: String,
     capabilities: Capabilities,
+    copy_format: CopyFormat,
 }
 
 impl PgDriver {
@@ -55,7 +56,19 @@ impl PgDriver {
             url: url.to_string(),
             schema: schema.to_string(),
             capabilities,
+            copy_format: CopyFormat::default(),
         })
+    }
+
+    /// Override the COPY format.
+    pub fn with_copy_format(mut self, copy_format: CopyFormat) -> Self {
+        self.copy_format = copy_format;
+        self
+    }
+
+    /// The COPY format this driver writes with.
+    pub fn copy_format(&self) -> CopyFormat {
+        self.copy_format
     }
 
     pub fn client(&self) -> &Arc<RwLock<Client>> {

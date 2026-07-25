@@ -56,12 +56,27 @@ pub trait SourceEndpoint: Send + Sync {
     /// SQL dialect, if this source has one. `None` for plugin sources.
     fn dialect(&self) -> Option<Dialect>;
 
+    /// If this source is a DB table with exactly one integer primary key,
+    /// returns `(pk_column, min, max)` so the scan can be split into parallel
+    /// range lanes. `None` (the default) disables lanes - the pipeline runs as a
+    /// single scan.
+    async fn int_key_range(&self, _table: &str) -> Option<(String, u64, u64)> {
+        None
+    }
+
     /// A `SchemaIntrospector` for this source plus the dialect its metadata
     /// should be interpreted in, if the source can describe its own schema.
     fn schema_introspector(
         &self,
         dest_dialect: Dialect,
     ) -> Option<(Arc<dyn SchemaIntrospector>, Dialect)>;
+}
+
+/// Constraints/indexes dropped before a bulk load, to be restored after it.
+#[derive(Default)]
+pub struct BulkLoadGuard {
+    /// SQL statements that rebuild what was dropped (e.g. `ADD PRIMARY KEY`).
+    pub rebuild: Vec<String>,
 }
 
 #[async_trait]
@@ -71,6 +86,34 @@ pub trait DestinationEndpoint: Send + Sync {
         pipeline: &Pipeline,
         source_dialect: Option<Dialect>,
     ) -> Result<Destination, MigrationError>;
+
+    /// Once-per-load hook run before any lane starts: drop indexes/constraints
+    /// whose per-row maintenance would slow the bulk COPY, so they can be built
+    /// once in bulk afterward. Lane-safe by construction (single call, before
+    /// fan-out). Default: no-op. Returns a guard describing what to restore.
+    async fn prepare_bulk_load(
+        &self,
+        _metas: &[TableMetadata],
+    ) -> Result<BulkLoadGuard, MigrationError> {
+        Ok(BulkLoadGuard::default())
+    }
+
+    /// Once-per-load hook run after all lanes finish: restore what
+    /// [`prepare_bulk_load`] dropped. Default: no-op.
+    async fn finish_bulk_load(&self, _guard: BulkLoadGuard) -> Result<(), MigrationError> {
+        Ok(())
+    }
+
+    /// Like [`build`], but backed by its own connection so a parallel lane
+    /// writes independently. Defaults to [`build`] (a shared handle) - only DB
+    /// destinations with a single write connection override it.
+    async fn build_lane(
+        &self,
+        pipeline: &Pipeline,
+        source_dialect: Option<Dialect>,
+    ) -> Result<Destination, MigrationError> {
+        self.build(pipeline, source_dialect).await
+    }
 
     /// Validate settings + plan DDL. No-op (empty ops) for plugin destinations
     /// or when the source is a plugin.

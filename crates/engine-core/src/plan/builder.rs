@@ -1,4 +1,5 @@
 use crate::context::env::EnvContext;
+use connectors::drivers::postgres::config::{CopyFormat, PgConflictAction};
 use model::{
     core::value::Value,
     execution::{
@@ -16,14 +17,19 @@ use model::{
         plugin::PluginDecl,
         properties::Properties,
         references::{DataMode, GraphReferences, TraversalDepth},
+        tuning::{
+            COPY_FORMAT as TUNING_COPY_FORMAT, DROP_INDEXES as TUNING_DROP_INDEXES,
+            ON_CONFLICT as TUNING_ON_CONFLICT,
+        },
     },
 };
+use query_builder::ast::load_data::LoadDataConflict;
 use smql_syntax::ast::{
     block::{ConnectionBlock, DefineBlock, ExecutionBlock, PluginBlock},
     expr::{Expression, ExpressionKind},
     literal::Literal,
     operator::{BinaryOperator, UnaryOperator},
-    pipeline::{FromBlock, PipelineBlock, ToBlock},
+    pipeline::{FromBlock, NestedBlock, PipelineBlock, ToBlock},
     validation::ValidationKind,
 };
 use std::{collections::HashMap, path::PathBuf, str::FromStr, sync::Arc};
@@ -124,6 +130,11 @@ const ERR_PIPELINE_DEPS_MUST_BE_STRINGS: &str =
 // Validation constants
 const MAX_CONCURRENCY_MIN: u32 = 1;
 const MAX_CONCURRENCY_MAX: u32 = 100;
+
+// Dialect tuning: the `to/from { <dialect> { … } }` block names.
+const DIALECT_POSTGRES: &str = "postgres";
+const DIALECT_MYSQL: &str = "mysql";
+const KNOWN_DIALECTS: &[&str] = &[DIALECT_POSTGRES, DIALECT_MYSQL];
 
 /// Convert validated AST to execution plan
 pub struct PlanBuilder {
@@ -385,17 +396,71 @@ impl PlanBuilder {
             .ok_or_else(|| ConvertError::Plan(ERR_MISSING_TABLE.to_string()))?;
 
         let graph_references = self.build_graph_references(from)?;
+        let conn = self.connections.get(&connection).cloned().ok_or_else(|| {
+            ConvertError::Connection(format!("Connection `{}` not found", connection))
+        })?;
+        let tuning =
+            self.build_endpoint_tuning(&from.nested_blocks, &conn.driver, "`from` block")?;
 
         Ok(DataSource {
-            connection: self.connections.get(&connection).cloned().ok_or_else(|| {
-                ConvertError::Connection(format!("Connection `{}` not found", connection))
-            })?,
+            connection: conn,
             table,
             filters,
             joins,
             pagination,
             graph_references,
+            tuning,
         })
+    }
+
+    /// Extract driver-specific tuning from a `from`/`to` endpoint's dialect
+    /// blocks (e.g. `postgres { drop_indexes = true }`).
+    fn build_endpoint_tuning(
+        &self,
+        nested_blocks: &[NestedBlock],
+        driver: &str,
+        endpoint: &str,
+    ) -> Result<HashMap<String, Value>, ConvertError> {
+        let mut tuning = HashMap::new();
+        let mut seen_dialect = false;
+
+        let allowed = Self::allowed_tuning_keys(driver);
+
+        for block in nested_blocks {
+            if !KNOWN_DIALECTS.contains(&block.kind.as_str()) {
+                continue; // not a dialect block - leave for other consumers
+            }
+
+            if block.kind != driver {
+                return Err(ConvertError::Plan(format!(
+                    "`{}` tuning block in a `{driver}` {endpoint} - a dialect block must match the endpoint's driver",
+                    block.kind
+                )));
+            }
+
+            if seen_dialect {
+                return Err(ConvertError::Plan(format!(
+                    "duplicate `{driver}` tuning block in {endpoint}"
+                )));
+            }
+            seen_dialect = true;
+
+            for attr in &block.attributes {
+                let key = attr.key.name.clone();
+
+                if !allowed.contains(&key.as_str()) {
+                    return Err(ConvertError::Plan(format!(
+                        "unknown `{driver}` tuning key `{key}` in {endpoint}; supported: {allowed:?}"
+                    )));
+                }
+
+                let value = self.eval_with_definitions(&attr.value)?;
+                Self::validate_tuning_value(&key, &value, driver, endpoint)?;
+
+                tuning.insert(key, value);
+            }
+        }
+        Ok(tuning)
     }
 
     fn build_destination(
@@ -439,13 +504,17 @@ impl PlanBuilder {
 
         let table_map = self.build_table_map(to)?;
 
+        let conn = self.connections.get(&connection).cloned().ok_or_else(|| {
+            ConvertError::Connection(format!("Connection `{}` not found", connection))
+        })?;
+        let tuning = self.build_endpoint_tuning(&to.nested_blocks, &conn.driver, "`to` block")?;
+
         Ok(DataDestination {
-            connection: self.connections.get(&connection).cloned().ok_or_else(|| {
-                ConvertError::Connection(format!("Connection `{}` not found", connection))
-            })?,
+            connection: conn,
             table,
             mode,
             table_map,
+            tuning,
         })
     }
 
@@ -1261,6 +1330,62 @@ impl PlanBuilder {
             BinaryOperator::And => BinaryOp::And,
             BinaryOperator::Or => BinaryOp::Or,
         }
+    }
+
+    fn allowed_tuning_keys(dialect: &str) -> &'static [&'static str] {
+        match dialect {
+            DIALECT_POSTGRES => &[TUNING_DROP_INDEXES, TUNING_COPY_FORMAT, TUNING_ON_CONFLICT],
+            DIALECT_MYSQL => &[TUNING_ON_CONFLICT],
+            _ => &[],
+        }
+    }
+
+    fn validate_tuning_value(
+        key: &str,
+        value: &Value,
+        driver: &str,
+        endpoint: &str,
+    ) -> Result<(), ConvertError> {
+        match key {
+            // Conflict handling is dialect-specific: Postgres routes through a
+            // staging table + `ON CONFLICT`, MySQL uses a `LOAD DATA` modifier.
+            TUNING_ON_CONFLICT => {
+                let valid = match value {
+                    Value::String(s) => match driver {
+                        DIALECT_POSTGRES => PgConflictAction::parse(s).is_some(),
+                        DIALECT_MYSQL => LoadDataConflict::parse(s).is_some(),
+                        _ => false,
+                    },
+                    _ => false,
+                };
+                if !valid {
+                    let expected = match driver {
+                        DIALECT_POSTGRES => "\"do_nothing\" or \"do_update\"",
+                        _ => "\"default\", \"replace\" or \"ignore\"",
+                    };
+                    return Err(ConvertError::Plan(format!(
+                        "invalid `{TUNING_ON_CONFLICT}` in {endpoint}: expected {expected}"
+                    )));
+                }
+            }
+            TUNING_COPY_FORMAT => {
+                let is_valid = matches!(value, Value::String(s) if CopyFormat::parse(s).is_some());
+                if !is_valid {
+                    return Err(ConvertError::Plan(format!(
+                        "invalid `{TUNING_COPY_FORMAT}` in {endpoint}: expected \"binary\" or \"text\""
+                    )));
+                }
+            }
+            TUNING_DROP_INDEXES => {
+                if !matches!(value, Value::Boolean(_)) {
+                    return Err(ConvertError::Plan(format!(
+                        "invalid `{TUNING_DROP_INDEXES}` in {endpoint}: expected `true` or `false`"
+                    )));
+                }
+            }
+            _ => {} // Other keys are either implicitly valid or unvalidated
+        }
+        Ok(())
     }
 }
 

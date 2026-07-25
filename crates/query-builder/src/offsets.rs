@@ -46,6 +46,19 @@ pub trait OffsetStrategy: Send + Sync {
 
 pub struct PkOffset {
     pub pk: QualCol,
+    pub lane: Option<(u64, u64)>,
+}
+
+impl PkOffset {
+    pub fn new(pk: QualCol) -> Self {
+        Self { pk, lane: None }
+    }
+
+    /// Confine this strategy to the half-open key range `[lo, hi)`.
+    pub fn with_lane(mut self, lo: u64, hi: u64) -> Self {
+        self.lane = Some((lo, hi));
+        self
+    }
 }
 
 pub struct NumericOffset {
@@ -67,6 +80,19 @@ pub struct DefaultOffset {
 /// key). Deterministic and correct for composite and non-integer keys.
 pub struct KeysetOffset {
     pub keys: Vec<QualCol>,
+    pub lane: Option<(u64, u64)>,
+}
+
+impl KeysetOffset {
+    pub fn new(keys: Vec<QualCol>) -> Self {
+        Self { keys, lane: None }
+    }
+
+    /// Confine this scan to the half-open range `[lo, hi)` on the first key.
+    pub fn with_lane(mut self, lo: u64, hi: u64) -> Self {
+        self.lane = Some((lo, hi));
+        self
+    }
 }
 
 /// Helper for constructing a binary expression.
@@ -139,6 +165,14 @@ impl OffsetStrategy for PkOffset {
 
         // Cursor::None => no WHERE (start from beginning)
 
+        // Confine to this lane's key range: pk >= lo AND pk < hi.
+        if let Some((lo, hi)) = self.lane {
+            let lo_cond = binary_expr(ident_q(&self.pk), BinaryOperator::GtEq, uint_literal(lo));
+            builder = append_where(builder, lo_cond);
+            let hi_cond = binary_expr(ident_q(&self.pk), BinaryOperator::Lt, uint_literal(hi));
+            builder = append_where(builder, hi_cond);
+        }
+
         // ORDER BY pk ASC, LIMIT ?
         builder = builder.order_by(ident_q(&self.pk), Some(OrderDir::Asc));
         builder = builder.limit(limit_expr(limit));
@@ -166,6 +200,7 @@ impl OffsetStrategy for PkOffset {
     fn clone_box(&self) -> Box<dyn OffsetStrategy> {
         Box::new(PkOffset {
             pk: self.pk.clone(),
+            lane: self.lane,
         })
     }
 
@@ -449,6 +484,14 @@ impl OffsetStrategy for KeysetOffset {
         {
             builder = append_where(builder, predicate);
         }
+
+        // Confine to this lane's range on the first (primary) key column.
+        if let (Some((lo, hi)), Some(first)) = (self.lane, self.keys.first()) {
+            let lo_cond = binary_expr(ident_q(first), BinaryOperator::GtEq, uint_literal(lo));
+            builder = append_where(builder, lo_cond);
+            let hi_cond = binary_expr(ident_q(first), BinaryOperator::Lt, uint_literal(hi));
+            builder = append_where(builder, hi_cond);
+        }
         for key in &self.keys {
             builder = builder.order_by(ident_q(key), Some(OrderDir::Asc));
         }
@@ -473,6 +516,7 @@ impl OffsetStrategy for KeysetOffset {
     fn clone_box(&self) -> Box<dyn OffsetStrategy> {
         Box::new(KeysetOffset {
             keys: self.keys.clone(),
+            lane: self.lane,
         })
     }
 
@@ -499,6 +543,7 @@ impl OffsetStrategyFactory {
                     .cursor
                     .clone()
                     .expect("PK offset requires 'cursor' column"),
+                lane: None,
             }),
 
             "numeric" => {
@@ -540,7 +585,10 @@ impl OffsetStrategyFactory {
     /// Build a strategy from a concrete cursor (e.g., when resuming).
     pub fn from_cursor(cursor: &Cursor) -> Arc<dyn OffsetStrategy> {
         match cursor {
-            Cursor::Pk { pk_col, .. } => Arc::new(PkOffset { pk: pk_col.clone() }),
+            Cursor::Pk { pk_col, .. } => Arc::new(PkOffset {
+                pk: pk_col.clone(),
+                lane: None,
+            }),
 
             Cursor::Numeric { col, .. } => {
                 // Without a pk in the cursor, default tiebreaker to "id".
@@ -569,7 +617,10 @@ impl OffsetStrategyFactory {
                 tz: chrono_tz::UTC,
             }),
 
-            Cursor::Keyset { keys, .. } => Arc::new(KeysetOffset { keys: keys.clone() }),
+            Cursor::Keyset { keys, .. } => Arc::new(KeysetOffset {
+                keys: keys.clone(),
+                lane: None,
+            }),
 
             Cursor::Default { offset } => Arc::new(DefaultOffset { offset: *offset }),
 
@@ -632,7 +683,7 @@ impl OffsetStrategyFactory {
                     column: col.clone(),
                 })
                 .collect();
-            Arc::new(KeysetOffset { keys })
+            Arc::new(KeysetOffset { keys, lane: None })
         } else {
             strategy
         }
@@ -673,9 +724,13 @@ mod keyset_tests {
     }
 
     fn render(cursor: &Cursor, keys: &[&str]) -> String {
-        let strat = KeysetOffset {
-            keys: keys.iter().map(|c| qc(c)).collect(),
-        };
+        render_strat(
+            &KeysetOffset::new(keys.iter().map(|c| qc(c)).collect()),
+            cursor,
+        )
+    }
+
+    fn render_strat(strat: &KeysetOffset, cursor: &Cursor) -> String {
         let builder = SelectBuilder::new().select(vec![ident_q(&qc("a"))]).from(
             crate::ast::common::TableRef {
                 schema: None,
@@ -688,6 +743,35 @@ mod keyset_tests {
         let mut r = Renderer::new(&dialect);
         ast.render(&mut r);
         r.finish().0
+    }
+
+    #[test]
+    fn lane_bounds_confine_first_key_range() {
+        // Literals render as bind params ($N), so assert on the operator shape.
+        // A lane over [100, 200) on the first page: both range predicates appear,
+        // no cursor predicate, ordering preserved.
+        let strat = KeysetOffset::new(vec![qc("id")]).with_lane(100, 200);
+        let sql = render_strat(&strat, &Cursor::None);
+        assert!(sql.contains(r#""t"."id" >="#), "lower bound missing: {sql}");
+        assert!(sql.contains(r#""t"."id" <"#), "upper bound missing: {sql}");
+        assert!(
+            !sql.contains(r#""t"."id" > $"#),
+            "no cursor on first page: {sql}"
+        );
+        assert!(
+            sql.contains(r#"ORDER BY "t"."id" ASC"#),
+            "ordering missing: {sql}"
+        );
+
+        // Mid-lane: the strict cursor predicate composes with the range bounds.
+        let cursor = Cursor::Keyset {
+            keys: vec![qc("id")],
+            values: vec![Value::Int(150)],
+        };
+        let sql = render_strat(&strat, &cursor);
+        assert!(sql.contains(r#""t"."id" > $"#), "cursor missing: {sql}");
+        assert!(sql.contains(r#""t"."id" >="#), "lower bound missing: {sql}");
+        assert!(sql.contains(r#""t"."id" <"#), "upper bound missing: {sql}");
     }
 
     #[test]
@@ -716,9 +800,7 @@ mod keyset_tests {
 
     #[test]
     fn next_cursor_reads_all_key_values() {
-        let strat = KeysetOffset {
-            keys: vec![qc("actor_id"), qc("film_id")],
-        };
+        let strat = KeysetOffset::new(vec![qc("actor_id"), qc("film_id")]);
         let row = Record {
             schema: "t".into(),
             fields: vec![

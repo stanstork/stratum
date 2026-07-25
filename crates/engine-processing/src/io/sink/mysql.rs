@@ -59,12 +59,6 @@ impl Sink for MySqlSink {
             return Ok(());
         }
 
-        if table.primary_keys.is_empty() {
-            return Err(SinkError::FastPathNotSupported(
-                "Table has no primary keys".to_string(),
-            ));
-        }
-
         let columns = self.columns(table);
 
         debug!(table = %table.name, rows = rows.len(), on_conflict = ?self.on_conflict, "fast-path LOAD DATA");

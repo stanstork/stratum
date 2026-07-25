@@ -8,7 +8,6 @@ use connectors::sql::metadata::table::TableMetadata;
 use engine_core::retry::RetryPolicy;
 use model::records::Record;
 use model::records::batch::Batch;
-use std::collections::HashMap;
 use tracing::{debug, trace, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -101,13 +100,14 @@ impl BatchWriter {
     /// Check if fast path (sink) is available.
     async fn can_use_fast_path(&self) -> Result<bool, ConsumerError> {
         let fast = self.destination.sink().support_fast_path().await?;
+
         if self.meta.is_empty() {
             warn!("no table metadata available to determine fast path support");
             return Ok(false);
         }
-        let meta = &self.meta[0]; // For now, check only the first table
-        debug!(table = %meta.name, fast_path = %fast, "fast path support checked");
-        Ok(fast && !meta.primary_keys.is_empty())
+
+        debug!(fast_path = %fast, "fast path support checked");
+        Ok(fast)
     }
 
     /// Write batch using fast path (sink: COPY, MERGE, etc.).
@@ -136,9 +136,7 @@ impl BatchWriter {
                 .run(
                     || {
                         let sink = self.destination.sink().clone();
-                        let meta = meta.clone();
-                        let rows = rows.clone();
-                        async move { sink.write_fast_path(&meta, &rows).await }
+                        async move { sink.write_fast_path(meta, rows).await }
                     },
                     classify_sink_error,
                 )
@@ -151,16 +149,6 @@ impl BatchWriter {
         }
 
         let duration = start.elapsed();
-        let rows_per_sec = rows_written as f64 / duration.as_secs_f64();
-
-        debug!(
-            batch_id = %batch.id,
-            rows = rows_written,
-            strategy = "fast_path",
-            duration_ms = duration.as_millis(),
-            rows_per_sec = %format!("{:.2}", rows_per_sec),
-            "batch written via sink"
-        );
 
         Ok(WriteResult {
             rows_written,
@@ -195,9 +183,7 @@ impl BatchWriter {
                 .run(
                     || {
                         let sink = self.destination.sink().clone();
-                        let meta = meta.clone();
-                        let rows = rows.clone();
-                        async move { sink.write_batch(&meta, &rows).await }
+                        async move { sink.write_batch(meta, rows).await }
                     },
                     classify_driver_error,
                 )
@@ -210,16 +196,6 @@ impl BatchWriter {
         }
 
         let duration = start.elapsed();
-        let rows_per_sec = rows_written as f64 / duration.as_secs_f64();
-
-        debug!(
-            batch_id = %batch.id,
-            rows = rows_written,
-            strategy = "regular",
-            duration_ms = duration.as_millis(),
-            rows_per_sec = %format!("{:.2}", rows_per_sec),
-            "batch written via destination"
-        );
 
         Ok(WriteResult {
             rows_written,
@@ -228,42 +204,36 @@ impl BatchWriter {
         })
     }
 
-    /// Group rows by their `schema` field and match to the corresponding TableMetadata.
-    /// Falls back to `self.meta[0]` for rows whose schema has no explicit metadata entry.
-    fn group_rows<'a>(&'a self, rows: &'a [Record]) -> Vec<(&'a TableMetadata, Vec<Record>)> {
+    /// Partition a batch's rows into contiguous same-table runs.
+    ///
+    /// Cascade fetches already emit rows grouped by table, so in
+    /// practice this yields exactly one run per table.
+    fn group_rows<'a>(&'a self, rows: &'a [Record]) -> Vec<(&'a TableMetadata, &'a [Record])> {
         if self.meta.len() == 1 {
-            // Fast path: single table, no grouping needed
-            return vec![(&self.meta[0], rows.to_vec())];
+            // Single table: the whole batch is one borrowed slice.
+            return vec![(&self.meta[0], rows)];
         }
 
-        // Build a lookup from table name -> metadata index
-        let meta_index: HashMap<&str, usize> = self
-            .meta
-            .iter()
-            .enumerate()
-            .map(|(i, m)| (m.name.as_str(), i))
-            .collect();
-
-        let mut groups: HashMap<usize, Vec<Record>> = HashMap::new();
-        for row in rows {
-            let idx = meta_index.get(row.schema.as_str()).copied().unwrap_or(0); // fallback to first table if schema unknown
-            groups.entry(idx).or_default().push(row.clone());
-        }
-
-        let mut result: Vec<_> = groups
-            .into_iter()
-            .map(|(idx, rows)| (&self.meta[idx], rows))
-            .collect();
-
-        // Preserve insertion order for determinism
-        // TODO: perf improvement - avoid sorting by using an ordered data structure from the start
-        result.sort_by_key(|(meta, _)| {
-            self.meta
+        let mut groups = Vec::new();
+        let mut start = 0;
+        while start < rows.len() {
+            let schema = rows[start].schema.as_str();
+            let len = rows[start..]
                 .iter()
-                .position(|m| m.name == meta.name)
-                .unwrap_or(0)
-        });
+                .take_while(|r| r.schema.as_str() == schema)
+                .count();
+            groups.push((self.meta_for(schema), &rows[start..start + len]));
+            start += len;
+        }
+        groups
+    }
 
-        result
+    /// Destination metadata for a row `schema`, falling back to the first table
+    /// when the schema is unknown.
+    fn meta_for(&self, schema: &str) -> &TableMetadata {
+        self.meta
+            .iter()
+            .find(|m| m.name == schema)
+            .unwrap_or(&self.meta[0])
     }
 }

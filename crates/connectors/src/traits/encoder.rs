@@ -1,11 +1,11 @@
 use model::core::value::Value;
 
-/// Provides database-specific CSV encoding for COPY/LOAD style ingestion.
-pub trait CopyValueEncoder {
-    /// Encodes a concrete value into the backend's CSV representation.
+/// Provides database-specific *text* encoding for COPY/LOAD style ingestion.
+pub trait TextCopyEncoder {
+    /// Encodes a concrete value into the backend's text representation.
     fn encode_value(&self, value: &Value) -> String;
 
-    /// Encodes a SQL NULL into its CSV literal form (e.g. `\N`).
+    /// Encodes a SQL NULL into its text literal form (e.g. `\N`).
     fn encode_null(&self) -> String;
 
     /// Helper that encodes an optional value, delegating NULL handling.

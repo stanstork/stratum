@@ -1,25 +1,42 @@
 use crate::sql::metadata::column::ColumnMetadata;
 use model::core::value::Value;
+use std::borrow::Cow;
 
-/// Coerces a value to match the target column type for PostgreSQL.
-/// This handles cross-database migrations where source values might not
-/// perfectly match the target column type.
-pub fn coerce_value(value: Value, col: &ColumnMetadata) -> Value {
-    if matches!(value, Value::Null) {
-        return value;
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ColumnCoercion {
+    /// No transform: the value passes straight through.
+    None,
+    /// Target is an array/set type: parse/convert the value into an array.
+    Array,
+    /// Target is a text column: decode binary into text.
+    TextFromBinary,
+}
+
+impl ColumnCoercion {
+    /// Classify a column once.
+    pub fn of(col: &ColumnMetadata) -> Self {
+        if is_array_column(col) {
+            ColumnCoercion::Array
+        } else if is_text_column(col) {
+            ColumnCoercion::TextFromBinary
+        } else {
+            ColumnCoercion::None
+        }
     }
 
-    // Check if target is an array type
-    if is_array_column(col) {
-        return coerce_to_array(value);
-    }
+    /// Apply the (precomputed) coercion to a value, borrowing when no transform
+    /// is needed so the common path never clones.
+    pub fn apply<'a>(self, value: &'a Value) -> Cow<'a, Value> {
+        if matches!(value, Value::Null) {
+            return Cow::Borrowed(value);
+        }
 
-    // Check if target is text type and source is binary
-    if is_text_column(col) {
-        return coerce_to_text(value);
+        match self {
+            ColumnCoercion::None => Cow::Borrowed(value),
+            ColumnCoercion::Array => coerce_to_array(value),
+            ColumnCoercion::TextFromBinary => coerce_to_text(value),
+        }
     }
-
-    value
 }
 
 /// Checks if a column is an array type.
@@ -35,15 +52,17 @@ fn is_text_column(col: &ColumnMetadata) -> bool {
 }
 
 /// Coerces a value to an array type.
-fn coerce_to_array(value: Value) -> Value {
+fn coerce_to_array<'a>(value: &'a Value) -> Cow<'a, Value> {
     match value {
         // Already array types
-        Value::Array(_) | Value::Set(_) => value,
+        Value::Array(_) | Value::Set(_) => Cow::Borrowed(value),
 
         // Parse string that might contain array data
         Value::String(s) => {
-            let parsed = parse_array_string(&s);
-            Value::Array(parsed.into_iter().map(Value::String).collect())
+            let parsed = parse_array_string(s);
+            Cow::Owned(Value::Array(
+                parsed.into_iter().map(Value::String).collect(),
+            ))
         }
 
         // Convert JSON array to array
@@ -67,29 +86,29 @@ fn coerce_to_array(value: Value) -> Value {
                         }
                     })
                     .collect();
-                Value::Array(parsed)
+                Cow::Owned(Value::Array(parsed))
             } else {
                 // Single value as array
-                Value::Array(vec![Value::String(json.to_string())])
+                Cow::Owned(Value::Array(vec![Value::String(json.to_string())]))
             }
         }
 
         // Single enum value as array
-        Value::Enum { value: v, .. } => Value::Array(vec![Value::String(v)]),
+        Value::Enum { value: v, .. } => Cow::Owned(Value::Array(vec![Value::String(v.clone())])),
 
         // Keep other types as-is
-        other => other,
+        other => Cow::Borrowed(other),
     }
 }
 
 /// Coerces a value to text type.
-fn coerce_to_text(value: Value) -> Value {
+fn coerce_to_text<'a>(value: &'a Value) -> Cow<'a, Value> {
     match value {
         Value::Binary(bytes) => match String::from_utf8(bytes.clone()) {
-            Ok(text) => Value::String(text),
-            Err(_) => Value::String(String::from_utf8_lossy(&bytes).to_string()),
+            Ok(text) => Cow::Owned(Value::String(text)),
+            Err(_) => Cow::Owned(Value::String(String::from_utf8_lossy(bytes).to_string())),
         },
-        other => other,
+        other => Cow::Borrowed(other),
     }
 }
 

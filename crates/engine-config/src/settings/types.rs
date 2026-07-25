@@ -6,19 +6,17 @@ use std::{collections::HashMap, fmt};
 /// Migration settings structure
 #[derive(Debug, Clone)]
 pub struct Settings {
-    pub infer_schema: bool,
     pub ignore_constraints: bool,
     pub create_missing_columns: bool,
     pub create_missing_tables: bool,
     pub copy_columns: CopyColumns,
     pub batch_size: usize,
-    pub cascade_schema: bool,
+    pub lanes: usize,
 }
 
 impl Settings {
     pub fn from_map(map: &HashMap<String, Value>) -> Settings {
         Settings {
-            infer_schema: map.get_bool("infer_schema").unwrap_or(false),
             ignore_constraints: map.get_bool("ignore_constraints").unwrap_or(false),
             create_missing_columns: map.get_bool("create_missing_columns").unwrap_or(false),
             create_missing_tables: map.get_bool("create_missing_tables").unwrap_or(false),
@@ -31,7 +29,7 @@ impl Settings {
                 })
                 .unwrap_or(CopyColumns::All),
             batch_size: map.get_usize("batch_size").unwrap_or(0),
-            cascade_schema: map.get_bool("cascade_schema").unwrap_or(false),
+            lanes: map.get_usize("lanes").unwrap_or(0),
         }
     }
 }

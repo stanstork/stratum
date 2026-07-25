@@ -129,6 +129,14 @@ impl Expr {
             values,
         }
     }
+
+    /// Creates an unqualified column identifier, e.g. `id`.
+    pub fn column(name: impl Into<String>) -> Self {
+        Expr::Identifier(Ident {
+            qualifier: None,
+            name: name.into(),
+        })
+    }
 }
 
 impl FunctionCall {
@@ -154,6 +162,24 @@ impl FunctionCall {
     pub fn sum(expr: Expr) -> Self {
         FunctionCall {
             name: "SUM".to_string(),
+            args: vec![expr],
+            wildcard: false,
+        }
+    }
+
+    /// Creates a MIN(expr) function call
+    pub fn min(expr: Expr) -> Self {
+        FunctionCall {
+            name: "MIN".to_string(),
+            args: vec![expr],
+            wildcard: false,
+        }
+    }
+
+    /// Creates a MAX(expr) function call
+    pub fn max(expr: Expr) -> Self {
+        FunctionCall {
+            name: "MAX".to_string(),
             args: vec![expr],
             wildcard: false,
         }

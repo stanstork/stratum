@@ -4,7 +4,6 @@ pub mod create_tables;
 pub mod driver;
 pub mod endpoint;
 pub mod error;
-pub mod infer_schema;
 pub mod orchestrator;
 pub mod phase;
 pub mod schema_manager;

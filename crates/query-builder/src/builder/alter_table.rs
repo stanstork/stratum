@@ -88,6 +88,15 @@ impl AlterTableBuilder {
         self
     }
 
+    pub fn add_primary_key(mut self, columns: &[String]) -> Self {
+        self.ast.operations.push(AlterTableOperation::AddConstraint(
+            TableConstraint::PrimaryKey {
+                columns: columns.to_vec(),
+            },
+        ));
+        self
+    }
+
     pub fn toggle_triggers(mut self, enabled: bool) -> Self {
         self.ast
             .operations

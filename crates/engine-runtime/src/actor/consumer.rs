@@ -4,7 +4,8 @@ use crate::error::ActorError;
 use engine_core::{event_bus::bus::EventBus, metrics::Metrics};
 use engine_processing::{
     cb::{CircuitBreaker, CircuitBreakerState},
-    consumer::{Consumer, ConsumerStatus},
+    channel::BatchEnvelope,
+    consumer::Consumer,
     error::ConsumerError,
 };
 use model::events::migration::MigrationEvent;
@@ -12,6 +13,14 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
+
+/// What to do after a batch write fails.
+enum AfterFailure {
+    /// The backoff has elapsed; re-attempt the same batch.
+    Retry,
+    /// The breaker opened - stop the consumer with this outcome.
+    Abort(TickAction),
+}
 
 /// Encapsulates the state and logic of the running consumer.
 struct ConsumerTask {
@@ -55,41 +64,48 @@ impl ConsumerTask {
         }
     }
 
-    async fn tick(&mut self) -> TickAction {
-        match self.consumer.tick().await {
-            Ok(status) => self.handle_success(status).await,
-            Err(e) => self.handle_error(e).await,
-        }
+    /// Await the next batch.
+    async fn recv(&mut self) -> Option<BatchEnvelope> {
+        self.consumer.recv_batch().await
     }
 
-    async fn handle_success(&mut self, status: ConsumerStatus) -> TickAction {
-        if self.breaker.consecutive_failures() > 0 {
-            info!(
-                run_id = %self.run_id,
-                item_id = %self.item_id,
-                "circuit breaker recovered"
-            );
-        }
-        self.breaker.record_success();
-        self.report_progress().await;
-
-        match status {
-            ConsumerStatus::Working => TickAction::Continue,
-            ConsumerStatus::Idle => TickAction::Idle,
-            ConsumerStatus::Finished => {
-                info!(run_id = %self.run_id, item_id = %self.item_id, "consumer finished");
-                if let Err(e) = self.consumer.finalize().await {
-                    error!(run_id = %self.run_id, item_id = %self.item_id, error = %e, "consumer finalize failed");
-                    let _ = self.consumer.stop().await;
-                    return TickAction::Failed(ActorError::Internal(e.to_string()));
+    /// Write a received batch, re-attempting *this* batch after each circuit breaker backoff.
+    async fn on_batch(&mut self, envelope: BatchEnvelope) -> TickAction {
+        loop {
+            match self.consumer.write(&envelope).await {
+                Ok(()) => {
+                    if self.breaker.consecutive_failures() > 0 {
+                        info!(
+                            run_id = %self.run_id,
+                            item_id = %self.item_id,
+                            "circuit breaker recovered"
+                        );
+                    }
+                    self.breaker.record_success();
+                    self.report_progress().await;
+                    return TickAction::Continue;
                 }
-                let _ = self.consumer.stop().await;
-                TickAction::Done
+                Err(e) => match self.handle_error(e).await {
+                    AfterFailure::Retry => continue,
+                    AfterFailure::Abort(action) => return action,
+                },
             }
         }
     }
 
-    async fn handle_error(&mut self, e: ConsumerError) -> TickAction {
+    /// The producer closed the channel and it is drained: finalize and finish.
+    async fn on_drained(&mut self) -> TickAction {
+        info!(run_id = %self.run_id, item_id = %self.item_id, "consumer finished");
+        if let Err(e) = self.consumer.finalize().await {
+            error!(run_id = %self.run_id, item_id = %self.item_id, error = %e, "consumer finalize failed");
+            let _ = self.consumer.stop().await;
+            return TickAction::Failed(ActorError::Internal(e.to_string()));
+        }
+        let _ = self.consumer.stop().await;
+        TickAction::Done
+    }
+
+    async fn handle_error(&mut self, e: ConsumerError) -> AfterFailure {
         self.metrics.increment_failures(1);
         error!(run_id = %self.run_id, item_id = %self.item_id, error = %e, "consumer tick failed");
 
@@ -100,20 +116,23 @@ impl ConsumerTask {
                     item_id = %self.item_id,
                     delay_ms = delay.as_millis(),
                     failures = self.breaker.consecutive_failures(),
-                    "circuit breaker backing off"
+                    "circuit breaker backing off, will retry batch"
                 );
                 tokio::time::sleep(delay).await;
-                TickAction::Continue
+                AfterFailure::Retry
             }
             CircuitBreakerState::Open => {
+                let failures = self.breaker.consecutive_failures();
                 error!(
                     run_id = %self.run_id,
                     item_id = %self.item_id,
-                    failures = self.breaker.consecutive_failures(),
+                    failures,
                     "circuit breaker open, stopping consumer"
                 );
                 let _ = self.consumer.stop().await;
-                TickAction::Done
+                AfterFailure::Abort(TickAction::Failed(ActorError::Internal(format!(
+                    "consumer aborted after {failures} consecutive batch write failures; last error: {e}"
+                ))))
             }
         }
     }
@@ -179,7 +198,7 @@ impl ConsumerTask {
                 run_id = %self.run_id,
                 item_id = %self.item_id,
                 rows = snapshot.records_processed,
-                rows_per_sec = %format!("{:.0}", rows_per_second),
+                rows_per_sec = %format_args!("{:.0}", rows_per_second),
                 skipped = snapshot.rows_skipped,
                 failed = snapshot.rows_failed,
                 "migration progress"
@@ -205,32 +224,27 @@ pub async fn run_consumer(
         };
 
     let mut task = ConsumerTask::new(consumer, metrics, event_bus, run_id, item_id);
-    let idle_delay = Duration::from_millis(100);
-    let mut tick_interval = tokio::time::interval(Duration::from_millis(1));
-    tick_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-    // Main loop: tick consumer and handle messages
     loop {
         tokio::select! {
-            _ = tick_interval.tick() => {
-                match task.tick().await {
-                    TickAction::Continue => tick_interval.reset_immediately(),
-                    TickAction::Idle => {
-                        tick_interval = tokio::time::interval(idle_delay);
-                        tick_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                    }
+            maybe = task.recv() => {
+                let action = match maybe {
+                    Some(envelope) => task.on_batch(envelope).await,
+                    None => task.on_drained().await,
+                };
+                match action {
+                    TickAction::Continue | TickAction::Idle => {}
                     TickAction::Done => return Ok(()),
                     TickAction::Failed(e) => return Err(e),
                 }
             }
             msg = rx.recv() => match msg {
                 Some(ConsumerMsg::Flush { run_id, item_id }) => {
-                    info!(run_id = %run_id, item_id = %item_id, "flushing consumer");
-                    tick_interval.reset_immediately();
+                    // No-op: the loop is already draining the channel continuously.
+                    info!(run_id = %run_id, item_id = %item_id, "flush requested (already draining)");
                 }
                 Some(ConsumerMsg::Stop { run_id, item_id, part_id }) => {
                     return match task.handle_stop(run_id, item_id, part_id).await {
-                        TickAction::Done => Ok(()),
                         TickAction::Failed(e) => Err(e),
                         _ => Ok(()),
                     };

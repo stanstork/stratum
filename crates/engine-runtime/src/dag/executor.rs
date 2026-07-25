@@ -1,7 +1,7 @@
 use crate::{
     dag::{
         Dag,
-        endpoint::{resolve_destination, resolve_source},
+        endpoint::{SourceEndpoint, resolve_destination, resolve_source},
     },
     error::MigrationError,
     execution::orchestrator::PipelineOrchestrator,
@@ -627,12 +627,14 @@ impl DagExecutor {
         let start_time = std::time::Instant::now();
         info!("starting pipeline");
 
-        let source_ep = resolve_source(
-            &pipeline.source.connection,
-            &self.exec_ctx,
-            &self.plugin_registry,
-        )
-        .await?;
+        let source_ep: Arc<dyn SourceEndpoint> = Arc::from(
+            resolve_source(
+                &pipeline.source.connection,
+                &self.exec_ctx,
+                &self.plugin_registry,
+            )
+            .await?,
+        );
         let dest_ep = resolve_destination(
             &pipeline.destination.connection,
             &self.exec_ctx,
@@ -681,6 +683,7 @@ impl DagExecutor {
         let orchestrator = PipelineOrchestrator::new(
             pipeline.clone(),
             pipeline_ctx,
+            source_ep.clone(),
             dest_ep,
             settings,
             schema_ops,

@@ -21,8 +21,10 @@ use crate::{
 use engine_core::{context::env::EnvContext, retry::RetryPolicy};
 use engine_state::MerkleStore;
 use engine_wasm::registry::PluginRegistry;
+use crate::channel::{BatchEnvelope, ByteBudget};
+use crate::io::source::Source;
 use model::{
-    execution::pipeline::Pipeline, pagination::cursor::Cursor, records::batch::Batch,
+    execution::pipeline::Pipeline, pagination::cursor::Cursor,
     transform::mapping::TransformationMetadata,
 };
 use std::sync::Arc;
@@ -130,15 +132,17 @@ pub struct Producer {
 impl Producer {
     pub async fn new(
         ctx: &PipelineContext,
-        batch_tx: mpsc::Sender<Batch>,
+        source: Source,
+        part_id: &str,
+        batch_tx: mpsc::Sender<BatchEnvelope>,
+        byte_budget: ByteBudget,
         mut config: ProducerConfig,
         mapped_columns_only: bool,
     ) -> Result<Self, ProducerError> {
         let exec_ctx = ctx.exec_ctx.clone();
         let run_id = ctx.run_id.clone();
         let item_id = ctx.item_id.clone();
-        let part_id = "part-0".to_string();
-        let source = ctx.source.clone();
+        let part_id = part_id.to_string();
         let pipeline = ctx.pipeline.clone();
         let mapping = ctx.mapping.clone();
         let state_store = ctx.state.clone();
@@ -172,10 +176,11 @@ impl Producer {
         );
 
         let state_manager = StateManager::new(ids.clone(), state_store.clone());
-        let mut coordinator = BatchCoordinator::new(batch_tx, state_manager);
+        let mut coordinator = BatchCoordinator::new(batch_tx, byte_budget, state_manager);
         if let Some(integrity) = config.integrity.take() {
             let merkle_store = state_store as Arc<dyn MerkleStore>;
-            coordinator = coordinator.enable_integrity(integrity, merkle_store);
+            coordinator =
+                coordinator.enable_integrity(integrity, merkle_store, config.lane_sink.clone());
         }
 
         Ok(Self {

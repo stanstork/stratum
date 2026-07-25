@@ -13,8 +13,6 @@ pub struct PipelineSettings {
     pub copy_columns: CopyColumns,
 
     #[serde(skip_serializing_if = "is_false")]
-    pub infer_schema: bool,
-    #[serde(skip_serializing_if = "is_false")]
     pub create_missing_tables: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub create_missing_columns: bool,
@@ -23,6 +21,7 @@ pub struct PipelineSettings {
     #[serde(skip_serializing_if = "is_false")]
     pub dry_run: bool,
 
+    pub lanes: usize,
     pub workers: usize,
     pub checkpoint: CheckpointStrategy,
 
@@ -37,10 +36,10 @@ impl PipelineSettings {
         Self {
             batch_size: settings.batch_size,
             copy_columns: settings.copy_columns,
-            infer_schema: settings.infer_schema,
             create_missing_tables: settings.create_missing_tables,
             create_missing_columns: settings.create_missing_columns,
             ignore_constraints: settings.ignore_constraints,
+            lanes: settings.lanes,
             dry_run: settings.dry_run,
             workers: 1,
             checkpoint: CheckpointStrategy::EveryBatch,
@@ -53,10 +52,10 @@ impl PipelineSettings {
         ValidatedSettings {
             batch_size: self.batch_size,
             copy_columns: self.copy_columns,
-            infer_schema: self.infer_schema,
             create_missing_tables: self.create_missing_tables,
             create_missing_columns: self.create_missing_columns,
             ignore_constraints: self.ignore_constraints,
+            lanes: self.lanes,
             dry_run: self.dry_run,
             integrity: IntegrityMode::Off,
         }

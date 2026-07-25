@@ -15,6 +15,7 @@ name = "stratum"
 path = "src/main.rs"
 
 [dependencies]
+mimalloc = "0.1"
 smql-syntax = { path = "../smql-syntax" }
 query-builder = { path = "../query-builder" }
 model = { path = "../model" }

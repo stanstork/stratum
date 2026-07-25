@@ -3,38 +3,94 @@ use crate::io::{
     sink::{Sink, mysql::MySqlSink, postgres::PostgresSink, wasm::WasmSinkAdapter},
 };
 use connectors::{
-    drivers::{mysql::driver::MySqlDriver, postgres::driver::PgDriver},
+    drivers::{
+        mysql::driver::MySqlDriver,
+        postgres::{
+            config::{CopyFormat, PgConflictAction},
+            driver::PgDriver,
+        },
+    },
     error::DriverError,
     sql::metadata::table::TableMetadata,
     traits::driver::Driver,
 };
 use engine_core::schema::type_registry::Dialect;
 use engine_wasm::runtime::instance::PluginInstance;
-use model::{execution::connection::Connection, records::Record};
-use query_builder::dialect;
-use std::sync::Arc;
+use model::{
+    core::value::Value,
+    execution::{
+        connection::Connection,
+        pipeline::DataDestination,
+        tuning::{COPY_FORMAT, ON_CONFLICT},
+    },
+    records::Record,
+};
+use query_builder::{ast::load_data::LoadDataConflict, dialect};
+use std::{collections::HashMap, sync::Arc};
+
+/// Read a driver-specific tuning value from an endpoint's dialect block.
+fn tuning<T>(
+    tuning: &HashMap<String, Value>,
+    key: &str,
+    parse: fn(&str) -> Option<T>,
+) -> Option<T> {
+    match tuning.get(key) {
+        Some(Value::String(s)) => parse(s),
+        _ => None,
+    }
+}
 
 /// Trait for creating a [`Destination`] from a typed driver.
 pub trait IntoDestination: Driver {
-    fn into_destination(self: Arc<Self>, table: &str, source_dialect: Dialect) -> Destination;
+    fn into_destination(
+        self: Arc<Self>,
+        dest: &DataDestination,
+        source_dialect: Dialect,
+    ) -> Destination;
 }
 
 impl IntoDestination for PgDriver {
-    fn into_destination(self: Arc<Self>, table: &str, source_dialect: Dialect) -> Destination {
+    fn into_destination(
+        self: Arc<Self>,
+        dest: &DataDestination,
+        source_dialect: Dialect,
+    ) -> Destination {
+        let driver = match tuning(&dest.tuning, COPY_FORMAT, CopyFormat::parse) {
+            Some(format) => Arc::new((*self).clone().with_copy_format(format)),
+            None => self,
+        };
+        let write_mode = dest.mode.clone();
+        let on_conflict = tuning(&dest.tuning, ON_CONFLICT, PgConflictAction::parse);
+
         Destination {
-            name: table.to_string(),
+            name: dest.table.clone(),
             format: DataFormat::Postgres,
-            sink: Arc::new(PostgresSink::new(self, source_dialect)),
+            sink: Arc::new(PostgresSink::new(
+                driver,
+                source_dialect,
+                write_mode,
+                on_conflict,
+            )),
         }
     }
 }
 
 impl IntoDestination for MySqlDriver {
-    fn into_destination(self: Arc<Self>, table: &str, _source_dialect: Dialect) -> Destination {
+    fn into_destination(
+        self: Arc<Self>,
+        dest: &DataDestination,
+        _source_dialect: Dialect,
+    ) -> Destination {
+        let sink = MySqlSink::new(self);
+        let sink = match tuning(&dest.tuning, ON_CONFLICT, LoadDataConflict::parse) {
+            Some(on_conflict) => sink.with_on_conflict(on_conflict),
+            None => sink,
+        };
+
         Destination {
-            name: table.to_string(),
+            name: dest.table.clone(),
             format: DataFormat::MySql,
-            sink: Arc::new(MySqlSink::new(self)),
+            sink: Arc::new(sink),
         }
     }
 }

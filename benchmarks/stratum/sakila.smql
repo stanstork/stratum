@@ -1,0 +1,117 @@
+// Benchmark: full Sakila migration, MySQL -> PostgreSQL.
+//
+// One pipeline per table (15 data tables; `film_text` is an orphan full-text
+// table nothing references and is excluded on both sides). The pipelines are
+// independent, so the `execution` block below runs them concurrently - the
+// lever for the many-small-tables workload (the default is sequential).
+//
+// Measured scope - identical for both tools (see ../pgloader/sakila.load.tpl):
+// create destination tables, copy every row. Secondary indexes and FK
+// constraints are excluded on both sides so the tools do the same work.
+//
+// URLs come from the environment; run.sh exports them for the bench databases.
+
+execution {
+    strategy        = "parallel"
+    max_concurrency = 8
+}
+
+connection "src" {
+    driver = "mysql"
+    url    = env("BENCH_SAKILA_MYSQL_URL")
+}
+
+connection "dst" {
+    driver = "postgres"
+    url    = env("BENCH_SAKILA_PG_URL")
+}
+
+pipeline "actor" {
+    from { connection = connection.src  table = "actor" }
+    to   { connection = connection.dst  table = "actor" }
+    settings { create_missing_tables = true  batch_size = 25000 }
+}
+
+pipeline "address" {
+    from { connection = connection.src  table = "address" }
+    to   { connection = connection.dst  table = "address" }
+    settings { create_missing_tables = true  batch_size = 25000 }
+}
+
+pipeline "category" {
+    from { connection = connection.src  table = "category" }
+    to   { connection = connection.dst  table = "category" }
+    settings { create_missing_tables = true  batch_size = 25000 }
+}
+
+pipeline "city" {
+    from { connection = connection.src  table = "city" }
+    to   { connection = connection.dst  table = "city" }
+    settings { create_missing_tables = true  batch_size = 25000 }
+}
+
+pipeline "country" {
+    from { connection = connection.src  table = "country" }
+    to   { connection = connection.dst  table = "country" }
+    settings { create_missing_tables = true  batch_size = 25000 }
+}
+
+pipeline "customer" {
+    from { connection = connection.src  table = "customer" }
+    to   { connection = connection.dst  table = "customer" }
+    settings { create_missing_tables = true  batch_size = 25000 }
+}
+
+pipeline "film" {
+    from { connection = connection.src  table = "film" }
+    to   { connection = connection.dst  table = "film" }
+    settings { create_missing_tables = true  batch_size = 25000 }
+}
+
+pipeline "film_actor" {
+    from { connection = connection.src  table = "film_actor" }
+    to   { connection = connection.dst  table = "film_actor" }
+    settings { create_missing_tables = true  batch_size = 25000 }
+}
+
+pipeline "film_category" {
+    from { connection = connection.src  table = "film_category" }
+    to   { connection = connection.dst  table = "film_category" }
+    settings { create_missing_tables = true  batch_size = 25000 }
+}
+
+pipeline "inventory" {
+    from { connection = connection.src  table = "inventory" }
+    to   { connection = connection.dst  table = "inventory" }
+    settings { create_missing_tables = true  batch_size = 25000 }
+}
+
+pipeline "language" {
+    from { connection = connection.src  table = "language" }
+    to   { connection = connection.dst  table = "language" }
+    settings { create_missing_tables = true  batch_size = 25000 }
+}
+
+pipeline "payment" {
+    from { connection = connection.src  table = "payment" }
+    to   { connection = connection.dst  table = "payment" }
+    settings { create_missing_tables = true  batch_size = 25000 }
+}
+
+pipeline "rental" {
+    from { connection = connection.src  table = "rental" }
+    to   { connection = connection.dst  table = "rental" }
+    settings { create_missing_tables = true  batch_size = 25000 }
+}
+
+pipeline "staff" {
+    from { connection = connection.src  table = "staff" }
+    to   { connection = connection.dst  table = "staff" }
+    settings { create_missing_tables = true  batch_size = 25000 }
+}
+
+pipeline "store" {
+    from { connection = connection.src  table = "store" }
+    to   { connection = connection.dst  table = "store" }
+    settings { create_missing_tables = true  batch_size = 25000 }
+}

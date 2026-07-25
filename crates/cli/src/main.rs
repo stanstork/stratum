@@ -2,6 +2,12 @@ use crate::{
     args::Cli, commands::execute_command, env::EnvManager, error::CliError,
     shutdown::ShutdownCoordinator,
 };
+
+// Keeps peak RSS of the data pipeline in check on many-core machines
+// versus the default system allocator.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use clap::Parser;
 use engine_infra::shutdown::ShutdownSignal;
 use engine_processing::EnvContext;

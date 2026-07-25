@@ -32,6 +32,8 @@ pub struct DataSource {
     pub joins: Vec<Join>,
     pub pagination: Option<Pagination>,
     pub graph_references: Option<GraphReferences>,
+    #[serde(default)]
+    pub tuning: HashMap<String, Value>,
 }
 
 /// To block - data destination configuration
@@ -41,6 +43,8 @@ pub struct DataDestination {
     pub table: String,
     pub mode: WriteMode,
     pub table_map: HashMap<String, String>,
+    #[serde(default)]
+    pub tuning: HashMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

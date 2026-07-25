@@ -409,6 +409,7 @@ Stratum stores pipeline state in `~/.stratum/state/` (sled embedded KV). If a mi
 | [docs/architecture.md](docs/architecture.md) | Crate map, design decisions, data flow |
 | [docs/plugins/](docs/plugins/README.md) | WASM plugins - roles, native Rust & JS (QuickJS) runtimes, authoring, CLI |
 | [docs/verification.md](docs/verification.md) | Cryptographic verification design and implementation |
+| [docs/benchmarks.md](docs/benchmarks.md) | Reproducible benchmark vs pgloader - methodology, results, `./benchmarks/run.sh` |
 | [examples/configs/](examples/configs/) | Runnable SMQL examples - schema mapping, DAG dependencies, validation, DLQ, and [`when.smql`](examples/configs/when.smql) (conditional values & computed-column chains) |
 
 ## Development
