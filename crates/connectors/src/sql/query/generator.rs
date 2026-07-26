@@ -340,10 +340,10 @@ impl<'a> QueryGenerator<'a> {
         &self,
         table: &str,
         columns: &[ColumnDef],
-        ignore_constraints: bool,
+        skip_primary_key: bool,
         temp: bool,
     ) -> (String, Vec<Value>) {
-        let primary_keys: Vec<String> = if ignore_constraints {
+        let primary_keys: Vec<String> = if skip_primary_key {
             Vec::new()
         } else {
             columns
@@ -354,7 +354,7 @@ impl<'a> QueryGenerator<'a> {
         };
 
         // MySQL rejects AUTO_INCREMENT on a column that belongs to no key (1075),
-        // which is exactly what `ignore_constraints` produces. Drop the attribute
+        // which is exactly what `skip_primary_key` produces. Drop the attribute
         // rather than emit invalid DDL. PostgreSQL's SERIAL needs no key.
         let drop_auto_inc = primary_keys.is_empty() && self.dialect.auto_inc_requires_key();
 

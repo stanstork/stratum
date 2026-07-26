@@ -657,7 +657,9 @@ settings {
 | `batch_size` | integer | `1000` | Rows per batch |
 | `create_missing_tables` | bool | `false` | Create the destination table if it doesn't exist |
 | `create_missing_columns` | bool | `false` | Add missing columns to an existing destination table |
-| `ignore_constraints` | bool | `false` | Skip creating foreign keys / constraints on the destination |
+| `skip_primary_keys` | bool | `false` | Create destination tables without a primary key (and never add one) |
+| `skip_foreign_keys` | bool | `false` | Don't create foreign-key constraints on the destination |
+| `skip_indexes` | bool | `false` | Don't create secondary (non-constraint) indexes on the destination |
 | `copy_columns` | enum | `"all"` | `"all"` copies every source column; `"map_only"` copies only mapped/`select`ed columns |
 
 ---

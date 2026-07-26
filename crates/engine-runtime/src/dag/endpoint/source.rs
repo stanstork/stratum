@@ -78,12 +78,16 @@ impl CsvSourceEndpoint {
 }
 
 impl DbSourceEndpoint {
+    #[allow(clippy::too_many_arguments)]
     async fn expand_graph(
         &self,
         root_table: &str,
         mapping: &TransformationMetadata,
         refs: &GraphReferences,
         dest_dialect: Dialect,
+        skip_primary_keys: bool,
+        skip_foreign_keys: bool,
+        skip_indexes: bool,
     ) -> Result<(Option<SchemaOps>, Option<HashMap<String, TableMetadata>>), MigrationError> {
         let source_dialect = self.0.dialect();
         let result = dispatch_driver!(&self.0, |d| {
@@ -91,7 +95,15 @@ impl DbSourceEndpoint {
             let type_registry = Arc::new(TypeRegistry::new(source_dialect, dest_dialect));
             let expander = GraphExpander::new(introspector, type_registry, source_dialect);
             expander
-                .expand(root_table, refs, mapping, false, false)
+                .expand(
+                    root_table,
+                    refs,
+                    mapping,
+                    skip_primary_keys,
+                    skip_foreign_keys,
+                    skip_indexes,
+                    false,
+                )
                 .await
                 .map_err(MigrationError::from)?
         });
@@ -117,8 +129,16 @@ impl SourceEndpoint for DbSourceEndpoint {
                         "graph expansion requires a SQL destination dialect, but destination driver '{dest_driver}' is not a SQL dialect"
                     ))
                 })?;
-                self.expand_graph(&pipeline.source.table, mapping, refs, dest_dialect)
-                    .await?
+                self.expand_graph(
+                    &pipeline.source.table,
+                    mapping,
+                    refs,
+                    dest_dialect,
+                    pipeline.setting_flag("skip_primary_keys"),
+                    pipeline.setting_flag("skip_foreign_keys"),
+                    pipeline.setting_flag("skip_indexes"),
+                )
+                .await?
             }
             None => (None, None),
         };

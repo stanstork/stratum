@@ -39,7 +39,7 @@ impl<'a> SettingsValidator<'a> {
 
         self.validate_batch_size(settings, &mut builder);
         self.validate_copy_columns(settings, &mut builder);
-        self.validate_ignore_constraints(settings, &mut builder, &mut errors);
+        self.validate_skip_constraints(settings, &mut builder, &mut errors);
         self.validate_lanes(settings, &mut builder);
         self.validate_create_tables(settings, &mut builder, &mut errors)
             .await?;
@@ -86,19 +86,29 @@ impl<'a> SettingsValidator<'a> {
         }
     }
 
-    fn validate_ignore_constraints(
+    fn validate_skip_constraints(
         &self,
         settings: &Settings,
         builder: &mut ValidatedSettingsBuilder,
         errors: &mut Vec<String>,
     ) {
-        if settings.ignore_constraints {
-            if !self.is_sql_destination() {
-                errors
-                    .push("ignore_constraints is only supported for SQL destinations".to_string());
-                return;
-            }
-            builder.ignore_constraints = Some(true);
+        if (settings.skip_primary_keys || settings.skip_foreign_keys || settings.skip_indexes)
+            && !self.is_sql_destination()
+        {
+            errors.push(
+                "skip_primary_keys / skip_foreign_keys / skip_indexes are only supported for SQL destinations"
+                    .to_string(),
+            );
+            return;
+        }
+        if settings.skip_primary_keys {
+            builder.skip_primary_keys = Some(true);
+        }
+        if settings.skip_foreign_keys {
+            builder.skip_foreign_keys = Some(true);
+        }
+        if settings.skip_indexes {
+            builder.skip_indexes = Some(true);
         }
     }
 
@@ -173,7 +183,9 @@ impl<'a> SettingsValidator<'a> {
             copy_columns = ?settings.copy_columns(),
             create_missing_tables = settings.create_missing_tables(),
             create_missing_columns = settings.create_missing_columns(),
-            ignore_constraints = settings.ignore_constraints(),
+            skip_primary_keys = settings.skip_primary_keys(),
+            skip_foreign_keys = settings.skip_foreign_keys(),
+            skip_indexes = settings.skip_indexes(),
             dry_run = settings.is_dry_run(),
             "validated settings"
         );

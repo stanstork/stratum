@@ -46,7 +46,6 @@ impl<D: SchemaDriver> SchemaSettingContext<D> {
     }
 
     pub async fn init_schema_planner(&self) -> Result<SchemaPlanner, SettingsError> {
-        let ignore_constraints = self.settings.ignore_constraints();
         let mapped_columns_only = *self.settings.copy_columns() == CopyColumns::MapOnly;
         let introspector = self.source.introspector.clone();
 
@@ -54,14 +53,15 @@ impl<D: SchemaDriver> SchemaSettingContext<D> {
             introspector,
             self.source.dialect,
             self.mapping.clone(),
-            ignore_constraints,
+            self.settings.skip_primary_keys(),
+            self.settings.skip_foreign_keys(),
+            self.settings.skip_indexes(),
             mapped_columns_only,
             self.type_registry(),
         ))
     }
 
     pub async fn build_schema_plan(&self) -> Result<SchemaPlan, SettingsError> {
-        let ignore_constraints = self.settings.ignore_constraints();
         let mapped_columns_only = *self.settings.copy_columns() == CopyColumns::MapOnly;
 
         let introspector = self.source.introspector.clone();
@@ -72,7 +72,9 @@ impl<D: SchemaDriver> SchemaSettingContext<D> {
 
         Ok(SchemaPlan::new(
             type_engine,
-            ignore_constraints,
+            self.settings.skip_primary_keys(),
+            self.settings.skip_foreign_keys(),
+            self.settings.skip_indexes(),
             mapped_columns_only,
             self.mapping.clone(),
         ))

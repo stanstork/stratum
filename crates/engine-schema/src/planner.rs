@@ -28,17 +28,22 @@ pub struct SchemaPlanner {
     introspector: Arc<dyn SchemaIntrospector>,
     source_dialect: Dialect,
     mapping: TransformationMetadata,
-    ignore_constraints: bool,
+    skip_primary_keys: bool,
+    skip_foreign_keys: bool,
+    skip_indexes: bool,
     mapped_columns_only: bool,
     type_registry: Arc<TypeRegistry>,
 }
 
 impl SchemaPlanner {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         introspector: Arc<dyn SchemaIntrospector>,
         source_dialect: Dialect,
         mapping: TransformationMetadata,
-        ignore_constraints: bool,
+        skip_primary_keys: bool,
+        skip_foreign_keys: bool,
+        skip_indexes: bool,
         mapped_columns_only: bool,
         type_registry: TypeRegistry,
     ) -> Self {
@@ -46,7 +51,9 @@ impl SchemaPlanner {
             introspector,
             source_dialect,
             mapping,
-            ignore_constraints,
+            skip_primary_keys,
+            skip_foreign_keys,
+            skip_indexes,
             mapped_columns_only,
             type_registry: Arc::new(type_registry),
         }
@@ -84,7 +91,9 @@ impl SchemaPlanner {
 
         let mut plan = SchemaPlan::new(
             type_engine,
-            self.ignore_constraints,
+            self.skip_primary_keys,
+            self.skip_foreign_keys,
+            self.skip_indexes,
             self.mapped_columns_only,
             self.mapping.clone(),
         );

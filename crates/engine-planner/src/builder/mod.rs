@@ -634,7 +634,9 @@ impl ReportBuilder {
             introspector.clone(),
             source_dialect,
             mapping.clone(),
-            view.ignore_constraints(),
+            view.skip_primary_keys(),
+            view.skip_foreign_keys(),
+            view.skip_indexes(),
             view.mapped_columns_only(),
             type_registry,
         );

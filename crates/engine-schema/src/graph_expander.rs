@@ -54,12 +54,15 @@ impl GraphExpander {
     }
 
     /// Expand the FK graph from the root table and produce schema operations.
+    #[allow(clippy::too_many_arguments)]
     pub async fn expand(
         &self,
         root_table: &str,
         refs: &GraphReferences,
         mapping: &TransformationMetadata,
-        ignore_constraints: bool,
+        skip_primary_keys: bool,
+        skip_foreign_keys: bool,
+        skip_indexes: bool,
         mapped_columns_only: bool,
     ) -> Result<GraphExpansionResult, DriverError> {
         // Build full metadata graph from root table
@@ -85,7 +88,9 @@ impl GraphExpander {
             .build_schema_ops(
                 &filtered_tables,
                 mapping,
-                ignore_constraints,
+                skip_primary_keys,
+                skip_foreign_keys,
+                skip_indexes,
                 mapped_columns_only,
                 refs.drop_constraints,
             )
@@ -189,11 +194,14 @@ impl GraphExpander {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn build_schema_ops(
         &self,
         tables: &[String],
         mapping: &TransformationMetadata,
-        ignore_constraints: bool,
+        skip_primary_keys: bool,
+        skip_foreign_keys: bool,
+        skip_indexes: bool,
         mapped_columns_only: bool,
         drop_constraints: bool,
     ) -> Result<SchemaOps, DriverError> {
@@ -206,7 +214,9 @@ impl GraphExpander {
             self.introspector.clone(),
             self.source_dialect,
             augmented,
-            ignore_constraints,
+            skip_primary_keys,
+            skip_foreign_keys,
+            skip_indexes,
             mapped_columns_only,
             (*self.type_registry).clone(),
         );

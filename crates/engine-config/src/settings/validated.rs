@@ -16,8 +16,13 @@ pub struct ValidatedSettings {
     pub create_missing_tables: bool,
     /// Whether to create missing columns at destination
     pub create_missing_columns: bool,
-    /// Whether to ignore constraints during migration
-    pub ignore_constraints: bool,
+    /// Skip primary keys: create destination tables without a PK and never add
+    /// one (also disables `pk_creation` deferral).
+    pub skip_primary_keys: bool,
+    /// Skip foreign keys: don't create FK constraints on the destination.
+    pub skip_foreign_keys: bool,
+    /// Skip secondary indexes: don't create non-constraint indexes on the destination.
+    pub skip_indexes: bool,
     /// Parallel range lanes for a single-table snapshot copy (>= 1).
     pub lanes: usize,
     /// When the destination primary key is created relative to the bulk load.
@@ -35,7 +40,9 @@ impl ValidatedSettings {
             copy_columns: CopyColumns::All,
             create_missing_tables: false,
             create_missing_columns: false,
-            ignore_constraints: false,
+            skip_primary_keys: false,
+            skip_foreign_keys: false,
+            skip_indexes: false,
             lanes: 1,
             pk_creation: PkCreation::Pre,
             dry_run,
@@ -65,7 +72,9 @@ impl ValidatedSettings {
             copy_columns: builder.copy_columns.unwrap_or(CopyColumns::All),
             create_missing_tables: builder.create_missing_tables.unwrap_or(false),
             create_missing_columns: builder.create_missing_columns.unwrap_or(false),
-            ignore_constraints: builder.ignore_constraints.unwrap_or(false),
+            skip_primary_keys: builder.skip_primary_keys.unwrap_or(false),
+            skip_foreign_keys: builder.skip_foreign_keys.unwrap_or(false),
+            skip_indexes: builder.skip_indexes.unwrap_or(false),
             lanes: builder.lanes.unwrap_or(1),
             pk_creation: builder.pk_creation.unwrap_or_default(),
             dry_run: builder.dry_run,
@@ -89,8 +98,16 @@ impl ValidatedSettings {
         self.create_missing_columns
     }
 
-    pub fn ignore_constraints(&self) -> bool {
-        self.ignore_constraints
+    pub fn skip_primary_keys(&self) -> bool {
+        self.skip_primary_keys
+    }
+
+    pub fn skip_foreign_keys(&self) -> bool {
+        self.skip_foreign_keys
+    }
+
+    pub fn skip_indexes(&self) -> bool {
+        self.skip_indexes
     }
 
     pub fn lanes(&self) -> usize {
@@ -134,7 +151,9 @@ pub struct ValidatedSettingsBuilder {
     pub copy_columns: Option<CopyColumns>,
     pub create_missing_tables: Option<bool>,
     pub create_missing_columns: Option<bool>,
-    pub ignore_constraints: Option<bool>,
+    pub skip_primary_keys: Option<bool>,
+    pub skip_foreign_keys: Option<bool>,
+    pub skip_indexes: Option<bool>,
     pub lanes: Option<usize>,
     pub pk_creation: Option<PkCreation>,
     pub dry_run: bool,
@@ -170,8 +189,18 @@ impl ValidatedSettingsBuilder {
         self
     }
 
-    pub fn ignore_constraints(mut self, ignore_constraints: bool) -> Self {
-        self.ignore_constraints = Some(ignore_constraints);
+    pub fn skip_primary_keys(mut self, skip: bool) -> Self {
+        self.skip_primary_keys = Some(skip);
+        self
+    }
+
+    pub fn skip_foreign_keys(mut self, skip: bool) -> Self {
+        self.skip_foreign_keys = Some(skip);
+        self
+    }
+
+    pub fn skip_indexes(mut self, skip: bool) -> Self {
+        self.skip_indexes = Some(skip);
         self
     }
 

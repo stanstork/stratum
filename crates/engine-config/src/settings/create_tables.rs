@@ -30,7 +30,8 @@ impl<D: SchemaDriver> CreateMissingTablesSetting<D> {
     }
 
     async fn build_schema_ops(&self) -> Result<SchemaOps, SettingsError> {
-        let defer_pk = self.context.settings.pk_creation() == PkCreation::Post;
+        let defer_pk = self.context.settings.pk_creation() == PkCreation::Post
+            && !self.context.settings.skip_primary_keys();
 
         // If the table already exists, bail out. `pk_creation = "post"` only
         // applies to tables we create, so warn and leave an existing PK as-is.

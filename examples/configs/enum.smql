@@ -56,7 +56,8 @@ pipeline "migrate_film" {
 
     settings {
         create_missing_tables = true
-        ignore_constraints    = true   // original_language_id FK skipped
+        skip_primary_keys = true
+        skip_foreign_keys = true   // original_language_id FK skipped
         batch_size            = 200
     }
 }

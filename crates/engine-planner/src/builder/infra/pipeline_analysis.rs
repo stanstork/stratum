@@ -135,8 +135,16 @@ impl<'a> PipelineSettingsView<'a> {
         Self { settings }
     }
 
-    pub fn ignore_constraints(&self) -> bool {
-        self.settings.ignore_constraints()
+    pub fn skip_primary_keys(&self) -> bool {
+        self.settings.skip_primary_keys()
+    }
+
+    pub fn skip_foreign_keys(&self) -> bool {
+        self.settings.skip_foreign_keys()
+    }
+
+    pub fn skip_indexes(&self) -> bool {
+        self.settings.skip_indexes()
     }
 
     pub fn mapped_columns_only(&self) -> bool {

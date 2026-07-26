@@ -171,8 +171,21 @@ async fn expand_graph(
         dispatch_driver!(src_driver, |d| d.clone() as Arc<dyn SchemaIntrospector>);
     let type_registry = Arc::new(TypeRegistry::new(source_dialect, dest_dialect));
     let expander = GraphExpander::new(introspector, type_registry, source_dialect);
+
+    let skip_pk = pipeline.setting_flag("skip_primary_keys");
+    let skip_fk = pipeline.setting_flag("skip_foreign_keys");
+    let skip_idx = pipeline.setting_flag("skip_indexes");
+
     expander
-        .expand(&pipeline.source.table, refs, &mapping, false, false)
+        .expand(
+            &pipeline.source.table,
+            refs,
+            &mapping,
+            skip_pk,
+            skip_fk,
+            skip_idx,
+            false,
+        )
         .await
         .map_err(|e| {
             ReportBuilderError::SourceAnalyzer(SourceAnalyzerError::QueryFailed(format!(

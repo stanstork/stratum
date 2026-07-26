@@ -23,6 +23,13 @@ pub struct Pipeline {
     pub plugin_transforms: Vec<PluginTransformCall>,
 }
 
+impl Pipeline {
+    /// Read a boolean `settings { }` flag from the raw settings map.
+    pub fn setting_flag(&self, key: &str) -> bool {
+        matches!(self.settings.get(key), Some(Value::Boolean(true)))
+    }
+}
+
 /// From block - data source configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataSource {
