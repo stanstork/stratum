@@ -4,9 +4,10 @@ use super::{
 };
 use crate::settings::error::SettingsError;
 use async_trait::async_trait;
+use connectors::drivers::postgres::config::PkCreation;
 use engine_core::schema::schema_ops::{SchemaOp, SchemaOps};
 use engine_processing::context::PipelineContext;
-use tracing::info;
+use tracing::{info, warn};
 
 pub struct CreateMissingTablesSetting<D: SchemaDriver> {
     context: SchemaSettingContext<D>,
@@ -29,8 +30,17 @@ impl<D: SchemaDriver> CreateMissingTablesSetting<D> {
     }
 
     async fn build_schema_ops(&self) -> Result<SchemaOps, SettingsError> {
-        // If the table already exists, bail out
+        let defer_pk = self.context.settings.pk_creation() == PkCreation::Post;
+
+        // If the table already exists, bail out. `pk_creation = "post"` only
+        // applies to tables we create, so warn and leave an existing PK as-is.
         if self.context.destination_exists().await? {
+            if defer_pk {
+                warn!(
+                    table = %self.context.destination.name,
+                    "pk_creation=\"post\" ignored: destination table already exists; leaving its primary key in place"
+                );
+            }
             info!("destination table already exists, skipping schema creation");
             return Ok(SchemaOps::empty());
         }
@@ -54,14 +64,34 @@ impl<D: SchemaDriver> CreateMissingTablesSetting<D> {
             });
         }
 
-        // Table queries -> pre
-        for (sql, name) in plan.table_queries().await {
+        // Table queries -> pre. With `pk_creation = "post"` the tables are
+        // created without their primary key and it is added back after the load,
+        // so per-row index maintenance doesn't slow the bulk COPY.
+        let table_queries = if defer_pk {
+            plan.table_queries_no_pk().await
+        } else {
+            plan.table_queries().await
+        };
+        for (sql, name) in table_queries {
             ops.pre.push(SchemaOp {
                 sql,
                 description: format!("Create table '{}'", name),
                 idempotent: false,
                 skip_if_missing_ref: false,
             });
+        }
+
+        // Deferred primary keys -> post, *before* the FKs (an FK may reference a
+        // PK/unique that must already exist).
+        if defer_pk {
+            for (sql, name) in plan.pk_queries() {
+                ops.post.push(SchemaOp {
+                    sql,
+                    description: format!("Add primary key on '{}'", name),
+                    idempotent: false,
+                    skip_if_missing_ref: false,
+                });
+            }
         }
 
         // FK queries -> post

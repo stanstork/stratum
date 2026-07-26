@@ -72,13 +72,6 @@ pub trait SourceEndpoint: Send + Sync {
     ) -> Option<(Arc<dyn SchemaIntrospector>, Dialect)>;
 }
 
-/// Constraints/indexes dropped before a bulk load, to be restored after it.
-#[derive(Default)]
-pub struct BulkLoadGuard {
-    /// SQL statements that rebuild what was dropped (e.g. `ADD PRIMARY KEY`).
-    pub rebuild: Vec<String>,
-}
-
 #[async_trait]
 pub trait DestinationEndpoint: Send + Sync {
     async fn build(
@@ -87,26 +80,10 @@ pub trait DestinationEndpoint: Send + Sync {
         source_dialect: Option<Dialect>,
     ) -> Result<Destination, MigrationError>;
 
-    /// Once-per-load hook run before any lane starts: drop indexes/constraints
-    /// whose per-row maintenance would slow the bulk COPY, so they can be built
-    /// once in bulk afterward. Lane-safe by construction (single call, before
-    /// fan-out). Default: no-op. Returns a guard describing what to restore.
-    async fn prepare_bulk_load(
-        &self,
-        _metas: &[TableMetadata],
-    ) -> Result<BulkLoadGuard, MigrationError> {
-        Ok(BulkLoadGuard::default())
-    }
-
-    /// Once-per-load hook run after all lanes finish: restore what
-    /// [`prepare_bulk_load`] dropped. Default: no-op.
-    async fn finish_bulk_load(&self, _guard: BulkLoadGuard) -> Result<(), MigrationError> {
-        Ok(())
-    }
-
-    /// Like [`build`], but backed by its own connection so a parallel lane
-    /// writes independently. Defaults to [`build`] (a shared handle) - only DB
-    /// destinations with a single write connection override it.
+    /// Like [`build`](Self::build), but backed by its own connection so a
+    /// parallel lane writes independently. Defaults to [`build`](Self::build)
+    /// (a shared handle) - only DB destinations with a single write connection
+    /// override it.
     async fn build_lane(
         &self,
         pipeline: &Pipeline,

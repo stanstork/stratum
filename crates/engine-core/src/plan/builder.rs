@@ -1,5 +1,5 @@
 use crate::context::env::EnvContext;
-use connectors::drivers::postgres::config::{CopyFormat, PgConflictAction};
+use connectors::drivers::postgres::config::{CopyFormat, PgConflictAction, PkCreation};
 use model::{
     core::value::Value,
     execution::{
@@ -18,8 +18,8 @@ use model::{
         properties::Properties,
         references::{DataMode, GraphReferences, TraversalDepth},
         tuning::{
-            COPY_FORMAT as TUNING_COPY_FORMAT, DROP_INDEXES as TUNING_DROP_INDEXES,
-            ON_CONFLICT as TUNING_ON_CONFLICT,
+            COPY_FORMAT as TUNING_COPY_FORMAT, ON_CONFLICT as TUNING_ON_CONFLICT,
+            PK_CREATION as TUNING_PK_CREATION,
         },
     },
 };
@@ -414,7 +414,7 @@ impl PlanBuilder {
     }
 
     /// Extract driver-specific tuning from a `from`/`to` endpoint's dialect
-    /// blocks (e.g. `postgres { drop_indexes = true }`).
+    /// blocks (e.g. `postgres { pk_creation = "post" }`).
     fn build_endpoint_tuning(
         &self,
         nested_blocks: &[NestedBlock],
@@ -1334,7 +1334,7 @@ impl PlanBuilder {
 
     fn allowed_tuning_keys(dialect: &str) -> &'static [&'static str] {
         match dialect {
-            DIALECT_POSTGRES => &[TUNING_DROP_INDEXES, TUNING_COPY_FORMAT, TUNING_ON_CONFLICT],
+            DIALECT_POSTGRES => &[TUNING_PK_CREATION, TUNING_COPY_FORMAT, TUNING_ON_CONFLICT],
             DIALECT_MYSQL => &[TUNING_ON_CONFLICT],
             _ => &[],
         }
@@ -1376,10 +1376,11 @@ impl PlanBuilder {
                     )));
                 }
             }
-            TUNING_DROP_INDEXES => {
-                if !matches!(value, Value::Boolean(_)) {
+            TUNING_PK_CREATION => {
+                let is_valid = matches!(value, Value::String(s) if PkCreation::parse(s).is_some());
+                if !is_valid {
                     return Err(ConvertError::Plan(format!(
-                        "invalid `{TUNING_DROP_INDEXES}` in {endpoint}: expected `true` or `false`"
+                        "invalid `{TUNING_PK_CREATION}` in {endpoint}: expected \"pre\" or \"post\""
                     )));
                 }
             }

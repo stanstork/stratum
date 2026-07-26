@@ -22,12 +22,10 @@ use engine_processing::{
 use engine_state::MerkleStore;
 use model::integrity::{algorithm::HashAlgorithm, config::IntegrityConfig};
 use model::{
-    core::value::Value,
     events::migration::MigrationEvent,
     execution::{
         pipeline::{Pipeline, WriteMode},
         references::DataMode,
-        tuning,
     },
     pagination::cursor::QualCol,
 };
@@ -220,12 +218,6 @@ impl PipelineOrchestrator {
         let metrics = Metrics::new();
         let dest_metas = self.fetch_destination_metadata().await?;
 
-        let bulk_guard = if self.should_bulk_drop_pk() {
-            Some(self.dest_ep.prepare_bulk_load(&dest_metas).await?)
-        } else {
-            None
-        };
-
         let lanes = self.plan_lanes().await?;
         let lanes_num = lanes.len();
 
@@ -262,11 +254,6 @@ impl PipelineOrchestrator {
         self.run_coordinators(coordinators, &metrics, start_time)
             .await?;
 
-        // All lanes succeeded: rebuild the PK in bulk.
-        if let Some(guard) = bulk_guard {
-            self.dest_ep.finish_bulk_load(guard).await?;
-        }
-
         // Combine every lane's hashes into one receipt per table.
         if let (Some(sink), Some(config)) = (&lane_sink, &integrity) {
             let merkle_store = self.ctx.state.clone() as Arc<dyn MerkleStore>;
@@ -284,31 +271,6 @@ impl PipelineOrchestrator {
         }
 
         Ok(metrics.snapshot().records_processed)
-    }
-
-    fn should_bulk_drop_pk(&self) -> bool {
-        let requested = matches!(
-            self.pipeline.destination.tuning.get(tuning::DROP_INDEXES),
-            Some(Value::Boolean(true))
-        );
-
-        if !requested {
-            return false;
-        }
-
-        let direct = matches!(
-            self.pipeline.destination.mode,
-            WriteMode::Insert | WriteMode::Replace
-        );
-
-        if !direct {
-            warn!(
-                mode = ?self.pipeline.destination.mode,
-                "drop_indexes ignored: only applies to Insert/Replace (direct copy) loads"
-            );
-        }
-
-        direct
     }
 
     async fn plan_lanes(&self) -> Result<Vec<(Source, String)>, MigrationError> {

@@ -1,5 +1,7 @@
-/// Postgres: drop the target's indexes/PK for the bulk load, rebuild after.
-pub const DROP_INDEXES: &str = "drop_indexes";
+/// Postgres: when to create the primary key - `"pre"` (default; PK present
+/// during the load) or `"post"` (create the table without its PK and add it
+/// after the bulk load, so index maintenance doesn't slow the COPY).
+pub const PK_CREATION: &str = "pk_creation";
 /// Postgres: COPY wire format (`"binary"` / `"text"`).
 pub const COPY_FORMAT: &str = "copy_format";
 /// Conflict handling - Postgres `ON CONFLICT`, MySQL `LOAD DATA` modifier.

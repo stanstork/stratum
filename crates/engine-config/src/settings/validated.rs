@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::settings::CopyColumns;
+use connectors::drivers::postgres::config::PkCreation;
 use model::{core::value::Value, execution::flags::IntegrityMode};
 use serde::Serialize;
 
@@ -19,6 +20,8 @@ pub struct ValidatedSettings {
     pub ignore_constraints: bool,
     /// Parallel range lanes for a single-table snapshot copy (>= 1).
     pub lanes: usize,
+    /// When the destination primary key is created relative to the bulk load.
+    pub pk_creation: PkCreation,
     /// Whether this is a dry run (no changes applied)
     pub dry_run: bool,
     /// Integrity hashing mode for this migration run.
@@ -34,6 +37,7 @@ impl ValidatedSettings {
             create_missing_columns: false,
             ignore_constraints: false,
             lanes: 1,
+            pk_creation: PkCreation::Pre,
             dry_run,
             integrity: IntegrityMode::Off,
         }
@@ -63,6 +67,7 @@ impl ValidatedSettings {
             create_missing_columns: builder.create_missing_columns.unwrap_or(false),
             ignore_constraints: builder.ignore_constraints.unwrap_or(false),
             lanes: builder.lanes.unwrap_or(1),
+            pk_creation: builder.pk_creation.unwrap_or_default(),
             dry_run: builder.dry_run,
             integrity: builder.integrity,
         }
@@ -90,6 +95,10 @@ impl ValidatedSettings {
 
     pub fn lanes(&self) -> usize {
         self.lanes
+    }
+
+    pub fn pk_creation(&self) -> PkCreation {
+        self.pk_creation
     }
 
     pub fn is_dry_run(&self) -> bool {
@@ -127,6 +136,7 @@ pub struct ValidatedSettingsBuilder {
     pub create_missing_columns: Option<bool>,
     pub ignore_constraints: Option<bool>,
     pub lanes: Option<usize>,
+    pub pk_creation: Option<PkCreation>,
     pub dry_run: bool,
     pub integrity: IntegrityMode,
 }

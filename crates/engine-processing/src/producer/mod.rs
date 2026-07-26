@@ -1,4 +1,6 @@
+use crate::channel::{BatchEnvelope, ByteBudget};
 use crate::context::PipelineContext;
+use crate::io::source::Source;
 use crate::transform::wasm::WasmTransform;
 use crate::{
     error::ProducerError,
@@ -21,8 +23,6 @@ use crate::{
 use engine_core::{context::env::EnvContext, retry::RetryPolicy};
 use engine_state::MerkleStore;
 use engine_wasm::registry::PluginRegistry;
-use crate::channel::{BatchEnvelope, ByteBudget};
-use crate::io::source::Source;
 use model::{
     execution::pipeline::Pipeline, pagination::cursor::Cursor,
     transform::mapping::TransformationMetadata,

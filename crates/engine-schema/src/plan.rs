@@ -572,6 +572,14 @@ impl SchemaPlan {
     }
 
     pub async fn table_queries(&self) -> HashSet<(String, String)> {
+        self.build_table_queries(true).await
+    }
+
+    pub async fn table_queries_no_pk(&self) -> HashSet<(String, String)> {
+        self.build_table_queries(false).await
+    }
+
+    async fn build_table_queries(&self, include_pk: bool) -> HashSet<(String, String)> {
         let mut queries = HashSet::new();
 
         for (table, columns) in &self.column_definitions {
@@ -595,13 +603,45 @@ impl SchemaPlan {
                 .collect();
             resolved_columns.extend(new_computed);
 
+            // `ignore_constraints` already drops the PK; `!include_pk` additionally
+            // defers it so it can be rebuilt in bulk after the load.
+            let omit_pk = self.ignore_constraints || !include_pk;
             let (sql, _) = QueryGenerator::new(self.target_dialect.as_ref()).create_table(
                 &resolved_table,
                 &resolved_columns,
-                self.ignore_constraints,
+                omit_pk,
                 false,
             );
 
+            queries.insert((sql, resolved_table));
+        }
+
+        queries
+    }
+
+    pub fn pk_queries(&self) -> HashSet<(String, String)> {
+        let mut queries = HashSet::new();
+
+        for (table, columns) in &self.column_definitions {
+            let resolved_table = self.mapping.entities.resolve(table);
+            let mut resolved_columns = self.resolve_column_definitions(table, columns);
+
+            if self.mapped_columns_only {
+                resolved_columns =
+                    self.filter_to_mapped_columns(&resolved_table, resolved_columns.clone());
+            }
+
+            let pk_cols: Vec<String> = resolved_columns
+                .iter()
+                .filter(|c| c.is_primary_key)
+                .map(|c| c.name.clone())
+                .collect();
+            if pk_cols.is_empty() {
+                continue;
+            }
+
+            let (sql, _) = QueryGenerator::new(self.target_dialect.as_ref())
+                .add_primary_key(&resolved_table, &pk_cols);
             queries.insert((sql, resolved_table));
         }
 

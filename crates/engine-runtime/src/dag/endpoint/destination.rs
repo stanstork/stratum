@@ -1,7 +1,10 @@
-use super::{BulkLoadGuard, DestinationEndpoint, HookPhase, SourceEndpoint};
+use super::{DestinationEndpoint, HookPhase, SourceEndpoint};
 use crate::error::MigrationError;
 use async_trait::async_trait;
-use connectors::sql::metadata::{column::ColumnMetadata, table::TableMetadata};
+use connectors::{
+    drivers::postgres::config::PkCreation,
+    sql::metadata::{column::ColumnMetadata, table::TableMetadata},
+};
 use engine_config::settings::{self, ValidatedSettings};
 use engine_core::{
     dispatch_driver,
@@ -105,6 +108,7 @@ impl DestinationEndpoint for DbDestinationEndpoint {
                 SchemaOps::empty(),
             ));
         };
+        let pk_creation = PkCreation::resolve(&pipeline.destination);
         let result = dispatch_driver!(&self.0, |d| {
             settings::validate_and_plan(
                 ctx,
@@ -112,28 +116,13 @@ impl DestinationEndpoint for DbDestinationEndpoint {
                 src_dialect,
                 d.clone(),
                 &pipeline.settings,
+                pk_creation,
                 dry_run,
                 integrity,
             )
             .await?
         });
         Ok(result)
-    }
-
-    async fn prepare_bulk_load(
-        &self,
-        metas: &[TableMetadata],
-    ) -> Result<BulkLoadGuard, MigrationError> {
-        let rebuild = self.0.drop_primary_keys(metas).await.map_err(|e| {
-            MigrationError::PipelineFailed(format!("drop PK for bulk load failed: {e}"))
-        })?;
-        Ok(BulkLoadGuard { rebuild })
-    }
-
-    async fn finish_bulk_load(&self, guard: BulkLoadGuard) -> Result<(), MigrationError> {
-        self.0.execute_ddl(&guard.rebuild).await.map_err(|e| {
-            MigrationError::PipelineFailed(format!("PK rebuild after bulk load failed: {e}"))
-        })
     }
 
     async fn apply_schema_ops(&self, ops: &[SchemaOp], phase: &str) -> Result<(), MigrationError> {

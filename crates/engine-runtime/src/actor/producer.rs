@@ -21,6 +21,7 @@ struct ProducerTask {
     event_bus: EventBus,
     run_id: String,
     item_id: String,
+    part_id: String,
 
     // Delta tracking
     last_batches_processed: u64,
@@ -35,6 +36,7 @@ impl ProducerTask {
         event_bus: EventBus,
         run_id: String,
         item_id: String,
+        part_id: String,
     ) -> Self {
         Self {
             producer,
@@ -43,6 +45,7 @@ impl ProducerTask {
             event_bus,
             run_id,
             item_id,
+            part_id,
             last_batches_processed: 0,
             last_rows_skipped: 0,
             last_rows_failed: 0,
@@ -62,6 +65,7 @@ impl ProducerTask {
             info!(
                 run_id = %self.run_id,
                 item_id = %self.item_id,
+                part_id = %self.part_id,
                 "circuit breaker recovered"
             );
         }
@@ -72,7 +76,7 @@ impl ProducerTask {
             ProducerStatus::Working => TickAction::Continue,
             ProducerStatus::Idle => TickAction::Idle,
             ProducerStatus::Finished => {
-                info!(run_id = %self.run_id, item_id = %self.item_id, "producer finished");
+                info!(run_id = %self.run_id, item_id = %self.item_id, part_id = %self.part_id, "producer finished");
                 let _ = self.producer.stop().await;
                 TickAction::Done
             }
@@ -84,6 +88,7 @@ impl ProducerTask {
             info!(
                 run_id = %self.run_id,
                 item_id = %self.item_id,
+                part_id = %self.part_id,
                 "consumer channel closed, producer stopping gracefully"
             );
             let _ = self.producer.stop().await;
@@ -94,6 +99,7 @@ impl ProducerTask {
             error!(
                 run_id = %self.run_id,
                 item_id = %self.item_id,
+                part_id = %self.part_id,
                 error = %e,
                 "fatal error, stopping migration immediately"
             );
@@ -102,13 +108,14 @@ impl ProducerTask {
         }
 
         self.metrics.increment_failures(1);
-        error!(run_id = %self.run_id, item_id = %self.item_id, error = %e, "producer tick failed");
+        error!(run_id = %self.run_id, item_id = %self.item_id, part_id = %self.part_id, error = %e, "producer tick failed");
 
         match self.breaker.record_failure() {
             CircuitBreakerState::RetryAfter(delay) => {
                 warn!(
                     run_id = %self.run_id,
                     item_id = %self.item_id,
+                    part_id = %self.part_id,
                     delay_ms = delay.as_millis(),
                     failures = self.breaker.consecutive_failures(),
                     "circuit breaker backing off"
@@ -120,6 +127,7 @@ impl ProducerTask {
                 error!(
                     run_id = %self.run_id,
                     item_id = %self.item_id,
+                    part_id = %self.part_id,
                     failures = self.breaker.consecutive_failures(),
                     "circuit breaker open, stopping producer"
                 );
@@ -130,9 +138,9 @@ impl ProducerTask {
     }
 
     async fn handle_stop(&mut self, run_id: String, item_id: String) -> TickAction {
-        info!(run_id = %self.run_id, item_id = %self.item_id, "producer received stop");
+        info!(run_id = %self.run_id, item_id = %self.item_id, part_id = %self.part_id, "producer received stop");
         if let Err(e) = self.producer.stop().await {
-            error!(run_id = %self.run_id, item_id = %self.item_id, error = %e, "producer stop failed");
+            error!(run_id = %self.run_id, item_id = %self.item_id, part_id = %self.part_id, error = %e, "producer stop failed");
             return TickAction::Failed(ActorError::Internal(e.to_string()));
         }
 
@@ -195,13 +203,13 @@ pub async fn run_producer(
     metrics: Metrics,
 ) -> Result<(), ActorError> {
     // Wait for start signal
-    let (run_id, item_id) =
+    let (run_id, item_id, part_id) =
         match wait_for_start(&mut producer, &mut rx, &cancel_token, &event_bus).await? {
             Some(ids) => ids,
             None => return Ok(()), // Cancelled or Stopped before starting
         };
 
-    let mut task = ProducerTask::new(producer, metrics, event_bus, run_id, item_id);
+    let mut task = ProducerTask::new(producer, metrics, event_bus, run_id, item_id, part_id);
     let idle_delay = Duration::from_millis(500);
     let mut tick_interval = tokio::time::interval(Duration::from_millis(1));
     tick_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -230,13 +238,13 @@ pub async fn run_producer(
                 }
                 Some(_) => {}
                 None => {
-                    info!(run_id = %task.run_id, item_id = %task.item_id, "producer mailbox closed, stopping");
+                    info!(run_id = %task.run_id, item_id = %task.item_id, part_id = %task.part_id, "producer mailbox closed, stopping");
                     let _ = task.producer.stop().await;
                     return Ok(());
                 }
             },
             _ = cancel_token.cancelled() => {
-                info!(run_id = %task.run_id, item_id = %task.item_id, "producer stopping after cancellation");
+                info!(run_id = %task.run_id, item_id = %task.item_id, part_id = %task.part_id, "producer stopping after cancellation");
                 let _ = task.producer.stop().await;
                 return Ok(());
             }
@@ -249,16 +257,16 @@ async fn wait_for_start(
     rx: &mut mpsc::Receiver<ProducerMsg>,
     cancel_token: &CancellationToken,
     event_bus: &EventBus,
-) -> Result<Option<(String, String)>, ActorError> {
+) -> Result<Option<(String, String, String)>, ActorError> {
     tokio::select! {
         msg = rx.recv() => match msg {
-            Some(ProducerMsg::StartSnapshot { run_id, item_id }) => {
-                start_snapshot(producer, event_bus, &run_id, &item_id).await?;
-                Ok(Some((run_id, item_id)))
+            Some(ProducerMsg::StartSnapshot { run_id, item_id, part_id }) => {
+                start_snapshot(producer, event_bus, &run_id, &item_id, &part_id).await?;
+                Ok(Some((run_id, item_id, part_id)))
             }
-            Some(ProducerMsg::StartCdc { run_id, item_id }) => {
+            Some(ProducerMsg::StartCdc { run_id, item_id, part_id }) => {
                 start_cdc(producer, event_bus, &run_id, &item_id).await?;
-                Ok(Some((run_id, item_id)))
+                Ok(Some((run_id, item_id, part_id)))
             }
             Some(ProducerMsg::Stop { .. }) | None => {
                 info!("producer stopping before start");
@@ -277,13 +285,14 @@ async fn start_snapshot(
     event_bus: &EventBus,
     run_id: &str,
     item_id: &str,
+    part_id: &str,
 ) -> Result<(), ActorError> {
-    if let Err(e) = producer.resume(run_id, item_id, "part-0").await {
-        error!(run_id = %run_id, item_id = %item_id, error = %e, "failed to resume producer state");
+    if let Err(e) = producer.resume(run_id, item_id, part_id).await {
+        error!(run_id = %run_id, item_id = %item_id, part_id = %part_id, error = %e, "failed to resume producer state");
         return Err(ActorError::Internal(e.to_string()));
     }
     if let Err(e) = producer.start_snapshot().await {
-        error!(run_id = %run_id, item_id = %item_id, error = %e, "failed to start snapshot");
+        error!(run_id = %run_id, item_id = %item_id, part_id = %part_id, error = %e, "failed to start snapshot");
         return Err(ActorError::Internal(e.to_string()));
     }
 

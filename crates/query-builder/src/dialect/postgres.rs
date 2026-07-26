@@ -131,7 +131,8 @@ impl Dialect for Postgres {
     fn is_integer_type(&self, data_type: &str) -> bool {
         matches!(
             data_type.trim().to_lowercase().as_str(),
-            "int" | "integer"
+            "int"
+                | "integer"
                 | "bigint"
                 | "smallint"
                 | "int2"

@@ -97,11 +97,7 @@ impl PipelineAnalysisResources {
         });
 
         let validated_settings = builder
-            .validate_settings(
-                pipeline,
-                &core_data_destination,
-                dest_introspector.as_ref(),
-            )
+            .validate_settings(pipeline, &core_data_destination, dest_introspector.as_ref())
             .await?;
 
         let schema_plan = Arc::new(

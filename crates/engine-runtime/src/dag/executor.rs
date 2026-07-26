@@ -362,14 +362,16 @@ impl DagExecutor {
                         }
                     }
 
-                    // Always refresh rows_done from checkpoint (authoritative cumulative count)
-                    if let Ok(Some(cp)) = self
+                    // Refresh rows_done from checkpoints (authoritative cumulative
+                    // count, summed across every lane/part of the pipeline).
+                    if let Ok(total) = self
                         .exec_ctx
                         .state
-                        .load_checkpoint(&run_id, &ps.item_id, "part-0")
+                        .total_rows_done(&run_id, &ps.item_id)
                         .await
+                        && total > 0
                     {
-                        ps.rows_done = cp.rows_done;
+                        ps.rows_done = total;
                     }
                 }
 
@@ -537,17 +539,16 @@ impl DagExecutor {
 
         if let Some(ps) = run_state.pipelines.iter_mut().find(|p| p.name == name) {
             ps.status = PipelineStatus::Completed;
-            // Read cumulative rows from checkpoint (authoritative source),
-            // fall back to prior count + current session metrics.
-            if let Ok(Some(cp)) = self
+            // Cumulative rows from checkpoints (authoritative, summed across all
+            // lanes), falling back to prior count + this session's metrics.
+            match self
                 .exec_ctx
                 .state
-                .load_checkpoint(&self.exec_ctx.run_id(), &ps.item_id, "part-0")
+                .total_rows_done(&self.exec_ctx.run_id(), &ps.item_id)
                 .await
             {
-                ps.rows_done = cp.rows_done;
-            } else {
-                ps.rows_done += rows_done;
+                Ok(total) if total > 0 => ps.rows_done = total,
+                _ => ps.rows_done += rows_done,
             }
         }
 
@@ -581,14 +582,15 @@ impl DagExecutor {
                 };
             }
 
-            // Update rows_done from checkpoint (cumulative) for all pipelines
-            if let Ok(Some(cp)) = self
+            // Update rows_done from checkpoints (cumulative across all lanes).
+            if let Ok(total) = self
                 .exec_ctx
                 .state
-                .load_checkpoint(&run_id, &ps.item_id, "part-0")
+                .total_rows_done(&run_id, &ps.item_id)
                 .await
+                && total > 0
             {
-                ps.rows_done = cp.rows_done;
+                ps.rows_done = total;
             }
         }
 

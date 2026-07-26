@@ -5,7 +5,7 @@ use super::{
     validator::SettingsValidator,
 };
 use crate::settings::SchemaSettingContext;
-use connectors::traits::introspector::SchemaIntrospector;
+use connectors::{drivers::postgres::config::PkCreation, traits::introspector::SchemaIntrospector};
 use engine_core::schema::{schema_ops::SchemaOps, type_registry::Dialect};
 use engine_processing::context::PipelineContext;
 use model::{core::value::Value, execution::flags::IntegrityMode};
@@ -15,12 +15,14 @@ use std::{collections::HashMap, sync::Arc};
 ///
 /// Returns validated settings (for non-schema config like batch_size) and
 /// the collected schema operations split into pre/post migration phases.
+#[allow(clippy::too_many_arguments)]
 pub async fn validate_and_plan<D>(
     ctx: &mut PipelineContext,
     src_introspector: Arc<dyn SchemaIntrospector>,
     src_dialect: Dialect,
     dst_driver: Arc<D>,
     settings: &HashMap<String, Value>,
+    pk_creation: PkCreation,
     is_dry_run: bool,
     integrity: IntegrityMode,
 ) -> Result<(ValidatedSettings, SchemaOps), SettingsError>
@@ -36,7 +38,10 @@ where
         is_dry_run,
         integrity,
     );
-    let validated_settings = validator.validate(&settings).await?;
+    let mut validated_settings = validator.validate(&settings).await?;
+
+    // `pk_creation` comes from the destination's dialect tuning.
+    validated_settings.pk_creation = pk_creation;
 
     let mut all_settings = collect_settings(
         ctx,

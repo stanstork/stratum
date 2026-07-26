@@ -56,6 +56,7 @@ impl PipelineSettings {
             create_missing_columns: self.create_missing_columns,
             ignore_constraints: self.ignore_constraints,
             lanes: self.lanes,
+            pk_creation: Default::default(),
             dry_run: self.dry_run,
             integrity: IntegrityMode::Off,
         }

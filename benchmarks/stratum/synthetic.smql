@@ -26,10 +26,16 @@ pipeline "orders" {
     to {
         connection = connection.dst
         table      = "orders"
+
+        postgres {
+            pk_creation = "post"
+            copy_format = "binary"
+        }
     }
 
     settings {
         create_missing_tables = true
         batch_size            = 50000
+        lanes                 = 1
     }
 }

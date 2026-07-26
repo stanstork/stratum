@@ -30,6 +30,7 @@ struct ConsumerTask {
     event_bus: EventBus,
     run_id: String,
     item_id: String,
+    part_id: String,
 
     // Progress tracking
     start_time: Instant,
@@ -47,6 +48,7 @@ impl ConsumerTask {
         event_bus: EventBus,
         run_id: String,
         item_id: String,
+        part_id: String,
     ) -> Self {
         let now = Instant::now();
         Self {
@@ -56,6 +58,7 @@ impl ConsumerTask {
             event_bus,
             run_id,
             item_id,
+            part_id,
             start_time: now,
             last_progress_report: now,
             progress_interval: Duration::from_millis(500),
@@ -78,6 +81,7 @@ impl ConsumerTask {
                         info!(
                             run_id = %self.run_id,
                             item_id = %self.item_id,
+                            part_id = %self.part_id,
                             "circuit breaker recovered"
                         );
                     }
@@ -95,9 +99,9 @@ impl ConsumerTask {
 
     /// The producer closed the channel and it is drained: finalize and finish.
     async fn on_drained(&mut self) -> TickAction {
-        info!(run_id = %self.run_id, item_id = %self.item_id, "consumer finished");
+        info!(run_id = %self.run_id, item_id = %self.item_id, part_id = %self.part_id, "consumer finished");
         if let Err(e) = self.consumer.finalize().await {
-            error!(run_id = %self.run_id, item_id = %self.item_id, error = %e, "consumer finalize failed");
+            error!(run_id = %self.run_id, item_id = %self.item_id, part_id = %self.part_id, error = %e, "consumer finalize failed");
             let _ = self.consumer.stop().await;
             return TickAction::Failed(ActorError::Internal(e.to_string()));
         }
@@ -107,13 +111,14 @@ impl ConsumerTask {
 
     async fn handle_error(&mut self, e: ConsumerError) -> AfterFailure {
         self.metrics.increment_failures(1);
-        error!(run_id = %self.run_id, item_id = %self.item_id, error = %e, "consumer tick failed");
+        error!(run_id = %self.run_id, item_id = %self.item_id, part_id = %self.part_id, error = %e, "consumer tick failed");
 
         match self.breaker.record_failure() {
             CircuitBreakerState::RetryAfter(delay) => {
                 warn!(
                     run_id = %self.run_id,
                     item_id = %self.item_id,
+                    part_id = %self.part_id,
                     delay_ms = delay.as_millis(),
                     failures = self.breaker.consecutive_failures(),
                     "circuit breaker backing off, will retry batch"
@@ -126,6 +131,7 @@ impl ConsumerTask {
                 error!(
                     run_id = %self.run_id,
                     item_id = %self.item_id,
+                    part_id = %self.part_id,
                     failures,
                     "circuit breaker open, stopping consumer"
                 );
@@ -143,9 +149,9 @@ impl ConsumerTask {
         item_id: String,
         part_id: String,
     ) -> TickAction {
-        info!(run_id = %self.run_id, item_id = %self.item_id, "consumer received stop");
+        info!(run_id = %self.run_id, item_id = %self.item_id, part_id = %self.part_id, "consumer received stop");
         if let Err(e) = self.consumer.stop().await {
-            error!(run_id = %self.run_id, item_id = %self.item_id, error = %e, "consumer stop failed");
+            error!(run_id = %self.run_id, item_id = %self.item_id, part_id = %self.part_id, error = %e, "consumer stop failed");
             return TickAction::Failed(ActorError::Internal(e.to_string()));
         }
 
@@ -197,6 +203,7 @@ impl ConsumerTask {
             info!(
                 run_id = %self.run_id,
                 item_id = %self.item_id,
+                part_id = %self.part_id,
                 rows = snapshot.records_processed,
                 rows_per_sec = %format_args!("{:.0}", rows_per_second),
                 skipped = snapshot.rows_skipped,
@@ -217,13 +224,13 @@ pub async fn run_consumer(
     metrics: Metrics,
 ) -> Result<(), ActorError> {
     // Wait for start signal
-    let (run_id, item_id) =
+    let (run_id, item_id, part_id) =
         match wait_for_start(&mut consumer, &mut rx, &cancel_token, &event_bus).await? {
             Some(ids) => ids,
             None => return Ok(()), // Cancelled or Stopped before starting
         };
 
-    let mut task = ConsumerTask::new(consumer, metrics, event_bus, run_id, item_id);
+    let mut task = ConsumerTask::new(consumer, metrics, event_bus, run_id, item_id, part_id);
 
     loop {
         tokio::select! {
@@ -251,13 +258,13 @@ pub async fn run_consumer(
                 }
                 Some(_) => {}
                 None => {
-                    info!(run_id = %task.run_id, item_id = %task.item_id, "consumer mailbox closed, stopping");
+                    info!(run_id = %task.run_id, item_id = %task.item_id, part_id = %task.part_id, "consumer mailbox closed, stopping");
                     let _ = task.consumer.stop().await;
                     return Ok(());
                 }
             },
             _ = cancel_token.cancelled() => {
-                info!(run_id = %task.run_id, item_id = %task.item_id, "consumer stopping after cancellation");
+                info!(run_id = %task.run_id, item_id = %task.item_id, part_id = %task.part_id, "consumer stopping after cancellation");
                 let _ = task.consumer.stop().await;
                 return Ok(());
             }
@@ -270,29 +277,29 @@ async fn wait_for_start(
     rx: &mut mpsc::Receiver<ConsumerMsg>,
     cancel_token: &CancellationToken,
     event_bus: &EventBus,
-) -> Result<Option<(String, String)>, ActorError> {
+) -> Result<Option<(String, String, String)>, ActorError> {
     loop {
         tokio::select! {
             msg = rx.recv() => match msg {
                 Some(ConsumerMsg::Start { run_id, item_id, part_id }) => {
                     if let Err(e) = consumer.start().await {
-                        error!(run_id = %run_id, item_id = %item_id, error = %e, "failed to start consumer");
+                        error!(run_id = %run_id, item_id = %item_id, part_id = %part_id, error = %e, "failed to start consumer");
                         return Err(ActorError::Internal(e.to_string()));
                     }
                     if let Err(e) = consumer.resume(&run_id, &item_id, &part_id).await {
-                        warn!(run_id = %run_id, item_id = %item_id, error = %e, "failed to resume consumer state");
+                        warn!(run_id = %run_id, item_id = %item_id, part_id = %part_id, error = %e, "failed to resume consumer state");
                     }
 
                     event_bus
                         .publish(MigrationEvent::ConsumerStarted {
                             run_id: run_id.clone(),
                             item_id: item_id.clone(),
-                            part_id,
+                            part_id: part_id.clone(),
                             timestamp: chrono::Utc::now(),
                         })
                         .await;
 
-                    return Ok(Some((run_id, item_id)));
+                    return Ok(Some((run_id, item_id, part_id)));
                 }
                 Some(ConsumerMsg::Stop { .. }) | None => {
                     info!("consumer stopping before start");

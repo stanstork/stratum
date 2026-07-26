@@ -3,7 +3,7 @@ use connectors::{
     drivers::{mysql::driver::MySqlDriver, postgres::driver::PgDriver},
     error::DriverError,
     sql::metadata::table::TableMetadata,
-    traits::{ddl::DdlWriter, introspector::SchemaIntrospector},
+    traits::introspector::SchemaIntrospector,
 };
 use model::execution::connection::Connection;
 use std::sync::Arc;
@@ -63,20 +63,6 @@ impl DriverRef {
 
     pub async fn table_metadata(&self, table: &str) -> Result<TableMetadata, DriverError> {
         dispatch_driver!(self, |d| Ok(d.table_metadata(table).await?))
-    }
-
-    /// Drop each table's primary key before a bulk load, returning the DDL to
-    /// rebuild them afterwards.
-    pub async fn drop_primary_keys(
-        &self,
-        metas: &[TableMetadata],
-    ) -> Result<Vec<String>, DriverError> {
-        dispatch_driver!(self, |d| d.drop_primary_keys(metas).await)
-    }
-
-    /// Execute a sequence of DDL statements against this driver, in order.
-    pub async fn execute_ddl(&self, statements: &[String]) -> Result<(), DriverError> {
-        dispatch_driver!(self, |d| d.execute_ddl(statements).await)
     }
 
     /// Extract PostgreSQL driver if this is a Postgres variant.
