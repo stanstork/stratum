@@ -538,13 +538,23 @@ impl OffsetStrategyFactory {
             .to_lowercase();
 
         match strategy.as_str() {
-            "pk" => Arc::new(PkOffset {
-                pk: config
+            "pk" => {
+                let cursor = config
                     .cursor
                     .clone()
-                    .expect("PK offset requires 'cursor' column"),
-                lane: None,
-            }),
+                    .expect("PK offset requires 'cursor' column");
+                match config.tiebreaker.clone() {
+                    // A tiebreaker makes the order row-unique: the boundary becomes
+                    // `(pk, tb) > (last_pk, last_tb)`, so a `with` join that fans out
+                    // (1:N) can't drop the tail of a group at a batch boundary the way
+                    // a bare `pk > last` does.
+                    Some(tb) => Arc::new(KeysetOffset::new(vec![cursor, tb])),
+                    None => Arc::new(PkOffset {
+                        pk: cursor,
+                        lane: None,
+                    }),
+                }
+            }
 
             "numeric" => {
                 let col = config

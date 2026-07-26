@@ -124,15 +124,20 @@ impl ProducerTask {
                 TickAction::Continue
             }
             CircuitBreakerState::Open => {
+                let failures = self.breaker.consecutive_failures();
                 error!(
                     run_id = %self.run_id,
                     item_id = %self.item_id,
                     part_id = %self.part_id,
-                    failures = self.breaker.consecutive_failures(),
-                    "circuit breaker open, stopping producer"
+                    failures,
+                    "circuit breaker open, aborting producer"
                 );
                 let _ = self.producer.stop().await;
-                TickAction::Done
+                // Abort the migration rather than reporting a silent 0-row success:
+                // the reads never recovered, so the destination is incomplete.
+                TickAction::Failed(ActorError::Internal(format!(
+                    "producer aborted after {failures} consecutive fetch failures; last error: {e}"
+                )))
             }
         }
     }

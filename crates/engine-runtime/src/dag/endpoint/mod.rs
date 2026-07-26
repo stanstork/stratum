@@ -64,6 +64,17 @@ pub trait SourceEndpoint: Send + Sync {
         None
     }
 
+    /// Build a source that reads one full table (no joins/filter/cascade).
+    async fn build_table_source(
+        &self,
+        _table: &str,
+        _offset_strategy: Arc<dyn OffsetStrategy>,
+    ) -> Result<Source, MigrationError> {
+        Err(MigrationError::PipelineFailed(
+            "parallel per-table sources are only supported for database sources".into(),
+        ))
+    }
+
     /// A `SchemaIntrospector` for this source plus the dialect its metadata
     /// should be interpreted in, if the source can describe its own schema.
     fn schema_introspector(

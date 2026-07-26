@@ -29,7 +29,7 @@ use model::{
     },
     pagination::cursor::QualCol,
 };
-use query_builder::offsets::KeysetOffset;
+use query_builder::offsets::{KeysetOffset, OffsetStrategyFactory};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
@@ -51,6 +51,11 @@ const BATCH_CHANNEL_CAPACITY: usize = 4;
 /// above a full narrow-row channel so it only binds when rows are unusually wide.
 const MAX_INFLIGHT_BYTES: usize = 128 * 1024 * 1024;
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// A discovered graph table whose integer-key span is at least this large is
+/// range-split into sub-lanes, so one big table doesn't bottleneck the
+/// per-table parallelism. Smaller tables migrate as a single lane each.
+const GRAPH_TABLE_RANGE_SPLIT_MIN_ROWS: u64 = 1_000_000;
 
 /// Split the inclusive key range `[lo, hi]` into `n` contiguous half-open
 /// `[start, end)` slices whose union is `[lo, hi+1)`. Remainder rows are spread
@@ -277,9 +282,20 @@ impl PipelineOrchestrator {
         let single = || vec![(self.ctx.source.clone(), "part-0".to_string())];
         let requested = self.settings.lanes();
 
-        // Return single lane early if conditions aren't met
-        if requested <= 1 || self.pipeline.source.graph_references.is_some() {
+        if requested <= 1 {
             return Ok(single());
+        }
+
+        // Lanes are for pure data movement only.
+        if !self.pipeline.source.filters.is_empty() || !self.pipeline.source.joins.is_empty() {
+            debug!("filters or joins present; using a single lane");
+            return Ok(single());
+        }
+
+        // Graph pipelines parallelize across discovered tables rather than
+        // range-splitting a single table.
+        if self.pipeline.source.graph_references.is_some() {
+            return self.plan_graph_table_lanes().await;
         }
 
         let table = &self.pipeline.source.table;
@@ -314,6 +330,97 @@ impl PipelineOrchestrator {
 
         info!(lanes = lane_nums, pk = %pk, key_min = lo, key_max = hi, "parallel range lanes enabled");
         Ok(lanes)
+    }
+
+    /// Parallelize a graph migration by giving each discovered table its own
+    /// full-table lane (run through a bounded pool sized by `lanes`).
+    async fn plan_graph_table_lanes(&self) -> Result<Vec<(Source, String)>, MigrationError> {
+        let single = || vec![(self.ctx.source.clone(), "part-0".to_string())];
+
+        if self.settings.integrity().is_enabled() {
+            info!("integrity enabled; migrating graph tables sequentially");
+            return Ok(single());
+        }
+
+        // Source table names: the root plus every discovered table. `cascade_tables`
+        // are destination names, so map them back to source names for reading.
+        let mut src_tables = vec![self.pipeline.source.table.clone()];
+
+        for dest in &self.cascade_tables {
+            src_tables.push(self.ctx.mapping.entities.reverse_resolve(dest));
+        }
+
+        let mut seen = HashSet::new();
+        src_tables.retain(|t| !t.is_empty() && seen.insert(t.clone()));
+
+        if src_tables.len() <= 1 {
+            return Ok(single());
+        }
+
+        let requested = self.settings.lanes();
+        let mut lanes = Vec::new();
+
+        // A single part index across all sub-lanes keeps checkpoint namespaces
+        // unique whether a table contributes one lane or several range sub-lanes.
+        let mut part = 0usize;
+        for table in &src_tables {
+            for source in self.plan_table_sublanes(table, requested).await? {
+                lanes.push((source, format!("part-{part}")));
+                part += 1;
+            }
+        }
+
+        info!(
+            tables = src_tables.len(),
+            lanes = lanes.len(),
+            concurrency = requested,
+            "graph table parallelism enabled"
+        );
+        Ok(lanes)
+    }
+
+    /// Sources for one discovered table: range sub-lanes when it is large and has
+    /// a single integer primary key, otherwise a single full-table source.
+    async fn plan_table_sublanes(
+        &self,
+        table: &str,
+        requested: usize,
+    ) -> Result<Vec<Source>, MigrationError> {
+        if let Some((pk, lo, hi)) = self.source_ep.int_key_range(table).await {
+            let span = hi - lo + 1;
+            let lane_nums = (requested as u64).min(span).max(1) as usize;
+
+            if span >= GRAPH_TABLE_RANGE_SPLIT_MIN_ROWS && lane_nums > 1 {
+                let mut sources = Vec::with_capacity(lane_nums);
+
+                for (rlo, rhi) in split_range(lo, hi, lane_nums) {
+                    let strategy = Arc::new(
+                        KeysetOffset::new(vec![QualCol {
+                            table: table.to_string(),
+                            column: pk.clone(),
+                        }])
+                        .with_lane(rlo, rhi),
+                    );
+
+                    sources.push(self.source_ep.build_table_source(table, strategy).await?);
+                }
+
+                info!(
+                    table,
+                    ranges = lane_nums,
+                    key_min = lo,
+                    key_max = hi,
+                    "range-splitting large graph table"
+                );
+
+                return Ok(sources);
+            }
+        }
+
+        let offset = OffsetStrategyFactory::from_pagination(&self.pipeline.source.pagination);
+        let source = self.source_ep.build_table_source(table, offset).await?;
+
+        Ok(vec![source])
     }
 
     /// Build one producer/consumer lane over `source`, identified by `part_id`
@@ -429,23 +536,33 @@ impl PipelineOrchestrator {
         metrics: &Metrics,
         start_time: std::time::Instant,
     ) -> Result<(), MigrationError> {
-        for (coordinator, part_id) in &coordinators {
-            coordinator
-                .start_snapshot_pipeline(
-                    self.ctx.run_id.clone(),
-                    self.ctx.item_id.clone(),
-                    part_id.clone(),
-                )
-                .await
-                .map_err(|e| {
-                    error!(error = %e, "failed to start snapshot pipeline");
-                    MigrationError::PipelineFailed(format!("Failed to start pipeline: {}", e))
-                })?;
-        }
+        let concurrency = self.settings.lanes().max(1);
+        let sem = Arc::new(tokio::sync::Semaphore::new(concurrency));
+        let run_id = self.ctx.run_id.clone();
+        let item_id = self.ctx.item_id.clone();
+
+        let tasks: Vec<_> = coordinators
+            .into_iter()
+            .map(|(coordinator, part_id)| {
+                let sem = sem.clone();
+                let run_id = run_id.clone();
+                let item_id = item_id.clone();
+
+                async move {
+                    let _permit = sem
+                        .acquire_owned()
+                        .await
+                        .expect("lane semaphore is never closed");
+                    coordinator
+                        .start_snapshot_pipeline(run_id, item_id, part_id)
+                        .await?;
+                    coordinator.wait().await
+                }
+            })
+            .collect();
 
         // All lanes must complete; the first error aborts the join.
-        let waits: Vec<_> = coordinators.into_iter().map(|(c, _)| c.wait()).collect();
-        let all_fut = async move { futures::future::try_join_all(waits).await.map(|_| ()) };
+        let all_fut = async move { futures::future::try_join_all(tasks).await.map(|_| ()) };
 
         let cancel_fut = self.shutdown.cancel.cancelled();
         let pause_fut = self.shutdown.pause.cancelled();

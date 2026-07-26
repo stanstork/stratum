@@ -16,8 +16,9 @@ use engine_core::{
         type_registry::{Dialect, TypeRegistry},
     },
 };
-use engine_processing::io::source::{
-    Source, csv::introspector::CsvIntrospector, wasm::introspector::PluginIntrospector,
+use engine_processing::io::{
+    format::DataFormat,
+    source::{Source, csv::introspector::CsvIntrospector, wasm::introspector::PluginIntrospector},
 };
 use engine_wasm::registry::PluginRegistry;
 use model::{
@@ -163,6 +164,25 @@ impl SourceEndpoint for DbSourceEndpoint {
         dispatch_driver!(&self.0, |d| d.int_key_range(table).await)
             .ok()
             .flatten()
+    }
+
+    async fn build_table_source(
+        &self,
+        table: &str,
+        offset_strategy: Arc<dyn OffsetStrategy>,
+    ) -> Result<Source, MigrationError> {
+        let format = match self.0.dialect() {
+            Dialect::Postgres => DataFormat::Postgres,
+            Dialect::MySql => DataFormat::MySql,
+        };
+        dispatch_driver!(&self.0, |d| Source::single_table(
+            d.clone(),
+            table,
+            format,
+            offset_strategy
+        )
+        .await)
+        .map_err(|e| MigrationError::PipelineFailed(format!("build table source '{table}': {e}")))
     }
 
     fn schema_introspector(
