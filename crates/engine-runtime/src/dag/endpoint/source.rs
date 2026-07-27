@@ -32,7 +32,13 @@ use model::{
 use query_builder::offsets::OffsetStrategy;
 use std::{collections::HashMap, sync::Arc};
 
-pub struct DbSourceEndpoint(pub DriverRef);
+pub struct DbSourceEndpoint {
+    /// Driver used for data reads and concrete dispatch.
+    pub driver: DriverRef,
+    /// Read-through introspector reused across every schema-planning call
+    /// so a source table is introspected once per run.
+    pub introspector: Arc<dyn SchemaIntrospector>,
+}
 
 pub struct WasmSourceEndpoint {
     pub registry: Arc<PluginRegistry>,
@@ -90,24 +96,21 @@ impl DbSourceEndpoint {
         skip_foreign_keys: bool,
         skip_indexes: bool,
     ) -> Result<(Option<SchemaOps>, Option<HashMap<String, TableMetadata>>), MigrationError> {
-        let source_dialect = self.0.dialect();
-        let result = dispatch_driver!(&self.0, |d| {
-            let introspector: Arc<dyn SchemaIntrospector> = d.clone() as _;
-            let type_registry = Arc::new(TypeRegistry::new(source_dialect, dest_dialect));
-            let expander = GraphExpander::new(introspector, type_registry, source_dialect);
-            expander
-                .expand(
-                    root_table,
-                    refs,
-                    mapping,
-                    skip_primary_keys,
-                    skip_foreign_keys,
-                    skip_indexes,
-                    false,
-                )
-                .await
-                .map_err(MigrationError::from)?
-        });
+        let source_dialect = self.driver.dialect();
+        let type_registry = Arc::new(TypeRegistry::new(source_dialect, dest_dialect));
+        let expander = GraphExpander::new(self.introspector.clone(), type_registry, source_dialect);
+        let result = expander
+            .expand(
+                root_table,
+                refs,
+                mapping,
+                skip_primary_keys,
+                skip_foreign_keys,
+                skip_indexes,
+                false,
+            )
+            .await
+            .map_err(MigrationError::from)?;
         let cascade_meta =
             matches!(refs.data_mode, DataMode::Cascade).then_some(result.discovered_tables);
         Ok((Some(result.schema_ops), cascade_meta))
@@ -145,7 +148,7 @@ impl SourceEndpoint for DbSourceEndpoint {
         };
         let cascade_tables = resolve_cascade_tables(pipeline, mapping, &cascade_meta);
 
-        let source = dispatch_driver!(&self.0, |d| {
+        let source = dispatch_driver!(&self.driver, |d| {
             Source::with_cascade(d.clone(), pipeline, mapping, offset_strategy, cascade_meta).await
         })?;
 
@@ -157,11 +160,11 @@ impl SourceEndpoint for DbSourceEndpoint {
     }
 
     fn dialect(&self) -> Option<Dialect> {
-        Some(self.0.dialect())
+        Some(self.driver.dialect())
     }
 
     async fn int_key_range(&self, table: &str) -> Option<(String, u64, u64)> {
-        dispatch_driver!(&self.0, |d| d.int_key_range(table).await)
+        dispatch_driver!(&self.driver, |d| d.int_key_range(table).await)
             .ok()
             .flatten()
     }
@@ -171,11 +174,11 @@ impl SourceEndpoint for DbSourceEndpoint {
         table: &str,
         offset_strategy: Arc<dyn OffsetStrategy>,
     ) -> Result<Source, MigrationError> {
-        let format = match self.0.dialect() {
+        let format = match self.driver.dialect() {
             Dialect::Postgres => DataFormat::Postgres,
             Dialect::MySql => DataFormat::MySql,
         };
-        dispatch_driver!(&self.0, |d| Source::single_table(
+        dispatch_driver!(&self.driver, |d| Source::single_table(
             d.clone(),
             table,
             format,
@@ -189,8 +192,7 @@ impl SourceEndpoint for DbSourceEndpoint {
         &self,
         _dest_dialect: Dialect,
     ) -> Option<(Arc<dyn SchemaIntrospector>, Dialect)> {
-        let introspector = dispatch_driver!(&self.0, |d| d.clone() as Arc<dyn SchemaIntrospector>);
-        Some((introspector, self.0.dialect()))
+        Some((self.introspector.clone(), self.driver.dialect()))
     }
 }
 

@@ -1,12 +1,23 @@
 use crate::row_counter::RowCounter;
 use crate::type_registry::Dialect;
+use async_trait::async_trait;
 use connectors::{
     error::DriverError,
     sql::{
         filter::SqlFilter,
-        metadata::{index::IndexMetadata, table::TableMetadata},
+        metadata::{
+            capabilities::Capabilities,
+            constraint::{CheckConstraintMetadata, UniqueConstraintMetadata},
+            fk::ForeignKeyMetadata,
+            index::IndexMetadata,
+            table::TableMetadata,
+        },
     },
-    traits::{introspector::SchemaIntrospector, reader::DataReader},
+    traits::{
+        driver::{Driver, DriverInfo},
+        introspector::SchemaIntrospector,
+        reader::DataReader,
+    },
 };
 use model::execution::row_count::RowCount;
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -80,6 +91,10 @@ pub struct MetadataCache<D: SchemaIntrospector + DataReader + Send + Sync + 'sta
 
     table_metadata: RwLock<HashMap<String, TableMetadata>>,
     index_metadata: RwLock<HashMap<String, Vec<IndexMetadata>>>,
+    fk_metadata: RwLock<HashMap<String, Vec<ForeignKeyMetadata>>>,
+    referencing_tables: RwLock<HashMap<String, Vec<String>>>,
+    unique_constraints: RwLock<HashMap<String, Vec<UniqueConstraintMetadata>>>,
+    check_constraints: RwLock<HashMap<String, Vec<CheckConstraintMetadata>>>,
     table_exists: RwLock<HashMap<String, bool>>,
     row_counts: RwLock<HashMap<RowCountKey, RowCount>>,
 }
@@ -92,6 +107,10 @@ impl<D: SchemaIntrospector + DataReader + Send + Sync + 'static> MetadataCache<D
             row_counter,
             table_metadata: RwLock::new(HashMap::new()),
             index_metadata: RwLock::new(HashMap::new()),
+            fk_metadata: RwLock::new(HashMap::new()),
+            referencing_tables: RwLock::new(HashMap::new()),
+            unique_constraints: RwLock::new(HashMap::new()),
+            check_constraints: RwLock::new(HashMap::new()),
             table_exists: RwLock::new(HashMap::new()),
             row_counts: RwLock::new(HashMap::new()),
         }
@@ -201,6 +220,93 @@ impl<D: SchemaIntrospector + DataReader + Send + Sync + 'static> MetadataCache<D
             table_exists_entries: self.table_exists.read().await.len(),
             row_count_entries: self.row_counts.read().await.len(),
         }
+    }
+}
+
+impl<D: SchemaIntrospector + DataReader + Send + Sync + 'static> Driver for MetadataCache<D> {
+    fn info(&self) -> &DriverInfo {
+        self.introspector.info()
+    }
+
+    fn version(&self) -> &str {
+        self.introspector.version()
+    }
+
+    fn capabilities(&self) -> &Capabilities {
+        self.introspector.capabilities()
+    }
+}
+
+/// Read-through `SchemaIntrospector`: lets an `Arc<MetadataCache<D>>` stand in
+/// for the raw driver anywhere an `Arc<dyn SchemaIntrospector>` is expected, so
+/// the schema-planning / graph-expansion path introspects each source table
+/// once per run instead of re-querying it for every plan step and lane.
+#[async_trait]
+impl<D: SchemaIntrospector + DataReader + Send + Sync + 'static> SchemaIntrospector
+    for MetadataCache<D>
+{
+    async fn table_exists(&self, table: &str) -> Result<bool, DriverError> {
+        MetadataCache::table_exists(self, table).await
+    }
+
+    async fn list_tables(&self, schema: Option<&str>) -> Result<Vec<String>, DriverError> {
+        // Not cached: cheap, and the `schema` argument varies.
+        self.driver().list_tables(schema).await
+    }
+
+    async fn table_metadata(&self, table: &str) -> Result<TableMetadata, DriverError> {
+        MetadataCache::table_metadata(self, table).await
+    }
+
+    async fn index_metadata(&self, table: &str) -> Result<Vec<IndexMetadata>, DriverError> {
+        MetadataCache::index_metadata(self, table).await
+    }
+
+    async fn fk_metadata(&self, table: &str) -> Result<Vec<ForeignKeyMetadata>, DriverError> {
+        let key = table.to_string();
+        let driver = self.driver();
+        cached_try_get(&self.fk_metadata, &key, || async {
+            driver.fk_metadata(table).await
+        })
+        .await
+    }
+
+    async fn referencing_tables(&self, table: &str) -> Result<Vec<String>, DriverError> {
+        let key = table.to_string();
+        let driver = self.driver();
+        cached_try_get(&self.referencing_tables, &key, || async {
+            driver.referencing_tables(table).await
+        })
+        .await
+    }
+
+    async fn table_size_bytes(&self, table: &str) -> Result<u64, DriverError> {
+        // Inherent method deliberately does not cache (volatile).
+        MetadataCache::table_size_bytes(self, table).await
+    }
+
+    async fn unique_constraint_metadata(
+        &self,
+        table: &str,
+    ) -> Result<Vec<UniqueConstraintMetadata>, DriverError> {
+        let key = table.to_string();
+        let driver = self.driver();
+        cached_try_get(&self.unique_constraints, &key, || async {
+            driver.unique_constraint_metadata(table).await
+        })
+        .await
+    }
+
+    async fn check_constraint_metadata(
+        &self,
+        table: &str,
+    ) -> Result<Vec<CheckConstraintMetadata>, DriverError> {
+        let key = table.to_string();
+        let driver = self.driver();
+        cached_try_get(&self.check_constraints, &key, || async {
+            driver.check_constraint_metadata(table).await
+        })
+        .await
     }
 }
 

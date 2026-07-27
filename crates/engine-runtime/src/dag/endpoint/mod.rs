@@ -153,7 +153,10 @@ pub async fn resolve_source(
             plugin: wasm_plugin_name(conn)?,
         })),
         Some(DataFormat::Csv) => Ok(Box::new(CsvSourceEndpoint::new(conn).await?)),
-        _ => Ok(Box::new(DbSourceEndpoint(exec.resolve_driver(conn).await?))),
+        _ => Ok(Box::new(DbSourceEndpoint {
+            driver: exec.resolve_driver(conn).await?,
+            introspector: exec.cached_source_introspector(conn).await?,
+        })),
     }
 }
 
