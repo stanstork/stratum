@@ -2,8 +2,8 @@ use crate::error::ProducerError;
 use engine_state::MerkleStore;
 use model::{
     integrity::{
-        coerce::coerce_row_for_hash, config::IntegrityConfig, hasher::RowHasher,
-        merkle::MerkleTree, receipt::VerificationReceipt,
+        config::IntegrityConfig, hasher::RowHasher, merkle::MerkleTree,
+        receipt::VerificationReceipt,
     },
     records::Record,
 };
@@ -155,7 +155,7 @@ impl IntegrityState {
 
         let row_hashes: Vec<[u8; 32]> = rows
             .iter()
-            .map(|r| hash_row_coerced(hasher, r, col_types))
+            .map(|r| hasher.hash_row_coerced(r, col_types))
             .collect();
 
         let subtree_root = MerkleTree::root_from_hashes(&row_hashes, self.config.algorithm);
@@ -184,7 +184,7 @@ impl IntegrityState {
         let set = self.cascade_hashes.get_mut(key).unwrap();
 
         for row in rows {
-            set.insert(hash_row_coerced(hasher, row, col_types));
+            set.insert(hasher.hash_row_coerced(row, col_types));
         }
     }
 
@@ -320,17 +320,4 @@ pub async fn finalize_lane_sink(
         .await?;
     }
     Ok(())
-}
-
-/// Hash a row, applying column-type coercions when `col_types` is non-empty.
-fn hash_row_coerced(
-    hasher: &mut RowHasher,
-    row: &Record,
-    col_types: &HashMap<String, String>,
-) -> [u8; 32] {
-    if col_types.is_empty() {
-        hasher.hash_row(row)
-    } else {
-        hasher.hash_row(&coerce_row_for_hash(row, col_types))
-    }
 }

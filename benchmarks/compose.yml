@@ -2,12 +2,19 @@
 #
 # Server tuning notes (identical for every tool measured - this cannot bias
 # the comparison, both tools talk to the same instances):
-#   MySQL (source, read-only during measured runs):
+#   MySQL (source, and destination when measuring loads *into* MySQL):
 #     --local-infile=1                     LOAD DATA fast path for clients
 #     --skip-log-bin                       no binlog; speeds up data generation
-#     --innodb-flush-log-at-trx-commit=2   relaxed durability; source is
-#                                          regenerable benchmark data
-#     --innodb-buffer-pool-size=1G         hold the working set in memory
+#     --innodb-flush-log-at-trx-commit=2   relaxed durability; regenerable data
+#     --innodb-buffer-pool-size=2G         hold the working set in memory
+#     --innodb-redo-log-capacity=4G        the default (100M) throttles bulk
+#                                          loads 2-3x on checkpoint flushing;
+#                                          size it to the load. THIS IS A SERVER
+#                                          SETTING - stratum never changes it, it
+#                                          only warns when it's small.
+#     --innodb-doublewrite=0               throwaway bench data; drops the 2x
+#                                          write amplification (do NOT do this on
+#                                          a database you care about)
 #   PostgreSQL (destination, where the measured writes land):
 #     shared_buffers=1GB                   reasonable for a load benchmark
 #     max_wal_size=8GB                     avoid checkpoint storms mid-load
@@ -22,7 +29,9 @@ services:
         "--local-infile=1",
         "--skip-log-bin",
         "--innodb-flush-log-at-trx-commit=2",
-        "--innodb-buffer-pool-size=1G",
+        "--innodb-buffer-pool-size=2G",
+        "--innodb-redo-log-capacity=4294967296",
+        "--innodb-doublewrite=0",
         "--default-authentication-plugin=mysql_native_password",
       ]
     environment:

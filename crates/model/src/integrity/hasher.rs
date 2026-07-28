@@ -1,9 +1,12 @@
 use crate::{
     core::value::Value,
-    integrity::{algorithm::HashAlgorithm, canonical::serialize_value},
+    integrity::{
+        algorithm::HashAlgorithm, canonical::serialize_value, coerce::coerce_value_for_hash,
+    },
     records::Record,
 };
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 
 pub struct RowHasher {
     /// Destination column names in lexicographic order.
@@ -34,6 +37,32 @@ impl RowHasher {
                 None => serialize_value(&Value::Null, &mut self.buf),
             }
         }
+        hash_bytes(&self.buf, self.algorithm)
+    }
+
+    /// Like [`hash_row`](Self::hash_row) but applies per-column coercions
+    /// when `col_types` is non-empty.
+    pub fn hash_row_coerced(
+        &mut self,
+        row: &Record,
+        col_types: &HashMap<String, String>,
+    ) -> [u8; 32] {
+        if col_types.is_empty() {
+            return self.hash_row(row);
+        }
+
+        self.buf.clear();
+
+        for col in &self.column_order {
+            match row.get(col).and_then(|fv| fv.value.as_ref()) {
+                Some(value) => {
+                    let col_type = col_types.get(col).map(|s| s.as_str()).unwrap_or("");
+                    serialize_value(&coerce_value_for_hash(value, col_type), &mut self.buf);
+                }
+                None => serialize_value(&Value::Null, &mut self.buf),
+            }
+        }
+
         hash_bytes(&self.buf, self.algorithm)
     }
 }

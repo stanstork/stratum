@@ -20,7 +20,6 @@ use model::{
         references::{DataMode, GraphReferences},
     },
     integrity::{
-        coerce::coerce_row_for_hash,
         hasher::RowHasher,
         merkle::MerkleTree,
         receipt::VerificationReceipt,
@@ -486,9 +485,5 @@ fn hash_row_coerced(
     row: &Record,
     col_types: &HashMap<String, String>,
 ) -> [u8; 32] {
-    if col_types.is_empty() {
-        hasher.hash_row(row)
-    } else {
-        hasher.hash_row(&coerce_row_for_hash(row, col_types))
-    }
+    hasher.hash_row_coerced(row, col_types)
 }

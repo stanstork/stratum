@@ -112,7 +112,7 @@ impl TransformPipeline {
         &self,
         mut rows: Vec<Record>,
     ) -> (Vec<Record>, Vec<Record>, Vec<(Record, TransformError)>) {
-        let mut successful = Vec::new();
+        let mut successful = Vec::with_capacity(rows.len());
         let mut filtered = Vec::new();
         let mut failed = Vec::new();
 

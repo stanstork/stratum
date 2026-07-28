@@ -219,4 +219,8 @@ impl Dialect for Postgres {
     fn supports_enums(&self) -> bool {
         true
     }
+
+    fn cast_null_literals(&self) -> bool {
+        true
+    }
 }

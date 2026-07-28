@@ -32,6 +32,27 @@ pub trait OffsetStrategy: Send + Sync {
     /// Generates the next cursor based on the last fetched row.
     fn next_cursor(&self, row: &Record) -> Cursor;
 
+    /// Advances pagination for the next batch.
+    fn advance_cursor(&self, last_row: &Record, _current: &Cursor, _batch_size: usize) -> Cursor {
+        self.next_cursor(last_row)
+    }
+
+    /// The cursor to resume from after a completed batch: `None` at the end of
+    /// the scan (or when the batch was empty), otherwise the advanced cursor.
+    fn next_after_batch(
+        &self,
+        last_row: Option<&Record>,
+        current: &Cursor,
+        batch_size: usize,
+        reached_end: bool,
+    ) -> Option<Cursor> {
+        if reached_end {
+            return None;
+        }
+
+        last_row.map(|row| self.advance_cursor(row, current, batch_size))
+    }
+
     /// Clones the boxed trait object.
     fn clone_box(&self) -> Box<dyn OffsetStrategy>;
 
@@ -426,6 +447,19 @@ impl OffsetStrategy for DefaultOffset {
     fn next_cursor(&self, _row: &Record) -> Cursor {
         Cursor::Default {
             offset: self.offset,
+        }
+    }
+
+    /// OFFSET pagination has no row-derived key: advance the running offset by
+    /// one batch. `current` carries the offset consumed so far.
+    fn advance_cursor(&self, _last_row: &Record, current: &Cursor, batch_size: usize) -> Cursor {
+        let offset = match current {
+            Cursor::Default { offset } => *offset,
+            _ => 0,
+        };
+
+        Cursor::Default {
+            offset: offset + batch_size,
         }
     }
 
@@ -831,6 +865,80 @@ mod keyset_tests {
             Cursor::Keyset { values, .. } => assert_eq!(values.len(), 2),
             other => panic!("expected keyset cursor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn advance_cursor_accumulates_offset_for_default() {
+        let strat = DefaultOffset { offset: 0 };
+        let row = Record {
+            schema: "t".into(),
+            fields: vec![],
+            op_type: Default::default(),
+        };
+        // First batch (from None) advances to one batch width.
+        assert!(matches!(
+            strat.advance_cursor(&row, &Cursor::None, 100),
+            Cursor::Default { offset: 100 }
+        ));
+        // Subsequent batches accumulate: current offset + batch size.
+        assert!(matches!(
+            strat.advance_cursor(&row, &Cursor::Default { offset: 100 }, 100),
+            Cursor::Default { offset: 200 }
+        ));
+    }
+
+    #[test]
+    fn advance_cursor_delegates_to_row_for_keyset() {
+        let strat = KeysetOffset::new(vec![qc("actor_id"), qc("film_id")]);
+        let row = Record {
+            schema: "t".into(),
+            fields: vec![
+                FieldValue {
+                    name: "actor_id".into(),
+                    value: Some(Value::Int(3)),
+                    data_type: Type::Boolean,
+                },
+                FieldValue {
+                    name: "film_id".into(),
+                    value: Some(Value::Int(7)),
+                    data_type: Type::Boolean,
+                },
+            ],
+            op_type: Default::default(),
+        };
+        // `current` and `batch_size` are ignored for key-based strategies: the
+        // result is derived from the row, matching `next_cursor`.
+        match strat.advance_cursor(&row, &Cursor::Default { offset: 999 }, 100) {
+            Cursor::Keyset { values, .. } => assert_eq!(values.len(), 2),
+            other => panic!("expected keyset cursor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn next_after_batch_stops_at_end_or_empty() {
+        let strat = DefaultOffset { offset: 0 };
+        let row = Record {
+            schema: "t".into(),
+            fields: vec![],
+            op_type: Default::default(),
+        };
+        // End of scan -> None, even with a last row.
+        assert!(
+            strat
+                .next_after_batch(Some(&row), &Cursor::None, 100, true)
+                .is_none()
+        );
+        // Empty batch (no last row) -> None.
+        assert!(
+            strat
+                .next_after_batch(None, &Cursor::None, 100, false)
+                .is_none()
+        );
+        // Otherwise advances via `advance_cursor`.
+        assert!(matches!(
+            strat.next_after_batch(Some(&row), &Cursor::Default { offset: 100 }, 100, false),
+            Some(Cursor::Default { offset: 200 })
+        ));
     }
 
     #[test]

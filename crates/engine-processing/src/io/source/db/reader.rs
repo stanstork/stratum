@@ -14,7 +14,7 @@ use connectors::{
     },
     traits::reader::DataReader,
 };
-use futures::future;
+use futures::stream::{self, StreamExt};
 use model::{
     core::value::Value,
     pagination::{cursor::Cursor, page::FetchResult},
@@ -26,6 +26,10 @@ use std::{
     sync::{Arc, Mutex},
     time::Instant,
 };
+
+/// Upper bound on related-table fetches issued concurrently per batch, so a wide
+/// FK graph cannot open an unbounded number of source connections at once.
+const MAX_CONCURRENT_TABLE_FETCHES: usize = 8;
 
 pub struct DbSourceReader {
     /// Primary keys of related rows already emitted, keyed by table.
@@ -468,8 +472,12 @@ impl DbSourceReader {
         // are re-fetched by every batch that references them, so emit each only once.
         let rows = self.dedup_related_rows(all_fetched, &primary_name);
 
-        let next_cursor =
-            self.compute_next_cursor(primary_last_row.as_ref(), &cursor, batch_size, reached_end);
+        let next_cursor = self.offset_strategy.next_after_batch(
+            primary_last_row.as_ref(),
+            &cursor,
+            batch_size,
+            reached_end,
+        );
 
         Ok((rows, next_cursor, reached_end))
     }
@@ -521,8 +529,12 @@ impl DbSourceReader {
         cursor: Cursor,
     ) -> Result<(Vec<Record>, Option<Cursor>, bool), DriverError> {
         let requests = self.build_fetch_rows_requests(batch_size, cursor.clone());
-        let futures = requests.into_iter().map(|req| self.reader.fetch(req));
-        let results = future::join_all(futures).await;
+        // Bound how many related-table fetches hit the source concurrently.
+        let results: Vec<Result<Vec<Record>, DriverError>> =
+            stream::iter(requests.into_iter().map(|req| self.reader.fetch(req)))
+                .buffered(MAX_CONCURRENT_TABLE_FETCHES)
+                .collect()
+                .await;
 
         let mut rows = Vec::new();
         let mut primary_rows_count = None;
@@ -541,37 +553,14 @@ impl DbSourceReader {
         let reached_end = reference_count < batch_size;
         let last_row = primary_last_row.or_else(|| rows.last().cloned());
 
-        let next_cursor =
-            self.compute_next_cursor(last_row.as_ref(), &cursor, batch_size, reached_end);
+        let next_cursor = self.offset_strategy.next_after_batch(
+            last_row.as_ref(),
+            &cursor,
+            batch_size,
+            reached_end,
+        );
 
         Ok((rows, next_cursor, reached_end))
-    }
-
-    fn compute_next_cursor(
-        &self,
-        last_row: Option<&Record>,
-        current_cursor: &Cursor,
-        batch_size: usize,
-        reached_end: bool,
-    ) -> Option<Cursor> {
-        if reached_end {
-            return None;
-        }
-
-        last_row.map(|row| {
-            let next = self.offset_strategy.next_cursor(row);
-            // Hack to keep track of how many rows we've read so far when using Default
-            // TODO: improve this by having the strategy manage its own state
-            match (current_cursor, &next) {
-                (Cursor::None, Cursor::Default { offset }) => Cursor::Default {
-                    offset: offset + batch_size,
-                },
-                (Cursor::Default { offset }, Cursor::Default { .. }) => Cursor::Default {
-                    offset: offset + batch_size,
-                },
-                _ => next,
-            }
-        })
     }
 }
 
@@ -602,12 +591,21 @@ impl SourceReader for DbSourceReader {
 /// Stable identity for a row within its table, used to detect related rows that
 /// an earlier cascade batch already emitted.
 fn pk_signature(row: &Record, pk_cols: &[String]) -> String {
+    use std::fmt::Write as _;
     let mut sig = String::new();
     for (i, col) in pk_cols.iter().enumerate() {
         if i > 0 {
             sig.push('\u{1}'); // delimiter that cannot appear in a rendered value
         }
-        sig.push_str(&format!("{:?}", row.get_value(col)));
+
+        match row.get(col).and_then(|fv| fv.value.as_ref()) {
+            Some(v) => {
+                let _ = write!(sig, "{:?}", v);
+            }
+            None => {
+                let _ = write!(sig, "{:?}", Value::Null);
+            }
+        }
     }
     sig
 }

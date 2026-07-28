@@ -27,10 +27,17 @@ impl TableMapper {
 
 impl Transform for FieldMapper {
     fn apply(&self, row: &mut Record) -> Result<(), TransformError> {
+        // No renames for this table -> every column name passes through unchanged.
+        if !self.ns_map.contains(&row.schema) {
+            return Ok(());
+        }
+
         let table = row.schema.clone();
+
         for column in &mut row.fields {
             column.name = self.ns_map.resolve(&table, &column.name);
         }
+
         Ok(())
     }
 }

@@ -96,7 +96,7 @@ impl TransformService {
         // Cap the number of error messages we retain.
         const MAX_ERROR_SAMPLES: usize = 10;
 
-        let mut successful = Vec::new();
+        let mut successful = Vec::with_capacity(rows.len());
         let mut filtered = Vec::new();
         let mut failed_rows = Vec::new();
         let mut error_samples = Vec::new();

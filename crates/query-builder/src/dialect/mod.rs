@@ -106,4 +106,15 @@ pub trait Dialect: Send + Sync {
     fn supports_enums(&self) -> bool {
         false
     }
+
+    /// Whether a `NULL` in an `INSERT ... VALUES` should be wrapped in a
+    /// `CAST(NULL AS <type>)`.
+    ///
+    /// PostgreSQL casts so it can infer the column type in ambiguous contexts
+    /// (e.g. `bytea`). MySQL's `CAST` does not accept type names like `varchar`
+    /// / `text` / `float`, and a bare `NULL` is unambiguous under an explicit
+    /// column list - so MySQL keeps the default (bare `NULL`).
+    fn cast_null_literals(&self) -> bool {
+        false
+    }
 }

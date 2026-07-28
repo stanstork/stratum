@@ -24,7 +24,7 @@ impl DataReader for MySqlDriver {
         debug!(sql = %sql, "generated SQL");
 
         let mut conn = self.pool().get_conn().await?;
-        let params = MySqlParamStore::from_values(&params).params();
+        let params = MySqlParamStore::from_values(&params).into_params();
         let rows: Vec<MySqlRow> = conn.exec(sql, params).await?;
         Ok(rows.iter().map(|r| r.decode(&request.table)).collect())
     }

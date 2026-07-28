@@ -13,9 +13,9 @@ use crate::{
     error::DriverError,
     sql::{
         metadata::{column::ColumnMetadata, table::TableMetadata},
-        query::generator::QueryGenerator,
+        query::generator::{QueryGenerator, max_rows_per_insert},
     },
-    traits::writer::DataWriter,
+    traits::{driver::Driver, writer::DataWriter},
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -31,20 +31,53 @@ impl DataWriter for PgDriver {
             return Ok(0);
         }
 
-        let num_rows = rows.len();
         let generator = QueryGenerator::new(&dialect::Postgres);
-        let (sql, params) = generator.insert_batch(meta, rows, &PgTypeConverter);
+        let max_params = self.capabilities().max_parameters.unwrap_or(usize::MAX);
+        let chunk_rows = max_rows_per_insert(meta, max_params);
 
-        debug!(rows = num_rows, table = %meta.name, "inserting rows");
+        // Common case: the whole batch fits in one statement.
+        if rows.len() <= chunk_rows {
+            let (sql, params) = generator.insert_batch(meta, rows, &PgTypeConverter);
 
-        let client = self.client().read().await;
-        let param_store = PgParamStore::from_values(&params);
-        let result = client
-            .execute(&sql, &param_store.as_refs()[..])
+            debug!(rows = rows.len(), table = %meta.name, "inserting rows");
+
+            let client = self.client().read().await;
+            let param_store = PgParamStore::from_values(&params);
+            let result = client
+                .execute(&sql, &param_store.as_refs()[..])
+                .await
+                .map_err(|e| DriverError::QueryError(format!("{:?}", e)))?;
+
+            return Ok(result);
+        }
+
+        // Batch exceeds the placeholder limit: split into chunks in one
+        // transaction so it stays all-or-nothing.
+
+        debug!(rows = rows.len(), chunk_rows, table = %meta.name, "inserting rows (chunked)");
+
+        let mut client = self.client().write().await;
+        let tx = client
+            .transaction()
+            .await
+            .map_err(|e| DriverError::QueryError(format!("{:?}", e)))?;
+        let mut affected = 0u64;
+
+        for chunk in rows.chunks(chunk_rows) {
+            let (sql, params) = generator.insert_batch(meta, chunk, &PgTypeConverter);
+            let param_store = PgParamStore::from_values(&params);
+
+            affected += tx
+                .execute(&sql, &param_store.as_refs()[..])
+                .await
+                .map_err(|e| DriverError::QueryError(format!("{:?}", e)))?;
+        }
+
+        tx.commit()
             .await
             .map_err(|e| DriverError::QueryError(format!("{:?}", e)))?;
 
-        Ok(result)
+        Ok(affected)
     }
 
     async fn truncate(&self, table: &str) -> Result<(), DriverError> {

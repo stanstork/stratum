@@ -12,10 +12,10 @@ pub struct IntegrityConfig {
     /// When true, every individual row hash is stored in the receipt alongside
     /// the batch-level Merkle roots.
     pub store_row_hashes: bool,
-    /// Destination column data types.
-    /// Used to apply the same coercions at hash time as the COPY writer applies
-    /// before writing - e.g., String("a,b") -> Array([String("a"), String("b")])
-    /// for TEXT[] columns, so migration and verify hashes match.
+    /// Destination column data types (in the destination's own dialect).
+    /// Used to apply the same coercions at hash time that the destination applies
+    /// on write - e.g., String("a,b") -> Array([String("a"), String("b")]) for an
+    /// array/set column - so migration and verify hashes match.
     pub column_types: HashMap<String, HashMap<String, String>>,
 }
 
@@ -41,7 +41,7 @@ impl IntegrityConfig {
         }
     }
 
-    /// Set destination column types: table_name -> column_name -> pg_type_string.
+    /// Set destination column types: table_name -> column_name -> type_string.
     pub fn with_column_types(
         mut self,
         column_types: HashMap<String, HashMap<String, String>>,

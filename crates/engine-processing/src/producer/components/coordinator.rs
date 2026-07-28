@@ -78,7 +78,7 @@ impl BatchCoordinator {
         let rows_count = rows.len();
 
         if let Some(ref mut state) = self.integrity {
-            state.hash_batch(&rows);
+            tokio::task::block_in_place(|| state.hash_batch(&rows));
         }
 
         // Send to consumer (which checkpoints after a successful write).

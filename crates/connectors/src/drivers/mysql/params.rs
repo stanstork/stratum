@@ -147,8 +147,8 @@ impl MySqlParamStore {
         MySqlParamStore { params }
     }
 
-    pub fn params(&self) -> Params {
-        let mysql_values: Vec<MySqlValue> = self.params.iter().map(|p| p.0.clone()).collect();
+    pub fn into_params(self) -> Params {
+        let mysql_values: Vec<MySqlValue> = self.params.into_iter().map(|p| p.0).collect();
         Params::Positional(mysql_values)
     }
 }
