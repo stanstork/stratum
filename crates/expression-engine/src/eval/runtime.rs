@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use crate::{context::EvalContext, eval::binary::BinaryOpEvaluator, functions::FunctionRegistry};
 use model::{
     core::value::Value,
@@ -6,6 +8,9 @@ use model::{
     transform::mapping::TransformationMetadata,
 };
 use tracing::warn;
+
+/// The built-in function table.
+static FUNCTION_REGISTRY: LazyLock<FunctionRegistry> = LazyLock::new(FunctionRegistry::new);
 
 /// Trait for evaluating compiled expressions with runtime row data
 pub trait Evaluator {
@@ -72,7 +77,7 @@ impl Evaluator for CompiledExpression {
 
                 // For source table references, the column may be renamed in the row data.
                 // We need to resolve the source column name to the target column name.
-                let resolved_key = mapping.field_mappings.resolve(&row.schema, key);
+                let resolved_key = mapping.field_mappings.resolve_cow(&row.schema, key);
 
                 let raw = row
                     .fields
@@ -154,14 +159,13 @@ fn eval_function(
     mapping: &TransformationMetadata,
     env_getter: &dyn Fn(&str) -> Option<String>,
 ) -> Option<Value> {
-    let registry = FunctionRegistry::new();
     let ctx = EvalContext::Runtime {
         row_data: row,
         mapping,
         env_getter,
     };
 
-    match registry.call(name, args, &ctx) {
+    match FUNCTION_REGISTRY.call(name, args, &ctx) {
         Ok(value) => Some(value),
         Err(e) => {
             warn!(function = %name, error = %e, "function evaluation failed");

@@ -4,6 +4,7 @@ use model::{
     records::Record,
     transform::mapping::{FieldTransformations, NameResolver},
 };
+use std::borrow::Cow;
 
 pub struct FieldMapper {
     ns_map: FieldTransformations,
@@ -35,7 +36,10 @@ impl Transform for FieldMapper {
         let table = row.schema.clone();
 
         for column in &mut row.fields {
-            column.name = self.ns_map.resolve(&table, &column.name);
+            // Only rewrite the name when it actually changes.
+            if let Cow::Owned(new_name) = self.ns_map.resolve_cow(&table, &column.name) {
+                column.name = new_name;
+            }
         }
 
         Ok(())

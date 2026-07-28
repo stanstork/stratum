@@ -3,6 +3,7 @@ use crate::{
     execution::{expr::CompiledExpression, pipeline::Pipeline},
     transform::computed_field::ComputedField,
 };
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 /// Manages field mappings and computed fields for entities in a pipeline.
@@ -189,6 +190,13 @@ impl FieldTransformations {
         }
     }
 
+    pub fn resolve_cow<'a>(&'a self, schema: &str, name: &'a str) -> Cow<'a, str> {
+        match self.field_renames.get(schema) {
+            Some(name_map) => name_map.resolve_cow(name),
+            None => Cow::Borrowed(name),
+        }
+    }
+
     pub fn reverse_resolve(&self, schema: &str, name: &str) -> String {
         if let Some(name_map) = self.field_renames.get(schema) {
             name_map.reverse_resolve(name)
@@ -231,11 +239,24 @@ impl NameResolver {
     /// Resolve source/origin name to target/destination name
     /// Example: "first_name" -> "given_name"
     pub fn resolve(&self, name: &str) -> String {
-        let lower = name.to_ascii_lowercase();
-        self.source_to_target
-            .get(&lower)
-            .cloned()
-            .unwrap_or_else(|| name.to_string())
+        self.resolve_cow(name).into_owned()
+    }
+
+    /// Like [`resolve`](Self::resolve) but borrows `name` when it maps to itself
+    /// (or is unmapped), so the identity case allocates nothing.
+    pub fn resolve_cow<'a>(&'a self, name: &'a str) -> Cow<'a, str> {
+        let target = if name.bytes().any(|b| b.is_ascii_uppercase()) {
+            self.source_to_target.get(&name.to_ascii_lowercase())
+        } else {
+            self.source_to_target.get(name)
+        };
+
+        match target {
+            // Identity mapping: nothing changes, so borrow the input.
+            Some(t) if t.eq_ignore_ascii_case(name) => Cow::Borrowed(name),
+            Some(t) => Cow::Owned(t.clone()),
+            None => Cow::Borrowed(name),
+        }
     }
 
     /// Resolve target/destination name to source/origin name

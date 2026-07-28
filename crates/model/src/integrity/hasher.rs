@@ -65,6 +65,66 @@ impl RowHasher {
 
         hash_bytes(&self.buf, self.algorithm)
     }
+
+    /// Hash a whole batch, resolving each ordered column to its
+    /// position in the row's field vector **once** for the batch.
+    pub fn hash_rows(
+        &mut self,
+        rows: &[&Record],
+        col_types: &HashMap<String, String>,
+    ) -> Vec<[u8; 32]> {
+        if rows.is_empty() {
+            return Vec::new();
+        }
+
+        // Destructure so `buf` can be borrowed mutably while `column_order` /
+        // `algorithm` are read inside the row loop.
+        let RowHasher {
+            column_order,
+            algorithm,
+            buf,
+        } = self;
+
+        let field_idx: Vec<Option<usize>> = column_order
+            .iter()
+            .map(|col| {
+                rows[0]
+                    .fields
+                    .iter()
+                    .position(|f| f.name.eq_ignore_ascii_case(col))
+            })
+            .collect();
+
+        // Resolve the coercion type per column once.
+        let coerce = !col_types.is_empty();
+        let col_types_by_pos: Vec<&str> = if coerce {
+            column_order
+                .iter()
+                .map(|col| col_types.get(col).map(|s| s.as_str()).unwrap_or(""))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        rows.iter()
+            .map(|row| {
+                buf.clear();
+                for (i, idx) in field_idx.iter().enumerate() {
+                    let value = idx
+                        .and_then(|j| row.fields.get(j))
+                        .and_then(|f| f.value.as_ref());
+                    match value {
+                        Some(v) if coerce => {
+                            serialize_value(&coerce_value_for_hash(v, col_types_by_pos[i]), buf)
+                        }
+                        Some(v) => serialize_value(v, buf),
+                        None => serialize_value(&Value::Null, buf),
+                    }
+                }
+                hash_bytes(buf, *algorithm)
+            })
+            .collect()
+    }
 }
 
 fn hash_bytes(data: &[u8], algorithm: HashAlgorithm) -> [u8; 32] {
@@ -127,5 +187,47 @@ mod tests {
         let row_missing = make_record(&[("a", Value::Int(1))]);
         let row_null = make_record(&[("a", Value::Int(1)), ("b", Value::Null)]);
         assert_eq!(h_with.hash_row(&row_missing), h_null.hash_row(&row_null));
+    }
+
+    #[test]
+    fn hash_rows_matches_per_row_hashing() {
+        use std::collections::HashMap;
+
+        let cols = vec!["a".to_string(), "b".to_string(), "tags".to_string()];
+        let make = || RowHasher::new(cols.clone(), HashAlgorithm::Sha256);
+
+        let r1 = make_record(&[
+            ("a", Value::Int(1)),
+            ("b", Value::Null), // present but null
+            ("tags", Value::String("x,y".into())),
+        ]);
+        let r2 = make_record(&[
+            ("a", Value::Int(2)),
+            ("b", Value::String("z".into())),
+            // "tags" omitted -> encoded as Null
+        ]);
+        let rows: Vec<&Record> = vec![&r1, &r2];
+
+        // No coercion: batch == per-row.
+        let empty = HashMap::new();
+        let batch = make().hash_rows(&rows, &empty);
+        let mut single = make();
+        let per_row: Vec<_> = rows
+            .iter()
+            .map(|r| single.hash_row_coerced(r, &empty))
+            .collect();
+        assert_eq!(batch, per_row);
+
+        // With coercion (tags -> array): batch == per-row, and it changed the hash.
+        let mut col_types = HashMap::new();
+        col_types.insert("tags".to_string(), "text[]".to_string());
+        let batch_coerced = make().hash_rows(&rows, &col_types);
+        let mut single_coerced = make();
+        let per_row_coerced: Vec<_> = rows
+            .iter()
+            .map(|r| single_coerced.hash_row_coerced(r, &col_types))
+            .collect();
+        assert_eq!(batch_coerced, per_row_coerced);
+        assert_ne!(batch, batch_coerced);
     }
 }

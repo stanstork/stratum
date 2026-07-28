@@ -22,20 +22,28 @@ impl ComputedTransform {
 
 impl Transform for ComputedTransform {
     fn apply(&self, row: &mut Record) -> Result<(), TransformError> {
-        let table = row.schema.clone();
-        let env = self.env.clone();
-        let env_getter = move |key: &str| env.get(key);
-        if let Some(computed_fields) = self.mapping.field_mappings.computed_fields.get(&table) {
-            for computed in computed_fields {
-                if let Some(value) = computed
-                    .expression
-                    .evaluate(row, &self.mapping, &env_getter)
-                {
-                    update_row(row, &computed.name, &value);
-                } else {
+        let Some(computed_fields) = self.mapping.field_mappings.computed_fields.get(&row.schema)
+        else {
+            return Ok(());
+        };
+
+        // Reserve once so appending the computed columns doesn't reallocate the
+        // field vector on every row.
+        row.fields.reserve(computed_fields.len());
+
+        let env = &self.env;
+        let env_getter = |key: &str| env.get(key);
+
+        for computed in computed_fields {
+            match computed
+                .expression
+                .evaluate(row, &self.mapping, &env_getter)
+            {
+                Some(value) => update_row(row, &computed.name, value),
+                None => {
                     return Err(TransformError::Transformation(format!(
                         "Failed to evaluate computed column `{}` in `{}`",
-                        computed.name, table
+                        computed.name, row.schema
                     )));
                 }
             }
@@ -44,20 +52,22 @@ impl Transform for ComputedTransform {
     }
 }
 
-// TODO: Optimize this function to avoid searching for the column multiple times
-// and to handle the case where the column is not found.
-fn update_row(row: &mut Record, column: &str, column_value: &Value) {
+/// Store a freshly computed value into `column`,
+/// overwriting an existing field or appending a new one.
+#[inline]
+fn update_row(row: &mut Record, column: &str, column_value: Value) {
     if let Some(col) = row
         .fields
         .iter_mut()
-        .find(|col| col.name.eq_ignore_ascii_case(column))
+        .find(|col| col.name == column || col.name.eq_ignore_ascii_case(column))
     {
-        col.value = Some(column_value.clone());
+        col.value = Some(column_value);
     } else {
+        let data_type = column_value.data_type();
         row.fields.push(FieldValue {
-            name: column.to_string(),
-            value: Some(column_value.clone()),
-            data_type: column_value.data_type(),
+            name: column.to_owned(),
+            value: Some(column_value),
+            data_type,
         });
     }
 }

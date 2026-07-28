@@ -153,10 +153,7 @@ impl IntegrityState {
         let col_types = self.config.column_types.get(key).unwrap_or(&empty_map);
         let hasher = self.hashers.get_mut(key).expect("hasher pre-populated");
 
-        let row_hashes: Vec<[u8; 32]> = rows
-            .iter()
-            .map(|r| hasher.hash_row_coerced(r, col_types))
-            .collect();
+        let row_hashes = hasher.hash_rows(rows, col_types);
 
         let subtree_root = MerkleTree::root_from_hashes(&row_hashes, self.config.algorithm);
 
@@ -183,8 +180,8 @@ impl IntegrityState {
         let hasher = self.hashers.get_mut(key).expect("hasher pre-populated");
         let set = self.cascade_hashes.get_mut(key).unwrap();
 
-        for row in rows {
-            set.insert(hasher.hash_row_coerced(row, col_types));
+        for hash in hasher.hash_rows(rows, col_types) {
+            set.insert(hash);
         }
     }
 
