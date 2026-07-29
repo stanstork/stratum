@@ -598,7 +598,7 @@ fn pk_signature(row: &Record, pk_cols: &[String]) -> String {
             sig.push('\u{1}'); // delimiter that cannot appear in a rendered value
         }
 
-        match row.get(col).and_then(|fv| fv.value.as_ref()) {
+        match row.value(col) {
             Some(v) => {
                 let _ = write!(sig, "{:?}", v);
             }

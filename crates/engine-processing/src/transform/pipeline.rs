@@ -23,6 +23,13 @@ pub enum ApplyOutcome {
     },
 }
 
+/// Outcome of running the pipeline over a whole batch.
+pub struct BatchOutput {
+    pub successful: Vec<Record>,
+    pub filtered: Vec<Record>,
+    pub failed: Vec<(Record, TransformError)>,
+}
+
 /// Details about a validation warning
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValidationWarning {
@@ -32,8 +39,24 @@ pub struct ValidationWarning {
     pub message: String,
 }
 
+/// How a row removed during [`TransformPipeline::run_batch`] is routed.
+enum Removal {
+    Filter,
+    Fail(TransformError),
+}
+
 pub trait Transform: Send + Sync {
+    /// Apply to a single row in place.
     fn apply(&self, row: &mut Record) -> Result<(), TransformError>;
+
+    /// Apply to a whole batch.
+    fn apply_batch(&self, rows: &mut [Record], failures: &mut Vec<(usize, TransformError)>) {
+        for (i, row) in rows.iter_mut().enumerate() {
+            if let Err(e) = self.apply(row) {
+                failures.push((i, e));
+            }
+        }
+    }
 }
 
 /// Trait for filter-like transforms that decide whether to keep a row.
@@ -108,29 +131,81 @@ impl TransformPipeline {
         }
     }
 
-    pub fn apply_batch(
-        &self,
-        mut rows: Vec<Record>,
-    ) -> (Vec<Record>, Vec<Record>, Vec<(Record, TransformError)>) {
-        let mut successful = Vec::with_capacity(rows.len());
+    /// Run the whole pipeline over a batch, **stage by stage**.
+    pub fn run_batch(&self, mut rows: Vec<Record>) -> BatchOutput {
         let mut filtered = Vec::new();
-        let mut failed = Vec::new();
+        let mut failed: Vec<(Record, TransformError)> = Vec::new();
 
-        // Process entire batch - collect all failures
-        for mut row in rows.drain(..) {
-            match self.apply(&mut row) {
-                Ok(ApplyOutcome::Success) | Ok(ApplyOutcome::Warning { .. }) => {
-                    successful.push(row)
+        let mut warn_scratch = Vec::new();
+        let mut scratch: Vec<Record> = Vec::new();
+
+        let mut failures: Vec<(usize, TransformError)> = Vec::new();
+        let mut removals: Vec<(usize, Removal)> = Vec::new();
+
+        for stage in &self.stages {
+            if rows.is_empty() {
+                break;
+            }
+
+            match stage {
+                PipelineStage::Transform(transform) => {
+                    failures.clear();
+                    transform.apply_batch(&mut rows, &mut failures);
+
+                    if !failures.is_empty() {
+                        removals.clear();
+
+                        for (idx, err) in failures.drain(..) {
+                            removals.push((idx, Removal::Fail(err)));
+                        }
+
+                        drain_removals(
+                            &mut rows,
+                            &mut scratch,
+                            &mut removals,
+                            &mut filtered,
+                            &mut failed,
+                        );
+                    }
                 }
-                Ok(ApplyOutcome::Skipped { .. }) => filtered.push(row),
-                Err(e) => {
-                    // Collect failed row but continue processing batch
-                    failed.push((row, e));
+                PipelineStage::Filter(filter) => {
+                    // One O(N) pass: retained rows keep their order, rejected rows move straight into `filtered`.
+                    filtered.extend(rows.extract_if(.., |row| !filter.should_keep(row)));
+                }
+                PipelineStage::Validation(validator) => {
+                    // Validate in place, recording removals by index.
+                    removals.clear();
+
+                    for (i, row) in rows.iter_mut().enumerate() {
+                        match self.validate(row, validator, &mut warn_scratch) {
+                            // Passed or warned (non-fatal): keep the row.
+                            Ok(None) => {}
+                            // Skip action: route to filtered.
+                            Ok(Some(_)) => removals.push((i, Removal::Filter)),
+                            // Fail action: route to failed (fatal for the run).
+                            Err(e) => removals.push((i, Removal::Fail(e))),
+                        }
+                        warn_scratch.clear();
+                    }
+
+                    if !removals.is_empty() {
+                        drain_removals(
+                            &mut rows,
+                            &mut scratch,
+                            &mut removals,
+                            &mut filtered,
+                            &mut failed,
+                        );
+                    }
                 }
             }
         }
 
-        (successful, filtered, failed)
+        BatchOutput {
+            successful: rows,
+            filtered,
+            failed,
+        }
     }
 
     pub fn add_transform<T: Transform + 'static>(mut self, transform: T) -> Self {
@@ -176,10 +251,9 @@ impl TransformPipeline {
                 }
                 ValidationAction::Warn => {
                     warn!(rule = %rule, message = %message, "validation failed, continuing");
-                    warnings.push(ValidationWarning {
-                        rule: rule.clone(),
-                        message: message.clone(),
-                    });
+                    // `res` was destructured by value, so move the strings in
+                    // rather than cloning.
+                    warnings.push(ValidationWarning { rule, message });
                 }
             }
         }
@@ -226,5 +300,28 @@ impl TransformPipelineExt for TransformPipeline {
 impl Default for TransformPipeline {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Move the rows at `removals`' (ascending) indices out of `rows` into their
+/// bucket, keeping the rest in their original order.
+fn drain_removals(
+    rows: &mut Vec<Record>,
+    scratch: &mut Vec<Record>,
+    removals: &mut Vec<(usize, Removal)>,
+    filtered: &mut Vec<Record>,
+    failed: &mut Vec<(Record, TransformError)>,
+) {
+    std::mem::swap(rows, scratch);
+    let mut rem = removals.drain(..).peekable();
+
+    for (i, row) in scratch.drain(..).enumerate() {
+        match rem.peek() {
+            Some(&(idx, _)) if idx == i => match rem.next().unwrap().1 {
+                Removal::Filter => filtered.push(row),
+                Removal::Fail(e) => failed.push((row, e)),
+            },
+            _ => rows.push(row),
+        }
     }
 }

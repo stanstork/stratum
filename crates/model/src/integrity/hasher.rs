@@ -30,10 +30,8 @@ impl RowHasher {
     pub fn hash_row(&mut self, row: &Record) -> [u8; 32] {
         self.buf.clear();
         for col in &self.column_order {
-            match row.get(col) {
-                Some(fv) => {
-                    serialize_value(fv.value.as_ref().unwrap_or(&Value::Null), &mut self.buf)
-                }
+            match row.value(col) {
+                Some(v) => serialize_value(v, &mut self.buf),
                 None => serialize_value(&Value::Null, &mut self.buf),
             }
         }
@@ -54,7 +52,7 @@ impl RowHasher {
         self.buf.clear();
 
         for col in &self.column_order {
-            match row.get(col).and_then(|fv| fv.value.as_ref()) {
+            match row.value(col) {
                 Some(value) => {
                     let col_type = col_types.get(col).map(|s| s.as_str()).unwrap_or("");
                     serialize_value(&coerce_value_for_hash(value, col_type), &mut self.buf);
@@ -85,14 +83,11 @@ impl RowHasher {
             buf,
         } = self;
 
+        // All rows in a batch share one schema, so resolve each ordered column to
+        // its position once via the shared schema index.
         let field_idx: Vec<Option<usize>> = column_order
             .iter()
-            .map(|col| {
-                rows[0]
-                    .fields
-                    .iter()
-                    .position(|f| f.name.eq_ignore_ascii_case(col))
-            })
+            .map(|col| rows[0].index_of(col))
             .collect();
 
         // Resolve the coercion type per column once.
@@ -110,9 +105,7 @@ impl RowHasher {
             .map(|row| {
                 buf.clear();
                 for (i, idx) in field_idx.iter().enumerate() {
-                    let value = idx
-                        .and_then(|j| row.fields.get(j))
-                        .and_then(|f| f.value.as_ref());
+                    let value = idx.and_then(|j| row.value_at(j));
                     match value {
                         Some(v) if coerce => {
                             serialize_value(&coerce_value_for_hash(v, col_types_by_pos[i]), buf)
@@ -142,7 +135,7 @@ mod tests {
     use crate::records::OpType;
 
     fn make_record(fields: &[(&str, Value)]) -> Record {
-        Record::new(
+        Record::from_fields(
             "test",
             fields
                 .iter()

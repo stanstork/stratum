@@ -1,7 +1,7 @@
 use crate::transform::{
     error::{ErrorType, TransformError},
     failed_row_writer::FailedRowWriter,
-    pipeline::{ApplyOutcome, TransformPipeline},
+    pipeline::{BatchOutput, TransformPipeline},
 };
 use engine_core::context::exec::ExecutionContext;
 use model::{
@@ -96,49 +96,38 @@ impl TransformService {
         // Cap the number of error messages we retain.
         const MAX_ERROR_SAMPLES: usize = 10;
 
-        let mut successful = Vec::with_capacity(rows.len());
-        let mut filtered = Vec::new();
-        let mut failed_rows = Vec::new();
+        // Run the whole batch through the pipeline stage-by-stage.
+        let BatchOutput {
+            successful,
+            filtered,
+            failed,
+        } = self.pipeline.run_batch(rows);
+
+        let mut failed_rows = Vec::with_capacity(failed.len());
         let mut error_samples = Vec::new();
         let mut has_fatal = false;
 
-        for mut row in rows {
-            // Apply pipeline - fail fast, no retry
-            match self.pipeline.apply(&mut row) {
-                Ok(ApplyOutcome::Success) | Ok(ApplyOutcome::Warning { .. }) => {
-                    // Row transformed successfully (warnings are non-fatal)
-                    successful.push(row);
-                }
-                Ok(ApplyOutcome::Skipped { .. }) => {
-                    // Row filtered out (not an error)
-                    filtered.push(row);
-                }
-                Err(e) => {
-                    // Check if this is a fatal error (validation failure)
-                    if e.is_fatal() {
-                        has_fatal = true;
-                    }
-
-                    // The error is otherwise only captured inside the FailedRow.
-                    // Log it so the cause is diagnosable.
-                    let err_msg = e.to_string();
-                    debug!(
-                        pipeline = %self.pipeline_name,
-                        batch_id = %batch_id,
-                        error = %err_msg,
-                        "row transformation failed"
-                    );
-
-                    if error_samples.len() < MAX_ERROR_SAMPLES {
-                        error_samples.push(err_msg);
-                    }
-
-                    // Transformation failed - create FailedRow for DLQ
-                    let failed_row = self.create_failed_row(run_id, batch_id, &row, e);
-                    failed_rows.push(failed_row);
-                    // Continue processing remaining rows in batch
-                }
+        for (row, error) in &failed {
+            // Check if this is a fatal error (validation failure).
+            if error.is_fatal() {
+                has_fatal = true;
             }
+
+            // The error is otherwise only captured inside the FailedRow. Log it
+            // so the cause is diagnosable.
+            let err_msg = error.to_string();
+            debug!(
+                pipeline = %self.pipeline_name,
+                batch_id = %batch_id,
+                error = %err_msg,
+                "row transformation failed"
+            );
+
+            if error_samples.len() < MAX_ERROR_SAMPLES {
+                error_samples.push(err_msg);
+            }
+
+            failed_rows.push(self.create_failed_row(run_id, batch_id, row, error));
         }
 
         if !failed_rows.is_empty() {
@@ -169,9 +158,9 @@ impl TransformService {
         run_id: &str,
         batch_id: &str,
         row: &Record,
-        error: TransformError,
+        error: &TransformError,
     ) -> FailedRow {
-        let stage = match &error {
+        let stage = match error {
             TransformError::ValidationFailed { .. } => ProcessingStage::Validation,
             _ => ProcessingStage::Transform,
         };
@@ -185,7 +174,7 @@ impl TransformService {
             error.to_string(),      // Error message
         )
         .with_execution_context(run_id.to_string(), Some(batch_id.to_string()), None)
-        .with_table(row.schema.clone())
+        .with_table(row.table().to_string())
         .with_retryable(is_retryable)
     }
 

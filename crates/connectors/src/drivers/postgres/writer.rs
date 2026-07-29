@@ -120,12 +120,7 @@ impl DataWriter for PgDriver {
         // column's field index once. Columns absent from the row map to `None` -> NULL.
         let field_idx: Vec<Option<usize>> = columns
             .iter()
-            .map(|col| {
-                rows[0]
-                    .fields
-                    .iter()
-                    .position(|f| f.name.eq_ignore_ascii_case(&col.name))
-            })
+            .map(|col| rows[0].index_of(&col.name))
             .collect();
 
         let generator = QueryGenerator::new(&dialect::Postgres);
@@ -191,10 +186,7 @@ fn encode_binary(
     for row in rows {
         PgBinaryEncoder::begin_row(&mut buf, columns.len());
         for i in 0..columns.len() {
-            match field_idx[i]
-                .and_then(|idx| row.fields.get(idx))
-                .and_then(|f| f.value.as_ref())
-            {
+            match field_idx[i].and_then(|idx| row.value_at(idx)) {
                 Some(value) => enc.write_field(bcts[i], value, &mut buf)?,
                 None => PgBinaryEncoder::write_null(&mut buf),
             }
@@ -217,10 +209,7 @@ fn encode_text(columns: &[ColumnMetadata], field_idx: &[Option<usize>], rows: &[
             if i > 0 {
                 buf.push(',');
             }
-            match field_idx[i]
-                .and_then(|idx| row.fields.get(idx))
-                .and_then(|f| f.value.as_ref())
-            {
+            match field_idx[i].and_then(|idx| row.value_at(idx)) {
                 Some(value) => {
                     let coerced = coercions[i].apply(value);
                     encoder.write_value(&coerced, &mut buf);

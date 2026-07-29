@@ -68,7 +68,6 @@ pipeline "migrate_language" {
     settings {
         create_missing_tables = true
         batch_size            = define.default_batch_size
-        copy_columns          = "MAP_ONLY"
     }
 }
 
@@ -97,7 +96,6 @@ pipeline "migrate_category" {
 
     settings {
         create_missing_tables = true
-        copy_columns          = "MAP_ONLY"
     }
 }
 
@@ -137,7 +135,6 @@ pipeline "migrate_actors_enriched" {
     settings {
         create_missing_tables  = true
         batch_size             = define.batch_size
-        copy_columns           = "MAP_ONLY"
     }
 }
 
@@ -183,7 +180,6 @@ pipeline "migrate_films_affordable" {
         skip_primary_keys = true
         skip_foreign_keys = true
         batch_size            = 1
-        copy_columns          = "MAP_ONLY"
     }
 }
 
@@ -226,7 +222,6 @@ pipeline "migrate_customers_with_store" {
         create_missing_tables = true
         skip_primary_keys = true
         skip_foreign_keys = true
-        copy_columns          = "MAP_ONLY"
     }
 }
 
@@ -276,7 +271,6 @@ pipeline "migrate_film_details" {
         skip_primary_keys = true
         skip_foreign_keys = true
         batch_size             = 1
-        copy_columns           = "MAP_ONLY"
     }
 }
 
@@ -327,7 +321,6 @@ pipeline "migrate_payments_validated" {
         skip_primary_keys = true
         skip_foreign_keys = true
         batch_size            = define.batch_size
-        copy_columns          = "MAP_ONLY"
     }
 }
 
@@ -384,7 +377,6 @@ pipeline "migrate_films_with_warnings" {
         skip_primary_keys = true
         skip_foreign_keys = true
         batch_size            = 1
-        copy_columns          = "MAP_ONLY"
     }
 }
 
@@ -443,7 +435,6 @@ pipeline "migrate_addresses_filtered" {
         skip_primary_keys = true
         skip_foreign_keys = true
         batch_size            = 1
-        copy_columns          = "MAP_ONLY"
     }
 }
 
@@ -506,7 +497,6 @@ pipeline "migrate_film_actors_enriched" {
         skip_primary_keys = true
         skip_foreign_keys = true
         batch_size             = 1
-        copy_columns           = "MAP_ONLY"
     }
 }
 
@@ -555,7 +545,6 @@ pipeline "migrate_inventory_with_file_dlq" {
         skip_primary_keys = true
         skip_foreign_keys = true
         batch_size            = 1
-        copy_columns          = "MAP_ONLY"
     }
 }
 
@@ -609,7 +598,6 @@ pipeline "migrate_staff_with_hooks" {
         create_missing_tables  = true
         skip_primary_keys = true
         skip_foreign_keys = true
-        copy_columns           = "MAP_ONLY"
     }
 }
 
@@ -698,7 +686,6 @@ pipeline "create_customer_360_view" {
         skip_primary_keys = true
         skip_foreign_keys = true
         batch_size             = 1
-        copy_columns           = "MAP_ONLY"
     }
 }
 
@@ -755,6 +742,5 @@ pipeline "create_migration_summary" {
         skip_primary_keys = true
         skip_foreign_keys = true
         batch_size            = 1
-        copy_columns          = "MAP_ONLY"
     }
 }

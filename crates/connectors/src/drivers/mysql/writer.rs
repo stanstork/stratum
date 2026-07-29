@@ -136,15 +136,8 @@ impl MySqlDriver {
             .collect();
         cols.sort_by_key(|c| c.ordinal);
 
-        let field_idx: Vec<Option<usize>> = cols
-            .iter()
-            .map(|c| {
-                rows[0]
-                    .fields
-                    .iter()
-                    .position(|f| f.name.eq_ignore_ascii_case(&c.name))
-            })
-            .collect();
+        let field_idx: Vec<Option<usize>> =
+            cols.iter().map(|c| rows[0].index_of(&c.name)).collect();
 
         // Serialize the whole batch to the tab/newline/backslash text format
         // that MySqlCopyEncoder produces.
@@ -157,10 +150,7 @@ impl MySqlDriver {
                     buff.push('\t');
                 }
 
-                match idx
-                    .and_then(|j| row.fields.get(j))
-                    .and_then(|f| f.value.as_ref())
-                {
+                match idx.and_then(|j| row.value_at(j)) {
                     Some(value) => encoder.write_value(value, &mut buff),
                     None => buff.push_str("\\N"),
                 }

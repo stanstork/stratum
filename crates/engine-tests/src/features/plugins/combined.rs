@@ -43,7 +43,6 @@ mod tests {
 
                 settings {{
                     create_missing_tables = true
-                    copy_columns          = "MAP_ONLY"
                 }}
             }}
             "#,

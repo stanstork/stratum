@@ -6,7 +6,7 @@ pub struct EmptyRowFilter;
 
 impl Filter for EmptyRowFilter {
     fn should_keep(&self, row: &Record) -> bool {
-        !row.fields.is_empty()
+        !row.is_empty()
     }
 }
 
@@ -46,7 +46,7 @@ impl UnmappedTableFilter {
 
 impl Filter for UnmappedTableFilter {
     fn should_keep(&self, row: &Record) -> bool {
-        self.has_any_mapping(&row.schema)
+        self.has_any_mapping(row.table())
     }
 }
 
@@ -92,10 +92,10 @@ mod tests {
     fn test_empty_row_filter() {
         let filter = EmptyRowFilter;
 
-        let empty_row = Record::new("test_table", vec![], OpType::default());
+        let empty_row = Record::from_fields("test_table", vec![], OpType::default());
         assert!(!filter.should_keep(&empty_row));
 
-        let non_empty_row = Record::new(
+        let non_empty_row = Record::from_fields(
             "test_table",
             vec![FieldValue {
                 name: "id".to_string(),
@@ -115,13 +115,12 @@ mod tests {
     fn test_field_value_filter() {
         let filter = FieldValueFilter::new(|row: &Record| {
             // Keep rows where 'active' field is true
-            row.get("active")
-                .and_then(|f| f.value.as_ref())
+            row.value("active")
                 .map(|v| matches!(v, Value::Boolean(true)))
                 .unwrap_or(false)
         });
 
-        let active_row = Record::new(
+        let active_row = Record::from_fields(
             "users",
             vec![FieldValue {
                 name: "active".to_string(),
@@ -132,7 +131,7 @@ mod tests {
         );
         assert!(filter.should_keep(&active_row));
 
-        let inactive_row = Record::new(
+        let inactive_row = Record::from_fields(
             "users",
             vec![FieldValue {
                 name: "active".to_string(),

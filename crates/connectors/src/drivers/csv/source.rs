@@ -141,7 +141,7 @@ impl CsvDataSource {
                         continue;
                     }
 
-                    let row = Record::new(&entity_name, fields, OpType::default());
+                    let row = Record::from_fields(&entity_name, fields, OpType::default());
                     result.push(row);
                 }
                 Some(Err(e)) => {

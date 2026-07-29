@@ -217,10 +217,10 @@ impl BatchWriter {
         let mut groups = Vec::new();
         let mut start = 0;
         while start < rows.len() {
-            let schema = rows[start].schema.as_str();
+            let schema = rows[start].table();
             let len = rows[start..]
                 .iter()
-                .take_while(|r| r.schema.as_str() == schema)
+                .take_while(|r| r.table() == schema)
                 .count();
             groups.push((self.meta_for(schema), &rows[start..start + len]));
             start += len;

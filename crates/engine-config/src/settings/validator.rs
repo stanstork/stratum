@@ -38,7 +38,6 @@ impl<'a> SettingsValidator<'a> {
         let mut errors: Vec<String> = Vec::new();
 
         self.validate_batch_size(settings, &mut builder);
-        self.validate_copy_columns(settings, &mut builder);
         self.validate_skip_constraints(settings, &mut builder, &mut errors);
         self.validate_lanes(settings, &mut builder);
         self.validate_create_tables(settings, &mut builder, &mut errors)
@@ -67,10 +66,6 @@ impl<'a> SettingsValidator<'a> {
             }
             builder.batch_size = Some(settings.batch_size);
         }
-    }
-
-    fn validate_copy_columns(&self, settings: &Settings, builder: &mut ValidatedSettingsBuilder) {
-        builder.copy_columns = Some(settings.copy_columns);
     }
 
     fn validate_lanes(&self, settings: &Settings, builder: &mut ValidatedSettingsBuilder) {
@@ -180,7 +175,6 @@ impl<'a> SettingsValidator<'a> {
     fn log_validated_settings(&self, settings: &ValidatedSettings) {
         debug!(
             batch_size = settings.batch_size(),
-            copy_columns = ?settings.copy_columns(),
             create_missing_tables = settings.create_missing_tables(),
             create_missing_columns = settings.create_missing_columns(),
             skip_primary_keys = settings.skip_primary_keys(),

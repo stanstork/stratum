@@ -54,6 +54,11 @@ impl FunctionRegistry {
         func(args, ctx)
     }
 
+    /// Resolve a function name to its implementation pointer.
+    pub fn get(&self, name: &str) -> Option<FunctionImpl> {
+        self.functions.get(&name.to_lowercase()).copied()
+    }
+
     pub fn has_function(&self, name: &str) -> bool {
         self.functions.contains_key(&name.to_lowercase())
     }

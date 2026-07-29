@@ -21,6 +21,6 @@ pub use orchestrator::{collect_settings, validate_and_plan};
 pub use phase::MigrationSettingsPhase;
 pub use schema_manager::apply_schema_ops;
 pub use traits::MigrationSetting;
-pub use types::{CopyColumns, Settings};
+pub use types::Settings;
 pub use validated::{ValidatedSettings, ValidatedSettingsBuilder};
 pub use validator::SettingsValidator;

@@ -93,11 +93,7 @@ impl IntegrityState {
         let mut groups: Vec<Vec<&Record>> = vec![Vec::new(); self.table_names.len()];
 
         for row in rows {
-            let idx = self
-                .table_indices
-                .get(row.schema.as_str())
-                .copied()
-                .unwrap_or(0);
+            let idx = self.table_indices.get(row.table()).copied().unwrap_or(0);
             groups[idx].push(row);
         }
 

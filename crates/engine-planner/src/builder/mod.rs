@@ -389,7 +389,7 @@ impl ReportBuilder {
             &report.joins,
             &report.validations,
             &report.source,
-            &settings,
+            pipeline.has_projection(),
         );
         let (order, stage) = self
             .calculate_execution_positions(dag, &pipeline.name)
@@ -453,7 +453,7 @@ impl ReportBuilder {
         let analysis_input = PipelineAnalysisInput::new(
             Arc::new(pipeline.clone()),
             self.sample_config(),
-            PipelineSettingsView::new(&resources.validated_settings).mapped_columns_only(),
+            pipeline.has_projection(),
         );
 
         let schema_plan = resources.schema_plan.clone();
@@ -637,7 +637,7 @@ impl ReportBuilder {
             view.skip_primary_keys(),
             view.skip_foreign_keys(),
             view.skip_indexes(),
-            view.mapped_columns_only(),
+            pipeline.has_projection(),
             type_registry,
         );
 

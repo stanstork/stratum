@@ -26,7 +26,15 @@ impl DataReader for MySqlDriver {
         let mut conn = self.pool().get_conn().await?;
         let params = MySqlParamStore::from_values(&params).into_params();
         let rows: Vec<MySqlRow> = conn.exec(sql, params).await?;
-        Ok(rows.iter().map(|r| r.decode(&request.table)).collect())
+
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Build the shared column schema once for the whole result set.
+        let schema = rows[0].schema(&request.table);
+
+        Ok(rows.iter().map(|r| r.decode_with_schema(&schema)).collect())
     }
 
     async fn count(

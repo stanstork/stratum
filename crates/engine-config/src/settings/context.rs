@@ -3,7 +3,6 @@ use super::{
     endpoint::{Endpoint, SchemaSource},
     error::SettingsError,
 };
-use crate::settings::CopyColumns;
 use crate::settings::validated::ValidatedSettings;
 use engine_core::schema::planner::SchemaPlanner;
 use engine_core::schema::{plan::SchemaPlan, type_registry::TypeRegistry, types::TypeEngine};
@@ -46,7 +45,7 @@ impl<D: SchemaDriver> SchemaSettingContext<D> {
     }
 
     pub async fn init_schema_planner(&self) -> Result<SchemaPlanner, SettingsError> {
-        let mapped_columns_only = *self.settings.copy_columns() == CopyColumns::MapOnly;
+        let mapped_columns_only = self.mapping.has_projection;
         let introspector = self.source.introspector.clone();
 
         Ok(SchemaPlanner::new(
@@ -62,7 +61,7 @@ impl<D: SchemaDriver> SchemaSettingContext<D> {
     }
 
     pub async fn build_schema_plan(&self) -> Result<SchemaPlan, SettingsError> {
-        let mapped_columns_only = *self.settings.copy_columns() == CopyColumns::MapOnly;
+        let mapped_columns_only = self.mapping.has_projection;
 
         let introspector = self.source.introspector.clone();
         let registry = Arc::new(self.type_registry());

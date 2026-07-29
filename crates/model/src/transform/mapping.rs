@@ -60,6 +60,9 @@ pub struct TransformationMetadata {
     /// Source tables actually migrated (created) by this run: the `from` table
     /// plus any cascade-discovered tables.
     pub migrated_tables: HashSet<String>,
+
+    /// Whether the pipeline declared an explicit `select` projection.
+    pub has_projection: bool,
 }
 
 impl FieldTransformations {
@@ -367,6 +370,7 @@ impl TransformationMetadata {
             foreign_fields,
             plugin_columns: Vec::new(),
             migrated_tables: source_tables,
+            has_projection: pipeline.has_projection(),
         }
     }
 

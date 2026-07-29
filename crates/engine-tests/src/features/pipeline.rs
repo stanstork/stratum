@@ -246,7 +246,6 @@ mod tests {
                 settings {
                     create_missing_tables = true
                     batch_size = env("BATCH_SIZE", 1000)
-                    copy_columns = "MAP_ONLY"
                 }
 
                 validate {
@@ -289,7 +288,6 @@ mod tests {
                 settings {
                     create_missing_tables = true
                     batch_size = 500
-                    copy_columns = "MAP_ONLY"
                 }
 
                 validate {
@@ -336,7 +334,6 @@ mod tests {
                 settings {
                     create_missing_tables = true
                     batch_size = 1000
-                    copy_columns = "MAP_ONLY"
                 }
 
                 validate {
@@ -378,7 +375,6 @@ mod tests {
                 settings {
                     create_missing_tables = true
                     batch_size = 500
-                    copy_columns = "MAP_ONLY"
                 }
 
                 validate {
@@ -522,7 +518,6 @@ mod tests {
                     skip_primary_keys = true
                     skip_foreign_keys = true
                     batch_size = 500
-                    copy_columns = "MAP_ONLY"
                 }
 
                 select {
@@ -587,7 +582,6 @@ mod tests {
                     skip_primary_keys = true
                     skip_foreign_keys = true
                     batch_size = 500
-                    copy_columns = "MAP_ONLY"
                 }
 
                 select {
@@ -749,7 +743,6 @@ mod tests {
                 settings {
                     create_missing_tables = true
                     batch_size = 10
-                    copy_columns = "MAP_ONLY"
                 }
 
                 validate {
@@ -839,7 +832,6 @@ mod tests {
                 settings {
                     create_missing_tables = true
                     batch_size = 1000
-                    copy_columns = "MAP_ONLY"
                 }
 
                 validate {
@@ -946,7 +938,6 @@ mod tests {
                 settings {
                     create_missing_tables = true
                     batch_size = 50
-                    copy_columns = "MAP_ONLY"
                 }
 
                 select {

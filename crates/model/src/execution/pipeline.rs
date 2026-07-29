@@ -28,6 +28,13 @@ impl Pipeline {
     pub fn setting_flag(&self, key: &str) -> bool {
         matches!(self.settings.get(key), Some(Value::Boolean(true)))
     }
+
+    /// Whether the pipeline declares an explicit output projection - a
+    /// `select { }` block (including plugin-produced columns). When true only the
+    /// projected columns are migrated; when false every source column is copied as-is.
+    pub fn has_projection(&self) -> bool {
+        !self.transformations.is_empty() || !self.plugin_transforms.is_empty()
+    }
 }
 
 /// From block - data source configuration

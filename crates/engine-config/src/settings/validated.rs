@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use crate::settings::CopyColumns;
 use connectors::drivers::postgres::config::PkCreation;
 use model::{core::value::Value, execution::flags::IntegrityMode};
 use serde::Serialize;
@@ -10,8 +9,6 @@ use serde::Serialize;
 pub struct ValidatedSettings {
     /// Batch size for reading and writing data
     pub batch_size: usize,
-    /// Which columns to copy from source to destination
-    pub copy_columns: CopyColumns,
     /// Whether to create missing tables at destination
     pub create_missing_tables: bool,
     /// Whether to create missing columns at destination
@@ -37,7 +34,6 @@ impl ValidatedSettings {
     pub fn default(dry_run: bool) -> Self {
         Self {
             batch_size: 1000,
-            copy_columns: CopyColumns::All,
             create_missing_tables: false,
             create_missing_columns: false,
             skip_primary_keys: false,
@@ -69,7 +65,6 @@ impl ValidatedSettings {
     pub fn from_builder(builder: ValidatedSettingsBuilder) -> Self {
         Self {
             batch_size: builder.batch_size.unwrap_or(1000),
-            copy_columns: builder.copy_columns.unwrap_or(CopyColumns::All),
             create_missing_tables: builder.create_missing_tables.unwrap_or(false),
             create_missing_columns: builder.create_missing_columns.unwrap_or(false),
             skip_primary_keys: builder.skip_primary_keys.unwrap_or(false),
@@ -84,10 +79,6 @@ impl ValidatedSettings {
 
     pub fn batch_size(&self) -> usize {
         self.batch_size
-    }
-
-    pub fn copy_columns(&self) -> &CopyColumns {
-        &self.copy_columns
     }
 
     pub fn create_missing_tables(&self) -> bool {
@@ -126,10 +117,6 @@ impl ValidatedSettings {
         self.create_missing_tables || self.create_missing_columns
     }
 
-    pub fn mapped_columns_only(&self) -> bool {
-        matches!(self.copy_columns, CopyColumns::MapOnly)
-    }
-
     pub fn integrity(&self) -> IntegrityMode {
         self.integrity
     }
@@ -148,7 +135,6 @@ fn read_usize(settings: &HashMap<String, Value>, key: &str) -> Option<usize> {
 #[derive(Debug, Default)]
 pub struct ValidatedSettingsBuilder {
     pub batch_size: Option<usize>,
-    pub copy_columns: Option<CopyColumns>,
     pub create_missing_tables: Option<bool>,
     pub create_missing_columns: Option<bool>,
     pub skip_primary_keys: Option<bool>,
@@ -171,11 +157,6 @@ impl ValidatedSettingsBuilder {
 
     pub fn batch_size(mut self, batch_size: usize) -> Self {
         self.batch_size = Some(batch_size);
-        self
-    }
-
-    pub fn copy_columns(mut self, copy_columns: CopyColumns) -> Self {
-        self.copy_columns = Some(copy_columns);
         self
     }
 

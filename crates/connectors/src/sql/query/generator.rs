@@ -23,7 +23,7 @@ use query_builder::{
     renderer::{Render, Renderer},
 };
 use query_builder::{table_ref, value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::{
     add_joins, add_where, ident, join_on_expr,
@@ -152,28 +152,20 @@ impl<'a> QueryGenerator<'a> {
         let mut builder = InsertBuilder::new(table_ref!(meta.name))
             .columns(&col_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
 
-        let col_plan: Vec<(&ColumnMetadata, String, _)> = sorted_columns
+        // Per-column canonical type.
+        let col_plan: Vec<(&ColumnMetadata, _)> = sorted_columns
             .iter()
             .map(|col_meta| {
                 let canonical = type_converter.to_canonical(col_meta).canonical;
-                (*col_meta, col_meta.name.to_lowercase(), canonical)
+                (*col_meta, canonical)
             })
             .collect();
 
         for row in rows.iter() {
-            let field_map: HashMap<String, &Value> = row
-                .fields
-                .iter()
-                .filter_map(|rc| rc.value.as_ref().map(|v| (rc.name.to_lowercase(), v)))
-                .collect();
-
             let ordered_values: Vec<Expr> = col_plan
                 .iter()
-                .map(|(col_meta, lname, data_type)| {
-                    let value = field_map
-                        .get(lname)
-                        .map(|v| (*v).clone())
-                        .unwrap_or(Value::Null);
+                .map(|(col_meta, data_type)| {
+                    let value = row.value(&col_meta.name).cloned().unwrap_or(Value::Null);
                     map_value_to_expr(value, col_meta, data_type, self.dialect)
                 })
                 .collect();

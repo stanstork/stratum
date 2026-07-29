@@ -61,7 +61,7 @@ impl SourceReader for WasmSourceReader {
         // Stamp records with the source table so entity-keyed transforms match.
         let mut rows = page.records;
         for row in &mut rows {
-            row.schema = self.table.clone();
+            row.set_table(&self.table);
         }
 
         Ok(FetchResult {

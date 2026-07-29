@@ -147,10 +147,6 @@ impl<'a> PipelineSettingsView<'a> {
         self.settings.skip_indexes()
     }
 
-    pub fn mapped_columns_only(&self) -> bool {
-        self.settings.mapped_columns_only()
-    }
-
     pub fn batch_size(&self) -> usize {
         self.settings.batch_size()
     }

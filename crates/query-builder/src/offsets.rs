@@ -845,9 +845,9 @@ mod keyset_tests {
     #[test]
     fn next_cursor_reads_all_key_values() {
         let strat = KeysetOffset::new(vec![qc("actor_id"), qc("film_id")]);
-        let row = Record {
-            schema: "t".into(),
-            fields: vec![
+        let row = Record::from_fields(
+            "t",
+            vec![
                 FieldValue {
                     name: "actor_id".into(),
                     value: Some(Value::Int(3)),
@@ -859,8 +859,8 @@ mod keyset_tests {
                     data_type: Type::Boolean,
                 },
             ],
-            op_type: Default::default(),
-        };
+            Default::default(),
+        );
         match strat.next_cursor(&row) {
             Cursor::Keyset { values, .. } => assert_eq!(values.len(), 2),
             other => panic!("expected keyset cursor, got {other:?}"),
@@ -870,11 +870,7 @@ mod keyset_tests {
     #[test]
     fn advance_cursor_accumulates_offset_for_default() {
         let strat = DefaultOffset { offset: 0 };
-        let row = Record {
-            schema: "t".into(),
-            fields: vec![],
-            op_type: Default::default(),
-        };
+        let row = Record::from_fields("t", vec![], Default::default());
         // First batch (from None) advances to one batch width.
         assert!(matches!(
             strat.advance_cursor(&row, &Cursor::None, 100),
@@ -890,9 +886,9 @@ mod keyset_tests {
     #[test]
     fn advance_cursor_delegates_to_row_for_keyset() {
         let strat = KeysetOffset::new(vec![qc("actor_id"), qc("film_id")]);
-        let row = Record {
-            schema: "t".into(),
-            fields: vec![
+        let row = Record::from_fields(
+            "t",
+            vec![
                 FieldValue {
                     name: "actor_id".into(),
                     value: Some(Value::Int(3)),
@@ -904,8 +900,8 @@ mod keyset_tests {
                     data_type: Type::Boolean,
                 },
             ],
-            op_type: Default::default(),
-        };
+            Default::default(),
+        );
         // `current` and `batch_size` are ignored for key-based strategies: the
         // result is derived from the row, matching `next_cursor`.
         match strat.advance_cursor(&row, &Cursor::Default { offset: 999 }, 100) {
@@ -917,11 +913,7 @@ mod keyset_tests {
     #[test]
     fn next_after_batch_stops_at_end_or_empty() {
         let strat = DefaultOffset { offset: 0 };
-        let row = Record {
-            schema: "t".into(),
-            fields: vec![],
-            op_type: Default::default(),
-        };
+        let row = Record::from_fields("t", vec![], Default::default());
         // End of scan -> None, even with a last row.
         assert!(
             strat

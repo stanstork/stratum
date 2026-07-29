@@ -12,6 +12,12 @@ use tracing::warn;
 /// The built-in function table.
 static FUNCTION_REGISTRY: LazyLock<FunctionRegistry> = LazyLock::new(FunctionRegistry::new);
 
+/// Resolve a function name against the shared built-in registry, returning its
+/// implementation pointer so a compiled expression can bind it once.
+pub(crate) fn lookup_function(name: &str) -> Option<crate::functions::FunctionImpl> {
+    FUNCTION_REGISTRY.get(name)
+}
+
 /// Trait for evaluating compiled expressions with runtime row data
 pub trait Evaluator {
     fn evaluate(
@@ -30,12 +36,7 @@ impl Evaluator for CompiledExpression {
         env_getter: &dyn Fn(&str) -> Option<String>,
     ) -> Option<Value> {
         match self {
-            CompiledExpression::Identifier(identifier) => row
-                .fields
-                .iter()
-                .find(|col| col.name.eq_ignore_ascii_case(identifier))
-                .map(|col| col.value.clone())
-                .unwrap_or(None),
+            CompiledExpression::Identifier(identifier) => row.value(identifier).cloned(),
 
             CompiledExpression::Literal(value) => Some(value.clone()),
 
@@ -65,10 +66,7 @@ impl Evaluator for CompiledExpression {
                     // Given the CrossEntityReference, find the matching column in the current row
                     .and_then(|lk| {
                         if let Some(target) = &lk.target {
-                            row.fields
-                                .iter()
-                                .find(|col| col.name.eq_ignore_ascii_case(target))
-                                .and_then(|col| col.value.clone())
+                            row.value(target).cloned()
                         } else {
                             // Lookup target is not specified. Used in function arguments.
                             None
@@ -77,13 +75,9 @@ impl Evaluator for CompiledExpression {
 
                 // For source table references, the column may be renamed in the row data.
                 // We need to resolve the source column name to the target column name.
-                let resolved_key = mapping.field_mappings.resolve_cow(&row.schema, key);
+                let resolved_key = mapping.field_mappings.resolve_cow(row.table(), key);
 
-                let raw = row
-                    .fields
-                    .iter()
-                    .find(|col| col.name.eq_ignore_ascii_case(&resolved_key))
-                    .and_then(|col| col.value.clone());
+                let raw = row.value(&resolved_key).cloned();
 
                 // If a mapped value is found, return it. Otherwise, return the raw value.
                 // Note: When the mapping contains lookups from joined tables, it generates a select with the mapped name.
@@ -96,12 +90,9 @@ impl Evaluator for CompiledExpression {
             }
 
             // Single-segment DotPath is just a field reference
-            CompiledExpression::DotPath(segments) if segments.len() == 1 => row
-                .fields
-                .iter()
-                .find(|col| col.name.eq_ignore_ascii_case(&segments[0]))
-                .map(|col| col.value.clone())
-                .unwrap_or(None),
+            CompiledExpression::DotPath(segments) if segments.len() == 1 => {
+                row.value(&segments[0]).cloned()
+            }
 
             CompiledExpression::Unary { operand, .. } => {
                 // For now, just evaluate the operand

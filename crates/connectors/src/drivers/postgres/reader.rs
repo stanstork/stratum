@@ -29,9 +29,16 @@ impl DataReader for PgDriver {
             .await
             .map_err(|e| DriverError::QueryError(e.to_string()))?;
 
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Shared column schema built once; each row shares it.
+        let schema = PgRowDecoder(&rows[0]).schema(&request.table);
+
         Ok(rows
             .iter()
-            .map(|row| PgRowDecoder(row).decode(&request.table))
+            .map(|row| PgRowDecoder(row).decode_with_schema(&schema))
             .collect())
     }
 

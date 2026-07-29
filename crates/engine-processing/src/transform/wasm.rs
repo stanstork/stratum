@@ -1,9 +1,6 @@
 use crate::transform::{error::TransformError, pipeline::Transform};
 use engine_wasm::{exchange::types::PluginInput, runtime::instance::PluginInstance};
-use model::{
-    core::value::{FieldValue, Value},
-    records::Record,
-};
+use model::{core::value::Value, records::Record};
 use std::{collections::HashMap, sync::Mutex};
 
 pub struct WasmTransform {
@@ -46,17 +43,8 @@ impl Transform for WasmTransform {
 }
 
 fn update_row(row: &mut Record, column: &str, column_value: &Value) {
-    if let Some(col) = row
-        .fields
-        .iter_mut()
-        .find(|col| col.name.eq_ignore_ascii_case(column))
-    {
-        col.value = Some(column_value.clone());
-    } else {
-        row.fields.push(FieldValue {
-            name: column.to_string(),
-            value: Some(column_value.clone()),
-            data_type: column_value.data_type(),
-        });
+    match row.index_of(column) {
+        Some(i) => row.set_value_at(i, Some(column_value.clone())),
+        None => row.push_column(column, column_value.data_type(), Some(column_value.clone())),
     }
 }

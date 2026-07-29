@@ -67,12 +67,12 @@ pub fn serialize_batch(batch: &PluginBatch) -> Result<Vec<u8>, WasmError> {
         .iter()
         .map(|record| {
             let mut row = Map::new();
-            for field in &record.fields {
-                let value = match &field.value {
+            for field in record.iter() {
+                let value = match field.value {
                     Some(v) => value_to_json(v),
                     None => value_to_json(&Value::Null),
                 };
-                row.insert(field.name.clone(), value);
+                row.insert(field.name.to_string(), value);
             }
             JsonValue::Object(row)
         })
@@ -375,7 +375,7 @@ fn json_row_to_record(json: &JsonValue, plugin: &str, index: usize) -> Result<Re
         });
     }
 
-    Ok(Record::new("plugin", fields, OpType::Insert))
+    Ok(Record::from_fields("plugin", fields, OpType::Insert))
 }
 
 fn invalid(plugin: &str, reason: &str) -> WasmError {

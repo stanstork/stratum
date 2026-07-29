@@ -1,10 +1,29 @@
 use super::pipeline::Transform;
 use crate::transform::error::TransformError;
 use model::{
-    records::Record,
+    records::{Record, RecordSchema},
     transform::mapping::{FieldTransformations, NameResolver},
 };
 use std::borrow::Cow;
+use std::sync::Arc;
+
+/// Apply a batch-wide schema swap.
+fn set_batch_schema(
+    rows: &mut [Record],
+    input: &Arc<RecordSchema>,
+    new_schema: &Arc<RecordSchema>,
+    per_row: impl Fn(&mut Record),
+) {
+    let input_ptr = Arc::as_ptr(input);
+
+    for row in rows.iter_mut() {
+        if std::ptr::eq(Arc::as_ptr(row.schema()), input_ptr) {
+            row.set_schema(Arc::clone(new_schema));
+        } else {
+            per_row(row);
+        }
+    }
+}
 
 pub struct FieldMapper {
     ns_map: FieldTransformations,
@@ -18,38 +37,89 @@ impl FieldMapper {
     pub fn new(ns_map: FieldTransformations) -> Self {
         Self { ns_map }
     }
+
+    /// Derive the renamed schema for `input`.
+    fn rename_schema(&self, input: &Arc<RecordSchema>) -> Arc<RecordSchema> {
+        let table = input.table();
+
+        input.remapped(|name| match self.ns_map.resolve_cow(table, name) {
+            Cow::Owned(n) => Some(Arc::from(n.as_str())),
+            Cow::Borrowed(_) => None,
+        })
+    }
 }
 
 impl TableMapper {
     pub fn new(name_map: NameResolver) -> Self {
         Self { name_map }
     }
+
+    /// Derive the re-tabled schema for `input` (once per batch).
+    fn retable_schema(&self, input: &Arc<RecordSchema>) -> Arc<RecordSchema> {
+        let new_table = self.name_map.resolve(input.table());
+
+        if new_table.eq_ignore_ascii_case(input.table()) {
+            Arc::clone(input)
+        } else {
+            input.with_table(new_table)
+        }
+    }
 }
 
 impl Transform for FieldMapper {
     fn apply(&self, row: &mut Record) -> Result<(), TransformError> {
-        // No renames for this table -> every column name passes through unchanged.
-        if !self.ns_map.contains(&row.schema) {
+        // No renames for this table -> names pass through unchanged.
+        if !self.ns_map.contains(row.table()) {
             return Ok(());
         }
 
-        let table = row.schema.clone();
+        let input = Arc::clone(row.schema());
+        let renamed = self.rename_schema(&input);
 
-        for column in &mut row.fields {
-            // Only rewrite the name when it actually changes.
-            if let Cow::Owned(new_name) = self.ns_map.resolve_cow(&table, &column.name) {
-                column.name = new_name;
-            }
-        }
+        row.set_schema(renamed);
 
         Ok(())
+    }
+
+    fn apply_batch(&self, rows: &mut [Record], _failures: &mut Vec<(usize, TransformError)>) {
+        let Some(first) = rows.first() else {
+            return;
+        };
+
+        // No renames for this table -> nothing to do for the whole batch.
+        if !self.ns_map.contains(first.table()) {
+            return;
+        }
+
+        let input = Arc::clone(first.schema());
+        let renamed = self.rename_schema(&input);
+
+        set_batch_schema(rows, &input, &renamed, |row| {
+            let _ = self.apply(row);
+        });
     }
 }
 
 impl Transform for TableMapper {
     fn apply(&self, row: &mut Record) -> Result<(), TransformError> {
-        let original_schema = row.schema.clone();
-        row.schema = self.name_map.resolve(&original_schema);
+        let input = Arc::clone(row.schema());
+        let retabled = self.retable_schema(&input);
+
+        row.set_schema(retabled);
+
         Ok(())
+    }
+
+    fn apply_batch(&self, rows: &mut [Record], _failures: &mut Vec<(usize, TransformError)>) {
+        let Some(first) = rows.first() else {
+            return;
+        };
+
+        let input = Arc::clone(first.schema());
+        let retabled = self.retable_schema(&input);
+
+        set_batch_schema(rows, &input, &retabled, |row| {
+            let _ = self.apply(row);
+        });
     }
 }

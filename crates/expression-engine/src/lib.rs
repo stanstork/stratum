@@ -11,7 +11,7 @@ pub use analyzer::ExpressionAnalyzer;
 pub use ast::eval_ast_expression;
 pub use context::EvalContext;
 pub use error::{ExpressionError, Result};
-pub use eval::Evaluator;
+pub use eval::{Evaluator, PreparedExpr};
 pub use functions::FunctionRegistry;
 pub use inference::infer_expression_type;
 pub use types::parse_env_as_type;

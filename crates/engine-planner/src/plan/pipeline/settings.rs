@@ -1,4 +1,4 @@
-use engine_config::settings::{CopyColumns, validated::ValidatedSettings};
+use engine_config::settings::validated::ValidatedSettings;
 use model::execution::flags::IntegrityMode;
 use serde::Serialize;
 
@@ -10,7 +10,6 @@ fn is_false(b: &bool) -> bool {
 #[derive(Serialize, Debug, Clone)]
 pub struct PipelineSettings {
     pub batch_size: usize,
-    pub copy_columns: CopyColumns,
 
     #[serde(skip_serializing_if = "is_false")]
     pub create_missing_tables: bool,
@@ -39,7 +38,6 @@ impl PipelineSettings {
     pub fn from_validated(settings: ValidatedSettings) -> Self {
         Self {
             batch_size: settings.batch_size,
-            copy_columns: settings.copy_columns,
             create_missing_tables: settings.create_missing_tables,
             create_missing_columns: settings.create_missing_columns,
             skip_primary_keys: settings.skip_primary_keys,
@@ -57,7 +55,6 @@ impl PipelineSettings {
     pub fn as_validated(&self) -> ValidatedSettings {
         ValidatedSettings {
             batch_size: self.batch_size,
-            copy_columns: self.copy_columns,
             create_missing_tables: self.create_missing_tables,
             create_missing_columns: self.create_missing_columns,
             skip_primary_keys: self.skip_primary_keys,

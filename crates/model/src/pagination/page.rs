@@ -1,8 +1,7 @@
 use crate::{pagination::cursor::Cursor, records::Record};
-use serde::{Deserialize, Serialize};
 
 /// Result of a single fetch page.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct FetchResult {
     /// Fetched rows from the source.
     pub rows: Vec<Record>,

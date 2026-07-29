@@ -444,7 +444,7 @@ impl PipelineOrchestrator {
             batch_tx,
             byte_budget,
             config,
-            self.settings.mapped_columns_only(),
+            self.pipeline.has_projection(),
         )
         .await
         .map_err(|e| MigrationError::InitializationError(e.to_string()))?;

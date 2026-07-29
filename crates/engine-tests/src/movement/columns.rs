@@ -3,7 +3,6 @@ mod tests {
     use crate::direction_tests;
     use crate::harness::Direction;
 
-    /// `copy_columns = "MAP_ONLY"` copies exactly the mapped columns, renaming as
     /// specified and dropping everything else.
     async fn map_only_case(dir: Direction) {
         dir.run(
@@ -21,7 +20,6 @@ mod tests {
                 settings {
                     create_missing_tables = true
                     batch_size            = 200
-                    copy_columns          = "MAP_ONLY"
                 }
             }
             "#,
