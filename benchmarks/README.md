@@ -64,6 +64,17 @@ of the `LOAD DATA` write path. The PG source table is seeded once from
 `synthetic/generate_pg.sql` (deterministic, cached like the MySQL source). Set
 `RUN_REVERSE=0` to skip it.
 
+## Plugin workloads (Rust vs JS WASM)
+
+`synthetic_plugin_rust` and `synthetic_plugin_js` run the same one-column
+transform (`net = amount * quantity`) through a WASM transform plugin - one
+compiled from native Rust, one from JavaScript (QuickJS) - so the two plugin
+runtimes are compared on identical per-row work. They are **Stratum-only** and
+need **native Stratum** plus the host toolchain: the `wasm32-wasip1` target
+(`rustup target add wasm32-wasip1`) and `npx` (Node.js). `run.sh` builds both
+plugins into `plugins/build/` before the run; if native Stratum or the toolchain
+is missing it logs a note and skips just these two workloads.
+
 ## Layout
 
 | Path | Purpose |
@@ -72,7 +83,8 @@ of the `LOAD DATA` write path. The PG source table is seeded once from
 | `compose.yml` | dedicated bench databases (MySQL 8.0 :33307, PostgreSQL 16 :54329) - isolated from the dev compose |
 | `Dockerfile.stratum` | image built to run Stratum when no `STRATUM_BIN` is present |
 | `Dockerfile.pgloader` | image built for docker-mode pgloader v4 (JVM rewrite, from its JAR) |
-| `stratum/*.smql` | Stratum configs (credential-free; URLs injected via env); `synthetic_lanes.smql` is the 4-lane variant, `synthetic_heavy.smql` the ~20-computed-column transform load, `synthetic_reverse.smql` the PG->MySQL one |
+| `stratum/*.smql` | Stratum configs (credential-free; URLs injected via env); `synthetic_lanes.smql` (4-lane), `synthetic_heavy.smql` (~20 computed columns), `synthetic_plugin_{rust,js}.smql` (WASM transform plugin), `synthetic_reverse.smql` (PG->MySQL) |
+| `plugins/` | transform plugins for the plugin workloads: `rust/order_net` (native -> wasm32), `js/order_net.js` (JS -> QuickJS wasm); `run.sh` builds both into `plugins/build/` |
 | `pgloader/*.load.tpl` | pgloader configs (URLs substituted by `run.sh`) |
 | `synthetic/` | deterministic generators: `generate_mysql.sql` (MySQL source), `generate_pg.sql` (PG source for the reverse run) |
 | `results/<ts>/` | per-run output: `summary.md`, `summary.tsv`, `env.txt`, raw logs (gitignored) |
@@ -84,7 +96,7 @@ of the `LOAD DATA` write path. The PG source table is seeded once from
 | `BENCH_ROWS` | `100000000` | synthetic table size |
 | `RUNS` | `3` | repetitions per Sakila scenario (median reported) |
 | `SYNTH_RUNS` | `1` | repetitions per synthetic scenario |
-| `WORKLOADS` | `sakila synthetic synthetic_heavy` | forward (MySQL->PG) workloads; `synthetic_heavy` is Stratum-only (transform CPU) |
+| `WORKLOADS` | `sakila synthetic synthetic_heavy synthetic_plugin_rust synthetic_plugin_js` | forward (MySQL->PG) workloads; `synthetic_heavy` and the `synthetic_plugin_*` cases are Stratum-only |
 | `TOOLS` | `stratum stratum-integrity stratum-lanes` | Stratum scenarios (`stratum-lanes` = 4 PK-range lanes, integer-PK tables only) |
 | `WITH_PGLOADER` | `0` | also run pgloader on PG-target workloads (comparison) |
 | `STRATUM_BIN` | `target/release/stratum` | Stratum binary; if it is absent, Stratum runs in Docker |

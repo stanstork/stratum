@@ -27,6 +27,8 @@ exclude = [
     # WASM-only QuickJS runtime: built solely for wasm32-wasip1 (see
     # build_fixtures.sh) and committed as a fixture.
     "crates/sdk/stratum-plugin-js-runtime",
+    # Benchmark transform plugin: a wasm32 cdylib built by benchmarks/run.sh.
+    "benchmarks/plugins/rust/order_net",
 ]
 
 resolver = "2"

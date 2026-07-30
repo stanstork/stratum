@@ -1,0 +1,51 @@
+// Benchmark: synthetic single-table load through a JavaScript WASM plugin,
+// MySQL -> PostgreSQL. Stratum only (pgloader has no plugin transforms).
+//
+// Identical to synthetic_plugin_rust.smql except the `order_net` transform is
+// the JavaScript plugin (compiled to WASM via QuickJS), so the JS and native
+// Rust plugin runtimes are measured on the same per-row transform.
+//
+// The plugin .wasm and the URLs come from the environment; run.sh compiles the
+// plugin and exports the paths.
+
+connection "src" {
+    driver = "mysql"
+    url    = env("BENCH_SYNTH_MYSQL_URL")
+}
+
+connection "dst" {
+    driver = "postgres"
+    url    = env("BENCH_SYNTH_PG_URL")
+}
+
+plugin "order_net" {
+    path = env("BENCH_PLUGIN_JS_WASM")
+}
+
+pipeline "orders_plugin_js" {
+    from {
+        connection = connection.src
+        table      = "orders"
+    }
+
+    to {
+        connection = connection.dst
+        table      = "orders_plugin_js"
+
+        postgres {
+            pk_creation = "post"
+            copy_format = "binary"
+        }
+    }
+
+    select {
+        order_id = orders.id
+        net      = plugin.order_net({ amount: orders.amount, quantity: orders.quantity })
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 50000
+        lanes                 = 1
+    }
+}

@@ -9,11 +9,14 @@
 # enable it with WITH_PGLOADER=1. By default only Stratum runs.
 #
 # Workloads
-#   sakila           full Sakila DB, MySQL -> PostgreSQL: schema + data
-#   synthetic        one deterministic ~200 B/row table (default 100M rows), MySQL -> PostgreSQL
-#   synthetic_heavy  same table, ~20 computed columns (concat/upper/year/arithmetic);
-#                    Stratum only (pgloader has no computed-column transforms)
-#   reverse          the synthetic table, PostgreSQL -> MySQL (Stratum only; RUN_REVERSE)
+#   sakila                 full Sakila DB, MySQL -> PostgreSQL: schema + data
+#   synthetic              one deterministic ~200 B/row table (default 100M rows), MySQL -> PostgreSQL
+#   synthetic_heavy        same table, ~20 computed columns (concat/upper/year/arithmetic);
+#                          Stratum only (pgloader has no computed-column transforms)
+#   synthetic_plugin_rust  same table, one column via a native-Rust WASM transform plugin
+#   synthetic_plugin_js    same table, one column via a JavaScript (QuickJS) WASM plugin
+#                          (both Stratum only; need native Stratum + the wasm32 target / npx)
+#   reverse                the synthetic table, PostgreSQL -> MySQL (Stratum only; RUN_REVERSE)
 #
 # Stratum scenarios (TOOLS)
 #   stratum            single lane (default)
@@ -68,7 +71,7 @@ PG_PORT=54329
 BENCH_ROWS="${BENCH_ROWS:-100000000}"
 RUNS="${RUNS:-3}"
 SYNTH_RUNS="${SYNTH_RUNS:-1}"
-WORKLOADS="${WORKLOADS:-sakila synthetic synthetic_heavy}"
+WORKLOADS="${WORKLOADS:-sakila synthetic synthetic_heavy synthetic_plugin_rust synthetic_plugin_js}"
 TOOLS="${TOOLS:-stratum stratum-integrity stratum-lanes}"
 # pgloader is an opt-in comparison for PostgreSQL-target workloads only.
 WITH_PGLOADER="${WITH_PGLOADER:-0}"
@@ -87,6 +90,11 @@ STRATUM_RUN_CTR=stratum-bench-run
 PG_DEST_DB="${PG_DEST_DB:-bench_dest}"     # PostgreSQL dest for MySQL -> PG workloads
 MYSQL_DEST_DB="${MYSQL_DEST_DB:-bench_rev}" # MySQL dest for the PG -> MySQL reverse
 PG_SRC_DB="${PG_SRC_DB:-bench_src}"        # PostgreSQL source seeded for the reverse
+
+# WASM transform plugins for the plugin workloads (built into plugins/build/).
+PLUGIN_BUILD_DIR="$SCRIPT_DIR/plugins/build"
+PLUGIN_RUST_WASM="$PLUGIN_BUILD_DIR/order_net_rust.wasm"
+PLUGIN_JS_WASM="$PLUGIN_BUILD_DIR/order_net_js.wasm"
 
 SAKILA_TABLES=(actor address category city country customer film film_actor
     film_category inventory language payment rental staff store)
@@ -147,6 +155,33 @@ else
         || die "failed to build stratum image $STRATUM_IMAGE"
     STRATUM_VERSION="$(docker run --rm "$STRATUM_IMAGE" stratum --version 2>/dev/null | head -1 || echo unknown)"
     log "stratum: docker $STRATUM_IMAGE ($STRATUM_VERSION)"
+fi
+
+# Plugin workloads need native Stratum plus the host toolchain to build the two
+# transform plugins (Rust -> wasm32-wasip1, and `stratum plugin compile` for JS).
+# On any shortfall, drop the plugin workloads with a note rather than aborting.
+if [[ " $WORKLOADS " == *" synthetic_plugin_"* ]]; then
+    drop_plugins() {
+        WORKLOADS="$(tr ' ' '\n' <<<"$WORKLOADS" | grep -v '^synthetic_plugin_' | tr '\n' ' ')"
+    }
+    if [[ $STRATUM_MODE != native ]]; then
+        log "note: plugin workloads need native Stratum (build $STRATUM_BIN); skipping synthetic_plugin_*"
+        drop_plugins
+    else
+        log "building transform plugins (Rust -> wasm32, JS -> wasm)..."
+        mkdir -p "$PLUGIN_BUILD_DIR"
+        if (cd "$REPO_ROOT" && cargo build --manifest-path benchmarks/plugins/rust/order_net/Cargo.toml \
+                --target wasm32-wasip1 --release) >&2 \
+            && cp "$SCRIPT_DIR/plugins/rust/order_net/target/wasm32-wasip1/release/order_net.wasm" \
+                "$PLUGIN_RUST_WASM" \
+            && "$STRATUM_BIN" plugin compile "$SCRIPT_DIR/plugins/js/order_net.js" \
+                -o "$PLUGIN_JS_WASM" >&2; then
+            log "plugins ready: $(basename "$PLUGIN_RUST_WASM"), $(basename "$PLUGIN_JS_WASM")"
+        else
+            log "note: plugin build failed (needs the wasm32-wasip1 target + npx); skipping synthetic_plugin_*"
+            drop_plugins
+        fi
+    fi
 fi
 
 # pgloader is an opt-in comparison (WITH_PGLOADER=1), for PG-target workloads
@@ -279,7 +314,11 @@ validate() { # $1 = workload, $2 = pg db
     else
         # synthetic writes `orders`; synthetic_heavy projects into `orders_heavy`.
         local tbl=orders
-        [[ "$1" == synthetic_heavy ]] && tbl=orders_heavy
+        case "$1" in
+            synthetic_heavy) tbl=orders_heavy ;;
+            synthetic_plugin_rust) tbl=orders_plugin_rust ;;
+            synthetic_plugin_js) tbl=orders_plugin_js ;;
+        esac
         local dst
         dst=$(pg_scalar "$2" "SELECT COUNT(*) FROM $tbl" || echo MISSING)
         [[ "$dst" == "$BENCH_ROWS" ]] || { log "  MISMATCH $tbl: src=$BENCH_ROWS dst=$dst"; bad=1; }
@@ -332,6 +371,8 @@ stratum_url_env() { # $1 = forward pg dest db
         "BENCH_SYNTH_PG_URL=postgres://bench:bench@127.0.0.1:$PG_PORT/$1"
         "BENCH_REV_PG_URL=postgres://bench:bench@127.0.0.1:$PG_PORT/$PG_SRC_DB"
         "BENCH_REV_MYSQL_URL=mysql://bench:bench@127.0.0.1:$MYSQL_PORT/$MYSQL_DEST_DB"
+        "BENCH_PLUGIN_RUST_WASM=$PLUGIN_RUST_WASM"
+        "BENCH_PLUGIN_JS_WASM=$PLUGIN_JS_WASM"
     )
 }
 
@@ -433,6 +474,8 @@ for workload in $WORKLOADS; do
         sakila) rows=$sakila_rows; dest_db=$PG_DEST_DB; n_runs=$RUNS ;;
         synthetic) rows=$BENCH_ROWS; dest_db=$PG_DEST_DB; n_runs=$SYNTH_RUNS ;;
         synthetic_heavy) rows=$BENCH_ROWS; dest_db=$PG_DEST_DB; n_runs=$SYNTH_RUNS ;;
+        synthetic_plugin_rust) rows=$BENCH_ROWS; dest_db=$PG_DEST_DB; n_runs=$SYNTH_RUNS ;;
+        synthetic_plugin_js) rows=$BENCH_ROWS; dest_db=$PG_DEST_DB; n_runs=$SYNTH_RUNS ;;
         *) die "unknown workload '$workload'" ;;
     esac
 

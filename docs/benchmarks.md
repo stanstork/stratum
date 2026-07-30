@@ -25,14 +25,22 @@ included).
 
 ## What is measured
 
-Four workloads:
+Six workloads:
 
 | Workload | Direction | Shape | What it stresses |
 |---|---|---|---|
 | **sakila** | MySQL -> PostgreSQL | the full [Sakila](https://dev.mysql.com/doc/sakila/en/) sample DB: 15 tables, ~46K rows | many-small-tables overhead: connection setup, schema creation, per-table coordination |
 | **synthetic** | MySQL -> PostgreSQL | one `orders` table, **100M rows** by default, ~200 B/row: BIGINT PK, INT, ENUM, DECIMAL, SMALLINT, FLOAT, CHAR, VARCHARs, BOOLEAN, UUID-shaped CHAR(36), TIMESTAMP, DATETIME, DATE, with NULLs sprinkled | sustained single-table throughput and memory behavior |
 | **synthetic_heavy** | MySQL -> PostgreSQL | the same `orders` table projected through ~20 computed columns (nested `concat`/`upper`/`lower`/`trim`/`year`/`month` + arithmetic over several source columns) | Stratum only - expression-evaluation CPU (compiled expressions, per-batch schema) |
+| **synthetic_plugin_rust** | MySQL -> PostgreSQL | the same table with one column computed by a **native-Rust WASM** transform plugin | Stratum only - per-row cost of a Rust WASM plugin (boundary + marshalling) |
+| **synthetic_plugin_js** | MySQL -> PostgreSQL | the same table, same column, via a **JavaScript (QuickJS) WASM** plugin | Stratum only - the same, for the JS-on-QuickJS runtime (compare against the Rust plugin) |
 | **reverse** | PostgreSQL -> MySQL | the same `orders` table, into MySQL via `LOAD DATA` | Stratum only - the MySQL write path (pgloader loads into PostgreSQL) |
+
+The two `plugin` workloads run the **identical** transform (`net = amount * quantity`)
+so the Rust-WASM and JS-QuickJS-WASM runtimes are compared on the same per-row
+work. They are Stratum-only and need native Stratum plus the host toolchain (the
+`wasm32-wasip1` target and `npx`); `run.sh` builds the plugins and skips these
+workloads with a note if the toolchain is absent.
 
 Stratum scenarios per workload:
 
@@ -48,9 +56,10 @@ Stratum scenarios per workload:
 > scenario runs on `synthetic` (BIGINT PK) but is skipped on `sakila`.
 
 Optional comparison (`WITH_PGLOADER=1`), added only to the MySQL -> PostgreSQL
-copy workloads - `sakila` and `synthetic`. It is not run on `synthetic_heavy` (a
-Stratum-only transform workload) or `reverse` (pgloader loads into PostgreSQL, so
-there is no MySQL-destination comparison):
+copy workloads - `sakila` and `synthetic`. It is not run on the transform
+workloads (`synthetic_heavy`, `synthetic_plugin_rust`, `synthetic_plugin_js` -
+Stratum-only) or `reverse` (pgloader loads into PostgreSQL, so there is no
+MySQL-destination comparison):
 
 Per run we record **wall time** (GNU `time -v`), **rows/s** (source rows /
 wall), and **peak RSS** of the migrating process (`Maximum resident set size`;
@@ -164,6 +173,39 @@ rows/s at 1 lane - so evaluating the ~20 computed columns per row roughly double
 the per-row cost (231k rows/s). Memory is unchanged (~0.46 GB): the transform is
 in-flight, so it adds CPU per row, not resident data. `--integrity` on top of the
 transforms lands at 175k rows/s (hashing the projected output rows as they pass).
+
+### Plugin transforms - Rust WASM vs JS (QuickJS) WASM (Stratum only)
+
+The same one-column transform (`net = amount * quantity`) run through a plugin,
+so the two plugin runtimes are compared on identical per-row work. The transform
+is trivial on purpose - the number is dominated by each runtime's per-row
+invocation cost (the WASM boundary + value marshalling), which is the point.
+
+| scenario | streams | wall (s) | rows/s | peak RSS |
+|---|---|---|---|---|
+| stratum, rust plugin | 1 | 62.0 | 161k | 0.91 GB |
+| stratum, js plugin | 1 | 128.0 | 78k | 1.00 GB |
+
+For reference, the plain copy of the same table ran 490k rows/s and the built-in
+`synthetic_heavy` transform 231k - so routing one column through a WASM plugin
+per row costs most of the throughput (native Rust 161k, JS-on-QuickJS 78k, ~2×
+apart) and roughly doubles memory (~0.9–1.0 GB vs 0.49 GB) for the runtime and
+marshalling buffers.
+
+> **Why these are lower than a built-in transform, and what's planned.** Plugin
+> transforms are currently invoked **once per row**: every row crosses the WASM
+> host<->guest boundary and marshals its values (JSON) in and out. That per-row
+> boundary cost - not the arithmetic - is what these numbers measure, which is
+> why both plugin cases sit well below the plain copy (~490k) and even the
+> built-in `synthetic_heavy` transforms (~231k), and why the heavier runtime (JS
+> on QuickJS) is ~2× slower than native Rust.
+>
+> **Planned: batch plugin invocation.** Pass a whole batch to the plugin in one
+> call - as sink plugins already do (`__stratum_write_batch`) - so the boundary
+> crossing and marshalling happen **once per batch** instead of once per row,
+> with the per-row `compute` running inside the guest. This should move plugin
+> throughput toward the plain-copy rate; these single-row-call numbers are the
+> pre-optimization baseline.
 
 ### Reverse - `orders`, PostgreSQL -> MySQL (Stratum only)
 
