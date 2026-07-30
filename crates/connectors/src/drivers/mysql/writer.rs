@@ -136,13 +136,33 @@ impl MySqlDriver {
             .collect();
         cols.sort_by_key(|c| c.ordinal);
 
+        // Only write destination columns the row actually carries.
+        cols.retain(|c| rows[0].index_of(&c.name).is_some());
+
+        if cols.is_empty() {
+            return Ok(0);
+        }
+
         let field_idx: Vec<Option<usize>> =
             cols.iter().map(|c| rows[0].index_of(&c.name)).collect();
 
-        // Serialize the whole batch to the tab/newline/backslash text format
-        // that MySqlCopyEncoder produces.
+        let sql = QueryGenerator::new(&dialect::MySql).load_data_infile(table, &cols, on_conflict);
+
+        // A `LOAD DATA` payload is sent as one logical packet, so it must stay
+        // under the server's `max_allowed_packet`.
+        let max_chunk = self
+            .capabilities()
+            .max_query_size
+            .map(|m| m.saturating_sub(m / 8).max(1 << 20)) // ~87.5% of max_allowed_packet, min 1 MiB
+            .unwrap_or(48 << 20); // conservative default if the server didn't report it
+
+        debug!(rows = rows.len(), table = %table, ?on_conflict, max_chunk, "LOAD DATA rows into table");
+
         let encoder = MySqlCopyEncoder;
-        let mut buff = String::with_capacity(rows.len() * 128);
+
+        let mut buff = String::with_capacity(max_chunk.min(rows.len() * 128) + 256);
+        let mut conn = self.write_conn().await?;
+        let mut affected = 0u64;
 
         for row in rows {
             for (i, idx) in field_idx.iter().enumerate() {
@@ -156,23 +176,37 @@ impl MySqlDriver {
                 }
             }
             buff.push('\n');
+
+            // Flush once the encoded chunk approaches the packet limit.
+            if buff.len() >= max_chunk {
+                affected += load_chunk(&mut conn, &sql, std::mem::take(&mut buff)).await?;
+            }
         }
 
-        let payload = Bytes::from(buff);
-        let sql = QueryGenerator::new(&dialect::MySql).load_data_infile(table, &cols, on_conflict);
+        if !buff.is_empty() {
+            affected += load_chunk(&mut conn, &sql, buff).await?;
+        }
 
-        debug!(rows = rows.len(), table = %table, ?on_conflict, "LOAD DATA rows into table");
-
-        let mut conn = self.write_conn().await?;
-        conn.set_infile_handler(async move {
-            Ok(futures_util::stream::once(async move { Ok(payload) }).boxed())
-        });
-
-        let result = conn
-            .query_iter(&sql)
-            .await
-            .map_err(|e| DriverError::QueryError(format!("{:?}", e)))?;
-
-        Ok(result.affected_rows())
+        Ok(affected)
     }
+}
+
+/// Send one already-encoded text chunk to the server.
+async fn load_chunk(
+    conn: &mut mysql_async::Conn,
+    sql: &str,
+    buff: String,
+) -> Result<u64, DriverError> {
+    let payload = Bytes::from(buff);
+
+    conn.set_infile_handler(async move {
+        Ok(futures_util::stream::once(async move { Ok(payload) }).boxed())
+    });
+
+    let result = conn
+        .query_iter(sql)
+        .await
+        .map_err(|e| DriverError::QueryError(format!("{:?}", e)))?;
+
+    Ok(result.affected_rows())
 }

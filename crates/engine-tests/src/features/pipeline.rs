@@ -110,7 +110,10 @@ mod tests {
                     table      = "actor"
                 }
                 select {
-                    full_name = concat(actor.first_name, actor.last_name)
+                    actor_id   = actor.actor_id
+                    first_name = actor.first_name
+                    last_name  = actor.last_name
+                    full_name  = concat(actor.first_name, actor.last_name)
                 }
                 settings {
                     create_missing_columns = true
@@ -187,7 +190,10 @@ mod tests {
                     table      = "actor"
                 }
                 select {
-                    full_name = concat(actor.first_name, actor.last_name)
+                    actor_id   = actor.actor_id
+                    first_name = actor.first_name
+                    last_name  = actor.last_name
+                    full_name  = concat(actor.first_name, actor.last_name)
                 }
                 settings {
                     create_missing_tables = true

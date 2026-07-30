@@ -144,6 +144,14 @@ impl<'a> QueryGenerator<'a> {
             .filter(|col| !col.is_generated)
             .collect();
         sorted_columns.sort_by_key(|col| col.ordinal);
+
+        // Only write destination columns the rows actually carry.
+        sorted_columns.retain(|col| rows[0].index_of(&col.name).is_some());
+
+        if sorted_columns.is_empty() {
+            return (String::new(), Vec::new());
+        }
+
         let col_names = sorted_columns
             .iter()
             .map(|col| col.name.clone())

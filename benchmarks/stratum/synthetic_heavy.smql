@@ -1,0 +1,71 @@
+// Benchmark: transform-heavy single-table load, MySQL -> PostgreSQL.
+//
+// Same `bench.orders` source as synthetic.smql, but the select block applies ~20
+// computed columns built from many (nested) function calls - concat / upper /
+// lower / trim / year / month plus arithmetic. This isolates the CPU cost of
+// expression evaluation from raw data movement and stresses the transform path
+// (compiled expressions, per-batch schema derivation).
+//
+// Only NON-NULL source columns are referenced, so no computed value short-circuits
+// to NULL (a null function argument makes the whole computed field fail). The
+// `select` block means only the projected columns are written - no source-column
+// copy amplification - so throughput reflects transform CPU, not write width.
+//
+// URLs come from the environment; run.sh exports them for the bench databases.
+
+connection "src" {
+    driver = "mysql"
+    url    = env("BENCH_SYNTH_MYSQL_URL")
+}
+
+connection "dst" {
+    driver = "postgres"
+    url    = env("BENCH_SYNTH_PG_URL")
+}
+
+pipeline "orders_heavy" {
+    from {
+        connection = connection.src
+        table      = "orders"
+    }
+
+    to {
+        connection = connection.dst
+        table      = "orders_heavy"
+
+        postgres {
+            pk_creation = "post"
+            copy_format = "binary"
+        }
+    }
+
+    select {
+        order_id = orders.id
+        t1  = concat(orders.currency, "-", orders.sku)
+        t2  = upper(orders.status)
+        t3  = lower(orders.sku)
+        t4  = trim(orders.currency)
+        t5  = concat(upper(orders.currency), lower(orders.status))
+        t6  = orders.amount * orders.quantity
+        t7  = orders.amount * 2
+        t8  = orders.quantity + 10
+        t9  = concat(orders.sku, "_", orders.currency, "_", orders.status)
+        t10 = year(orders.created_at)
+        t11 = month(orders.created_at)
+        t12 = concat(upper(orders.status), "/", lower(orders.currency))
+        t13 = concat(orders.order_uuid, ":", orders.sku)
+        t14 = upper(concat(orders.currency, orders.status))
+        t15 = orders.amount * orders.quantity + orders.customer_id
+        t16 = trim(upper(orders.sku))
+        t17 = concat(orders.currency, "|", upper(orders.status), "|", lower(orders.sku))
+        t18 = lower(concat(orders.sku, orders.currency))
+        t19 = orders.customer_id * 3 + orders.quantity
+        t20 = concat(orders.status, "#", orders.sku, "#", orders.currency, "#", upper(orders.status))
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 50000
+        lanes                 = 1
+    }
+}

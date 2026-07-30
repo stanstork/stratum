@@ -1,4 +1,4 @@
-use super::pipeline::Transform;
+use super::pipeline::{Transform, for_each_table};
 use crate::transform::error::TransformError;
 use model::{
     records::{Record, RecordSchema},
@@ -82,20 +82,23 @@ impl Transform for FieldMapper {
     }
 
     fn apply_batch(&self, rows: &mut [Record], _failures: &mut Vec<(usize, TransformError)>) {
-        let Some(first) = rows.first() else {
-            return;
-        };
+        // A graph/cascade batch mixes tables; rename each per-table run on its own.
+        for_each_table(rows, |_offset, run| {
+            let Some(first) = run.first() else {
+                return;
+            };
 
-        // No renames for this table -> nothing to do for the whole batch.
-        if !self.ns_map.contains(first.table()) {
-            return;
-        }
+            // No renames for this table -> nothing to do for this run.
+            if !self.ns_map.contains(first.table()) {
+                return;
+            }
 
-        let input = Arc::clone(first.schema());
-        let renamed = self.rename_schema(&input);
+            let input = Arc::clone(first.schema());
+            let renamed = self.rename_schema(&input);
 
-        set_batch_schema(rows, &input, &renamed, |row| {
-            let _ = self.apply(row);
+            set_batch_schema(run, &input, &renamed, |row| {
+                let _ = self.apply(row);
+            });
         });
     }
 }
@@ -111,15 +114,18 @@ impl Transform for TableMapper {
     }
 
     fn apply_batch(&self, rows: &mut [Record], _failures: &mut Vec<(usize, TransformError)>) {
-        let Some(first) = rows.first() else {
-            return;
-        };
+        // A graph/cascade batch mixes source tables; re-table each per-table run.
+        for_each_table(rows, |_offset, run| {
+            let Some(first) = run.first() else {
+                return;
+            };
 
-        let input = Arc::clone(first.schema());
-        let retabled = self.retable_schema(&input);
+            let input = Arc::clone(first.schema());
+            let retabled = self.retable_schema(&input);
 
-        set_batch_schema(rows, &input, &retabled, |row| {
-            let _ = self.apply(row);
+            set_batch_schema(run, &input, &retabled, |row| {
+                let _ = self.apply(row);
+            });
         });
     }
 }

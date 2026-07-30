@@ -1,4 +1,4 @@
-use super::pipeline::Transform;
+use super::pipeline::{Transform, for_each_table};
 use crate::transform::error::TransformError;
 use model::{
     records::{Record, RecordSchema, SchemaColumn},
@@ -91,28 +91,38 @@ impl FieldPruner {
 
 impl Transform for FieldPruner {
     fn apply(&self, row: &mut Record) -> Result<(), TransformError> {
+        // A table without a projection (no `select`/named select) is copied in full - never pruned.
+        if !self.per_table.contains_key(row.table()) {
+            return Ok(());
+        }
+
         let input = Arc::clone(row.schema());
         let (kept, output) = self.prune_plan(&input);
+
         row.project(output, &kept);
+
         Ok(())
     }
 
     fn apply_batch(&self, rows: &mut [Record], _failures: &mut Vec<(usize, TransformError)>) {
-        let Some(first) = rows.first() else {
-            return;
-        };
+        // A graph/cascade batch mixes tables; prune each per-table run only if
+        // that table declares a projection.
+        for_each_table(rows, |_offset, run| {
+            let Some(first) = run.first() else {
+                return;
+            };
 
-        // Derive kept positions + output schema once, then project every row.
-        let input = Arc::clone(first.schema());
-        let (kept, output) = self.prune_plan(&input);
-        let input_ptr = Arc::as_ptr(&input);
-
-        for row in rows.iter_mut() {
-            if std::ptr::eq(Arc::as_ptr(row.schema()), input_ptr) {
-                row.project(Arc::clone(&output), &kept);
-            } else {
-                let _ = self.apply(row);
+            // No projection for this table -> copy it in full.
+            if !self.per_table.contains_key(first.table()) {
+                return;
             }
-        }
+
+            let input = Arc::clone(first.schema());
+            let (kept, output) = self.prune_plan(&input);
+
+            for row in run.iter_mut() {
+                row.project(Arc::clone(&output), &kept);
+            }
+        });
     }
 }

@@ -6,6 +6,25 @@ use model::records::Record;
 use std::sync::Arc;
 use tracing::warn;
 
+/// Split `rows` into maximal contiguous runs that share one schema `Arc` (i.e.
+/// one table) and call `f(offset, run)` for each.
+pub(crate) fn for_each_table(rows: &mut [Record], mut f: impl FnMut(usize, &mut [Record])) {
+    let mut start = 0;
+
+    while start < rows.len() {
+        let start_ptr = Arc::as_ptr(rows[start].schema());
+        let mut end = start + 1;
+
+        while end < rows.len() && std::ptr::eq(Arc::as_ptr(rows[end].schema()), start_ptr) {
+            end += 1;
+        }
+
+        f(start, &mut rows[start..end]);
+
+        start = end;
+    }
+}
+
 /// Outcome of applying a transformation pipeline to a row
 #[derive(Debug, Clone, PartialEq)]
 pub enum ApplyOutcome {

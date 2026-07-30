@@ -1,4 +1,4 @@
-use super::pipeline::Transform;
+use super::pipeline::{Transform, for_each_table};
 use crate::transform::error::TransformError;
 use engine_core::context::env::EnvContext;
 use expression_engine::{Evaluator, PreparedExpr};
@@ -77,77 +77,79 @@ impl Transform for ComputedTransform {
     }
 
     fn apply_batch(&self, rows: &mut [Record], failures: &mut Vec<(usize, TransformError)>) {
-        let Some(first) = rows.first() else {
-            return;
-        };
-
-        let Some(computed_fields) = self
-            .mapping
-            .field_mappings
-            .computed_fields
-            .get(first.table())
-        else {
-            return;
-        };
-
-        if computed_fields.is_empty() {
-            return;
-        }
-
-        let input_schema = Arc::clone(first.schema());
-        let table = input_schema.table();
-
-        let prepared: Vec<PreparedExpr> = computed_fields
-            .iter()
-            .map(|c| PreparedExpr::compile(&c.expression, &input_schema, &self.mapping, table))
-            .collect();
-
-        let env = &self.env;
-        let env_getter = |key: &str| env.get(key);
-
-        let mut scratch: Vec<Value> = Vec::with_capacity(computed_fields.len());
-        let mut plan: Option<Arc<ComputedPlan>> = None;
-
-        for (i, row) in rows.iter_mut().enumerate() {
-            scratch.clear();
-
-            // Evaluate every computed expression against this row.
-            let mut evaluated = true;
-
-            for (expr, computed) in prepared.iter().zip(computed_fields) {
-                match expr.eval(row, &self.mapping, &env_getter) {
-                    Some(v) => scratch.push(v),
-                    None => {
-                        failures.push((
-                            i,
-                            TransformError::Transformation(format!(
-                                "Failed to evaluate computed column `{}` in `{}`",
-                                computed.name,
-                                row.table()
-                            )),
-                        ));
-                        evaluated = false;
-                        break;
-                    }
-                }
-            }
-            if !evaluated {
-                continue;
-            }
-
-            // Build the plan on the first row (or if the schema changes mid-batch,
-            // which shouldn't happen but is handled for safety).
-            let need_plan = match &plan {
-                Some(p) => !Arc::ptr_eq(&p.input, row.schema()),
-                None => true,
+        for_each_table(rows, |offset, run| {
+            let Some(first) = run.first() else {
+                return;
             };
 
-            if need_plan {
-                plan = Some(build_plan(row.schema(), computed_fields, &scratch));
+            let Some(computed_fields) = self
+                .mapping
+                .field_mappings
+                .computed_fields
+                .get(first.table())
+            else {
+                return;
+            };
+
+            if computed_fields.is_empty() {
+                return;
             }
 
-            apply_plan(row, &mut scratch, plan.as_ref().unwrap());
-        }
+            let input_schema = Arc::clone(first.schema());
+            let table = input_schema.table();
+
+            let prepared: Vec<PreparedExpr> = computed_fields
+                .iter()
+                .map(|c| PreparedExpr::compile(&c.expression, &input_schema, &self.mapping, table))
+                .collect();
+
+            let env = &self.env;
+            let env_getter = |key: &str| env.get(key);
+
+            let mut scratch: Vec<Value> = Vec::with_capacity(computed_fields.len());
+            let mut plan: Option<Arc<ComputedPlan>> = None;
+
+            for (i, row) in run.iter_mut().enumerate() {
+                scratch.clear();
+
+                // Evaluate every computed expression against this row.
+                let mut evaluated = true;
+
+                for (expr, computed) in prepared.iter().zip(computed_fields) {
+                    match expr.eval(row, &self.mapping, &env_getter) {
+                        Some(v) => scratch.push(v),
+                        None => {
+                            failures.push((
+                                offset + i,
+                                TransformError::Transformation(format!(
+                                    "Failed to evaluate computed column `{}` in `{}`",
+                                    computed.name,
+                                    row.table()
+                                )),
+                            ));
+                            evaluated = false;
+                            break;
+                        }
+                    }
+                }
+                if !evaluated {
+                    continue;
+                }
+
+                // Build the plan on the first row of the run (all rows share a
+                // schema); re-derive only if the schema changes.
+                let need_plan = match &plan {
+                    Some(p) => !Arc::ptr_eq(&p.input, row.schema()),
+                    None => true,
+                };
+
+                if need_plan {
+                    plan = Some(build_plan(row.schema(), computed_fields, &scratch));
+                }
+
+                apply_plan(row, &mut scratch, plan.as_ref().unwrap());
+            }
+        });
     }
 }
 

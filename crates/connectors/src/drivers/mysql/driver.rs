@@ -107,14 +107,28 @@ impl MySqlDriver {
             .map(|v| v != 0)
             .unwrap_or(false);
 
-        // Drop connection explicitly or let it drop out of scope;
-        // we're done with I/O here.
+        // The largest single packet the server accepts.
+        let max_allowed_packet = conn
+            .query_first::<u64, _>("SELECT @@max_allowed_packet")
+            .await
+            .map_err(|e| DriverError::QueryError(e.to_string()))?
+            .map(|v| v as usize);
+
+        // Drop connection explicitly or let it drop out of scope.
         drop(conn);
 
-        Ok(Self::resolve_capabilities(version, local_infile_enabled))
+        Ok(Self::resolve_capabilities(
+            version,
+            local_infile_enabled,
+            max_allowed_packet,
+        ))
     }
 
-    fn resolve_capabilities(version: String, local_infile_enabled: bool) -> Capabilities {
+    fn resolve_capabilities(
+        version: String,
+        local_infile_enabled: bool,
+        max_allowed_packet: Option<usize>,
+    ) -> Capabilities {
         // MySQL has no `RETURNING`. MariaDB added `INSERT ... RETURNING` in 10.5;
         // since our write path uses INSERT, gate the capability on that version.
         let supports_returning = Self::mariadb_supports_returning(&version);
@@ -132,7 +146,7 @@ impl MySqlDriver {
             uuid_type: false, // Usually stored as BINARY(16) or CHAR(36)
             geometry_type: true,
             max_parameters: Some(MYSQL_MAX_PREPARED_STMT_PARAMS.into()),
-            max_query_size: None, // Depends on server's max_allowed_packet, usually dynamic
+            max_query_size: max_allowed_packet, // server's max_allowed_packet
         }
     }
 

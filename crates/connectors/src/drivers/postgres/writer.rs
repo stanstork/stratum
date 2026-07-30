@@ -114,10 +114,17 @@ impl DataWriter for PgDriver {
             .collect();
         columns.sort_by_key(|c| c.ordinal);
 
+        // Only write destination columns the row actually carries.
+        columns.retain(|c| rows[0].index_of(&c.name).is_some());
+
+        if columns.is_empty() {
+            return Ok(0);
+        }
+
         debug!(rows = rows.len(), table = %table, "COPY rows into table");
 
         // All rows in a batch share the same field layout, so resolve each output
-        // column's field index once. Columns absent from the row map to `None` -> NULL.
+        // column's field index once. Every retained column is present in the row.
         let field_idx: Vec<Option<usize>> = columns
             .iter()
             .map(|col| rows[0].index_of(&col.name))
