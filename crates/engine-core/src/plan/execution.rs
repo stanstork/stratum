@@ -642,8 +642,38 @@ pipeline "warehouse" {
         assert!(plan.pipelines[2].settings.contains_key("batch_size"));
     }
 
-    /// Locks in the exact shape the Sakila benchmark config uses: env() URLs, a
-    /// multi-line `tables` array with a trailing comma, and a bare `to` block.
+    #[test]
+    fn test_after_referencing_multi_table_block_is_dangling() {
+        let input = r#"
+connection "src" { driver = "mysql"    url = "mysql://u@localhost/db" }
+connection "dst" { driver = "postgres" url = "postgres://u@localhost/db" }
+
+pipeline "warehouse" {
+    from { connection = connection.src  tables = ["actor", "category"] }
+    to   { connection = connection.dst }
+}
+pipeline "downstream" {
+    after = [pipeline.warehouse]
+    from  { connection = connection.src  table = "language" }
+    to    { connection = connection.dst  table = "language" }
+}
+        "#;
+        let plan = build_plan(input);
+        let names: Vec<_> = plan.pipelines.iter().map(|p| p.name.clone()).collect();
+        assert!(names.contains(&"warehouse:actor".to_string()));
+        assert!(names.contains(&"downstream".to_string()));
+
+        // `downstream` still names the un-expanded block, which is not itself a
+        // pipeline after fan-out.
+        let downstream = plan
+            .pipelines
+            .iter()
+            .find(|p| p.name == "downstream")
+            .unwrap();
+        assert_eq!(downstream.dependencies, vec!["warehouse".to_string()]);
+        assert!(!names.contains(&"warehouse".to_string()));
+    }
+
     #[test]
     fn test_multi_table_benchmark_shape() {
         let input = r#"

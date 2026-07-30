@@ -3,6 +3,8 @@ pub mod enums;
 pub mod filters;
 pub mod graph;
 pub mod joins;
+pub mod lanes;
 pub mod multi_table;
 pub mod tables;
 pub mod validation;
+pub mod write_options;

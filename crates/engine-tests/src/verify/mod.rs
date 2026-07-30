@@ -16,6 +16,30 @@ mod tests {
         };
     }
 
+    /// Verify must hold in the reverse cross-engine direction too - PostgreSQL
+    /// source -> MySQL destination - not only MySQL -> PostgreSQL. A single
+    /// `actor` table, integrity apply, then verify.
+    #[traced_test]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn verify_cross_engine_pg_to_mysql() {
+        use crate::harness::Direction;
+
+        let dir = Direction::POSTGRES_TO_MYSQL;
+        let body = r#"
+            pipeline "actor" {
+                from { connection = connection.src  table = "actor" }
+                to   { connection = connection.dst  table = "actor" }
+                settings { create_missing_tables = true  batch_size = 100 }
+            }
+        "#;
+        dir.reset().await;
+        let smql = dir.smql(body);
+        run_smql(&smql, true).await.expect("apply failed");
+        run_verify_smql(&smql)
+            .await
+            .expect("verify should match for PG -> MySQL");
+    }
+
     /// Simplest case: actor table, small row count, straightforward types.
     // Config: crates/engine-tests/configs/verify/actor.smql
     #[traced_test]

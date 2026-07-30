@@ -1521,7 +1521,7 @@ impl PlanBuilder {
             if !table_set.contains(&named.table.to_ascii_lowercase()) {
                 return Err(ConvertError::Plan(format!(
                     "pipeline `{}`: select \"{}\" refers to a table not in `tables`",
-                    &block.name, named.table
+                    block.name, named.table
                 )));
             }
         }
@@ -1542,7 +1542,7 @@ impl PlanBuilder {
             if !table_set.contains(&key.to_ascii_lowercase()) {
                 return Err(ConvertError::Plan(format!(
                     "pipeline `{}`: map key `{}` is not in `tables`",
-                    &block.name, key
+                    block.name, key
                 )));
             }
         }

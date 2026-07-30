@@ -37,8 +37,8 @@ SELECT
     c.COLUMN_COMMENT AS column_comment,
     c.COLLATION_NAME AS collation_name,
     c.CHARACTER_SET_NAME AS character_set_name,
-    (c.EXTRA LIKE '%GENERATED%') AS is_generated,
-    (c.EXTRA LIKE '%STORED%') AS is_stored,
+    (c.EXTRA LIKE '%VIRTUAL GENERATED%' OR c.EXTRA LIKE '%STORED GENERATED%') AS is_generated,
+    (c.EXTRA LIKE '%STORED GENERATED%') AS is_stored,
     c.GENERATION_EXPRESSION AS generated_expression,
     c.COLUMN_TYPE AS full_column_type
 FROM information_schema.COLUMNS c

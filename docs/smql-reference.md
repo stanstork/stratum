@@ -257,13 +257,32 @@ to {
 | `"append"` *(default)* | Load rows, keeping any existing ones |
 | `"replace"` | Truncate the destination table, then load |
 
-> **Row-level write strategy is a separate, currently-automatic axis.** How each
-> row is written is orthogonal to truncate-vs-append: when the destination
-> supports bulk COPY and the table has a primary key, rows are **upserted** (COPY
-> into a staging table, then MERGE on the primary key); otherwise they are plain
-> **inserted**. This is automatic and not yet configurable - choosing the strategy
-> and conflict keys explicitly (a planned `on_conflict` setting) isn't available,
-> and passing `mode = "upsert"` / `"merge"` is a build error.
+**Dialect tuning.** A `postgres { … }` or `mysql { … }` sub-block inside `to`
+sets destination-specific write options (unknown keys are rejected):
+
+```smql
+to {
+  connection = connection.warehouse_pg
+  table      = "fact_orders"
+
+  postgres {
+    copy_format = "binary"      // "binary" | "text"
+    pk_creation = "post"        // "pre" | "post"
+    on_conflict = "do_update"   // "do_nothing" | "do_update"
+  }
+}
+```
+
+| Dialect | Option | Values | Default | Meaning |
+|---|---|---|---|---|
+| postgres | `copy_format` | `"binary"`, `"text"` | `"binary"` when every column is exactly encodable, else `"text"` | `COPY` wire format |
+| postgres | `pk_creation` | `"pre"`, `"post"` | `"pre"` | `"post"` creates the table without its PK and adds it after the bulk load, so index maintenance doesn't slow the `COPY` |
+| postgres | `on_conflict` | `"do_nothing"`, `"do_update"` | plain insert | `do_nothing` skips colliding rows; `do_update` **upserts** on the primary key (via a staging table + `ON CONFLICT`) |
+| mysql | `on_conflict` | `"default"`, `"replace"`, `"ignore"` | `"default"` | `LOAD DATA` modifier: `replace` overwrites colliding rows, `ignore` skips them; `default` emits none (`LOCAL INFILE` skips, server-side errors) |
+
+`on_conflict = "do_update"` needs the primary key present during the load, so it
+overrides `pk_creation = "post"` (Stratum warns and keeps the PK). Value aliases
+are accepted (e.g. `before`/`after`, `nothing`/`skip`, `update`/`upsert`).
 
 **With table renaming for graph pipelines:**
 ```smql
@@ -328,11 +347,9 @@ is joined before `products` references it). All joined tables become available i
 
 Field mapping block. Syntax is `destination_col = expression`.
 
-> **`select` *adds* columns; by default it doesn't restrict them.** With the
-> default `copy_columns = "all"`, the destination gets **every source column plus**
-> the ones you define here - so a `select` that lists a few columns still emits all
-> the others too. To output *only* the columns in `select`, set
-> `copy_columns = "map_only"` in [settings](#settings).
+> **`select` projects - it restricts output to the columns you list.** With a
+> `select` block the destination gets **only** the columns defined here; without
+> one, every source column is copied straight through.
 
 **Simple column copy:**
 ```smql
@@ -642,9 +659,9 @@ Per-pipeline configuration overrides.
 
 ```smql
 settings {
-  batch_size            = env("batch_size")
+  batch_size            = 1000
   create_missing_tables = true
-  copy_columns          = "all"   // "all" | "map_only"
+  lanes                 = 4
 }
 ```
 
@@ -658,7 +675,23 @@ settings {
 | `skip_primary_keys` | bool | `false` | Create destination tables without a primary key (and never add one) |
 | `skip_foreign_keys` | bool | `false` | Don't create foreign-key constraints on the destination |
 | `skip_indexes` | bool | `false` | Don't create secondary (non-constraint) indexes on the destination |
-| `copy_columns` | enum | `"all"` | `"all"` copies every source column; `"map_only"` copies only mapped/`select`ed columns |
+| `lanes` | integer (1–32) | `1` | Parallel copy workers - see [lanes](#lanes--parallel-copy) below |
+
+#### `lanes` - parallel copy
+
+`lanes` splits a copy into up to N concurrent workers, each on its own source and
+destination connection. What gets split depends on the pipeline:
+
+- **Single-table pipeline** - the table is range-split on its **integer primary
+  key** (`min..max`) into `lanes` contiguous ranges copied in parallel. A table
+  without an integer PK falls back to a single lane (no error, no speedup).
+- **Graph pipeline** (`from { with references { data = cascade } }`) - the
+  discovered tables migrate **concurrently**, up to `lanes` at a time, and a
+  large integer-PK table among them is additionally range-split. So here `lanes`
+  is the table-level concurrency, not only an intra-table split.
+
+Clamped to 1–32. With `--integrity`, graph migrations run sequentially (one table
+at a time) so Merkle receipts stay deterministic.
 
 ---
 
@@ -882,6 +915,11 @@ from {
 |---------|:--------------:|:-----------:|
 | `with references {}` | ✓ | ✗ |
 | `with references { data = cascade }` | ✓ | ✓ (referenced rows only) |
+
+**Parallelism.** A `cascade` migration honors the [`lanes`](#lanes--parallel-copy)
+setting: the discovered tables migrate concurrently, up to `lanes` at a time, and
+a large integer-PK table is additionally range-split. `--integrity` forces
+sequential migration (one table at a time) for deterministic receipts.
 
 ### Destination Table Renaming
 

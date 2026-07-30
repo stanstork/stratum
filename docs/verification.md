@@ -28,7 +28,7 @@ Merkle Tree-Based Post-Migration Integrity Verification
 
 Conventional migration verification relies on row count comparison. Matching counts do not guarantee matching data: silent corruption, partial writes, network-level bit flips, and OOM kills mid-batch can all produce a destination with the correct row count but incorrect data.
 
-Stratum's cryptographic verification hashes each post-transform row, organizes hashes into a Merkle tree per batch, and persists the batch roots to sled on pipeline completion. The `verify` command re-reads the destination, recomputes the same structure, and compares. When roots differ, batch-level comparison isolates the failing batch — then row-level comparison (when available) identifies the exact divergent rows.
+Stratum's cryptographic verification hashes each post-transform row, organizes hashes into a Merkle tree per batch, and persists the batch roots to sled on pipeline completion. The `verify` command re-reads the destination, recomputes the same structure, and compares. When roots differ, batch-level comparison isolates the failing batch - then row-level comparison (when available) identifies the exact divergent rows.
 
 This detects:
 
@@ -41,11 +41,35 @@ This detects:
 
 **Transform correctness is a unit and integration testing concern, not a cryptographic verification concern.**
 
-The hash is computed over post-transform output. Whether `lower(trim(email))` does the right thing, whether a `when` expression maps tiers correctly — that is validated by tests. Verification checks that the destination matches what was written, not whether what was written is semantically correct.
+The hash is computed over post-transform output. Whether `lower(trim(email))` does the right thing, whether a `when` expression maps tiers correctly - that is validated by tests. Verification checks that the destination matches what was written, not whether what was written is semantically correct.
 
-Verification also does not prove that the correct rows were selected from the source. If a `where` filter was wrong and selected the wrong rows, the destination hash will still match the stored receipt — because the receipt was computed from whatever was written.
+Verification also does not prove that the correct rows were selected from the source. If a `where` filter was wrong and selected the wrong rows, the destination hash will still match the stored receipt - because the receipt was computed from whatever was written.
 
 **Source-to-destination comparison** (proving "destination rows match source rows through the transform") is out of scope and deferred as a future extension.
+
+### Non-deterministic destination columns
+
+The receipt records the values **written from the source** at apply time; `verify`
+re-reads the **destination** and compares. So if a verified column's destination
+value is generated non-deterministically rather than copied, the read-back will
+not match the receipt and `verify` reports a **false mismatch** - even though the
+data movement was correct. This happens when a destination column:
+
+- has a **non-deterministic default** (`now()` / `CURRENT_TIMESTAMP`, `random()`,
+  `uuid_generate_v4()`, …) that fires because the column isn't supplied from the
+  source, or
+- is regenerated on write by an **`ON UPDATE CURRENT_TIMESTAMP`** clause or a
+  **trigger** (e.g. on an `on_conflict = "do_update"` upsert).
+
+Stratum does **not** strip such defaults from the destination: a destination
+column may legitimately need one, and a pre-existing destination table is outside
+the migration's control. If a table has non-deterministic columns, expect
+`verify` to flag it - the mismatch is in those generated columns, not in the
+copied data.
+
+> **Planned:** a future verification update will let you exclude such columns
+> from row hashing, so tables with non-deterministic defaults can still be
+> verified on their stable columns.
 
 ---
 
@@ -96,7 +120,7 @@ On pipeline completion, `IntegrityState::save_receipts()` builds the final `Veri
 3. For each batch: recompute subtree root; compare against `receipt.batch_roots[i]`.
 4. After all batches: sentinel fetch detects rows inserted beyond the receipt boundary.
 5. For divergent batches: compare row-by-row if receipt carries `row_hashes`.
-6. Return `Vec<VerificationResult>` — one result per table.
+6. Return `Vec<VerificationResult>` - one result per table.
 
 ### Diagram
 
@@ -182,7 +206,7 @@ pub enum IntegrityMode {
 
 ### `VerificationReceipt`
 
-Written to sled at pipeline completion. Key: `receipt:{pipeline_name}:{table_name}` — stable across runs so each new `apply --integrity` overwrites the previous receipt.
+Written to sled at pipeline completion. Key: `receipt:{pipeline_name}:{table_name}` - stable across runs so each new `apply --integrity` overwrites the previous receipt.
 
 ```rust
 pub struct VerificationReceipt {
@@ -306,7 +330,7 @@ for each column_name in column_order (lexicographic order):
 | `Binary(b)`      | `0x40` | 4-byte LE length + raw bytes                            |
 | `Json(j)`        | `0x50` | canonical JSON (sorted keys), 4-byte LE length prefix   |
 | `Array(a)`       | `0x60` | 4-byte LE element count + recursively encoded elements  |
-| `Enum { value }` | `0x70` | string value only — no type name                       |
+| `Enum { value }` | `0x70` | string value only - no type name                       |
 
 ### Column Order
 
@@ -334,7 +358,7 @@ Column types are passed in `IntegrityConfig.column_types` and used on both the w
 
 ### Batch-Level Tree (Write Path)
 
-For each batch of N post-transform rows, `MerkleTree::root_from_hashes()` computes a subtree root from the row hashes. Only the root is kept — no intermediate nodes are retained. Memory is O(N) for the leaf hashes during root computation, then discarded.
+For each batch of N post-transform rows, `MerkleTree::root_from_hashes()` computes a subtree root from the row hashes. Only the root is kept - no intermediate nodes are retained. Memory is O(N) for the leaf hashes during root computation, then discarded.
 
 ```
 Row hashes: h0  h1  h2  h3  h4
@@ -354,7 +378,7 @@ After all batches, `MerkleTree::root_from_hashes()` combines all batch subtree r
 
 ### Cascade Tables
 
-Cascade tables (FK-referenced tables pulled in via `with references { data = cascade }`) receive rows from multiple source batches in non-PK order. A `HashSet` deduplicates row hashes across all batches. At finalization, the set is sorted and a single Merkle root is computed. `receipt.sorted_hashes = true` tells verify to apply the same sort before building its tree — making the comparison order-independent.
+Cascade tables (FK-referenced tables pulled in via `with references { data = cascade }`) receive rows from multiple source batches in non-PK order. A `HashSet` deduplicates row hashes across all batches. At finalization, the set is sorted and a single Merkle root is computed. `receipt.sorted_hashes = true` tells verify to apply the same sort before building its tree - making the comparison order-independent.
 
 ---
 
@@ -389,7 +413,7 @@ pub trait MerkleStore: Send + Sync {
 
 ### `verify()` Function
 
-Lives in `engine-verify`. Takes an `ExecutionPlan` and returns `Vec<VerificationResult>` — one result per (pipeline, table) pair. Has no dependency on `engine-runtime`.
+Lives in `engine-verify`. Takes an `ExecutionPlan` and returns `Vec<VerificationResult>` - one result per (pipeline, table) pair. Has no dependency on `engine-runtime`.
 
 ```rust
 pub async fn verify(
@@ -502,7 +526,7 @@ For pipelines using `with references { data = cascade }`, each FK-referenced tab
 - `IntegrityState` accumulates row hashes in a `HashSet` per cascade table, deduplicating rows referenced by multiple source batches.
 - At finalization, hashes are sorted and a single Merkle root is stored.
 - Verify reads all rows from each cascade destination table, sorts their hashes, and compares to `receipt.table_root`.
-- `row_hashes` is always `None` for cascade receipts — row-level diff is not supported for out-of-order tables.
+- `row_hashes` is always `None` for cascade receipts - row-level diff is not supported for out-of-order tables.
 
 ---
 
@@ -512,7 +536,7 @@ For pipelines using `with references { data = cascade }`, each FK-referenced tab
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Empty table                     | `root_from_hashes(&[])` returns a fixed sentinel. Verify re-reads zero rows, computes the same sentinel. Match.                                                            |
 | Single row                      | Treated as a single-leaf tree. Root equals the row hash directly.                                                                                                            |
-| Pipeline with `where` filter  | Receipt covers only the filtered rows. Verify re-reads destination (already contains only filtered rows) and compares — no re-application of the filter on the verify path. |
+| Pipeline with `where` filter  | Receipt covers only the filtered rows. Verify re-reads destination (already contains only filtered rows) and compares - no re-application of the filter on the verify path. |
 | `action = skip` validation    | Skipped rows are not written and not hashed. Receipt reflects only written rows.`skipped_rows` counter records the count.                                                  |
 | Rows inserted after migration   | Detected by the sentinel fetch. Reported as a batch count mismatch.                                                                                                          |
 | `NoPriorRun`                  | Pipeline ran without `--integrity`. Verify returns `NoPriorRun` (not an error).                                                                                          |
@@ -540,7 +564,7 @@ Total: ~550 ns/row. At 30K rows/sec (typical MySQL->PostgreSQL), under 2% overhe
 
 ### Verification Path Cost
 
-Full destination re-read at the same speed as the original migration. For a 10M row table: ~5–6 minutes. Batch-level early termination means a single corrupted row is detected after scanning only to the divergent batch — potentially seconds for early batches.
+Full destination re-read at the same speed as the original migration. For a 10M row table: ~5–6 minutes. Batch-level early termination means a single corrupted row is detected after scanning only to the divergent batch - potentially seconds for early batches.
 
 ---
 
@@ -552,4 +576,4 @@ For CDC pipelines: maintain Merkle trees incrementally as new rows arrive, recom
 
 ### Parallel Verification
 
-For very large tables: read PK ranges concurrently, build batch subtrees in parallel. The batch-level tree structure supports this naturally — each batch is an independent subtree.
+For very large tables: read PK ranges concurrently, build batch subtrees in parallel. The batch-level tree structure supports this naturally - each batch is an independent subtree.

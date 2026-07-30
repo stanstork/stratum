@@ -56,6 +56,19 @@ impl Direction {
         self.dst.scalar_i64(self.dst.dest_url(), sql).await
     }
 
+    pub async fn dst_scalar_string(&self, sql: &str) -> Option<String> {
+        self.dst.scalar_string(self.dst.dest_url(), sql).await
+    }
+
+    pub async fn src_scalar_string(&self, sql: &str) -> Option<String> {
+        self.src.scalar_string(self.src.source_url(), sql).await
+    }
+
+    /// Run a statement against the destination (seed / tamper helpers).
+    pub async fn dst_execute(&self, sql: &str) {
+        self.dst.execute(self.dst.dest_url(), sql).await;
+    }
+
     pub async fn dst_column_count(&self, table: &str) -> i64 {
         self.dst_scalar_i64(&format!(
             "SELECT COUNT(*) FROM information_schema.columns \

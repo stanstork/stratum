@@ -64,6 +64,7 @@ ordering, resumability, or verification.
 - **Fault tolerance** - circuit breaker, configurable retry, Dead Letter Queue
 - **Graph references** - auto-discover and migrate FK-dependent tables
 - **Multi-table pipelines** - `tables = [...]` fans one block out into a full copy per table
+- **Parallel lanes** - `lanes = N` splits a large single-table copy into N primary-key ranges; graph migrations run their tables concurrently
 - **Pagination strategies** - primary key, numeric, timestamp cursor
 - **Lifecycle hooks** - `before` / `after` SQL blocks per pipeline
 - **WASM plugins** - sandboxed transform / filter / source / sink plugins in native Rust or JavaScript
