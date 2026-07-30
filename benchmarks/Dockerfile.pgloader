@@ -1,0 +1,17 @@
+# pgloader v4 (the Clojure/JVM rewrite) image, built by run.sh for the docker
+# pgloader path. There is no published v4 image - v4 ships as a JAR that needs
+# Java 21+ - so we assemble one on a Temurin 21 JRE. Default settings, no tuning,
+# matching how a user would run the recommended v4 build.
+#
+# The JAR URL always points at the latest v4-dev pre-release build; override it
+# with --build-arg PGLOADER_JAR_URL=... (run.sh passes PGLOADER_JAR_URL).
+FROM eclipse-temurin:21-jre
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+ARG PGLOADER_JAR_URL=https://github.com/dimitri/pgloader/releases/download/v4-dev/pgloader.jar
+RUN curl -fL -o /usr/local/lib/pgloader.jar "$PGLOADER_JAR_URL"
+RUN printf '#!/bin/sh\nexec java -jar /usr/local/lib/pgloader.jar "$@"\n' \
+        > /usr/local/bin/pgloader \
+    && chmod 755 /usr/local/bin/pgloader
+ENTRYPOINT []

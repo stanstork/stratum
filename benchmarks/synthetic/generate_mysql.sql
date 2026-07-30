@@ -1,13 +1,39 @@
--- Deterministic data generator for bench.orders.
+-- Deterministic synthetic table + generator for bench.orders (MySQL).
 --
--- Strategy: build a one-million-row sequence table once (cross join of a
--- 10-row digit table), then INSERT ... SELECT from it in 1M-row batches,
--- computing every column as a pure function of the absolute row number `m`.
--- Server-side generation avoids client round trips entirely; expect roughly
--- 100-400k rows/s depending on hardware.
+-- Self-contained (schema + generator together, mirroring generate_pg.sql): one
+-- wide-ish OLTP-style `orders` table with a realistic type mix (integers,
+-- decimal, float, enum, char/varchar, nullable text, boolean, uuid-shaped char,
+-- timestamp/datetime/date) at ~200 bytes/row, then a server-side generator that
+-- fills it. Every value is a pure function of the row number, so any two runs at
+-- the same size produce byte-identical data.
 --
--- Invoked by run.sh as:  CALL bench.gen_orders(<total_rows>);
+-- Strategy: build a one-million-row sequence table once (cross join of a 10-row
+-- digit table), then INSERT ... SELECT from it in 1M-row batches. No client round trips.
+--
+-- Invoked by run.sh as:  mysql ... < generate_mysql.sql   then   CALL bench.gen_orders(<N>);
+
+CREATE DATABASE IF NOT EXISTS bench;
 USE bench;
+
+DROP TABLE IF EXISTS orders;
+CREATE TABLE orders (
+    id           BIGINT UNSIGNED NOT NULL,
+    customer_id  INT NOT NULL,
+    status       ENUM('pending','paid','shipped','cancelled','refunded') NOT NULL,
+    amount       DECIMAL(12,2) NOT NULL,
+    quantity     SMALLINT NOT NULL,
+    discount_pct FLOAT NULL,
+    currency     CHAR(3) NOT NULL,
+    sku          VARCHAR(32) NOT NULL,
+    note         VARCHAR(255) NULL,
+    tags         VARCHAR(64) NULL,
+    is_gift      TINYINT(1) NOT NULL,
+    order_uuid   CHAR(36) NOT NULL,
+    created_at   TIMESTAMP NOT NULL,
+    updated_at   DATETIME NOT NULL,
+    ship_date    DATE NULL,
+    PRIMARY KEY (id)
+) ENGINE = InnoDB;
 
 -- Fixed session state so generated values are machine-independent.
 SET time_zone = '+00:00';

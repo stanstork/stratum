@@ -1,17 +1,17 @@
--- pgloader: full Sakila migration, MySQL -> PostgreSQL.
---
--- Measured scope - identical for both tools (see ../stratum/sakila.smql):
--- create destination tables, copy every row. Secondary indexes and FK
--- constraints are excluded on both sides so the tools do the same work.
---
--- `film_text` is excluded on both sides (an orphan full-text table nothing
--- references). @@ placeholders are substituted by run.sh.
-
+-- pgloader full Sakila load, MySQL to PostgreSQL. See ../README.md for scope.
+-- Copies every row of all 15 data tables (film_text excluded on both sides).
+-- SCOPE CAVEAT: pgloader v4 always builds indexes and foreign keys,
+-- while stratum builds tables and primary keys only, 
+-- so the two are not scope-matched on Sakila. Placeholders come from run.sh.
+-- The CAST maps the address.location GEOMETRY column to bytea, since the bench
+-- PostgreSQL has no PostGIS (v4 dropped the default geometry cast v3 had).
 LOAD DATABASE
      FROM @@SAKILA_MYSQL_URL@@
      INTO @@SAKILA_PG_URL@@
 
-WITH include drop, create tables, create no indexes, no foreign keys, reset sequences
+WITH include drop, create tables, reset sequences
+
+CAST type geometry to bytea drop typemod
 
 EXCLUDING TABLE NAMES MATCHING 'film_text'
 

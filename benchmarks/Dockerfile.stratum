@@ -1,0 +1,25 @@
+# Stratum benchmark image.
+#
+# Built by run.sh ONLY when pgloader is measured via its Docker image: to keep
+# the comparison fair, both tools then run containerized (same --network host,
+# same host databases) rather than one native and one in Docker. When pgloader
+# runs from a native binary, run.sh runs the native stratum binary instead and
+# never touches this file.
+#
+# Multi-stage: compile with the pinned toolchain, ship only the binary on a
+# slim runtime. libssl3 is required at runtime (connectors link native-tls).
+FROM rust:1.97-bookworm AS build
+WORKDIR /src
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+# Copy the whole workspace; .dockerignore keeps target/ and results/ out.
+COPY . .
+RUN cargo build --release -p cli
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /src/target/release/stratum /usr/local/bin/stratum
+ENTRYPOINT []

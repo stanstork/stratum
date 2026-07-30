@@ -1,17 +1,68 @@
 # benchmarks/
 
-Reproducible Stratum vs pgloader benchmark. Methodology and published results:
+Reproducible **Stratum** benchmark for MySQL <-> PostgreSQL bulk load. pgloader is
+an optional comparison (see below). Methodology and published results:
 [docs/benchmarks.md](../docs/benchmarks.md).
 
 ```bash
-./benchmarks/run.sh                      # full suite (100M-row synthetic; ~45 GB disk)
+./benchmarks/run.sh                      # benchmark Stratum (100M-row synthetic; ~45 GB disk)
 BENCH_ROWS=1000000 ./benchmarks/run.sh   # scaled-down run
-./benchmarks/run.sh clean                # tear down bench containers + volumes
+WITH_PGLOADER=1 ./benchmarks/run.sh      # also compare against pgloader
+./benchmarks/run.sh clean                # tear down bench containers, volumes, image
 ```
 
-Prerequisites: Docker + compose v2, GNU time (`/usr/bin/time`), Rust toolchain
-(or `STRATUM_BIN`). pgloader: native binary if on `PATH`, Docker image
-otherwise.
+Prerequisites: Docker + compose v2, GNU time (`/usr/bin/time`). Docker alone is
+enough - `Dockerfile.stratum` compiles Stratum inside a Rust builder stage. The
+host Rust toolchain is needed only for the *native* path (to build
+`target/release/stratum`).
+
+## Stratum: binary or Docker
+
+If a Stratum binary exists at `STRATUM_BIN` (default `target/release/stratum`) it
+is measured natively; otherwise `run.sh` builds and runs it from
+`Dockerfile.stratum`. So `cargo build --release -p cli` first for a native run,
+or just run with nothing built to benchmark the Docker image.
+
+## pgloader comparison (opt-in)
+
+pgloader is **off by default** - the benchmark measures Stratum. Set
+`WITH_PGLOADER=1` to add pgloader on the PostgreSQL-target workloads (`sakila`,
+`synthetic`); it never runs on the MySQL-target `reverse` workload, since
+pgloader only migrates *into* PostgreSQL.
+
+`PGLOADER_BIN` measures a local pgloader natively; unset, pgloader runs in Docker
+as **v4** (the JVM rewrite). v4 ships only as a JAR (needs Java 21+) with no
+published image, so `run.sh` builds one from `Dockerfile.pgloader` - the JAR
+comes from `PGLOADER_JAR_URL` (default: latest `v4-dev`). Point `PGLOADER_IMAGE`
+at a prebuilt image (e.g. the old `dimitri/pgloader:latest` Lisp build) to pull
+it as-is instead.
+
+**Run both tools the same way for a fair wall-clock** - both native (set
+`STRATUM_BIN` + `PGLOADER_BIN`) or both Docker (set neither). The harness warns
+if they differ but won't force it. Peak RSS for a dockerized tool is sampled from
+`docker stats` (~1-2s, approximate); run native for exact GNU-time RSS.
+
+pgloader runs with **default tuning** (no `workers`/`concurrency`/batch/prefetch
+options) - the numbers are its out-of-the-box behavior, not its ceiling; a tuned
+pgloader would likely do better.
+
+## Sakila scope note
+
+The Sakila `pgloader` row is **not scope-matched** with Stratum. Stratum's
+`sakila.smql` creates the destination tables + primary keys and copies every
+row; on this workload pgloader also builds the secondary indexes and foreign
+keys, so it does more work. Read the Sakila `pgloader` number as a full-schema
+migration, not a like-for-like data copy. The **synthetic** workload (a single
+table with only a primary key) is the like-for-like comparison.
+
+## Reverse benchmark (PG -> MySQL, stratum only)
+
+`RUN_REVERSE=1` (default) also runs a PostgreSQL -> MySQL load, reported in its
+own `reverse` rows. pgloader migrates *into* PostgreSQL, so there is nothing to
+compare it against for a MySQL destination - this is a stratum-only measurement
+of the `LOAD DATA` write path. The PG source table is seeded once from
+`synthetic/generate_pg.sql` (deterministic, cached like the MySQL source). Set
+`RUN_REVERSE=0` to skip it.
 
 ## Layout
 
@@ -19,9 +70,11 @@ otherwise.
 |---|---|
 | `run.sh` | the harness: builds, seeds, runs every scenario, validates row counts, writes the report |
 | `compose.yml` | dedicated bench databases (MySQL 8.0 :33307, PostgreSQL 16 :54329) - isolated from the dev compose |
-| `stratum/*.smql` | Stratum configs (credential-free; URLs injected via env) |
+| `Dockerfile.stratum` | image built to run Stratum when no `STRATUM_BIN` is present |
+| `Dockerfile.pgloader` | image built for docker-mode pgloader v4 (JVM rewrite, from its JAR) |
+| `stratum/*.smql` | Stratum configs (credential-free; URLs injected via env); `synthetic_lanes.smql` is the 4-lane variant, `synthetic_heavy.smql` the ~20-computed-column transform load, `synthetic_reverse.smql` the PG->MySQL one |
 | `pgloader/*.load.tpl` | pgloader configs (URLs substituted by `run.sh`) |
-| `synthetic/` | deterministic generator for the `orders` table |
+| `synthetic/` | deterministic generators: `generate_mysql.sql` (MySQL source), `generate_pg.sql` (PG source for the reverse run) |
 | `results/<ts>/` | per-run output: `summary.md`, `summary.tsv`, `env.txt`, raw logs (gitignored) |
 
 ## Knobs (environment variables)
@@ -31,10 +84,20 @@ otherwise.
 | `BENCH_ROWS` | `100000000` | synthetic table size |
 | `RUNS` | `3` | repetitions per Sakila scenario (median reported) |
 | `SYNTH_RUNS` | `1` | repetitions per synthetic scenario |
-| `WORKLOADS` | `sakila synthetic` | subset of workloads |
-| `TOOLS` | `stratum stratum-integrity pgloader` | subset of tools |
-| `STRATUM_BIN` | `target/release/stratum` | skip the build, use this binary |
-| `PGLOADER_IMAGE` | `dimitri/pgloader:latest` | Docker fallback image |
+| `WORKLOADS` | `sakila synthetic synthetic_heavy` | forward (MySQL->PG) workloads; `synthetic_heavy` is Stratum-only (transform CPU) |
+| `TOOLS` | `stratum stratum-integrity stratum-lanes` | Stratum scenarios (`stratum-lanes` = 4 PK-range lanes, integer-PK tables only) |
+| `WITH_PGLOADER` | `0` | also run pgloader on PG-target workloads (comparison) |
+| `STRATUM_BIN` | `target/release/stratum` | Stratum binary; if it is absent, Stratum runs in Docker |
+| `STRATUM_IMAGE` | `stratum-bench:local` | image tag built for docker-mode Stratum |
+| `PGLOADER_BIN` | *(unset)* | local pgloader binary; unset -> Docker v4 image |
+| `PGLOADER_IMAGE` | `pgloader-bench:v4` | built from `Dockerfile.pgloader`; set to a prebuilt image to pull instead |
+| `PGLOADER_JAR_URL` | latest `v4-dev` JAR | pgloader v4 JAR baked into the built image |
+| `RUN_REVERSE` | `1` | also run the PG->MySQL reverse benchmark (stratum only) |
+| `REV_ROWS` | `$BENCH_ROWS` | row count for the reverse benchmark's PG source |
+| `REV_RUNS` | `$SYNTH_RUNS` | repetitions for the reverse benchmark |
+| `PG_DEST_DB` | `bench_dest` | PostgreSQL destination db (MySQL->PG workloads) |
+| `MYSQL_DEST_DB` | `bench_rev` | MySQL destination db (PG->MySQL reverse) |
+| `PG_SRC_DB` | `bench_src` | PostgreSQL source db seeded for the reverse |
 
 Every run validates row counts source-vs-destination and aborts on mismatch -
 a reported number always means the data actually arrived.

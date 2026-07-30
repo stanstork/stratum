@@ -24,6 +24,7 @@ SMQL (Stratum Migration Query Language) is a declarative, SQL-inspired language 
   - [settings](#settings)
 - [Expressions](#expressions)
 - [Graph References](#graph-references)
+- [Multi-Table Pipelines](#multi-table-pipelines)
 - [Complete Example](#complete-example)
 
 ---
@@ -204,25 +205,22 @@ from {
 }
 ```
 
-**Multiple-table union (planned - not yet implemented).** A `from` block
-currently reads a single `table`. The intended syntax, for reference only:
+**Multiple tables (fan-out).** List several tables and the pipeline expands into
+one independent full-copy pipeline per table - the connections and settings are
+declared once instead of repeated. See
+[Multi-Table Pipelines](#multi-table-pipelines) for the full feature (per-table
+renames, projections, execution order, and restrictions).
 
-```text
-// PLANNED - not yet supported
+```smql
 from {
   connection = connection.mysql_prod
-  tables     = ["orders_2023", "orders_2024"]   // implicit union
-}
-
-// PLANNED - per-table filters
-from {
-  connection = connection.mysql_prod
-  union {
-    table "orders_2023" where year == 2023
-    table "orders_2024" where year == 2024
-  }
+  tables     = ["orders", "customers", "products"]
 }
 ```
+
+This is a fan-out of whole-table copies, **not** a union: each table is copied
+into its own destination table. A true multi-source union into one table is not
+supported.
 
 **With graph references** (see [Graph References](#graph-references)):
 ```smql
@@ -987,6 +985,92 @@ pipeline "migrate_orders" {
   }
 }
 ```
+
+---
+
+## Multi-Table Pipelines
+
+A `from` block may list several tables with `tables = [...]`. Stratum fans the
+block out into **one independent pipeline per table**, so the shared connections
+and settings are written once instead of copy-pasted for every table.
+
+```smql
+pipeline "warehouse" {
+  from {
+    connection = connection.src
+    tables = ["actor", "customer", "payment"]
+  }
+  to { connection = connection.dst }
+  settings {
+    create_missing_tables = true
+    batch_size            = 25000
+  }
+}
+```
+
+This is a **fan-out of full-table copies**: each table is copied whole into its
+own destination table (every row, every column). It does **not** follow foreign
+keys - for FK-graph discovery (which copies only FK-reachable rows) use
+[`with references`](#with-references-block) instead. `tables` is also not a
+union: the tables are not combined into a single destination.
+
+### Per-table renames and projections
+
+Tables you don't name are copied verbatim. To change an individual table, reuse
+the same constructs the graph feature uses - they match a listed table by name:
+
+- **`select "T" { ... }`** - becomes table `T`'s projection / column renames.
+- **`to { map { T = "dest" } }`** - renames table `T`'s destination table.
+
+```smql
+pipeline "warehouse" {
+  from {
+    connection = connection.src
+    tables = ["actor", "customer"]
+  }
+  to {
+    connection = connection.dst
+    map { customer = "dim_customer" }     // rename the destination table
+  }
+  select "customer" {                      // project + rename columns
+    id          = customer.customer_id
+    given_name  = customer.first_name
+    family_name = customer.last_name
+  }
+  settings { create_missing_tables = true }
+}
+```
+
+Result: `actor` is copied verbatim as `actor`; `customer` becomes `dim_customer`
+with exactly the columns `id`, `given_name`, `family_name`.
+
+### Execution order
+
+The expanded pipelines are independent (no dependencies between them), so they
+are scheduled by the top-level [`execution`](#execution) block like any other
+pipelines:
+
+- no `execution` block -> **sequential** (the default): one table at a time;
+- `strategy = "parallel"` -> up to `max_concurrency` tables concurrently.
+
+Fanning out does not itself change scheduling - the expansions are ordinary
+pipelines named `<pipeline>:<table>` (e.g. `warehouse:customer`).
+
+### Restrictions
+
+A `tables` block is a straight full copy, so the following are rejected with a
+clear error (each is a single-table / single-root concern):
+
+| Not allowed with `tables` | Use instead |
+|---|---|
+| `table = "..."` in the same `from` | one or the other, not both |
+| `with references { ... }` | a single-table graph pipeline |
+| `with { ... }` joins | a single-table pipeline |
+| an unnamed `select { ... }` | `select "T" { ... }` per table |
+| `where` / `validate` | a single-table pipeline |
+
+Every `select "T"` and every `map` key must name a table listed in `tables`,
+and a table may not be listed twice.
 
 ---
 

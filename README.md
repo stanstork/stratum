@@ -63,6 +63,7 @@ ordering, resumability, or verification.
 - **Data quality** - `validate` blocks with per-row `assert` / `warn` rules
 - **Fault tolerance** - circuit breaker, configurable retry, Dead Letter Queue
 - **Graph references** - auto-discover and migrate FK-dependent tables
+- **Multi-table pipelines** - `tables = [...]` fans one block out into a full copy per table
 - **Pagination strategies** - primary key, numeric, timestamp cursor
 - **Lifecycle hooks** - `before` / `after` SQL blocks per pipeline
 - **WASM plugins** - sandboxed transform / filter / source / sink plugins in native Rust or JavaScript
@@ -326,6 +327,30 @@ pipeline "migrate_orders_full" {
 }
 ```
 
+**Multi-table pipeline (one block, many tables):**
+```smql
+// `tables` fans out into one full-copy pipeline per table - connections and
+// settings declared once. Tables run under the `execution` strategy (parallel
+// here). Optional per-table tweaks: `select "T"` projects/renames columns and
+// `map` renames the destination table; unnamed tables copy verbatim.
+pipeline "warehouse" {
+  from {
+    connection = connection.src
+    tables = ["actor", "category", "customer"]
+  }
+  to {
+    connection = connection.dst
+    map { customer = "dim_customer" }
+  }
+  select "customer" {
+    id          = customer.customer_id
+    given_name  = customer.first_name
+    family_name = customer.last_name
+  }
+  settings { create_missing_tables = true }
+}
+```
+
 **Data validation and error handling:**
 ```smql
 validate {
@@ -409,7 +434,7 @@ Stratum stores pipeline state in `~/.stratum/state/` (sled embedded KV). If a mi
 | [docs/architecture.md](docs/architecture.md) | Crate map, design decisions, data flow |
 | [docs/plugins/](docs/plugins/README.md) | WASM plugins - roles, native Rust & JS (QuickJS) runtimes, authoring, CLI |
 | [docs/verification.md](docs/verification.md) | Cryptographic verification design and implementation |
-| [docs/benchmarks.md](docs/benchmarks.md) | Reproducible benchmark vs pgloader - methodology, results, `./benchmarks/run.sh` |
+| [docs/benchmarks.md](docs/benchmarks.md) | Reproducible Stratum benchmark (optional pgloader comparison) - methodology, results, `./benchmarks/run.sh` |
 | [examples/configs/](examples/configs/) | Runnable SMQL examples - schema mapping, DAG dependencies, validation, DLQ, and [`when.smql`](examples/configs/when.smql) (conditional values & computed-column chains) |
 
 ## Development
