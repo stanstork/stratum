@@ -558,7 +558,11 @@ For pipelines using `with references { data = cascade }`, each FK-referenced tab
 | Subtree root computation | ~50 ns/row (amortized) | Single-pass level reduction, O(N) memory.              |
 | Receipt write to sled    | ~10 µs once           | One KV write per table at pipeline completion.         |
 
-Total: ~550 ns/row. At 30K rows/sec (typical MySQL->PostgreSQL), under 2% overhead. Bottleneck remains network I/O.
+The per-row costs above are rough, order-of-magnitude figures to show *where*
+the work goes, not a benchmark. What matters end-to-end: hashing runs
+**in-flight**, overlapped with the destination write rather than added on top of
+it, so it costs a low single-digit percent overall - hashing is not the limiting
+factor. For measured numbers on real hardware see [benchmarks.md](benchmarks.md).
 
 `--full-integrity` adds one `Vec<[u8; 32]>` element per row (~32 bytes) retained in memory for the duration of the pipeline, plus the same 32 bytes persisted in sled. A 1M row table uses ~32 MB of additional sled storage.
 

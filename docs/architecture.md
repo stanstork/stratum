@@ -313,7 +313,7 @@ FKs are created after data migration to prevent constraint violations during bul
 When FK dependencies form a cycle (mutual references, self-references), a BFS-based `partial_topological_order()` places acyclic tables first, then cycle members alphabetically. This produces deterministic DDL regardless of `HashMap` iteration order.
 
 ### Bounded MPSC Channel (4 batches or 128 MiB)
-The producer → consumer channel is bounded two ways, whichever binds first: by batch count (`BATCH_CHANNEL_CAPACITY = 4`) and by in-flight bytes (`MAX_INFLIGHT_BYTES = 128 MiB`). The byte bound is the wide-row guard — a batch of very wide rows draws proportionally more of the budget, so the window can't balloon on wide tables. This provides natural backpressure (the producer blocks when the consumer can't keep up) and bounds per-lane memory regardless of source speed or table size. The depth was deliberately kept shallow (was 64): a deep channel just parks more fully-materialized batches in RAM without improving throughput, since the destination write is the bottleneck. Per-lane footprint scales with lane count, not table size — see [benchmarks.md](benchmarks.md).
+The producer → consumer channel is bounded two ways, whichever binds first: by batch count (`BATCH_CHANNEL_CAPACITY = 4`) and by in-flight bytes (`MAX_INFLIGHT_BYTES = 128 MiB`). The byte bound is the wide-row guard — a batch of very wide rows draws proportionally more of the budget, so the window can't balloon on wide tables. This provides natural backpressure (the producer blocks when the consumer can't keep up) and bounds per-lane memory regardless of source speed or table size. The depth was deliberately kept shallow: a deep channel just parks more fully-materialized batches in RAM without improving throughput — extra read-ahead only helps if the consumer has spare capacity to drain it, which the slower side (usually the write, or per-row transform CPU) doesn't. Per-lane footprint scales with lane count, not table size — see [benchmarks.md](benchmarks.md).
 
 ### Sled for StateStore
 Embedded, no external dependency, ACID-transactional, B+ tree with lock-free reads, crash-safe WAL. Checkpoints are written after every batch so crash recovery loses at most one batch.
@@ -328,16 +328,32 @@ The CLI sets [mimalloc](https://github.com/microsoft/mimalloc) as the `#[global_
 
 ## Performance Characteristics
 
+Structural bounds, fixed by the code (not machine-dependent):
+
 | Metric | Value |
 |--------|-------|
-| MySQL/PostgreSQL throughput | 10K–50K rows/sec (network-bound) |
-| CSV throughput | 50K–100K rows/sec (disk-bound) |
-| Baseline memory | ~50MB |
-| Per-pipeline memory | ~10–30MB (batch-size dependent) |
 | MPSC channel bound | 4 batches or 128 MiB (whichever binds first) |
 | Checkpoint interval | Every batch |
 | Retry backoff | 1s -> 30s exponential |
 | Graceful shutdown | <5s to drain in-flight batches |
+
+Behavioral shape (for measured figures see [benchmarks.md](benchmarks.md), which
+records the box they were taken on - treat any absolute number as
+machine-specific, not a reference spec):
+
+- **The bottleneck depends on the workload.** For a plain bulk copy it's usually
+  the destination write - the COPY / `LOAD DATA` into the target (PostgreSQL
+  binary COPY is the fastest target; InnoDB `LOAD DATA` is slower because every
+  write maintains the clustered index). Heavy per-row work - many computed
+  columns, or a WASM/JS plugin - shifts it to expression/plugin CPU instead, and
+  a slow source or a remote network link can bind too.
+- **`lanes = N` trades connections and memory for total throughput**, scaling
+  sublinearly and flattening near the destination's ingest ceiling past ~2 lanes.
+- **Integrity adds a low single-digit percent** - row hashing runs in-flight,
+  overlapped with the write, so it isn't paid serially.
+- **Peak RSS is bounded and roughly flat** regardless of table size (the
+  in-flight window is capped); it scales with lane count, not row count.
+  mimalloc keeps it flat and returns freed memory to the OS.
 
 ---
 

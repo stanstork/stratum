@@ -133,5 +133,6 @@ Stratum's own levers (which it *does* control): the `LOAD DATA` fast path,
 session-scoped `unique_checks`/`foreign_key_checks=0` on the write connection
 (the standard bulk pattern, same as `mysqldump`), two-phase FK creation, and
 `lanes` for parallel key-range writes. With the server settings above plus
-`lanes=4`, a MySQL destination reaches parity with PostgreSQL binary COPY
-(~400k rows/s on the synthetic table).
+`lanes=4`, a MySQL destination approaches Stratum's PostgreSQL binary-COPY rate
+on the synthetic table (see [../docs/benchmarks.md](../docs/benchmarks.md) for
+measured figures).
