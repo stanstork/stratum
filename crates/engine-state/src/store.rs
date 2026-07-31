@@ -24,6 +24,8 @@ pub trait StateStore: Send + Sync {
             .map(CheckpointSummary::from))
     }
 
+    async fn total_rows_done(&self, run_id: &str, item_id: &str) -> Result<u64, StateStoreError>;
+
     async fn append_wal(&self, entry: &WalEntry) -> Result<(), StateStoreError>;
     async fn iter_wal(&self, run_id: &str) -> Result<Vec<WalEntry>, StateStoreError>;
 

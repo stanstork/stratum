@@ -2,7 +2,12 @@ use crate::{
     drivers::mysql::{driver::MySqlDriver, params::MySqlParamStore, queries},
     error::DriverError,
     sql::{filter::SqlFilter, query::generator::QueryGenerator, request::FetchRowsRequest},
-    traits::{reader::DataReader, row_decoder::RowDecoder},
+    traits::{
+        executor::QueryExecutor,
+        introspector::SchemaIntrospector,
+        reader::{DataReader, key_range_from_rows, single_int_pk},
+        row_decoder::RowDecoder,
+    },
 };
 use async_trait::async_trait;
 use model::records::Record;
@@ -19,9 +24,17 @@ impl DataReader for MySqlDriver {
         debug!(sql = %sql, "generated SQL");
 
         let mut conn = self.pool().get_conn().await?;
-        let params = MySqlParamStore::from_values(&params).params();
+        let params = MySqlParamStore::from_values(&params).into_params();
         let rows: Vec<MySqlRow> = conn.exec(sql, params).await?;
-        Ok(rows.iter().map(|r| r.decode(&request.table)).collect())
+
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Build the shared column schema once for the whole result set.
+        let schema = rows[0].schema(&request.table);
+
+        Ok(rows.iter().map(|r| r.decode_with_schema(&schema)).collect())
     }
 
     async fn count(
@@ -56,5 +69,17 @@ impl DataReader for MySqlDriver {
             None => 0,
         };
         Ok(estimate)
+    }
+
+    async fn int_key_range(&self, table: &str) -> Result<Option<(String, u64, u64)>, DriverError> {
+        let meta = self.table_metadata(table).await?;
+        let Some(pk) = single_int_pk(&meta, &dialect::MySql) else {
+            return Ok(None);
+        };
+
+        let (sql, _) = QueryGenerator::new(&dialect::MySql).select_key_range(table, &pk);
+        let rows = self.query(&sql).await?;
+
+        Ok(key_range_from_rows(pk, &rows))
     }
 }

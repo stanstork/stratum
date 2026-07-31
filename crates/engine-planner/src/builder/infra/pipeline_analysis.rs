@@ -85,7 +85,7 @@ impl PipelineAnalysisResources {
         let source_dialect = src_driver.dialect();
         let core_data_destination = dispatch_driver!(dst_driver.clone(), |d| {
             d.clone()
-                .into_destination(&pipeline.destination.table, source_dialect)
+                .into_destination(&pipeline.destination, source_dialect)
         });
 
         let introspector = dispatch_driver!(&src_driver, |d| {
@@ -97,12 +97,7 @@ impl PipelineAnalysisResources {
         });
 
         let validated_settings = builder
-            .validate_settings(
-                pipeline,
-                &core_data_source,
-                &core_data_destination,
-                dest_introspector.as_ref(),
-            )
+            .validate_settings(pipeline, &core_data_destination, dest_introspector.as_ref())
             .await?;
 
         let schema_plan = Arc::new(
@@ -140,12 +135,16 @@ impl<'a> PipelineSettingsView<'a> {
         Self { settings }
     }
 
-    pub fn ignore_constraints(&self) -> bool {
-        self.settings.ignore_constraints()
+    pub fn skip_primary_keys(&self) -> bool {
+        self.settings.skip_primary_keys()
     }
 
-    pub fn mapped_columns_only(&self) -> bool {
-        self.settings.mapped_columns_only()
+    pub fn skip_foreign_keys(&self) -> bool {
+        self.settings.skip_foreign_keys()
+    }
+
+    pub fn skip_indexes(&self) -> bool {
+        self.settings.skip_indexes()
     }
 
     pub fn batch_size(&self) -> usize {

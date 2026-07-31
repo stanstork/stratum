@@ -58,7 +58,7 @@ use engine_core::{
         type_registry::{Dialect, TypeRegistry},
     },
 };
-use engine_processing::io::{destination::Destination, source::Source};
+use engine_processing::io::destination::Destination;
 use engine_runtime::dag::Dag;
 use engine_wasm::registry::{PluginRegistry, load_registry};
 use model::execution::flags::IntegrityMode;
@@ -389,7 +389,7 @@ impl ReportBuilder {
             &report.joins,
             &report.validations,
             &report.source,
-            &settings,
+            pipeline.has_projection(),
         );
         let (order, stage) = self
             .calculate_execution_positions(dag, &pipeline.name)
@@ -453,7 +453,7 @@ impl ReportBuilder {
         let analysis_input = PipelineAnalysisInput::new(
             Arc::new(pipeline.clone()),
             self.sample_config(),
-            PipelineSettingsView::new(&resources.validated_settings).mapped_columns_only(),
+            pipeline.has_projection(),
         );
 
         let schema_plan = resources.schema_plan.clone();
@@ -604,13 +604,11 @@ impl ReportBuilder {
     pub(crate) async fn validate_settings(
         &self,
         pipeline: &Pipeline,
-        source: &Source,
         dest: &Destination,
         introspector: &dyn SchemaIntrospector,
     ) -> ReportBuilderResult<ValidatedSettings> {
         let settings = Settings::from_map(&pipeline.settings);
-        let validator =
-            SettingsValidator::new(source, dest, introspector, true, IntegrityMode::Off);
+        let validator = SettingsValidator::new(dest, introspector, true, IntegrityMode::Off);
         validator.validate(&settings).await.map_err(|e| {
             ReportBuilderError::Config(format!("Validation failed for {}: {}", pipeline.name, e))
         })
@@ -636,8 +634,10 @@ impl ReportBuilder {
             introspector.clone(),
             source_dialect,
             mapping.clone(),
-            view.ignore_constraints(),
-            view.mapped_columns_only(),
+            view.skip_primary_keys(),
+            view.skip_foreign_keys(),
+            view.skip_indexes(),
+            pipeline.has_projection(),
             type_registry,
         );
 

@@ -1,4 +1,5 @@
 use crate::context::env::EnvContext;
+use connectors::drivers::postgres::config::{CopyFormat, PgConflictAction, PkCreation};
 use model::{
     core::value::Value,
     execution::{
@@ -16,17 +17,30 @@ use model::{
         plugin::PluginDecl,
         properties::Properties,
         references::{DataMode, GraphReferences, TraversalDepth},
+        tuning::{
+            COPY_FORMAT as TUNING_COPY_FORMAT, ON_CONFLICT as TUNING_ON_CONFLICT,
+            PK_CREATION as TUNING_PK_CREATION,
+        },
     },
 };
+use query_builder::ast::load_data::LoadDataConflict;
 use smql_syntax::ast::{
+    attribute::Attribute,
     block::{ConnectionBlock, DefineBlock, ExecutionBlock, PluginBlock},
     expr::{Expression, ExpressionKind},
+    ident::Identifier,
     literal::Literal,
     operator::{BinaryOperator, UnaryOperator},
-    pipeline::{FromBlock, PipelineBlock, ToBlock},
+    pipeline::{FromBlock, NestedBlock, PipelineBlock, SelectBlock, ToBlock},
+    span::Span,
     validation::ValidationKind,
 };
-use std::{collections::HashMap, path::PathBuf, str::FromStr, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    str::FromStr,
+    sync::Arc,
+};
 
 // ============================================================
 // Attribute Name Constants
@@ -45,6 +59,7 @@ const ATTR_TOTAL_TIMEOUT: &str = "total_timeout";
 // Pipeline attributes
 const ATTR_CONNECTION: &str = "connection";
 const ATTR_TABLE: &str = "table";
+const ATTR_TABLES: &str = "tables";
 const ATTR_MODE: &str = "mode";
 const ATTR_STRATEGY_PAGINATION: &str = "strategy";
 const ATTR_CURSOR: &str = "cursor";
@@ -124,6 +139,11 @@ const ERR_PIPELINE_DEPS_MUST_BE_STRINGS: &str =
 // Validation constants
 const MAX_CONCURRENCY_MIN: u32 = 1;
 const MAX_CONCURRENCY_MAX: u32 = 100;
+
+// Dialect tuning: the `to/from { <dialect> { … } }` block names.
+const DIALECT_POSTGRES: &str = "postgres";
+const DIALECT_MYSQL: &str = "mysql";
+const KNOWN_DIALECTS: &[&str] = &[DIALECT_POSTGRES, DIALECT_MYSQL];
 
 /// Convert validated AST to execution plan
 pub struct PlanBuilder {
@@ -260,6 +280,35 @@ impl PlanBuilder {
         })
     }
 
+    /// Desugar a pipeline that lists several tables (`from { tables = [...] }`)
+    /// into one full-copy pipeline per table.
+    pub fn expand_pipeline(
+        &self,
+        block: &PipelineBlock,
+    ) -> Result<Vec<PipelineBlock>, ConvertError> {
+        let Some(from) = &block.from else {
+            return Ok(vec![block.clone()]);
+        };
+
+        let Some(tables_attr) = from.attributes.iter().find(|a| a.key.name == ATTR_TABLES) else {
+            return Ok(vec![block.clone()]);
+        };
+
+        let tables = self.read_table_list(&block.name, tables_attr)?;
+        Self::validate_multi_table_guardrails(block, from)?;
+
+        // Lowercased names for case-insensitive membership checks.
+        let table_set: HashSet<String> = tables.iter().map(|t| t.to_ascii_lowercase()).collect();
+
+        Self::validate_multi_table_named_selects(block, &table_set)?;
+        let rename = self.multi_table_renames(block, &table_set)?;
+
+        Ok(tables
+            .iter()
+            .map(|table| Self::expand_one_table(block, table, &rename))
+            .collect())
+    }
+
     pub fn build_pipeline(&self, pipeline_block: &PipelineBlock) -> Result<Pipeline, ConvertError> {
         let source = self.build_source(pipeline_block)?;
         let destination = self.build_destination(pipeline_block)?;
@@ -385,17 +434,71 @@ impl PlanBuilder {
             .ok_or_else(|| ConvertError::Plan(ERR_MISSING_TABLE.to_string()))?;
 
         let graph_references = self.build_graph_references(from)?;
+        let conn = self.connections.get(&connection).cloned().ok_or_else(|| {
+            ConvertError::Connection(format!("Connection `{}` not found", connection))
+        })?;
+        let tuning =
+            self.build_endpoint_tuning(&from.nested_blocks, &conn.driver, "`from` block")?;
 
         Ok(DataSource {
-            connection: self.connections.get(&connection).cloned().ok_or_else(|| {
-                ConvertError::Connection(format!("Connection `{}` not found", connection))
-            })?,
+            connection: conn,
             table,
             filters,
             joins,
             pagination,
             graph_references,
+            tuning,
         })
+    }
+
+    /// Extract driver-specific tuning from a `from`/`to` endpoint's dialect
+    /// blocks (e.g. `postgres { pk_creation = "post" }`).
+    fn build_endpoint_tuning(
+        &self,
+        nested_blocks: &[NestedBlock],
+        driver: &str,
+        endpoint: &str,
+    ) -> Result<HashMap<String, Value>, ConvertError> {
+        let mut tuning = HashMap::new();
+        let mut seen_dialect = false;
+
+        let allowed = Self::allowed_tuning_keys(driver);
+
+        for block in nested_blocks {
+            if !KNOWN_DIALECTS.contains(&block.kind.as_str()) {
+                continue; // not a dialect block - leave for other consumers
+            }
+
+            if block.kind != driver {
+                return Err(ConvertError::Plan(format!(
+                    "`{}` tuning block in a `{driver}` {endpoint} - a dialect block must match the endpoint's driver",
+                    block.kind
+                )));
+            }
+
+            if seen_dialect {
+                return Err(ConvertError::Plan(format!(
+                    "duplicate `{driver}` tuning block in {endpoint}"
+                )));
+            }
+            seen_dialect = true;
+
+            for attr in &block.attributes {
+                let key = attr.key.name.clone();
+
+                if !allowed.contains(&key.as_str()) {
+                    return Err(ConvertError::Plan(format!(
+                        "unknown `{driver}` tuning key `{key}` in {endpoint}; supported: {allowed:?}"
+                    )));
+                }
+
+                let value = self.eval_with_definitions(&attr.value)?;
+                Self::validate_tuning_value(&key, &value, driver, endpoint)?;
+
+                tuning.insert(key, value);
+            }
+        }
+        Ok(tuning)
     }
 
     fn build_destination(
@@ -439,13 +542,17 @@ impl PlanBuilder {
 
         let table_map = self.build_table_map(to)?;
 
+        let conn = self.connections.get(&connection).cloned().ok_or_else(|| {
+            ConvertError::Connection(format!("Connection `{}` not found", connection))
+        })?;
+        let tuning = self.build_endpoint_tuning(&to.nested_blocks, &conn.driver, "`to` block")?;
+
         Ok(DataDestination {
-            connection: self.connections.get(&connection).cloned().ok_or_else(|| {
-                ConvertError::Connection(format!("Connection `{}` not found", connection))
-            })?,
+            connection: conn,
             table,
             mode,
             table_map,
+            tuning,
         })
     }
 
@@ -1262,6 +1369,223 @@ impl PlanBuilder {
             BinaryOperator::Or => BinaryOp::Or,
         }
     }
+
+    fn allowed_tuning_keys(dialect: &str) -> &'static [&'static str] {
+        match dialect {
+            DIALECT_POSTGRES => &[TUNING_PK_CREATION, TUNING_COPY_FORMAT, TUNING_ON_CONFLICT],
+            DIALECT_MYSQL => &[TUNING_ON_CONFLICT],
+            _ => &[],
+        }
+    }
+
+    fn validate_tuning_value(
+        key: &str,
+        value: &Value,
+        driver: &str,
+        endpoint: &str,
+    ) -> Result<(), ConvertError> {
+        match key {
+            // Conflict handling is dialect-specific: Postgres routes through a
+            // staging table + `ON CONFLICT`, MySQL uses a `LOAD DATA` modifier.
+            TUNING_ON_CONFLICT => {
+                let valid = match value {
+                    Value::String(s) => match driver {
+                        DIALECT_POSTGRES => PgConflictAction::parse(s).is_some(),
+                        DIALECT_MYSQL => LoadDataConflict::parse(s).is_some(),
+                        _ => false,
+                    },
+                    _ => false,
+                };
+                if !valid {
+                    let expected = match driver {
+                        DIALECT_POSTGRES => "\"do_nothing\" or \"do_update\"",
+                        _ => "\"default\", \"replace\" or \"ignore\"",
+                    };
+                    return Err(ConvertError::Plan(format!(
+                        "invalid `{TUNING_ON_CONFLICT}` in {endpoint}: expected {expected}"
+                    )));
+                }
+            }
+            TUNING_COPY_FORMAT => {
+                let is_valid = matches!(value, Value::String(s) if CopyFormat::parse(s).is_some());
+                if !is_valid {
+                    return Err(ConvertError::Plan(format!(
+                        "invalid `{TUNING_COPY_FORMAT}` in {endpoint}: expected \"binary\" or \"text\""
+                    )));
+                }
+            }
+            TUNING_PK_CREATION => {
+                let is_valid = matches!(value, Value::String(s) if PkCreation::parse(s).is_some());
+                if !is_valid {
+                    return Err(ConvertError::Plan(format!(
+                        "invalid `{TUNING_PK_CREATION}` in {endpoint}: expected \"pre\" or \"post\""
+                    )));
+                }
+            }
+            _ => {} // Other keys are either implicitly valid or unvalidated
+        }
+        Ok(())
+    }
+
+    fn read_table_list(
+        &self,
+        pipeline: &str,
+        tables_attr: &Attribute,
+    ) -> Result<Vec<String>, ConvertError> {
+        let ExpressionKind::Array(items) = &tables_attr.value.kind else {
+            return Err(ConvertError::Plan(format!(
+                "pipeline `{pipeline}`: `tables` must be a list of table names"
+            )));
+        };
+
+        let mut tables = Vec::with_capacity(items.len());
+        for item in items {
+            match self.eval_with_definitions(item)? {
+                Value::String(s) => tables.push(s),
+                other => {
+                    return Err(ConvertError::Plan(format!(
+                        "pipeline `{pipeline}`: `tables` must contain strings, found {other:?}"
+                    )));
+                }
+            }
+        }
+
+        if tables.is_empty() {
+            return Err(ConvertError::Plan(format!(
+                "pipeline `{pipeline}`: `tables` is empty"
+            )));
+        }
+
+        let mut seen = HashSet::new();
+        for t in &tables {
+            if !seen.insert(t.to_ascii_lowercase()) {
+                return Err(ConvertError::Plan(format!(
+                    "pipeline `{pipeline}`: `tables` lists `{t}` more than once"
+                )));
+            }
+        }
+
+        Ok(tables)
+    }
+
+    fn validate_multi_table_guardrails(
+        block: &PipelineBlock,
+        from: &FromBlock,
+    ) -> Result<(), ConvertError> {
+        let name = &block.name;
+
+        if from.attributes.iter().any(|a| a.key.name == ATTR_TABLE) {
+            return Err(ConvertError::Plan(format!(
+                "pipeline `{name}`: `table` and `tables` are mutually exclusive"
+            )));
+        }
+
+        if from.references.is_some() {
+            return Err(ConvertError::Plan(format!(
+                "pipeline `{name}`: `tables` cannot be combined with `with references`"
+            )));
+        }
+
+        if block.with_block.is_some() {
+            return Err(ConvertError::Plan(format!(
+                "pipeline `{name}`: `tables` cannot be combined with a `with {{ }}` join block"
+            )));
+        }
+
+        if block.select_block.is_some() {
+            return Err(ConvertError::Plan(format!(
+                "pipeline `{name}`: an unnamed `select {{ }}` is ambiguous with `tables`; use `select \"table\" {{ }}` per table"
+            )));
+        }
+
+        if !block.where_clauses.is_empty() {
+            return Err(ConvertError::Plan(format!(
+                "pipeline `{name}`: `where` is not supported with `tables`"
+            )));
+        }
+
+        if block.validate_block.is_some() {
+            return Err(ConvertError::Plan(format!(
+                "pipeline `{name}`: `validate` is not supported with `tables`"
+            )));
+        }
+
+        Ok(())
+    }
+
+    fn validate_multi_table_named_selects(
+        block: &PipelineBlock,
+        table_set: &HashSet<String>,
+    ) -> Result<(), ConvertError> {
+        for named in &block.named_select_blocks {
+            if !table_set.contains(&named.table.to_ascii_lowercase()) {
+                return Err(ConvertError::Plan(format!(
+                    "pipeline `{}`: select \"{}\" refers to a table not in `tables`",
+                    block.name, named.table
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn multi_table_renames(
+        &self,
+        block: &PipelineBlock,
+        table_set: &HashSet<String>,
+    ) -> Result<HashMap<String, String>, ConvertError> {
+        let rename = match &block.to {
+            Some(to) => self.build_table_map(to)?,
+            None => HashMap::new(),
+        };
+
+        for key in rename.keys() {
+            if !table_set.contains(&key.to_ascii_lowercase()) {
+                return Err(ConvertError::Plan(format!(
+                    "pipeline `{}`: map key `{}` is not in `tables`",
+                    block.name, key
+                )));
+            }
+        }
+        Ok(rename)
+    }
+
+    fn expand_one_table(
+        block: &PipelineBlock,
+        table: &str,
+        rename: &HashMap<String, String>,
+    ) -> PipelineBlock {
+        let mut nb = block.clone();
+        nb.name = format!("{}:{}", block.name, table);
+
+        if let Some(f) = nb.from.as_mut() {
+            f.attributes.retain(|a| a.key.name != ATTR_TABLES);
+            f.attributes.push(string_attr(ATTR_TABLE, table, f.span));
+        }
+
+        let dest = rename
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(table))
+            .map(|(_, v)| v.as_str())
+            .unwrap_or(table);
+
+        if let Some(t) = nb.to.as_mut() {
+            t.attributes.retain(|a| a.key.name != ATTR_TABLE);
+            t.attributes.push(string_attr(ATTR_TABLE, dest, t.span));
+            t.map_block = None;
+        }
+
+        nb.select_block = block
+            .named_select_blocks
+            .iter()
+            .find(|n| n.table.eq_ignore_ascii_case(table))
+            .map(|n| SelectBlock {
+                fields: n.fields.clone(),
+                span: n.span,
+            });
+        nb.named_select_blocks = Vec::new();
+
+        nb
+    }
 }
 
 impl Default for PlanBuilder {
@@ -1310,6 +1634,17 @@ fn parse_duration(s: &str) -> Result<u64, ConvertError> {
     };
 
     Ok(seconds)
+}
+
+fn string_attr(key: &str, value: &str, span: Span) -> Attribute {
+    Attribute {
+        key: Identifier::new(key, span),
+        value: Expression::new(
+            ExpressionKind::Literal(Literal::String(value.to_string())),
+            span,
+        ),
+        span,
+    }
 }
 
 #[cfg(test)]
@@ -2285,5 +2620,221 @@ mod tests {
                 .to_string()
                 .contains("Failed to parse environment variable")
         );
+    }
+
+    // ----- expand_pipeline (multi-table `tables = [...]`) --------------------
+
+    use smql_syntax::ast::pipeline::{
+        FieldMapping, FromBlock, MapBlock, NamedSelectBlock, ToBlock,
+    };
+
+    fn make_array_expr(items: Vec<&str>) -> Expression {
+        Expression::new(
+            ExpressionKind::Array(items.into_iter().map(make_string_expr).collect()),
+            test_span(),
+        )
+    }
+
+    fn conn_from(attrs: Vec<Attribute>) -> FromBlock {
+        let mut attributes = vec![make_attribute(
+            "connection",
+            make_dotpath_expr(vec!["connection", "src"]),
+        )];
+        attributes.extend(attrs);
+        FromBlock {
+            attributes,
+            nested_blocks: vec![],
+            references: None,
+            span: test_span(),
+        }
+    }
+
+    fn conn_to(map_block: Option<MapBlock>) -> ToBlock {
+        ToBlock {
+            attributes: vec![make_attribute(
+                "connection",
+                make_dotpath_expr(vec!["connection", "dst"]),
+            )],
+            nested_blocks: vec![],
+            map_block,
+            span: test_span(),
+        }
+    }
+
+    fn tables_block(from: FromBlock, to: ToBlock) -> PipelineBlock {
+        PipelineBlock {
+            name: "warehouse".to_string(),
+            description: None,
+            after: None,
+            from: Some(from),
+            to: Some(to),
+            where_clauses: vec![],
+            with_block: None,
+            select_block: None,
+            named_select_blocks: vec![],
+            validate_block: None,
+            on_error_block: None,
+            paginate_block: None,
+            before_block: None,
+            after_block: None,
+            settings_block: None,
+            span: test_span(),
+        }
+    }
+
+    fn table_attr_of(block: &PipelineBlock, which: fn(&PipelineBlock) -> &[Attribute]) -> String {
+        which(block)
+            .iter()
+            .find(|a| a.key.name == ATTR_TABLE)
+            .and_then(|a| match &a.value.kind {
+                ExpressionKind::Literal(Literal::String(s)) => Some(s.clone()),
+                _ => None,
+            })
+            .expect("table attribute")
+    }
+
+    fn from_attrs(b: &PipelineBlock) -> &[Attribute] {
+        &b.from.as_ref().unwrap().attributes
+    }
+    fn to_attrs(b: &PipelineBlock) -> &[Attribute] {
+        &b.to.as_ref().unwrap().attributes
+    }
+
+    #[test]
+    fn expand_without_tables_passes_through() {
+        let builder = PlanBuilder::default();
+        let block = tables_block(
+            conn_from(vec![make_attribute("table", make_string_expr("orders"))]),
+            conn_to(None),
+        );
+        let out = builder.expand_pipeline(&block).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "warehouse");
+    }
+
+    #[test]
+    fn expand_tables_fans_out_one_per_table() {
+        let builder = PlanBuilder::default();
+        let block = tables_block(
+            conn_from(vec![make_attribute(
+                "tables",
+                make_array_expr(vec!["actor", "film", "payment"]),
+            )]),
+            conn_to(None),
+        );
+        let out = builder.expand_pipeline(&block).unwrap();
+        assert_eq!(out.len(), 3);
+
+        let names: Vec<_> = out.iter().map(|p| p.name.clone()).collect();
+        assert_eq!(
+            names,
+            ["warehouse:actor", "warehouse:film", "warehouse:payment"]
+        );
+
+        // Every expansion has a single-table `table` on both ends (== source name
+        // with no map), no leftover `tables`, and no root select.
+        for (p, t) in out.iter().zip(["actor", "film", "payment"]) {
+            assert_eq!(table_attr_of(p, from_attrs), t);
+            assert_eq!(table_attr_of(p, to_attrs), t);
+            assert!(!from_attrs(p).iter().any(|a| a.key.name == ATTR_TABLES));
+            assert!(p.select_block.is_none());
+            assert!(p.named_select_blocks.is_empty());
+        }
+    }
+
+    #[test]
+    fn expand_named_select_becomes_root_and_map_renames_dest() {
+        let builder = PlanBuilder::default();
+        let mut block = tables_block(
+            conn_from(vec![make_attribute(
+                "tables",
+                make_array_expr(vec!["customer", "film"]),
+            )]),
+            conn_to(Some(MapBlock {
+                mappings: vec![FieldMapping {
+                    name: Identifier::new("customer", test_span()),
+                    value: make_string_expr("dim_customer"),
+                    span: test_span(),
+                }],
+                span: test_span(),
+            })),
+        );
+        block.named_select_blocks = vec![NamedSelectBlock {
+            table: "customer".to_string(),
+            fields: vec![FieldMapping {
+                name: Identifier::new("given_name", test_span()),
+                value: make_dotpath_expr(vec!["customer", "first_name"]),
+                span: test_span(),
+            }],
+            span: test_span(),
+        }];
+
+        let out = builder.expand_pipeline(&block).unwrap();
+        assert_eq!(out.len(), 2);
+
+        let customer = out.iter().find(|p| p.name == "warehouse:customer").unwrap();
+        // map renames the destination table only.
+        assert_eq!(table_attr_of(customer, from_attrs), "customer");
+        assert_eq!(table_attr_of(customer, to_attrs), "dim_customer");
+        // the named select is promoted to the root select.
+        let root = customer.select_block.as_ref().expect("root select");
+        assert_eq!(root.fields.len(), 1);
+        assert_eq!(root.fields[0].name.name, "given_name");
+
+        // film has no named select and no rename -> full copy, dest == source.
+        let film = out.iter().find(|p| p.name == "warehouse:film").unwrap();
+        assert!(film.select_block.is_none());
+        assert_eq!(table_attr_of(film, to_attrs), "film");
+    }
+
+    #[test]
+    fn expand_rejects_unnamed_select_and_bad_references() {
+        let builder = PlanBuilder::default();
+
+        // Unnamed root select is ambiguous across tables.
+        let mut block = tables_block(
+            conn_from(vec![make_attribute(
+                "tables",
+                make_array_expr(vec!["a", "b"]),
+            )]),
+            conn_to(None),
+        );
+        block.select_block = Some(SelectBlock {
+            fields: vec![],
+            span: test_span(),
+        });
+        assert!(builder.expand_pipeline(&block).is_err());
+
+        // A named select for a table that isn't listed.
+        let mut block2 = tables_block(
+            conn_from(vec![make_attribute("tables", make_array_expr(vec!["a"]))]),
+            conn_to(None),
+        );
+        block2.named_select_blocks = vec![NamedSelectBlock {
+            table: "zzz".to_string(),
+            fields: vec![],
+            span: test_span(),
+        }];
+        assert!(builder.expand_pipeline(&block2).is_err());
+
+        // Duplicate table names.
+        let dup = tables_block(
+            conn_from(vec![make_attribute(
+                "tables",
+                make_array_expr(vec!["a", "a"]),
+            )]),
+            conn_to(None),
+        );
+        assert!(builder.expand_pipeline(&dup).is_err());
+
+        // `table` and `tables` together.
+        let both = tables_block(
+            conn_from(vec![
+                make_attribute("table", make_string_expr("a")),
+                make_attribute("tables", make_array_expr(vec!["a"])),
+            ]),
+            conn_to(None),
+        );
+        assert!(builder.expand_pipeline(&both).is_err());
     }
 }

@@ -3,7 +3,6 @@ use super::{
     endpoint::{Endpoint, SchemaSource},
     error::SettingsError,
 };
-use crate::settings::CopyColumns;
 use crate::settings::validated::ValidatedSettings;
 use engine_core::schema::planner::SchemaPlanner;
 use engine_core::schema::{plan::SchemaPlan, type_registry::TypeRegistry, types::TypeEngine};
@@ -46,23 +45,23 @@ impl<D: SchemaDriver> SchemaSettingContext<D> {
     }
 
     pub async fn init_schema_planner(&self) -> Result<SchemaPlanner, SettingsError> {
-        let ignore_constraints = self.settings.ignore_constraints();
-        let mapped_columns_only = *self.settings.copy_columns() == CopyColumns::MapOnly;
+        let mapped_columns_only = self.mapping.has_projection;
         let introspector = self.source.introspector.clone();
 
         Ok(SchemaPlanner::new(
             introspector,
             self.source.dialect,
             self.mapping.clone(),
-            ignore_constraints,
+            self.settings.skip_primary_keys(),
+            self.settings.skip_foreign_keys(),
+            self.settings.skip_indexes(),
             mapped_columns_only,
             self.type_registry(),
         ))
     }
 
     pub async fn build_schema_plan(&self) -> Result<SchemaPlan, SettingsError> {
-        let ignore_constraints = self.settings.ignore_constraints();
-        let mapped_columns_only = *self.settings.copy_columns() == CopyColumns::MapOnly;
+        let mapped_columns_only = self.mapping.has_projection;
 
         let introspector = self.source.introspector.clone();
         let registry = Arc::new(self.type_registry());
@@ -72,7 +71,9 @@ impl<D: SchemaDriver> SchemaSettingContext<D> {
 
         Ok(SchemaPlan::new(
             type_engine,
-            ignore_constraints,
+            self.settings.skip_primary_keys(),
+            self.settings.skip_foreign_keys(),
+            self.settings.skip_indexes(),
             mapped_columns_only,
             self.mapping.clone(),
         ))

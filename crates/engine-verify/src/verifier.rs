@@ -20,7 +20,6 @@ use model::{
         references::{DataMode, GraphReferences},
     },
     integrity::{
-        coerce::coerce_row_for_hash,
         hasher::RowHasher,
         merkle::MerkleTree,
         receipt::VerificationReceipt,
@@ -397,7 +396,20 @@ async fn get_graph_expansion(
     mapping: &TransformationMetadata,
 ) -> Result<Option<HashMap<String, TableMetadata>>, VerifyError> {
     if let Some(refs) = &pipeline.source.graph_references {
-        expand_graph_references(&pipeline.source.table, src_driver, mapping, refs).await
+        let dest_driver = &pipeline.destination.connection.driver;
+        let dest_dialect = Dialect::parse(dest_driver).ok_or_else(|| {
+            VerifyError::InitializationError(format!(
+                "graph verification requires a SQL destination dialect, but destination driver '{dest_driver}' is not a SQL dialect"
+            ))
+        })?;
+        expand_graph_references(
+            &pipeline.source.table,
+            src_driver,
+            mapping,
+            refs,
+            dest_dialect,
+        )
+        .await
     } else {
         Ok(None)
     }
@@ -408,18 +420,18 @@ async fn expand_graph_references(
     src_driver: &DriverRef,
     mapping: &TransformationMetadata,
     refs: &GraphReferences,
+    dest_dialect: Dialect,
 ) -> Result<Option<HashMap<String, TableMetadata>>, VerifyError> {
     let source_dialect = src_driver.dialect();
 
     let result = dispatch_driver!(src_driver, |d| {
         let introspector: Arc<dyn SchemaIntrospector> = d.clone() as _;
-        let type_registry = Arc::new(TypeRegistry::new(
-            source_dialect,
-            Dialect::Postgres, // TODO: derive from destination driver
-        ));
+        let type_registry = Arc::new(TypeRegistry::new(source_dialect, dest_dialect));
         let expander = GraphExpander::new(introspector, type_registry, source_dialect);
+        // Verify only consumes the discovered-table set below, never the schema
+        // ops, so the skip_* flags are irrelevant here.
         expander
-            .expand(root_table, refs, mapping, false, false)
+            .expand(root_table, refs, mapping, false, false, false, false)
             .await
             .map_err(|e| VerifyError::InitializationError(e.to_string()))?
     });
@@ -473,9 +485,5 @@ fn hash_row_coerced(
     row: &Record,
     col_types: &HashMap<String, String>,
 ) -> [u8; 32] {
-    if col_types.is_empty() {
-        hasher.hash_row(row)
-    } else {
-        hasher.hash_row(&coerce_row_for_hash(row, col_types))
-    }
+    hasher.hash_row_coerced(row, col_types)
 }

@@ -108,7 +108,7 @@ impl<S: SchemaDriver> SampleCollector<S> {
 
         source_rows
             .iter_mut()
-            .for_each(|r| r.schema = pipeline.source.table.clone());
+            .for_each(|r| r.set_table(&pipeline.source.table));
 
         let transform_pipeline = build_transform_pipeline(
             pipeline,
@@ -476,8 +476,8 @@ impl<S: SchemaDriver> SampleCollector<S> {
         col_ref: &str,
         mapping: &TransformationMetadata,
     ) -> Option<Value> {
-        if let Some(f) = row.get(col_ref) {
-            return f.value.clone();
+        if let Some(v) = row.value(col_ref) {
+            return Some(v.clone());
         }
 
         if let Some((alias, field)) = col_ref.split_once('.') {
@@ -486,19 +486,18 @@ impl<S: SchemaDriver> SampleCollector<S> {
                     if cr.entity.eq_ignore_ascii_case(alias)
                         && cr.field.eq_ignore_ascii_case(field)
                         && let Some(target) = &cr.target
-                        && let Some(f) = row.get(target)
+                        && let Some(v) = row.value(target)
                     {
-                        return f.value.clone();
+                        return Some(v.clone());
                     }
                 }
             }
-            if let Some(f) = row.get(field) {
-                return f.value.clone();
+            if let Some(v) = row.value(field) {
+                return Some(v.clone());
             }
         }
 
-        row.get(col_ref.split('.').next_back()?)
-            .and_then(|f| f.value.clone())
+        row.value(col_ref.split('.').next_back()?).cloned()
     }
 
     fn format_val_context(
@@ -527,10 +526,9 @@ impl<S: SchemaDriver> SampleCollector<S> {
 
     fn map_to_sample_values(&self, row: &Record) -> HashMap<String, SampleValue> {
         const MAX_DISPLAY: usize = 120;
-        row.fields
-            .iter()
+        row.iter()
             .map(|f| {
-                let (display, is_null, truncated, len) = match &f.value {
+                let (display, is_null, truncated, len) = match f.value {
                     Some(v) => {
                         let s = v.as_string().unwrap_or_else(|| format!("{:?}", v));
                         if s.len() > MAX_DISPLAY {
@@ -547,7 +545,7 @@ impl<S: SchemaDriver> SampleCollector<S> {
                     None => ("NULL".into(), true, false, None),
                 };
                 (
-                    f.name.clone(),
+                    f.name.to_string(),
                     SampleValue {
                         display,
                         value_type: format!("{:?}", f.data_type),
@@ -604,8 +602,8 @@ impl<S: SchemaDriver> SampleCollector<S> {
     fn extract_identifier(&self, row: &Record) -> Option<String> {
         ["id", "_id", "uuid", "pk", &self.config.id_column]
             .iter()
-            .find_map(|&c| row.fields.iter().find(|f| f.name.eq_ignore_ascii_case(c)))
-            .and_then(|f| f.value.as_ref().map(|v| format!("{:?}", v)))
+            .find_map(|&c| row.iter().find(|f| f.name.eq_ignore_ascii_case(c)))
+            .and_then(|f| f.value.map(|v| format!("{:?}", v)))
     }
 
     fn empty_preview(&self, start: Instant, query: Option<SampleQuery>) -> SampleDataPreview {

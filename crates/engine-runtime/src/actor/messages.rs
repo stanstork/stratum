@@ -4,10 +4,18 @@
 #[derive(Debug)]
 pub enum ProducerMsg {
     /// Start (or resume) snapshot for a given migration item.
-    StartSnapshot { run_id: String, item_id: String },
+    StartSnapshot {
+        run_id: String,
+        item_id: String,
+        part_id: String,
+    },
 
     /// Start CDC stream for a given migration item.
-    StartCdc { run_id: String, item_id: String },
+    StartCdc {
+        run_id: String,
+        item_id: String,
+        part_id: String,
+    },
 
     /// Graceful shutdown.
     Stop { run_id: String, item_id: String },

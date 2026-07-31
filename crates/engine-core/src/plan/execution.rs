@@ -63,8 +63,9 @@ impl ExecutionPlan {
 
         let mut pipelines = Vec::new();
         for pipeline_block in &doc.pipelines {
-            let pipeline = builder.build_pipeline(pipeline_block)?;
-            pipelines.push(pipeline);
+            for expanded in builder.expand_pipeline(pipeline_block)? {
+                pipelines.push(builder.build_pipeline(&expanded)?);
+            }
         }
 
         let mut plugins = Vec::new();
@@ -585,5 +586,128 @@ pipeline "copy_customers" {
         assert_eq!(plan.pipelines[0].transformations.len(), 2);
         assert_eq!(plan.pipelines[0].transformations[0].target_field, "id");
         assert_eq!(plan.pipelines[0].transformations[1].target_field, "total");
+    }
+
+    #[test]
+    fn test_multi_table_pipeline_fans_out() {
+        let input = r#"
+connection "src" { driver = "mysql"    url = "mysql://u@localhost/db" }
+connection "dst" { driver = "postgres" url = "postgres://u@localhost/db" }
+
+pipeline "warehouse" {
+    from {
+        connection = connection.src
+        tables = ["actor", "customer", "payment"]
+    }
+    to {
+        connection = connection.dst
+        map { customer = "dim_customer" }
+    }
+    select "customer" {
+        customer_id = customer.customer_id
+        given_name  = customer.first_name
+    }
+    settings { create_missing_tables = true  batch_size = 25000 }
+}
+        "#;
+
+        let doc = parse(input).expect("Failed to parse SMQL");
+        let plan = ExecutionPlan::build(&doc, Arc::new(EnvContext::empty()))
+            .expect("Failed to build execution plan");
+
+        // Fans out to one pipeline per table.
+        let names: Vec<_> = plan.pipelines.iter().map(|p| p.name.clone()).collect();
+        assert_eq!(
+            names,
+            ["warehouse:actor", "warehouse:customer", "warehouse:payment"]
+        );
+
+        let actor = &plan.pipelines[0];
+        assert_eq!(actor.source.table, "actor");
+        assert_eq!(actor.destination.table, "actor"); // no rename -> same name
+        assert!(actor.transformations.is_empty()); // full copy, no projection
+
+        let customer = &plan.pipelines[1];
+        assert_eq!(customer.source.table, "customer");
+        assert_eq!(customer.destination.table, "dim_customer"); // map rename
+        // named select promoted to this pipeline's projection
+        let targets: Vec<_> = customer
+            .transformations
+            .iter()
+            .map(|t| t.target_field.clone())
+            .collect();
+        assert_eq!(targets, ["customer_id", "given_name"]);
+
+        // Settings carried to every expansion.
+        assert!(plan.pipelines[2].settings.contains_key("batch_size"));
+    }
+
+    #[test]
+    fn test_after_referencing_multi_table_block_is_dangling() {
+        let input = r#"
+connection "src" { driver = "mysql"    url = "mysql://u@localhost/db" }
+connection "dst" { driver = "postgres" url = "postgres://u@localhost/db" }
+
+pipeline "warehouse" {
+    from { connection = connection.src  tables = ["actor", "category"] }
+    to   { connection = connection.dst }
+}
+pipeline "downstream" {
+    after = [pipeline.warehouse]
+    from  { connection = connection.src  table = "language" }
+    to    { connection = connection.dst  table = "language" }
+}
+        "#;
+        let plan = build_plan(input);
+        let names: Vec<_> = plan.pipelines.iter().map(|p| p.name.clone()).collect();
+        assert!(names.contains(&"warehouse:actor".to_string()));
+        assert!(names.contains(&"downstream".to_string()));
+
+        // `downstream` still names the un-expanded block, which is not itself a
+        // pipeline after fan-out.
+        let downstream = plan
+            .pipelines
+            .iter()
+            .find(|p| p.name == "downstream")
+            .unwrap();
+        assert_eq!(downstream.dependencies, vec!["warehouse".to_string()]);
+        assert!(!names.contains(&"warehouse".to_string()));
+    }
+
+    #[test]
+    fn test_multi_table_benchmark_shape() {
+        let input = r#"
+connection "src" { driver = "mysql"    url = env("SRC_URL") }
+connection "dst" { driver = "postgres" url = env("DST_URL") }
+
+pipeline "sakila" {
+    from {
+        connection = connection.src
+        tables = [
+            "actor", "address", "category",
+            "film", "payment", "store",
+        ]
+    }
+    to { connection = connection.dst }
+    settings { create_missing_tables = true  batch_size = 25000 }
+}
+        "#;
+
+        let plan = build_plan_with_env(
+            input,
+            &[
+                ("SRC_URL", "mysql://u@localhost/db"),
+                ("DST_URL", "postgres://u@localhost/db"),
+            ],
+        );
+
+        assert_eq!(plan.pipelines.len(), 6);
+        assert_eq!(plan.pipelines[0].name, "sakila:actor");
+        assert_eq!(plan.pipelines[5].name, "sakila:store");
+        // Straight full copy: source == destination table, no projection.
+        for p in &plan.pipelines {
+            assert_eq!(p.source.table, p.destination.table);
+            assert!(p.transformations.is_empty());
+        }
     }
 }

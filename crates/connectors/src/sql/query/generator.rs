@@ -23,7 +23,7 @@ use query_builder::{
     renderer::{Render, Renderer},
 };
 use query_builder::{table_ref, value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::{
     add_joins, add_where, ident, join_on_expr,
@@ -111,6 +111,19 @@ impl<'a> QueryGenerator<'a> {
         self.render_ast(select_ast)
     }
 
+    /// `SELECT MIN(col) AS lo, MAX(col) AS hi FROM table` - the range probe used
+    /// to split an integer key into parallel scan lanes.
+    pub fn select_key_range(&self, table: &str, column: &str) -> (String, Vec<Value>) {
+        let lo = Expr::FunctionCall(FunctionCall::min(Expr::column(column))).alias("lo");
+        let hi = Expr::FunctionCall(FunctionCall::max(Expr::column(column))).alias("hi");
+        let select_ast = SelectBuilder::new()
+            .select(vec![lo, hi])
+            .from(table_ref!(table), None)
+            .build();
+
+        self.render_ast(select_ast)
+    }
+
     pub fn insert_batch<T>(
         &self,
         meta: &TableMetadata,
@@ -131,6 +144,14 @@ impl<'a> QueryGenerator<'a> {
             .filter(|col| !col.is_generated)
             .collect();
         sorted_columns.sort_by_key(|col| col.ordinal);
+
+        // Only write destination columns the rows actually carry.
+        sorted_columns.retain(|col| rows[0].index_of(&col.name).is_some());
+
+        if sorted_columns.is_empty() {
+            return (String::new(), Vec::new());
+        }
+
         let col_names = sorted_columns
             .iter()
             .map(|col| col.name.clone())
@@ -139,25 +160,21 @@ impl<'a> QueryGenerator<'a> {
         let mut builder = InsertBuilder::new(table_ref!(meta.name))
             .columns(&col_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
 
-        for row in rows.iter() {
-            // Create a HashMap for efficient, case-insensitive lookup of values by column name
-            let field_map: HashMap<String, Value> = row
-                .fields
-                .clone()
-                .into_iter()
-                .filter_map(|rc| rc.value.map(|v| (rc.name.to_lowercase(), v)))
-                .collect();
+        // Per-column canonical type.
+        let col_plan: Vec<(&ColumnMetadata, _)> = sorted_columns
+            .iter()
+            .map(|col_meta| {
+                let canonical = type_converter.to_canonical(col_meta).canonical;
+                (*col_meta, canonical)
+            })
+            .collect();
 
-            // Map the ordered column names to their corresponding values for the current row
-            let ordered_values: Vec<Expr> = sorted_columns
+        for row in rows.iter() {
+            let ordered_values: Vec<Expr> = col_plan
                 .iter()
-                .map(|col_meta| {
-                    let value = field_map
-                        .get(&col_meta.name.to_lowercase())
-                        .cloned()
-                        .unwrap_or(Value::Null);
-                    let data_type = type_converter.to_canonical(col_meta).canonical;
-                    map_value_to_expr(value, col_meta, &data_type)
+                .map(|(col_meta, data_type)| {
+                    let value = row.value(&col_meta.name).cloned().unwrap_or(Value::Null);
+                    map_value_to_expr(value, col_meta, data_type, self.dialect)
                 })
                 .collect();
 
@@ -167,7 +184,21 @@ impl<'a> QueryGenerator<'a> {
         self.render_ast(builder.build())
     }
 
-    pub fn copy_from_stdin(&self, table: &str, columns: &[ColumnMetadata]) -> String {
+    pub fn copy_from_stdin_text(&self, table: &str, columns: &[ColumnMetadata]) -> String {
+        self.copy_from_stdin_with(table, columns, "csv, NULL '\\N'")
+    }
+
+    /// `COPY ... FROM STDIN WITH (FORMAT binary)` for the binary COPY fast path.
+    pub fn copy_from_stdin_binary(&self, table: &str, columns: &[ColumnMetadata]) -> String {
+        self.copy_from_stdin_with(table, columns, "binary")
+    }
+
+    fn copy_from_stdin_with(
+        &self,
+        table: &str,
+        columns: &[ColumnMetadata],
+        format: &str,
+    ) -> String {
         let column_names = columns
             .iter()
             .filter(|col| !col.is_generated)
@@ -178,7 +209,7 @@ impl<'a> QueryGenerator<'a> {
             .columns(&column_names)
             .direction(CopyDirection::From)
             .endpoint(CopyEndpoint::Stdin)
-            .option("FORMAT", Some("csv, NULL '\\N'"))
+            .option("FORMAT", Some(format))
             .build();
 
         let (sql, _) = self.render_ast(copy_ast);
@@ -211,6 +242,7 @@ impl<'a> QueryGenerator<'a> {
         meta: &TableMetadata,
         staging: &str,
         columns: &[ColumnMetadata],
+        do_update: bool,
     ) -> (String, Vec<Value>) {
         let target_ref = table_ref!(meta.name);
         let staging_ref = table_ref!(staging);
@@ -233,7 +265,7 @@ impl<'a> QueryGenerator<'a> {
             })
             .collect();
 
-        builder = if assignments.is_empty() {
+        builder = if !do_update || assignments.is_empty() {
             builder.when_matched_do_nothing()
         } else {
             builder.when_matched_update(assignments)
@@ -255,6 +287,7 @@ impl<'a> QueryGenerator<'a> {
         meta: &TableMetadata,
         staging_table: &str,
         columns: &[ColumnMetadata],
+        do_update: bool,
     ) -> (String, Vec<Value>) {
         let pk_set = primary_key_set(meta);
         let staging_alias = "s";
@@ -273,7 +306,11 @@ impl<'a> QueryGenerator<'a> {
         } else {
             Some(OnConflict {
                 columns: meta.primary_keys.clone(),
-                action: self.build_conflict_action(columns, &pk_set),
+                action: if do_update {
+                    self.build_conflict_action(columns, &pk_set)
+                } else {
+                    ConflictAction::DoNothing
+                },
             })
         };
 
@@ -307,10 +344,10 @@ impl<'a> QueryGenerator<'a> {
         &self,
         table: &str,
         columns: &[ColumnDef],
-        ignore_constraints: bool,
+        skip_primary_key: bool,
         temp: bool,
     ) -> (String, Vec<Value>) {
-        let primary_keys: Vec<String> = if ignore_constraints {
+        let primary_keys: Vec<String> = if skip_primary_key {
             Vec::new()
         } else {
             columns
@@ -321,7 +358,7 @@ impl<'a> QueryGenerator<'a> {
         };
 
         // MySQL rejects AUTO_INCREMENT on a column that belongs to no key (1075),
-        // which is exactly what `ignore_constraints` produces. Drop the attribute
+        // which is exactly what `skip_primary_key` produces. Drop the attribute
         // rather than emit invalid DDL. PostgreSQL's SERIAL needs no key.
         let drop_auto_inc = primary_keys.is_empty() && self.dialect.auto_inc_requires_key();
 
@@ -380,6 +417,19 @@ impl<'a> QueryGenerator<'a> {
 
     pub fn truncate_table(&self, table: &str) -> (String, Vec<Value>) {
         self.render_ast(TruncateTableBuilder::new(table_ref!(table)).build())
+    }
+
+    /// `ALTER TABLE … ADD PRIMARY KEY (cols)` for the given table.
+    pub fn add_primary_key(&self, table: &str, columns: &[String]) -> (String, Vec<Value>) {
+        let ast = AlterTableBuilder::new(table_ref!(table))
+            .add_primary_key(columns)
+            .build();
+        self.render_ast(ast)
+    }
+
+    /// Dialect-specific DDL to drop a table's primary key.
+    pub fn drop_primary_key(&self, table: &str) -> String {
+        self.dialect.drop_primary_key(table)
     }
 
     pub fn add_foreign_key(
@@ -643,13 +693,25 @@ impl<'a> QueryGenerator<'a> {
 ///
 /// This function contains all the specific logic for handling different data types,
 /// like casting enums or parsing string representations of arrays.
-fn map_value_to_expr(value: Value, col_meta: &ColumnMetadata, data_type: &Type) -> Expr {
-    // If the value is NULL, generate a CAST to ensure the database knows the correct type.
-    // This avoids the "expression is of type ..." error for bytea and other columns.
+fn map_value_to_expr(
+    value: Value,
+    col_meta: &ColumnMetadata,
+    data_type: &Type,
+    dialect: &dyn Dialect,
+) -> Expr {
+    // For NULL, PostgreSQL casts so it can infer the column type in ambiguous
+    // contexts (e.g. bytea). MySQL's CAST rejects type names like `varchar` /
+    // `text` / `float`, and a bare NULL is unambiguous under an explicit column
+    // list - so it emits a plain NULL.
     if let Value::Null = value {
-        return Expr::Cast {
-            expr: Box::new(Expr::Literal("NULL".to_string())),
-            data_type: col_meta.data_type.clone(), // Use raw data type string
+        let null_lit = Expr::Literal("NULL".to_string());
+        return if dialect.cast_null_literals() {
+            Expr::Cast {
+                expr: Box::new(null_lit),
+                data_type: col_meta.data_type.clone(), // raw destination type string
+            }
+        } else {
+            null_lit
         };
     }
 
@@ -667,7 +729,6 @@ fn map_value_to_expr(value: Value, col_meta: &ColumnMetadata, data_type: &Type) 
             Expr::Value(Value::Set(string_array))
         }
 
-        // For enums, wrap in CAST expression (e.g., `$1::TEXT::enum_type`)
         Type::Enum { name, .. } => {
             let base_expr = match coerced_value {
                 Value::Enum { value: v, .. } => Expr::Value(Value::String(v)),
@@ -675,7 +736,13 @@ fn map_value_to_expr(value: Value, col_meta: &ColumnMetadata, data_type: &Type) 
                 other => Expr::Value(other),
             };
 
-            // Use the enum type name from the canonical type
+            // MySQL enum columns accept the plain string variant directly.
+            // PostgreSQL needs the value cast into its named enum type
+            // (`$1::TEXT::enum_type`).
+            if !dialect.supports_enums() {
+                return base_expr;
+            }
+
             let enum_type_name = if name.is_empty() {
                 col_meta.name.clone() // Fallback to column name
             } else {
@@ -733,6 +800,18 @@ fn build_pk_match_expr(meta: &TableMetadata, target_alias: &str, source_alias: &
     })
 }
 
+/// Maximum rows one parameterized INSERT may carry without exceeding the
+/// backend's prepared-statement placeholder limit.
+pub fn max_rows_per_insert(meta: &TableMetadata, max_params: usize) -> usize {
+    let cols = meta
+        .columns
+        .values()
+        .filter(|c| !c.is_generated)
+        .count()
+        .max(1);
+    (max_params / cols).max(1)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::sql::{metadata::fk::ForeignKeyAction, request::FetchRowsRequestBuilder};
@@ -744,6 +823,48 @@ mod tests {
         offsets::DefaultOffset,
     };
     use std::sync::Arc;
+
+    #[test]
+    fn max_rows_per_insert_respects_placeholder_limit() {
+        use crate::sql::metadata::{column::ColumnMetadata, table::TableMetadata};
+        use std::collections::HashMap;
+
+        let mut columns = HashMap::new();
+        for i in 0..15 {
+            columns.insert(
+                format!("c{i}"),
+                ColumnMetadata {
+                    name: format!("c{i}"),
+                    ..Default::default()
+                },
+            );
+        }
+        // A generated column must NOT count toward the placeholder budget
+        // (insert_batch excludes it from the statement).
+        columns.insert(
+            "gen".to_string(),
+            ColumnMetadata {
+                name: "gen".to_string(),
+                is_generated: true,
+                ..Default::default()
+            },
+        );
+
+        let meta = TableMetadata {
+            name: "orders".to_string(),
+            schema: None,
+            columns,
+            primary_keys: vec![],
+            foreign_keys: vec![],
+            referenced_tables: HashMap::new(),
+            referencing_tables: HashMap::new(),
+        };
+
+        // 15 non-generated columns, 65535 placeholders -> 4369 rows per statement.
+        assert_eq!(max_rows_per_insert(&meta, 65535), 65535 / 15);
+        // Never zero, even when a single row's columns exceed the budget.
+        assert_eq!(max_rows_per_insert(&meta, 5), 1);
+    }
 
     #[test]
     fn test_validation_estimation_postgres_simple() {

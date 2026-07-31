@@ -20,7 +20,6 @@ mod tests {
                 settings {
                     create_missing_tables = true
                     batch_size            = 500
-                    copy_columns          = "MAP_ONLY"
                 }
             }
             "#,

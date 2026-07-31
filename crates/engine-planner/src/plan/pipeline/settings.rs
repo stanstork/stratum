@@ -1,4 +1,4 @@
-use engine_config::settings::{CopyColumns, validated::ValidatedSettings};
+use engine_config::settings::validated::ValidatedSettings;
 use model::execution::flags::IntegrityMode;
 use serde::Serialize;
 
@@ -10,19 +10,21 @@ fn is_false(b: &bool) -> bool {
 #[derive(Serialize, Debug, Clone)]
 pub struct PipelineSettings {
     pub batch_size: usize,
-    pub copy_columns: CopyColumns,
 
-    #[serde(skip_serializing_if = "is_false")]
-    pub infer_schema: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub create_missing_tables: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub create_missing_columns: bool,
     #[serde(skip_serializing_if = "is_false")]
-    pub ignore_constraints: bool,
+    pub skip_primary_keys: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub skip_foreign_keys: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub skip_indexes: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub dry_run: bool,
 
+    pub lanes: usize,
     pub workers: usize,
     pub checkpoint: CheckpointStrategy,
 
@@ -36,11 +38,12 @@ impl PipelineSettings {
     pub fn from_validated(settings: ValidatedSettings) -> Self {
         Self {
             batch_size: settings.batch_size,
-            copy_columns: settings.copy_columns,
-            infer_schema: settings.infer_schema,
             create_missing_tables: settings.create_missing_tables,
             create_missing_columns: settings.create_missing_columns,
-            ignore_constraints: settings.ignore_constraints,
+            skip_primary_keys: settings.skip_primary_keys,
+            skip_foreign_keys: settings.skip_foreign_keys,
+            skip_indexes: settings.skip_indexes,
+            lanes: settings.lanes,
             dry_run: settings.dry_run,
             workers: 1,
             checkpoint: CheckpointStrategy::EveryBatch,
@@ -52,11 +55,13 @@ impl PipelineSettings {
     pub fn as_validated(&self) -> ValidatedSettings {
         ValidatedSettings {
             batch_size: self.batch_size,
-            copy_columns: self.copy_columns,
-            infer_schema: self.infer_schema,
             create_missing_tables: self.create_missing_tables,
             create_missing_columns: self.create_missing_columns,
-            ignore_constraints: self.ignore_constraints,
+            skip_primary_keys: self.skip_primary_keys,
+            skip_foreign_keys: self.skip_foreign_keys,
+            skip_indexes: self.skip_indexes,
+            lanes: self.lanes,
+            pk_creation: Default::default(),
             dry_run: self.dry_run,
             integrity: IntegrityMode::Off,
         }

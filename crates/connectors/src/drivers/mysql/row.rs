@@ -2,43 +2,45 @@ use crate::traits::row_decoder::RowDecoder;
 use bigdecimal::BigDecimal;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use model::{
-    core::{
-        types::Type,
-        value::{FieldValue, Value},
-    },
-    records::{OpType, Record},
+    core::{types::Type, value::Value},
+    records::{OpType, Record, RecordSchema, SchemaColumn},
 };
 use mysql_async::{Row as MySqlRow, Value as MySqlValue, consts::ColumnType};
 use mysql_async::{consts::ColumnFlags, prelude::FromValue};
 use std::str::FromStr;
+use std::sync::Arc;
 
 impl RowDecoder for MySqlRow {
-    fn decode(&self, table: &str) -> Record {
-        let fields = self
+    fn schema(&self, table: &str) -> Arc<RecordSchema> {
+        let columns = self
+            .columns_ref()
+            .iter()
+            .map(|col| {
+                let is_unsigned = col.flags().contains(ColumnFlags::UNSIGNED_FLAG);
+                let data_type = mysql_col_type_to_canonical(col.column_type(), is_unsigned);
+
+                SchemaColumn::new(col.name_str().as_ref(), data_type)
+            })
+            .collect();
+
+        RecordSchema::new(table, columns)
+    }
+
+    fn decode_with_schema(&self, schema: &Arc<RecordSchema>) -> Record {
+        let values = self
             .columns_ref()
             .iter()
             .enumerate()
             .map(|(idx, col)| {
-                let name = col.name_str().into_owned();
                 let col_type = col.column_type();
                 let flags = col.flags();
                 let is_unsigned = flags.contains(ColumnFlags::UNSIGNED_FLAG);
-                let data_type = mysql_col_type_to_canonical(col_type, is_unsigned);
-                let value = extract_value(self, idx, col_type, is_unsigned, flags);
 
-                FieldValue {
-                    name,
-                    value,
-                    data_type,
-                }
+                extract_value(self, idx, col_type, is_unsigned, flags)
             })
             .collect();
 
-        Record {
-            schema: table.to_string(),
-            fields,
-            op_type: OpType::default(),
-        }
+        Record::new(Arc::clone(schema), values, OpType::default())
     }
 
     fn columns(&self) -> Vec<String> {

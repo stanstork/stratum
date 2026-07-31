@@ -56,6 +56,25 @@ pub trait SourceEndpoint: Send + Sync {
     /// SQL dialect, if this source has one. `None` for plugin sources.
     fn dialect(&self) -> Option<Dialect>;
 
+    /// If this source is a DB table with exactly one integer primary key,
+    /// returns `(pk_column, min, max)` so the scan can be split into parallel
+    /// range lanes. `None` (the default) disables lanes - the pipeline runs as a
+    /// single scan.
+    async fn int_key_range(&self, _table: &str) -> Option<(String, u64, u64)> {
+        None
+    }
+
+    /// Build a source that reads one full table (no joins/filter/cascade).
+    async fn build_table_source(
+        &self,
+        _table: &str,
+        _offset_strategy: Arc<dyn OffsetStrategy>,
+    ) -> Result<Source, MigrationError> {
+        Err(MigrationError::PipelineFailed(
+            "parallel per-table sources are only supported for database sources".into(),
+        ))
+    }
+
     /// A `SchemaIntrospector` for this source plus the dialect its metadata
     /// should be interpreted in, if the source can describe its own schema.
     fn schema_introspector(
@@ -71,6 +90,18 @@ pub trait DestinationEndpoint: Send + Sync {
         pipeline: &Pipeline,
         source_dialect: Option<Dialect>,
     ) -> Result<Destination, MigrationError>;
+
+    /// Like [`build`](Self::build), but backed by its own connection so a
+    /// parallel lane writes independently. Defaults to [`build`](Self::build)
+    /// (a shared handle) - only DB destinations with a single write connection
+    /// override it.
+    async fn build_lane(
+        &self,
+        pipeline: &Pipeline,
+        source_dialect: Option<Dialect>,
+    ) -> Result<Destination, MigrationError> {
+        self.build(pipeline, source_dialect).await
+    }
 
     /// Validate settings + plan DDL. No-op (empty ops) for plugin destinations
     /// or when the source is a plugin.
@@ -115,6 +146,7 @@ pub async fn resolve_source(
     conn: &Connection,
     exec: &ExecutionContext,
     registry: &Arc<PluginRegistry>,
+    isolated: bool,
 ) -> Result<Box<dyn SourceEndpoint>, MigrationError> {
     match DataFormat::parse(&conn.driver) {
         Some(DataFormat::Wasm) => Ok(Box::new(WasmSourceEndpoint {
@@ -122,7 +154,18 @@ pub async fn resolve_source(
             plugin: wasm_plugin_name(conn)?,
         })),
         Some(DataFormat::Csv) => Ok(Box::new(CsvSourceEndpoint::new(conn).await?)),
-        _ => Ok(Box::new(DbSourceEndpoint(exec.resolve_driver(conn).await?))),
+        _ => {
+            let driver = exec.resolve_driver(conn).await?;
+            let driver = if isolated {
+                driver.reconnect().await?
+            } else {
+                driver
+            };
+            Ok(Box::new(DbSourceEndpoint {
+                driver,
+                introspector: exec.cached_source_introspector(conn).await?,
+            }))
+        }
     }
 }
 
@@ -130,14 +173,21 @@ pub async fn resolve_destination(
     conn: &Connection,
     exec: &ExecutionContext,
     registry: &Arc<PluginRegistry>,
+    isolated: bool,
 ) -> Result<Box<dyn DestinationEndpoint>, MigrationError> {
     match DataFormat::parse(&conn.driver) {
         Some(DataFormat::Wasm) => Ok(Box::new(WasmDestinationEndpoint::new(
             registry.clone(),
             wasm_plugin_name(conn)?,
         )?)),
-        _ => Ok(Box::new(DbDestinationEndpoint(
-            exec.resolve_driver(conn).await?,
-        ))),
+        _ => {
+            let driver = exec.resolve_driver(conn).await?;
+            let driver = if isolated {
+                driver.reconnect().await?
+            } else {
+                driver
+            };
+            Ok(Box::new(DbDestinationEndpoint(driver)))
+        }
     }
 }

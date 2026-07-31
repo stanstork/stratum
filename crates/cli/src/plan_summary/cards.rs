@@ -144,9 +144,9 @@ fn cascade_card(out: &mut String, t: &CascadeTablePlan, s: &Sty, max_rows: u64) 
     };
     let _ = writeln!(
         out,
-        "  {} {}  {} {}  {:>ROWS_W$} rows",
+        "  {} {:<NAME_W$}  {} {}  {:>ROWS_W$} rows",
         s.dim(s.glyph_pipe()),
-        &format!("{:<NAME_W$}", t.source_table),
+        t.source_table,
         s.dim(&format!("{:<FLOW_W$}", flow)),
         bar_str,
         fmt_rows(&t.row_count),

@@ -1,21 +1,31 @@
 use crate::{
-    context::env::EnvContext, drivers::DriverRef, plan::execution::ExecutionPlan,
+    context::env::EnvContext,
+    drivers::DriverRef,
+    plan::execution::ExecutionPlan,
+    schema::{metadata_cache::MetadataCache, type_registry::Dialect},
     state::sled_store::SledStateStore,
 };
 use connectors::{
     drivers::{mysql::driver::MySqlDriver, postgres::driver::PgDriver},
     error::DriverError,
-    traits::driver::Driver,
+    traits::{driver::Driver, introspector::SchemaIntrospector},
 };
 use model::execution::connection::Connection;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::RwLock;
+
+const METADATA_CACHE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Holds connections and file adapters for the duration of a migration.
 #[derive(Clone)]
 pub struct ExecutionContext {
     /// Connection pool - reuses drivers across pipelines
     connection_pool: Arc<RwLock<ConnectionPool>>,
+
+    /// Read-through metadata caches, shared across every pipeline.
+    /// Only source (read-only) introspection is cached here; the
+    /// destination is mutated by DDL mid-pipeline and must not be cached.
+    metadata_caches: Arc<RwLock<HashMap<String, Arc<dyn SchemaIntrospector>>>>,
 
     pub run_id: String,
     pub state: Arc<SledStateStore>,
@@ -32,6 +42,7 @@ impl ExecutionContext {
 
         Ok(ExecutionContext {
             connection_pool: Arc::new(RwLock::new(ConnectionPool::new())),
+            metadata_caches: Arc::new(RwLock::new(HashMap::new())),
             run_id,
             state,
             env,
@@ -67,6 +78,40 @@ impl ExecutionContext {
     pub async fn resolve_driver(&self, conn: &Connection) -> Result<DriverRef, DriverError> {
         let mut pool = self.connection_pool.write().await;
         DriverRef::resolve(&conn.driver, conn, &mut pool).await
+    }
+
+    /// A read-through introspector for a **source** connection,
+    /// cached by `conn.name` and shared across pipelines.
+    pub async fn cached_source_introspector(
+        &self,
+        conn: &Connection,
+    ) -> Result<Arc<dyn SchemaIntrospector>, DriverError> {
+        if let Some(cache) = self.metadata_caches.read().await.get(&conn.name) {
+            return Ok(cache.clone());
+        }
+
+        let dialect = Dialect::parse(&conn.driver)
+            .ok_or_else(|| DriverError::UnsupportedScheme(conn.driver.clone()))?;
+
+        let cache: Arc<dyn SchemaIntrospector> = match conn.driver.as_str() {
+            "postgres" | "postgresql" => Arc::new(MetadataCache::new(
+                self.get_pg_driver(conn).await?,
+                dialect,
+                METADATA_CACHE_TIMEOUT,
+            )),
+            "mysql" => Arc::new(MetadataCache::new(
+                self.get_mysql_driver(conn).await?,
+                dialect,
+                METADATA_CACHE_TIMEOUT,
+            )),
+            other => return Err(DriverError::UnsupportedScheme(other.to_string())),
+        };
+
+        self.metadata_caches
+            .write()
+            .await
+            .insert(conn.name.clone(), cache.clone());
+        Ok(cache)
     }
 }
 

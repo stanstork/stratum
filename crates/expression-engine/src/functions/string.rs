@@ -48,25 +48,36 @@ pub fn eval_trim(args: &[Value], _ctx: &EvalContext) -> Result<Value> {
 
 /// Concatenate multiple values into a string
 pub fn eval_concat(args: &[Value], _ctx: &EvalContext) -> Result<Value> {
-    let concatenated = args
-        .iter()
-        .map(value_to_string)
-        .collect::<Vec<_>>()
-        .join("");
-    Ok(Value::String(concatenated))
+    let mut out = String::new();
+    for arg in args {
+        write_value_string(arg, &mut out);
+    }
+    Ok(Value::String(out))
 }
 
-/// Convert a Value to its string representation
-fn value_to_string(value: &Value) -> String {
+fn write_value_string(value: &Value, out: &mut String) {
+    use std::fmt::Write as _;
     match value {
-        Value::String(s) => s.clone(),
-        Value::Int(i) => i.to_string(),
-        Value::UInt(u) => u.to_string(),
-        Value::Float(f) => f.to_string(),
-        Value::Decimal(d) => d.to_string(),
-        Value::Boolean(b) => b.to_string(),
-        Value::Null => String::new(),
-        other => format!("{:?}", other),
+        Value::String(s) => out.push_str(s),
+        Value::Int(i) => {
+            let _ = write!(out, "{i}");
+        }
+        Value::UInt(u) => {
+            let _ = write!(out, "{u}");
+        }
+        Value::Float(f) => {
+            let _ = write!(out, "{f}");
+        }
+        Value::Decimal(d) => {
+            let _ = write!(out, "{d}");
+        }
+        Value::Boolean(b) => {
+            let _ = write!(out, "{b}");
+        }
+        Value::Null => {}
+        other => {
+            let _ = write!(out, "{other:?}");
+        }
     }
 }
 

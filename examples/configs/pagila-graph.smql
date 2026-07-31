@@ -14,7 +14,7 @@
 //   - `data = cascade` migrates the data for all discovered tables too
 //     (use `data = schema_only` to create just the tables + relations, no rows)
 //
-// NOTE: unlike pagila.smql, this does NOT set `ignore_constraints`, so foreign
+// NOTE: unlike pagila.smql, this does NOT set `skip_foreign_keys`, so foreign
 // keys ARE created in MySQL - that's the point of this config. The circular
 // staff <-> store FK is resolved by deferring constraint creation to after the
 // tables exist.

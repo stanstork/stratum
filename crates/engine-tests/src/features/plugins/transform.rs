@@ -15,7 +15,7 @@ mod tests {
 
     /// Build an SMQL doc for a `film -> <dest>` pipeline whose `select` block is
     /// supplied by the caller. The `test_transform` plugin is declared as `adder`.
-    fn smql(dest_table: &str, select_block: &str, extra_settings: &str) -> String {
+    fn smql(dest_table: &str, select_block: &str) -> String {
         feature_smql(&format!(
             r#"
             plugin "adder" {{ path = "{plugin}" }}
@@ -31,14 +31,12 @@ mod tests {
 
                 settings {{
                     create_missing_tables = true
-                    {extra}
                 }}
             }}
             "#,
             plugin = fixture("test_transform.wasm"),
             dest = dest_table,
             select = select_block,
-            extra = extra_settings,
         ))
     }
 
@@ -52,7 +50,6 @@ mod tests {
             "films_priced",
             r#"film_id    = film.film_id
                total_cost = plugin.adder({ a: film.rental_rate, b: film.replacement_cost })"#,
-            r#"copy_columns = "MAP_ONLY""#,
         );
 
         run_smql(&doc, false).await.expect("migration succeeds");
@@ -86,7 +83,6 @@ mod tests {
             "films_priced",
             r#"film_id    = film.film_id
                total_cost = plugin.adder({ a: film.rental_rate, b: film.replacement_cost })"#,
-            r#"copy_columns = "MAP_ONLY""#,
         );
 
         run_smql(&doc, false).await.expect("migration succeeds");
@@ -106,7 +102,6 @@ mod tests {
             "films_priced",
             r#"film_id    = film.film_id
                total_cost = plugin.adder({ a: film.rental_rate, b: film.replacement_cost })"#,
-            r#"copy_columns = "MAP_ONLY""#,
         );
 
         run_smql(&doc, false).await.expect("migration succeeds");
@@ -151,7 +146,6 @@ mod tests {
                rental_rate      = film.rental_rate
                replacement_cost = film.replacement_cost
                total_cost       = plugin.adder({ a: film.rental_rate, b: film.replacement_cost })"#,
-            r#"copy_columns = "MAP_ONLY""#,
         );
 
         run_smql(&doc, false).await.expect("migration succeeds");
@@ -184,7 +178,6 @@ mod tests {
             "films_shadow",
             r#"film_id = film.film_id
                length  = plugin.adder({ a: film.rental_rate, b: film.replacement_cost })"#,
-            r#"copy_columns = "MAP_ONLY""#,
         );
 
         run_smql(&doc, false).await.expect("migration succeeds");

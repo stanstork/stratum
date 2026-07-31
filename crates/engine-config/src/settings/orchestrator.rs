@@ -1,11 +1,11 @@
 use super::{
     create_cols::CreateMissingColumnsSetting, create_tables::CreateMissingTablesSetting,
     driver::SchemaDriver, endpoint::Endpoint, endpoint::SchemaSource, error::SettingsError,
-    infer_schema::InferSchemaSetting, traits::MigrationSetting, types::Settings,
-    validated::ValidatedSettings, validator::SettingsValidator,
+    traits::MigrationSetting, types::Settings, validated::ValidatedSettings,
+    validator::SettingsValidator,
 };
 use crate::settings::SchemaSettingContext;
-use connectors::traits::introspector::SchemaIntrospector;
+use connectors::{drivers::postgres::config::PkCreation, traits::introspector::SchemaIntrospector};
 use engine_core::schema::{schema_ops::SchemaOps, type_registry::Dialect};
 use engine_processing::context::PipelineContext;
 use model::{core::value::Value, execution::flags::IntegrityMode};
@@ -15,12 +15,14 @@ use std::{collections::HashMap, sync::Arc};
 ///
 /// Returns validated settings (for non-schema config like batch_size) and
 /// the collected schema operations split into pre/post migration phases.
+#[allow(clippy::too_many_arguments)]
 pub async fn validate_and_plan<D>(
     ctx: &mut PipelineContext,
     src_introspector: Arc<dyn SchemaIntrospector>,
     src_dialect: Dialect,
     dst_driver: Arc<D>,
     settings: &HashMap<String, Value>,
+    pk_creation: PkCreation,
     is_dry_run: bool,
     integrity: IntegrityMode,
 ) -> Result<(ValidatedSettings, SchemaOps), SettingsError>
@@ -31,13 +33,15 @@ where
 
     let introspector = dst_driver.clone() as Arc<dyn SchemaIntrospector>;
     let validator = SettingsValidator::new(
-        &ctx.source,
         &ctx.destination,
         introspector.as_ref(),
         is_dry_run,
         integrity,
     );
-    let validated_settings = validator.validate(&settings).await?;
+    let mut validated_settings = validator.validate(&settings).await?;
+
+    // `pk_creation` comes from the destination's dialect tuning.
+    validated_settings.pk_creation = pk_creation;
 
     let mut all_settings = collect_settings(
         ctx,
@@ -81,11 +85,6 @@ where
 
     let schema_ctx = SchemaSettingContext::new(source_info, dest_info, &ctx.mapping, validated);
     let mut all_settings: Vec<Box<dyn MigrationSetting>> = Vec::new();
-
-    if validated.infer_schema() {
-        let infer_schema_setting = InferSchemaSetting::new(schema_ctx.clone()).await;
-        all_settings.push(Box::new(infer_schema_setting));
-    }
 
     if validated.create_missing_tables() {
         let missing_tables_setting = CreateMissingTablesSetting::new(schema_ctx.clone()).await;

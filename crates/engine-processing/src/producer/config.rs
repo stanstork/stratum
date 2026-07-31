@@ -1,3 +1,4 @@
+use crate::producer::components::integrity::LaneHashSink;
 use model::integrity::config::IntegrityConfig;
 use std::{num::NonZeroUsize, time::Duration};
 
@@ -25,6 +26,11 @@ pub struct ProducerConfig {
     /// When `Some`, the producer hashes each batch and writes a `VerificationReceipt`
     /// to sled on completion. `None` means zero overhead - no hashing occurs.
     pub integrity: Option<IntegrityConfig>,
+
+    /// When `Some`, this producer is one parallel lane: it accumulates hashes
+    /// into the shared sink instead of writing its own receipt (the orchestrator
+    /// writes one combined receipt). Only meaningful with `integrity`.
+    pub lane_sink: Option<LaneHashSink>,
 }
 
 impl Default for ProducerConfig {
@@ -37,6 +43,7 @@ impl Default for ProducerConfig {
             max_retries: 3,
             retry_delay: Duration::from_secs(1),
             integrity: None,
+            lane_sink: None,
         }
     }
 }

@@ -47,6 +47,20 @@ impl DriverRef {
         }
     }
 
+    /// A driver handle backed by its own connection, so a parallel lane writes
+    /// independently of the others. Postgres is a single connection, so this
+    /// opens a fresh one (same URL/schema); MySQL is already pool-backed and its
+    /// pool hands out concurrent connections, so it is reused as-is.
+    pub async fn reconnect(&self) -> Result<DriverRef, DriverError> {
+        match self {
+            Self::Postgres(d) => {
+                let fresh = PgDriver::connect_with_schema(d.url(), d.schema()).await?;
+                Ok(DriverRef::Postgres(Arc::new(fresh)))
+            }
+            Self::MySql(_) => Ok(self.clone()),
+        }
+    }
+
     pub async fn table_metadata(&self, table: &str) -> Result<TableMetadata, DriverError> {
         dispatch_driver!(self, |d| Ok(d.table_metadata(table).await?))
     }

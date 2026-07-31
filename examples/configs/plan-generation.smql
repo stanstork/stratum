@@ -68,7 +68,6 @@ pipeline "migrate_language" {
     settings {
         create_missing_tables = true
         batch_size            = define.default_batch_size
-        copy_columns          = "MAP_ONLY"
     }
 }
 
@@ -97,7 +96,6 @@ pipeline "migrate_category" {
 
     settings {
         create_missing_tables = true
-        copy_columns          = "MAP_ONLY"
     }
 }
 
@@ -137,7 +135,6 @@ pipeline "migrate_actors_enriched" {
     settings {
         create_missing_tables  = true
         batch_size             = define.batch_size
-        copy_columns           = "MAP_ONLY"
     }
 }
 
@@ -180,9 +177,9 @@ pipeline "migrate_films_affordable" {
 
     settings {
         create_missing_tables = true
-        ignore_constraints    = true
+        skip_primary_keys = true
+        skip_foreign_keys = true
         batch_size            = 1
-        copy_columns          = "MAP_ONLY"
     }
 }
 
@@ -223,8 +220,8 @@ pipeline "migrate_customers_with_store" {
 
     settings {
         create_missing_tables = true
-        ignore_constraints    = true
-        copy_columns          = "MAP_ONLY"
+        skip_primary_keys = true
+        skip_foreign_keys = true
     }
 }
 
@@ -271,9 +268,9 @@ pipeline "migrate_film_details" {
 
     settings {
         create_missing_tables  = true
-        ignore_constraints     = true
+        skip_primary_keys = true
+        skip_foreign_keys = true
         batch_size             = 1
-        copy_columns           = "MAP_ONLY"
     }
 }
 
@@ -321,9 +318,9 @@ pipeline "migrate_payments_validated" {
 
     settings {
         create_missing_tables = true
-        ignore_constraints    = true
+        skip_primary_keys = true
+        skip_foreign_keys = true
         batch_size            = define.batch_size
-        copy_columns          = "MAP_ONLY"
     }
 }
 
@@ -377,9 +374,9 @@ pipeline "migrate_films_with_warnings" {
 
     settings {
         create_missing_tables = true
-        ignore_constraints    = true
+        skip_primary_keys = true
+        skip_foreign_keys = true
         batch_size            = 1
-        copy_columns          = "MAP_ONLY"
     }
 }
 
@@ -435,9 +432,9 @@ pipeline "migrate_addresses_filtered" {
 
     settings {
         create_missing_tables = true
-        ignore_constraints    = true
+        skip_primary_keys = true
+        skip_foreign_keys = true
         batch_size            = 1
-        copy_columns          = "MAP_ONLY"
     }
 }
 
@@ -497,9 +494,9 @@ pipeline "migrate_film_actors_enriched" {
 
     settings {
         create_missing_tables  = true
-        ignore_constraints     = true
+        skip_primary_keys = true
+        skip_foreign_keys = true
         batch_size             = 1
-        copy_columns           = "MAP_ONLY"
     }
 }
 
@@ -545,9 +542,9 @@ pipeline "migrate_inventory_with_file_dlq" {
 
     settings {
         create_missing_tables = true
-        ignore_constraints    = true
+        skip_primary_keys = true
+        skip_foreign_keys = true
         batch_size            = 1
-        copy_columns          = "MAP_ONLY"
     }
 }
 
@@ -599,8 +596,8 @@ pipeline "migrate_staff_with_hooks" {
 
     settings {
         create_missing_tables  = true
-        ignore_constraints     = true
-        copy_columns           = "MAP_ONLY"
+        skip_primary_keys = true
+        skip_foreign_keys = true
     }
 }
 
@@ -686,9 +683,9 @@ pipeline "create_customer_360_view" {
 
     settings {
         create_missing_tables  = true
-        ignore_constraints     = true
+        skip_primary_keys = true
+        skip_foreign_keys = true
         batch_size             = 1
-        copy_columns           = "MAP_ONLY"
     }
 }
 
@@ -742,8 +739,8 @@ pipeline "create_migration_summary" {
 
     settings {
         create_missing_tables = true
-        ignore_constraints    = true
+        skip_primary_keys = true
+        skip_foreign_keys = true
         batch_size            = 1
-        copy_columns          = "MAP_ONLY"
     }
 }

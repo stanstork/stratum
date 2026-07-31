@@ -1,7 +1,10 @@
 use super::{DestinationEndpoint, HookPhase, SourceEndpoint};
 use crate::error::MigrationError;
 use async_trait::async_trait;
-use connectors::sql::metadata::{column::ColumnMetadata, table::TableMetadata};
+use connectors::{
+    drivers::postgres::config::PkCreation,
+    sql::metadata::{column::ColumnMetadata, table::TableMetadata},
+};
 use engine_config::settings::{self, ValidatedSettings};
 use engine_core::{
     dispatch_driver,
@@ -69,7 +72,23 @@ impl DestinationEndpoint for DbDestinationEndpoint {
         let src_dialect = source_dialect.unwrap_or_else(|| self.0.dialect());
         let dest = dispatch_driver!(&self.0, |d| {
             d.clone()
-                .into_destination(&pipeline.destination.table, src_dialect)
+                .into_destination(&pipeline.destination, src_dialect)
+        });
+        Ok(dest)
+    }
+
+    async fn build_lane(
+        &self,
+        pipeline: &Pipeline,
+        source_dialect: Option<Dialect>,
+    ) -> Result<Destination, MigrationError> {
+        let src_dialect = source_dialect.unwrap_or_else(|| self.0.dialect());
+        let fresh = self.0.reconnect().await.map_err(|e| {
+            MigrationError::PipelineFailed(format!("opening a lane write connection failed: {e}"))
+        })?;
+        let dest = dispatch_driver!(&fresh, |d| {
+            d.clone()
+                .into_destination(&pipeline.destination, src_dialect)
         });
         Ok(dest)
     }
@@ -89,6 +108,7 @@ impl DestinationEndpoint for DbDestinationEndpoint {
                 SchemaOps::empty(),
             ));
         };
+        let pk_creation = PkCreation::resolve(&pipeline.destination);
         let result = dispatch_driver!(&self.0, |d| {
             settings::validate_and_plan(
                 ctx,
@@ -96,6 +116,7 @@ impl DestinationEndpoint for DbDestinationEndpoint {
                 src_dialect,
                 d.clone(),
                 &pipeline.settings,
+                pk_creation,
                 dry_run,
                 integrity,
             )

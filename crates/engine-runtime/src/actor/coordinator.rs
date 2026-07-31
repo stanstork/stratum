@@ -55,13 +55,19 @@ impl PipelineCoordinator {
     }
 
     /// Starts the producer for snapshot processing.
-    pub async fn start_snapshot(&self, run_id: String, item_id: String) -> Result<(), ActorError> {
-        info!(run_id = %run_id, item_id = %item_id, "starting snapshot producer");
+    pub async fn start_snapshot(
+        &self,
+        run_id: String,
+        item_id: String,
+        part_id: String,
+    ) -> Result<(), ActorError> {
+        info!(run_id = %run_id, item_id = %item_id, part_id = %part_id, "starting snapshot producer");
 
         self.producer_tx
             .send(ProducerMsg::StartSnapshot {
-                run_id: run_id.clone(),
-                item_id: item_id.clone(),
+                run_id,
+                item_id,
+                part_id,
             })
             .await
             .map_err(|_| ActorError::MailboxClosed)?;
@@ -89,11 +95,20 @@ impl PipelineCoordinator {
     }
 
     /// Starts the producer for CDC processing.
-    pub async fn start_cdc(&self, run_id: String, item_id: String) -> Result<(), ActorError> {
-        info!(run_id = %run_id, item_id = %item_id, "starting CDC producer");
+    pub async fn start_cdc(
+        &self,
+        run_id: String,
+        item_id: String,
+        part_id: String,
+    ) -> Result<(), ActorError> {
+        info!(run_id = %run_id, item_id = %item_id, part_id = %part_id, "starting CDC producer");
 
         self.producer_tx
-            .send(ProducerMsg::StartCdc { run_id, item_id })
+            .send(ProducerMsg::StartCdc {
+                run_id,
+                item_id,
+                part_id,
+            })
             .await
             .map_err(|_| ActorError::MailboxClosed)?;
 
@@ -187,11 +202,11 @@ impl PipelineCoordinator {
         part_id: String,
     ) -> Result<(), ActorError> {
         // Start consumer first so it's ready to receive data
-        self.start_consumer(run_id.clone(), item_id.clone(), part_id)
+        self.start_consumer(run_id.clone(), item_id.clone(), part_id.clone())
             .await?;
 
         // Then start the producer
-        self.start_snapshot(run_id, item_id).await?;
+        self.start_snapshot(run_id, item_id, part_id).await?;
 
         Ok(())
     }
@@ -211,11 +226,11 @@ impl PipelineCoordinator {
         );
 
         // Start consumer first so it's ready to receive data
-        self.start_consumer(run_id.clone(), item_id.clone(), part_id)
+        self.start_consumer(run_id.clone(), item_id.clone(), part_id.clone())
             .await?;
 
         // Then start the CDC producer
-        self.start_cdc(run_id, item_id).await?;
+        self.start_cdc(run_id, item_id, part_id).await?;
 
         info!("CDC pipeline started");
         Ok(())

@@ -140,7 +140,7 @@ impl FailedRow {
             })
             .collect();
 
-        Record::new(entity, field_values, OpType::default())
+        Record::from_fields(entity, field_values, OpType::default())
     }
 
     pub fn with_execution_context(

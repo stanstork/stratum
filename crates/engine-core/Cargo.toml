@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 connectors = { path = "../connectors" }
+query-builder = { path = "../query-builder" }
 model = { path = "../model" }
 smql-syntax = { path = "../smql-syntax" }
 expression-engine = { path = "../expression-engine" }

@@ -48,7 +48,7 @@ graph TB
             TRANSFORM --> BATCH_COORD
         end
 
-        CHANNEL["MPSC Channel<br/>capacity: 64 batches<br/>backpressure"]
+        CHANNEL["MPSC Channel<br/>4 batches or 128 MiB<br/>backpressure"]
 
         subgraph CONS_SIDE["CONSUMER SIDE"]
             SINK["Sink (write_batch)<br/>PostgresSink: COPY protocol<br/>fallback: INSERT"]

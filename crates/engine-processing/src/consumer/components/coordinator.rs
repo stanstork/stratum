@@ -1,5 +1,6 @@
 use crate::{
-    consumer::components::writer::BatchWriter, error::ConsumerError, state_manager::StateManager,
+    channel::BatchEnvelope, consumer::components::writer::BatchWriter, error::ConsumerError,
+    state_manager::StateManager,
 };
 use engine_core::{metrics::Metrics, state::models::Checkpoint};
 use engine_state::models::CheckpointStage;
@@ -12,7 +13,7 @@ pub struct BatchCoordinator {
     writer: BatchWriter,
     state_manager: StateManager,
     metrics: Metrics,
-    batch_rx: mpsc::Receiver<Batch>,
+    batch_rx: mpsc::Receiver<BatchEnvelope>,
 }
 
 impl BatchCoordinator {
@@ -20,7 +21,7 @@ impl BatchCoordinator {
         writer: BatchWriter,
         state_manager: StateManager,
         metrics: Metrics,
-        batch_rx: mpsc::Receiver<Batch>,
+        batch_rx: mpsc::Receiver<BatchEnvelope>,
     ) -> Self {
         Self {
             writer,
@@ -38,11 +39,16 @@ impl BatchCoordinator {
         self.writer.finalize().await
     }
 
+    /// Await the next batch envelope.
+    pub async fn recv(&mut self) -> Option<BatchEnvelope> {
+        self.batch_rx.recv().await
+    }
+
     /// Try to receive and process one batch.
     pub async fn try_process_one(&mut self) -> Result<bool, ConsumerError> {
         match self.batch_rx.try_recv() {
-            Ok(batch) => {
-                self.process_batch(batch).await?;
+            Ok(envelope) => {
+                self.process_batch(&envelope.batch).await?;
                 Ok(true)
             }
             Err(mpsc::error::TryRecvError::Empty) => Ok(false),
@@ -58,7 +64,7 @@ impl BatchCoordinator {
     }
 
     /// Process a single batch: write + checkpoint + metrics.
-    pub async fn process_batch(&self, batch: Batch) -> Result<(), ConsumerError> {
+    pub async fn process_batch(&self, batch: &Batch) -> Result<(), ConsumerError> {
         let batch_id = batch.id.clone();
         let row_count = batch.rows.len();
         let byte_count = batch.size_bytes();
@@ -91,7 +97,7 @@ impl BatchCoordinator {
             })?;
 
         // Write to destination with retry
-        let write_result = self.writer.write_batch(&batch).await?;
+        let write_result = self.writer.write_batch(batch).await?;
 
         let new_rows = current_rows + row_count as u64;
 

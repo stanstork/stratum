@@ -137,7 +137,7 @@ The data pipeline. Runs one producer task and one consumer task per pipeline, co
 Source (SnapshotReader)
   -> TransformService
   -> BatchCoordinator
-  ↓ MPSC channel (capacity: 64 batches, backpressure)
+  ↓ MPSC channel (bounded: 4 batches OR 128 MiB, whichever binds first; backpressure)
 Sink (BatchWriter)
   -> StateManager (checkpoint per batch)
   -> Metrics
@@ -312,14 +312,17 @@ FKs are created after data migration to prevent constraint violations during bul
 ### Deterministic `partial_topological_order()` for FK Cycles
 When FK dependencies form a cycle (mutual references, self-references), a BFS-based `partial_topological_order()` places acyclic tables first, then cycle members alphabetically. This produces deterministic DDL regardless of `HashMap` iteration order.
 
-### Bounded MPSC Channel (capacity: 64)
-Provides natural backpressure — producer blocks when consumer can't keep up. Bounds memory regardless of source speed. Capacity is a tuning parameter.
+### Bounded MPSC Channel (4 batches or 128 MiB)
+The producer → consumer channel is bounded two ways, whichever binds first: by batch count (`BATCH_CHANNEL_CAPACITY = 4`) and by in-flight bytes (`MAX_INFLIGHT_BYTES = 128 MiB`). The byte bound is the wide-row guard — a batch of very wide rows draws proportionally more of the budget, so the window can't balloon on wide tables. This provides natural backpressure (the producer blocks when the consumer can't keep up) and bounds per-lane memory regardless of source speed or table size. The depth was deliberately kept shallow (was 64): a deep channel just parks more fully-materialized batches in RAM without improving throughput, since the destination write is the bottleneck. Per-lane footprint scales with lane count, not table size — see [benchmarks.md](benchmarks.md).
 
 ### Sled for StateStore
 Embedded, no external dependency, ACID-transactional, B+ tree with lock-free reads, crash-safe WAL. Checkpoints are written after every batch so crash recovery loses at most one batch.
 
 ### DriverRef + dispatch_driver! Macro
 Instead of `Arc<dyn Driver>` (which loses type information), `DriverRef` is an enum over concrete driver types. The `dispatch_driver!` macro generates match arms, allowing monomorphic dispatch without dynamic dispatch overhead on hot paths.
+
+### mimalloc as the Global Allocator
+The CLI sets [mimalloc](https://github.com/microsoft/mimalloc) as the `#[global_allocator]` (`crates/cli/src/main.rs`). The producer/consumer pipeline is allocation-heavy — every row carries owned column values (`String`, `BigDecimal`, `Vec`) that are allocated on read and freed after encoding, so a load churns hundreds of millions of short-lived allocations. On a high-core machine the default glibc allocator spreads these across many per-thread arenas and holds freed memory in them rather than returning it to the OS, which inflated peak RSS ~2–3× as a pure artifact (unrelated to the bounded in-flight window the pipeline actually keeps). mimalloc keeps peak RSS flat and returns memory to the OS promptly; it also modestly improved throughput on the churn-heavy path. This is a link-time choice with no code impact beyond the one `global_allocator` line — see the note in `crates/cli/Cargo.toml`. Peak-RSS numbers and the full rationale are in [benchmarks.md](benchmarks.md).
 
 ---
 
@@ -331,7 +334,7 @@ Instead of `Arc<dyn Driver>` (which loses type information), `DriverRef` is an e
 | CSV throughput | 50K–100K rows/sec (disk-bound) |
 | Baseline memory | ~50MB |
 | Per-pipeline memory | ~10–30MB (batch-size dependent) |
-| MPSC channel capacity | 64 batches |
+| MPSC channel bound | 4 batches or 128 MiB (whichever binds first) |
 | Checkpoint interval | Every batch |
 | Retry backoff | 1s -> 30s exponential |
 | Graceful shutdown | <5s to drain in-flight batches |

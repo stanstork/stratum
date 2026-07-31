@@ -53,7 +53,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
 
@@ -71,7 +72,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
         "#,
@@ -135,7 +137,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
 
@@ -153,7 +156,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
 
@@ -171,7 +175,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
         "#,
@@ -239,7 +244,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
 
@@ -257,7 +263,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
 
@@ -275,7 +282,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
 
@@ -293,7 +301,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
         "#,
@@ -356,7 +365,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
 
@@ -371,7 +381,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
         "#,
@@ -447,7 +458,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
 
@@ -465,7 +477,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
 
@@ -483,7 +496,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
 
@@ -501,7 +515,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
         "#,
@@ -601,7 +616,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
 
@@ -619,7 +635,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
 
@@ -637,7 +654,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
         "#,
@@ -707,7 +725,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
 
@@ -724,7 +743,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
 

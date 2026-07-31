@@ -40,7 +40,9 @@ impl TableReader {
 
         let reached_end = rows.len() < limit;
         let last_row = rows.last().cloned();
-        let next_cursor = self.compute_next_cursor(last_row.as_ref(), &cursor, reached_end, limit);
+        let next_cursor =
+            self.offset_strategy
+                .next_after_batch(last_row.as_ref(), &cursor, limit, reached_end);
 
         Ok((rows, next_cursor))
     }
@@ -56,31 +58,5 @@ impl TableReader {
             .cursor(cursor.clone())
             .strategy(self.offset_strategy.clone())
             .build()
-    }
-
-    // TODO: this logic is currently duplicated. Refactor to a shared utility.
-    fn compute_next_cursor(
-        &self,
-        last_row: Option<&Record>,
-        current_cursor: &Cursor,
-        reached_end: bool,
-        limit: usize,
-    ) -> Option<Cursor> {
-        if reached_end {
-            return None;
-        }
-
-        last_row.map(|row| {
-            let next = self.offset_strategy.next_cursor(row);
-            // Default strategy tracks offset by row count, not by row content.
-            // next_cursor() returns the row-level offset; we advance by limit instead.
-            match (current_cursor, &next) {
-                (Cursor::None, Cursor::Default { .. }) => Cursor::Default { offset: limit },
-                (Cursor::Default { offset }, Cursor::Default { .. }) => Cursor::Default {
-                    offset: offset + limit,
-                },
-                _ => next,
-            }
-        })
     }
 }

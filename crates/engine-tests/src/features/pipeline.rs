@@ -110,7 +110,10 @@ mod tests {
                     table      = "actor"
                 }
                 select {
-                    full_name = concat(actor.first_name, actor.last_name)
+                    actor_id   = actor.actor_id
+                    first_name = actor.first_name
+                    last_name  = actor.last_name
+                    full_name  = concat(actor.first_name, actor.last_name)
                 }
                 settings {
                     create_missing_columns = true
@@ -172,7 +175,7 @@ mod tests {
     // - The new column should be populated with the concatenated values of `first_name` and `last_name`.
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
-    async fn create_table_with_computed_column_and_ignore_constraints() {
+    async fn create_table_with_computed_column_and_skip_constraints() {
         reset_postgres_schema().await;
 
         let tmpl = feature_smql(
@@ -187,11 +190,15 @@ mod tests {
                     table      = "actor"
                 }
                 select {
-                    full_name = concat(actor.first_name, actor.last_name)
+                    actor_id   = actor.actor_id
+                    first_name = actor.first_name
+                    last_name  = actor.last_name
+                    full_name  = concat(actor.first_name, actor.last_name)
                 }
                 settings {
                     create_missing_tables = true
-                    ignore_constraints    = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                 }
             }
         "#,
@@ -245,7 +252,6 @@ mod tests {
                 settings {
                     create_missing_tables = true
                     batch_size = env("BATCH_SIZE", 1000)
-                    copy_columns = "MAP_ONLY"
                 }
 
                 validate {
@@ -288,7 +294,6 @@ mod tests {
                 settings {
                     create_missing_tables = true
                     batch_size = 500
-                    copy_columns = "MAP_ONLY"
                 }
 
                 validate {
@@ -335,7 +340,6 @@ mod tests {
                 settings {
                     create_missing_tables = true
                     batch_size = 1000
-                    copy_columns = "MAP_ONLY"
                 }
 
                 validate {
@@ -377,7 +381,6 @@ mod tests {
                 settings {
                     create_missing_tables = true
                     batch_size = 500
-                    copy_columns = "MAP_ONLY"
                 }
 
                 validate {
@@ -518,9 +521,9 @@ mod tests {
 
                 settings {
                     create_missing_tables = true
-                    ignore_constraints = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                     batch_size = 500
-                    copy_columns = "MAP_ONLY"
                 }
 
                 select {
@@ -582,9 +585,9 @@ mod tests {
 
                 settings {
                     create_missing_tables = true
-                    ignore_constraints = true
+                    skip_primary_keys = true
+                    skip_foreign_keys = true
                     batch_size = 500
-                    copy_columns = "MAP_ONLY"
                 }
 
                 select {
@@ -746,7 +749,6 @@ mod tests {
                 settings {
                     create_missing_tables = true
                     batch_size = 10
-                    copy_columns = "MAP_ONLY"
                 }
 
                 validate {
@@ -836,7 +838,6 @@ mod tests {
                 settings {
                     create_missing_tables = true
                     batch_size = 1000
-                    copy_columns = "MAP_ONLY"
                 }
 
                 validate {
@@ -943,7 +944,6 @@ mod tests {
                 settings {
                     create_missing_tables = true
                     batch_size = 50
-                    copy_columns = "MAP_ONLY"
                 }
 
                 select {

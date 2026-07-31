@@ -94,6 +94,29 @@ impl Dbms {
         }
     }
 
+    /// Run a statement (no result) against either engine - for seeding or
+    /// tampering with the destination in write-semantics tests.
+    pub(crate) async fn execute(self, url: &str, sql: &str) {
+        match self {
+            Dbms::MySql => {
+                let pool = Pool::from_url(url).expect("mysql pool");
+                let mut conn = pool.get_conn().await.expect("mysql connection");
+                conn.query_drop(sql)
+                    .await
+                    .unwrap_or_else(|e| panic!("mysql exec failed: {sql}\n{e}"));
+            }
+            Dbms::Postgres => {
+                let client = fixtures::connect_client(url)
+                    .await
+                    .expect("postgres connection");
+                client
+                    .batch_execute(sql)
+                    .await
+                    .unwrap_or_else(|e| panic!("postgres exec failed: {sql}\n{e}"));
+            }
+        }
+    }
+
     /// Every value of a single text column.
     pub(crate) async fn strings(self, url: &str, sql: &str) -> Vec<String> {
         match self {

@@ -2,7 +2,12 @@ use crate::{
     drivers::postgres::{driver::PgDriver, params::PgParamStore, queries, row::PgRowDecoder},
     error::DriverError,
     sql::{filter::SqlFilter, query::generator::QueryGenerator, request::FetchRowsRequest},
-    traits::{reader::DataReader, row_decoder::RowDecoder},
+    traits::{
+        executor::QueryExecutor,
+        introspector::SchemaIntrospector,
+        reader::{DataReader, key_range_from_rows, single_int_pk},
+        row_decoder::RowDecoder,
+    },
 };
 use async_trait::async_trait;
 use model::records::Record;
@@ -24,9 +29,16 @@ impl DataReader for PgDriver {
             .await
             .map_err(|e| DriverError::QueryError(e.to_string()))?;
 
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Shared column schema built once; each row shares it.
+        let schema = PgRowDecoder(&rows[0]).schema(&request.table);
+
         Ok(rows
             .iter()
-            .map(|row| PgRowDecoder(row).decode(&request.table))
+            .map(|row| PgRowDecoder(row).decode_with_schema(&schema))
             .collect())
     }
 
@@ -71,5 +83,17 @@ impl DataReader for PgDriver {
                 "Negative row count estimate".to_string(),
             ))
         }
+    }
+
+    async fn int_key_range(&self, table: &str) -> Result<Option<(String, u64, u64)>, DriverError> {
+        let meta = self.table_metadata(table).await?;
+        let Some(pk) = single_int_pk(&meta, &dialect::Postgres) else {
+            return Ok(None);
+        };
+
+        let (sql, _) = QueryGenerator::new(&dialect::Postgres).select_key_range(table, &pk);
+        let rows = self.query(&sql).await?;
+
+        Ok(key_range_from_rows(pk, &rows))
     }
 }

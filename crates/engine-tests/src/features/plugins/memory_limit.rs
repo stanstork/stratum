@@ -35,7 +35,6 @@ mod tests {
 
                 settings {{
                     create_missing_tables = true
-                    copy_columns          = "MAP_ONLY"
                     batch_size            = 64
                 }}
             }}
@@ -99,7 +98,6 @@ mod tests {
 
                 settings {{
                     create_missing_tables = true
-                    copy_columns          = "MAP_ONLY"
                     batch_size            = 64
                 }}
             }}

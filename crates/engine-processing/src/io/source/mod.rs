@@ -30,6 +30,7 @@ use query_builder::{
     offsets::{OffsetStrategy, OffsetStrategyFactory},
 };
 use std::{collections::HashMap, sync::Arc};
+use tracing::warn;
 
 pub mod csv;
 pub mod db;
@@ -124,6 +125,22 @@ impl Source {
             LinkedSource::new(driver.clone(), &format, &pipeline.source.joins, mapping).await?;
         let filter = Self::create_filter(pipeline, &format)?;
 
+        if !pipeline.source.joins.is_empty()
+            && pipeline
+                .source
+                .pagination
+                .as_ref()
+                .and_then(|p| p.tiebreaker.as_ref())
+                .is_none()
+        {
+            warn!(
+                table = %name,
+                "`with` join without a `paginate` tiebreaker: if the join fans out (1:N), \
+                 keyset pagination can drop rows at batch boundaries. Add a row-unique \
+                 `paginate {{ strategy = \"pk\", cursor = \"<pk>\", tiebreaker = \"<unique col>\" }}`."
+            );
+        }
+
         // Fetch primary table metadata upfront so the reader always knows which
         // columns to select, even for simple (non-cascade) pipelines.
         let primary_meta = driver.table_metadata(&name).await.ok();
@@ -152,6 +169,40 @@ impl Source {
             primary,
             linked,
             filter,
+        })
+    }
+
+    /// Build a source that reads one full table (no joins, no filter, no cascade scoping).
+    pub async fn single_table<D>(
+        driver: Arc<D>,
+        table: &str,
+        format: DataFormat,
+        offset_strategy: Arc<dyn OffsetStrategy>,
+    ) -> Result<Self, DriverError>
+    where
+        D: DataReader + SchemaIntrospector,
+    {
+        let meta = driver.table_metadata(table).await?;
+        let offset_strategy =
+            OffsetStrategyFactory::keyset_over_pk(offset_strategy, table, &meta.primary_keys);
+
+        let primary = Self::build_primary_reader(
+            table,
+            &format,
+            driver,
+            &None, // no joins
+            &None, // no filter
+            offset_strategy,
+            None,       // no cascade metadata -> fetch_single (whole table)
+            Some(meta), // primary metadata for column selection
+        )?;
+
+        Ok(Source {
+            name: table.to_string(),
+            format,
+            primary,
+            linked: None,
+            filter: None,
         })
     }
 

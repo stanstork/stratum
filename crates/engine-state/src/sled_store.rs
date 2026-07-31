@@ -89,6 +89,19 @@ impl StateStore for SledStateStore {
         }
     }
 
+    async fn total_rows_done(&self, run_id: &str, item_id: &str) -> Result<u64, StateStoreError> {
+        // Sum `rows_done` over every part under this item (chk:run:item:part-*).
+        let prefix = format!("chk:{}:{}:", run_id, item_id);
+        let mut total = 0u64;
+        for entry in self.db.scan_prefix(prefix) {
+            let (_key, value) = entry.map_err(|e| StateStoreError::Storage(e.to_string()))?;
+            let cp: Checkpoint = bincode::deserialize(&value)
+                .map_err(|e| StateStoreError::Serialization(e.to_string()))?;
+            total += cp.rows_done;
+        }
+        Ok(total)
+    }
+
     async fn append_wal(&self, entry: &WalEntry) -> Result<(), StateStoreError> {
         let seq = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
         let key = format!("wal:{}:{}", entry.run_id(), seq);

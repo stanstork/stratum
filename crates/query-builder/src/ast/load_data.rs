@@ -20,8 +20,19 @@ pub enum LoadDataConflict {
     /// `IGNORE` (colliding rows are skipped); server-side `INFILE` errors instead.
     #[default]
     Default,
-    /// `REPLACE` — overwrite existing rows that collide on a key.
+    /// `REPLACE` - overwrite existing rows that collide on a key.
     Replace,
-    /// `IGNORE` — explicitly skip colliding rows.
+    /// `IGNORE` - explicitly skip colliding rows.
     Ignore,
+}
+
+impl LoadDataConflict {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "default" => Some(Self::Default),
+            "replace" => Some(Self::Replace),
+            "ignore" => Some(Self::Ignore),
+            _ => None,
+        }
+    }
 }

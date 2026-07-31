@@ -16,7 +16,7 @@ impl QueryExecutor for MySqlDriver {
     }
 
     async fn execute_params(&self, sql: &str, params: &[Value]) -> Result<(), DriverError> {
-        let params = MySqlParamStore::from_values(params).params();
+        let params = MySqlParamStore::from_values(params).into_params();
         let mut conn = self.pool().get_conn().await?;
         conn.exec_drop(sql, params).await?;
         Ok(())
@@ -30,7 +30,7 @@ impl QueryExecutor for MySqlDriver {
 
     async fn query_params(&self, sql: &str, params: &[Value]) -> Result<Vec<Record>, DriverError> {
         let mut conn = self.pool().get_conn().await?;
-        let params = MySqlParamStore::from_values(params).params();
+        let params = MySqlParamStore::from_values(params).into_params();
         let rows: Vec<MySqlRow> = conn.exec(sql, params).await?;
         Ok(rows.iter().map(|r| r.decode("")).collect())
     }

@@ -16,13 +16,3 @@ target/
 .env
 .env.*
 !.env.example
-
-# Generated engine test files
-meta.json
-rep.json
-res.json
-
-engine-tests/migration_buffer_*/
-
-CLAUDE.md
-/.claude

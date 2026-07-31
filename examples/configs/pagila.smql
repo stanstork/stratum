@@ -25,10 +25,10 @@
 // Note: foreign keys are not created here. Each pipeline migrates a single table,
 // and a table's FKs are only emitted when the referenced table is part of the same
 // pipeline - so they are filtered out automatically. `after = [...]` orders the
-// *data* load so parent rows land before children. (Do not set
-// `ignore_constraints = true`: it drops the PRIMARY KEY too, which MySQL requires
-// for the AUTO_INCREMENT columns. Use examples/configs/pagila-graph.smql to
-// migrate the whole FK graph with constraints.)
+// *data* load so parent rows land before children. (To skip FKs use
+// `skip_foreign_keys = true`; keep `skip_primary_keys` off, since MySQL needs the
+// primary key for its AUTO_INCREMENT columns. Use examples/configs/pagila-graph.smql
+// to migrate the whole FK graph with constraints.)
 
 define {
     pg_url    = env("PAGILA_URL")

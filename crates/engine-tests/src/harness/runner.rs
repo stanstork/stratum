@@ -375,12 +375,8 @@ pub async fn get_cell_as_string(query: &str, schema: &str, db: DbType, column: &
     let row = rows
         .first()
         .unwrap_or_else(|| panic!("no rows returned for query `{query}`"));
-    let col = row
-        .get(column)
-        .unwrap_or_else(|| panic!("column `{column}` not found in row"));
-    col.value
-        .as_ref()
-        .unwrap_or_else(|| panic!("column `{column}` was NULL"))
+    row.value(column)
+        .unwrap_or_else(|| panic!("column `{column}` not found or NULL in row"))
         .as_string()
         .unwrap_or_else(|| panic!("column `{column}` was not a string"))
 }
@@ -394,12 +390,8 @@ pub async fn get_cell_as_f64(query: &str, schema: &str, db: DbType, column: &str
     let row = rows
         .first()
         .unwrap_or_else(|| panic!("no rows returned for query `{query}`"));
-    let col = row
-        .get(column)
-        .unwrap_or_else(|| panic!("column `{column}` not found in row"));
-    col.value
-        .as_ref()
-        .unwrap_or_else(|| panic!("column `{column}` was NULL"))
+    row.value(column)
+        .unwrap_or_else(|| panic!("column `{column}` not found or NULL in row"))
         .as_f64()
         .unwrap_or_else(|| panic!("column `{column}` was not a float"))
 }
@@ -414,12 +406,8 @@ pub async fn get_cell_as_usize(query: &str, schema: &str, db: DbType, column: &s
     let row = rows
         .first()
         .unwrap_or_else(|| panic!("no rows returned for query `{query}`"));
-    let col = row
-        .get(column)
-        .unwrap_or_else(|| panic!("column `{column}` not found in row"));
-    col.value
-        .as_ref()
-        .unwrap_or_else(|| panic!("column `{column}` was NULL"))
+    row.value(column)
+        .unwrap_or_else(|| panic!("column `{column}` not found or NULL in row"))
         .as_usize()
         .unwrap_or_else(|| panic!("column `{column}` was not a float"))
 }

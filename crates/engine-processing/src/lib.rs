@@ -1,4 +1,5 @@
 pub mod cb;
+pub mod channel;
 pub mod consumer;
 pub mod context;
 pub mod error;

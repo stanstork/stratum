@@ -24,6 +24,7 @@ SMQL (Stratum Migration Query Language) is a declarative, SQL-inspired language 
   - [settings](#settings)
 - [Expressions](#expressions)
 - [Graph References](#graph-references)
+- [Multi-Table Pipelines](#multi-table-pipelines)
 - [Complete Example](#complete-example)
 
 ---
@@ -204,25 +205,22 @@ from {
 }
 ```
 
-**Multiple-table union (planned - not yet implemented).** A `from` block
-currently reads a single `table`. The intended syntax, for reference only:
+**Multiple tables (fan-out).** List several tables and the pipeline expands into
+one independent full-copy pipeline per table - the connections and settings are
+declared once instead of repeated. See
+[Multi-Table Pipelines](#multi-table-pipelines) for the full feature (per-table
+renames, projections, execution order, and restrictions).
 
-```text
-// PLANNED - not yet supported
+```smql
 from {
   connection = connection.mysql_prod
-  tables     = ["orders_2023", "orders_2024"]   // implicit union
-}
-
-// PLANNED - per-table filters
-from {
-  connection = connection.mysql_prod
-  union {
-    table "orders_2023" where year == 2023
-    table "orders_2024" where year == 2024
-  }
+  tables     = ["orders", "customers", "products"]
 }
 ```
+
+This is a fan-out of whole-table copies, **not** a union: each table is copied
+into its own destination table. A true multi-source union into one table is not
+supported.
 
 **With graph references** (see [Graph References](#graph-references)):
 ```smql
@@ -259,13 +257,32 @@ to {
 | `"append"` *(default)* | Load rows, keeping any existing ones |
 | `"replace"` | Truncate the destination table, then load |
 
-> **Row-level write strategy is a separate, currently-automatic axis.** How each
-> row is written is orthogonal to truncate-vs-append: when the destination
-> supports bulk COPY and the table has a primary key, rows are **upserted** (COPY
-> into a staging table, then MERGE on the primary key); otherwise they are plain
-> **inserted**. This is automatic and not yet configurable - choosing the strategy
-> and conflict keys explicitly (a planned `on_conflict` setting) isn't available,
-> and passing `mode = "upsert"` / `"merge"` is a build error.
+**Dialect tuning.** A `postgres { … }` or `mysql { … }` sub-block inside `to`
+sets destination-specific write options (unknown keys are rejected):
+
+```smql
+to {
+  connection = connection.warehouse_pg
+  table      = "fact_orders"
+
+  postgres {
+    copy_format = "binary"      // "binary" | "text"
+    pk_creation = "post"        // "pre" | "post"
+    on_conflict = "do_update"   // "do_nothing" | "do_update"
+  }
+}
+```
+
+| Dialect | Option | Values | Default | Meaning |
+|---|---|---|---|---|
+| postgres | `copy_format` | `"binary"`, `"text"` | `"binary"` when every column is exactly encodable, else `"text"` | `COPY` wire format |
+| postgres | `pk_creation` | `"pre"`, `"post"` | `"pre"` | `"post"` creates the table without its PK and adds it after the bulk load, so index maintenance doesn't slow the `COPY` |
+| postgres | `on_conflict` | `"do_nothing"`, `"do_update"` | plain insert | `do_nothing` skips colliding rows; `do_update` **upserts** on the primary key (via a staging table + `ON CONFLICT`) |
+| mysql | `on_conflict` | `"default"`, `"replace"`, `"ignore"` | `"default"` | `LOAD DATA` modifier: `replace` overwrites colliding rows, `ignore` skips them; `default` emits none (`LOCAL INFILE` skips, server-side errors) |
+
+`on_conflict = "do_update"` needs the primary key present during the load, so it
+overrides `pk_creation = "post"` (Stratum warns and keeps the PK). Value aliases
+are accepted (e.g. `before`/`after`, `nothing`/`skip`, `update`/`upsert`).
 
 **With table renaming for graph pipelines:**
 ```smql
@@ -330,11 +347,9 @@ is joined before `products` references it). All joined tables become available i
 
 Field mapping block. Syntax is `destination_col = expression`.
 
-> **`select` *adds* columns; by default it doesn't restrict them.** With the
-> default `copy_columns = "all"`, the destination gets **every source column plus**
-> the ones you define here - so a `select` that lists a few columns still emits all
-> the others too. To output *only* the columns in `select`, set
-> `copy_columns = "map_only"` in [settings](#settings).
+> **`select` projects - it restricts output to the columns you list.** With a
+> `select` block the destination gets **only** the columns defined here; without
+> one, every source column is copied straight through.
 
 **Simple column copy:**
 ```smql
@@ -644,9 +659,9 @@ Per-pipeline configuration overrides.
 
 ```smql
 settings {
-  batch_size            = env("batch_size")
+  batch_size            = 1000
   create_missing_tables = true
-  copy_columns          = "all"   // "all" | "map_only"
+  lanes                 = 4
 }
 ```
 
@@ -657,10 +672,26 @@ settings {
 | `batch_size` | integer | `1000` | Rows per batch |
 | `create_missing_tables` | bool | `false` | Create the destination table if it doesn't exist |
 | `create_missing_columns` | bool | `false` | Add missing columns to an existing destination table |
-| `infer_schema` | bool | `false` | Infer the destination schema from the source |
-| `ignore_constraints` | bool | `false` | Skip creating foreign keys / constraints on the destination |
-| `cascade_schema` | bool | `false` | Also create schema for graph-referenced (cascaded) tables |
-| `copy_columns` | enum | `"all"` | `"all"` copies every source column; `"map_only"` copies only mapped/`select`ed columns |
+| `skip_primary_keys` | bool | `false` | Create destination tables without a primary key (and never add one) |
+| `skip_foreign_keys` | bool | `false` | Don't create foreign-key constraints on the destination |
+| `skip_indexes` | bool | `false` | Don't create secondary (non-constraint) indexes on the destination |
+| `lanes` | integer (1–32) | `1` | Parallel copy workers - see [lanes](#lanes--parallel-copy) below |
+
+#### `lanes` - parallel copy
+
+`lanes` splits a copy into up to N concurrent workers, each on its own source and
+destination connection. What gets split depends on the pipeline:
+
+- **Single-table pipeline** - the table is range-split on its **integer primary
+  key** (`min..max`) into `lanes` contiguous ranges copied in parallel. A table
+  without an integer PK falls back to a single lane (no error, no speedup).
+- **Graph pipeline** (`from { with references { data = cascade } }`) - the
+  discovered tables migrate **concurrently**, up to `lanes` at a time, and a
+  large integer-PK table among them is additionally range-split. So here `lanes`
+  is the table-level concurrency, not only an intra-table split.
+
+Clamped to 1–32. With `--integrity`, graph migrations run sequentially (one table
+at a time) so Merkle receipts stay deterministic.
 
 ---
 
@@ -885,6 +916,11 @@ from {
 | `with references {}` | ✓ | ✗ |
 | `with references { data = cascade }` | ✓ | ✓ (referenced rows only) |
 
+**Parallelism.** A `cascade` migration honors the [`lanes`](#lanes--parallel-copy)
+setting: the discovered tables migrate concurrently, up to `lanes` at a time, and
+a large integer-PK table is additionally range-split. `--integrity` forces
+sequential migration (one table at a time) for deterministic receipts.
+
 ### Destination Table Renaming
 
 Use `map` in `to` to rename tables at the destination. Unmapped tables keep their original names.
@@ -987,6 +1023,92 @@ pipeline "migrate_orders" {
   }
 }
 ```
+
+---
+
+## Multi-Table Pipelines
+
+A `from` block may list several tables with `tables = [...]`. Stratum fans the
+block out into **one independent pipeline per table**, so the shared connections
+and settings are written once instead of copy-pasted for every table.
+
+```smql
+pipeline "warehouse" {
+  from {
+    connection = connection.src
+    tables = ["actor", "customer", "payment"]
+  }
+  to { connection = connection.dst }
+  settings {
+    create_missing_tables = true
+    batch_size            = 25000
+  }
+}
+```
+
+This is a **fan-out of full-table copies**: each table is copied whole into its
+own destination table (every row, every column). It does **not** follow foreign
+keys - for FK-graph discovery (which copies only FK-reachable rows) use
+[`with references`](#with-references-block) instead. `tables` is also not a
+union: the tables are not combined into a single destination.
+
+### Per-table renames and projections
+
+Tables you don't name are copied verbatim. To change an individual table, reuse
+the same constructs the graph feature uses - they match a listed table by name:
+
+- **`select "T" { ... }`** - becomes table `T`'s projection / column renames.
+- **`to { map { T = "dest" } }`** - renames table `T`'s destination table.
+
+```smql
+pipeline "warehouse" {
+  from {
+    connection = connection.src
+    tables = ["actor", "customer"]
+  }
+  to {
+    connection = connection.dst
+    map { customer = "dim_customer" }     // rename the destination table
+  }
+  select "customer" {                      // project + rename columns
+    id          = customer.customer_id
+    given_name  = customer.first_name
+    family_name = customer.last_name
+  }
+  settings { create_missing_tables = true }
+}
+```
+
+Result: `actor` is copied verbatim as `actor`; `customer` becomes `dim_customer`
+with exactly the columns `id`, `given_name`, `family_name`.
+
+### Execution order
+
+The expanded pipelines are independent (no dependencies between them), so they
+are scheduled by the top-level [`execution`](#execution) block like any other
+pipelines:
+
+- no `execution` block -> **sequential** (the default): one table at a time;
+- `strategy = "parallel"` -> up to `max_concurrency` tables concurrently.
+
+Fanning out does not itself change scheduling - the expansions are ordinary
+pipelines named `<pipeline>:<table>` (e.g. `warehouse:customer`).
+
+### Restrictions
+
+A `tables` block is a straight full copy, so the following are rejected with a
+clear error (each is a single-table / single-root concern):
+
+| Not allowed with `tables` | Use instead |
+|---|---|
+| `table = "..."` in the same `from` | one or the other, not both |
+| `with references { ... }` | a single-table graph pipeline |
+| `with { ... }` joins | a single-table pipeline |
+| an unnamed `select { ... }` | `select "T" { ... }` per table |
+| `where` / `validate` | a single-table pipeline |
+
+Every `select "T"` and every `map` key must name a table listed in `tables`,
+and a table may not be listed twice.
 
 ---
 

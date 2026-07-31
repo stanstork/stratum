@@ -4,15 +4,23 @@ use crate::{
     sql::metadata::capabilities::Capabilities,
     traits::driver::{Driver, DriverInfo},
 };
-use mysql_async::{Pool, prelude::Queryable};
-use tracing::info;
+use mysql_async::{Conn, Pool, prelude::Queryable};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use tracing::{info, warn};
 
 const MYSQL_MAX_PREPARED_STMT_PARAMS: u16 = 65535;
+
+/// Below this, a bulk load stalls repeatedly on InnoDB checkpoint flushing.
+const MIN_HEALTHY_REDO_BYTES: i64 = 1024 * 1024 * 1024; // 1 GiB
 
 #[derive(Clone)]
 pub struct MySqlDriver {
     pool: Pool,
     capabilities: Capabilities,
+    advised: Arc<AtomicBool>,
 }
 
 impl MySqlDriver {
@@ -30,11 +38,51 @@ impl MySqlDriver {
 
         info!(driver = "mysql", "database connection established");
 
-        Ok(Self { pool, capabilities })
+        Ok(Self {
+            pool,
+            capabilities,
+            advised: Arc::new(AtomicBool::new(false)),
+        })
     }
 
     pub fn pool(&self) -> &Pool {
         &self.pool
+    }
+
+    /// One-time, read-only advisory run before the first bulk write. Stratum does
+    /// not change server config - it only surfaces settings the DBA controls that
+    /// throttle bulk loads, so the operator knows what to ask for. No-op after the
+    /// first call and never invoked on read-only source connections.
+    pub(crate) async fn bulk_preflight_advisory(&self, conn: &mut Conn) {
+        if self.advised.swap(true, Ordering::Relaxed) {
+            return;
+        }
+
+        // Without `local_infile`, LOAD DATA is unavailable and bulk writes fall
+        // back to slow multi-row INSERT.
+        if !self.capabilities.copy_protocol {
+            warn!(
+                driver = "mysql",
+                "local_infile is off; bulk writes fall back to slow INSERT. Set local_infile=1 \
+                 to enable the LOAD DATA fast path."
+            );
+        }
+
+        // A small redo log forces frequent checkpoints; large loads stall on
+        // flushing. `innodb_redo_log_capacity` exists on MySQL 8.0.30+; on older
+        // servers the query errors and we silently skip (nothing to advise on).
+        if let Ok(Some(redo)) = conn
+            .query_first::<i64, _>("SELECT @@GLOBAL.innodb_redo_log_capacity")
+            .await
+            && redo < MIN_HEALTHY_REDO_BYTES
+        {
+            warn!(
+                driver = "mysql",
+                redo_mb = redo / (1024 * 1024),
+                "redo log is small; large loads stall on checkpoint flushing. Raise \
+                 innodb_redo_log_capacity (e.g. 4G)."
+            );
+        }
     }
 
     /// Fetches the version string from the DB and resolves capabilities.
@@ -59,14 +107,28 @@ impl MySqlDriver {
             .map(|v| v != 0)
             .unwrap_or(false);
 
-        // Drop connection explicitly or let it drop out of scope;
-        // we're done with I/O here.
+        // The largest single packet the server accepts.
+        let max_allowed_packet = conn
+            .query_first::<u64, _>("SELECT @@max_allowed_packet")
+            .await
+            .map_err(|e| DriverError::QueryError(e.to_string()))?
+            .map(|v| v as usize);
+
+        // Drop connection explicitly or let it drop out of scope.
         drop(conn);
 
-        Ok(Self::resolve_capabilities(version, local_infile_enabled))
+        Ok(Self::resolve_capabilities(
+            version,
+            local_infile_enabled,
+            max_allowed_packet,
+        ))
     }
 
-    fn resolve_capabilities(version: String, local_infile_enabled: bool) -> Capabilities {
+    fn resolve_capabilities(
+        version: String,
+        local_infile_enabled: bool,
+        max_allowed_packet: Option<usize>,
+    ) -> Capabilities {
         // MySQL has no `RETURNING`. MariaDB added `INSERT ... RETURNING` in 10.5;
         // since our write path uses INSERT, gate the capability on that version.
         let supports_returning = Self::mariadb_supports_returning(&version);
@@ -84,7 +146,7 @@ impl MySqlDriver {
             uuid_type: false, // Usually stored as BINARY(16) or CHAR(36)
             geometry_type: true,
             max_parameters: Some(MYSQL_MAX_PREPARED_STMT_PARAMS.into()),
-            max_query_size: None, // Depends on server's max_allowed_packet, usually dynamic
+            max_query_size: max_allowed_packet, // server's max_allowed_packet
         }
     }
 

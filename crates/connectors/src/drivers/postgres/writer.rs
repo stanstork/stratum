@@ -1,14 +1,21 @@
 use crate::{
     drivers::postgres::{
-        coercion, driver::PgDriver, encoder::PgCopyEncoder, params::PgParamStore,
+        config::CopyFormat,
+        driver::PgDriver,
+        encoding::{
+            binary::{BinaryColumnType, BinaryEncodeError, PgBinaryEncoder},
+            coercion,
+            text::PgCopyEncoder,
+        },
+        params::PgParamStore,
         types::PgTypeConverter,
     },
     error::DriverError,
     sql::{
         metadata::{column::ColumnMetadata, table::TableMetadata},
-        query::generator::QueryGenerator,
+        query::generator::{QueryGenerator, max_rows_per_insert},
     },
-    traits::{encoder::CopyValueEncoder, writer::DataWriter},
+    traits::{driver::Driver, writer::DataWriter},
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -24,20 +31,53 @@ impl DataWriter for PgDriver {
             return Ok(0);
         }
 
-        let num_rows = rows.len();
         let generator = QueryGenerator::new(&dialect::Postgres);
-        let (sql, params) = generator.insert_batch(meta, rows, &PgTypeConverter);
+        let max_params = self.capabilities().max_parameters.unwrap_or(usize::MAX);
+        let chunk_rows = max_rows_per_insert(meta, max_params);
 
-        debug!(rows = num_rows, table = %meta.name, "inserting rows");
+        // Common case: the whole batch fits in one statement.
+        if rows.len() <= chunk_rows {
+            let (sql, params) = generator.insert_batch(meta, rows, &PgTypeConverter);
 
-        let client = self.client().read().await;
-        let param_store = PgParamStore::from_values(&params);
-        let result = client
-            .execute(&sql, &param_store.as_refs()[..])
+            debug!(rows = rows.len(), table = %meta.name, "inserting rows");
+
+            let client = self.client().read().await;
+            let param_store = PgParamStore::from_values(&params);
+            let result = client
+                .execute(&sql, &param_store.as_refs()[..])
+                .await
+                .map_err(|e| DriverError::QueryError(format!("{:?}", e)))?;
+
+            return Ok(result);
+        }
+
+        // Batch exceeds the placeholder limit: split into chunks in one
+        // transaction so it stays all-or-nothing.
+
+        debug!(rows = rows.len(), chunk_rows, table = %meta.name, "inserting rows (chunked)");
+
+        let mut client = self.client().write().await;
+        let tx = client
+            .transaction()
+            .await
+            .map_err(|e| DriverError::QueryError(format!("{:?}", e)))?;
+        let mut affected = 0u64;
+
+        for chunk in rows.chunks(chunk_rows) {
+            let (sql, params) = generator.insert_batch(meta, chunk, &PgTypeConverter);
+            let param_store = PgParamStore::from_values(&params);
+
+            affected += tx
+                .execute(&sql, &param_store.as_refs()[..])
+                .await
+                .map_err(|e| DriverError::QueryError(format!("{:?}", e)))?;
+        }
+
+        tx.commit()
             .await
             .map_err(|e| DriverError::QueryError(format!("{:?}", e)))?;
 
-        Ok(result)
+        Ok(affected)
     }
 
     async fn truncate(&self, table: &str) -> Result<(), DriverError> {
@@ -64,11 +104,9 @@ impl DataWriter for PgDriver {
             return Ok(0);
         }
 
-        let encoder = PgCopyEncoder;
-
         // Get non-generated columns sorted by ordinal position.
         // Generated columns are computed by the DB and must be excluded from both
-        // the COPY header and the CSV data to avoid a column-count mismatch.
+        // the COPY header and the data to avoid a column-count mismatch.
         let mut columns: Vec<_> = columns
             .iter()
             .filter(|c| !c.is_generated)
@@ -76,11 +114,45 @@ impl DataWriter for PgDriver {
             .collect();
         columns.sort_by_key(|c| c.ordinal);
 
-        // Build COPY statement using query generator
-        let generator = QueryGenerator::new(&dialect::Postgres);
-        let statement = generator.copy_from_stdin(table, &columns);
+        // Only write destination columns the row actually carries.
+        columns.retain(|c| rows[0].index_of(&c.name).is_some());
+
+        if columns.is_empty() {
+            return Ok(0);
+        }
 
         debug!(rows = rows.len(), table = %table, "COPY rows into table");
+
+        // All rows in a batch share the same field layout, so resolve each output
+        // column's field index once. Every retained column is present in the row.
+        let field_idx: Vec<Option<usize>> = columns
+            .iter()
+            .map(|col| rows[0].index_of(&col.name))
+            .collect();
+
+        let generator = QueryGenerator::new(&dialect::Postgres);
+
+        // Prefer binary COPY when the driver is configured for it and every
+        // column is binary-encodable; otherwise fall back to the CSV text path.
+        let binary_cols = if self.copy_format() == CopyFormat::Binary {
+            columns
+                .iter()
+                .map(BinaryColumnType::classify)
+                .collect::<Option<Vec<_>>>()
+        } else {
+            None
+        };
+
+        let (statement, payload) = match binary_cols
+            .as_deref()
+            .map(|bcts| encode_binary(&columns, bcts, &field_idx, rows))
+        {
+            Some(Ok(buf)) => (generator.copy_from_stdin_binary(table, &columns), buf),
+            _ => (
+                generator.copy_from_stdin_text(table, &columns),
+                encode_text(&columns, &field_idx, rows),
+            ),
+        };
 
         let client = self.client().write().await;
 
@@ -88,32 +160,13 @@ impl DataWriter for PgDriver {
             .copy_in(&statement)
             .await
             .map_err(|e| DriverError::QueryError(format!("{:?}", e)))?;
+
         pin_mut!(sink);
 
-        // Write rows as CSV in column order
-        for row in rows {
-            let mut line = String::new();
-            for (i, col) in columns.iter().enumerate() {
-                if i > 0 {
-                    line.push(',');
-                }
-                let field = row.get(&col.name);
-                let encoded = match field.and_then(|f| f.value.clone()) {
-                    Some(value) => {
-                        // Coerce value to match target column type
-                        let coerced = coercion::coerce_value(value, col);
-                        encoder.encode_value(&coerced)
-                    }
-                    None => encoder.encode_null(),
-                };
-                line.push_str(&encoded);
-            }
-            line.push('\n');
-            sink.as_mut()
-                .send(Bytes::from(line))
-                .await
-                .map_err(|e| DriverError::QueryError(format!("{:?}", e)))?;
-        }
+        sink.as_mut()
+            .send(payload)
+            .await
+            .map_err(|e| DriverError::QueryError(format!("{:?}", e)))?;
 
         sink.as_mut()
             .close()
@@ -122,4 +175,56 @@ impl DataWriter for PgDriver {
 
         Ok(rows.len() as u64)
     }
+}
+
+/// Encode a batch as a binary COPY stream. Returns `Err(BinaryEncodeError)` if
+/// any value fails to encode for its target column, signaling a fallback to CSV
+fn encode_binary(
+    columns: &[ColumnMetadata],
+    bcts: &[BinaryColumnType],
+    field_idx: &[Option<usize>],
+    rows: &[Record],
+) -> Result<Bytes, BinaryEncodeError> {
+    let enc = PgBinaryEncoder;
+    let mut buf = Vec::with_capacity(rows.len() * 128 + 19);
+
+    PgBinaryEncoder::write_header(&mut buf);
+
+    for row in rows {
+        PgBinaryEncoder::begin_row(&mut buf, columns.len());
+        for i in 0..columns.len() {
+            match field_idx[i].and_then(|idx| row.value_at(idx)) {
+                Some(value) => enc.write_field(bcts[i], value, &mut buf)?,
+                None => PgBinaryEncoder::write_null(&mut buf),
+            }
+        }
+    }
+
+    PgBinaryEncoder::write_trailer(&mut buf);
+    Ok(Bytes::from(buf))
+}
+
+/// Encode a batch as a single CSV COPY payload (the text fallback path).
+fn encode_text(columns: &[ColumnMetadata], field_idx: &[Option<usize>], rows: &[Record]) -> Bytes {
+    let encoder = PgCopyEncoder;
+    let coercions: Vec<_> = columns.iter().map(coercion::ColumnCoercion::of).collect();
+
+    let mut buf = String::with_capacity(rows.len() * 128);
+
+    for row in rows {
+        for i in 0..columns.len() {
+            if i > 0 {
+                buf.push(',');
+            }
+            match field_idx[i].and_then(|idx| row.value_at(idx)) {
+                Some(value) => {
+                    let coerced = coercions[i].apply(value);
+                    encoder.write_value(&coerced, &mut buf);
+                }
+                None => buf.push_str("\\N"),
+            }
+        }
+        buf.push('\n');
+    }
+    Bytes::from(buf)
 }

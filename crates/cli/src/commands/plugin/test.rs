@@ -172,7 +172,7 @@ fn build_records(src: Option<&str>) -> Result<Vec<Record>, CliError> {
                 },
             })
             .collect();
-        records.push(Record::new("<test>", fields, OpType::Insert));
+        records.push(Record::from_fields("<test>", fields, OpType::Insert));
     }
     Ok(records)
 }

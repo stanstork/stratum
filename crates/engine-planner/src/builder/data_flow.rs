@@ -1,14 +1,11 @@
 use crate::plan::{
-    pipeline::{
-        data_flow_summary::DataFlowSummary, settings::PipelineSettings, source::SourcePlan,
-    },
+    pipeline::{data_flow_summary::DataFlowSummary, source::SourcePlan},
     transform::{
         join::JoinPlan,
         mapping::{ColumnMapping, MappingSource, MappingType},
     },
     validation::{plan::ValidationPlan, types::ValidationLevel},
 };
-use engine_config::settings::CopyColumns;
 use std::collections::HashSet;
 
 /// Refines data flow statistics for a specific pipeline
@@ -20,7 +17,7 @@ impl DataFlowAnalyzer {
         joins: &[JoinPlan],
         validations: &[ValidationPlan],
         source: &SourcePlan,
-        settings: &PipelineSettings,
+        has_projection: bool,
     ) -> DataFlowSummary {
         let mut summary = DataFlowSummary::default();
 
@@ -56,9 +53,9 @@ impl DataFlowAnalyzer {
             })
             .collect();
 
-        // When copy_columns is All, all source columns that aren't explicitly remapped
-        // are implicitly copied as direct 1:1 mappings
-        if matches!(settings.copy_columns, CopyColumns::All) {
+        // With no `select` projection, every source column that isn't explicitly
+        // remapped is implicitly copied as a direct 1:1 mapping.
+        if !has_projection {
             // Count source columns that don't have an explicit mapping to a different name
             let explicitly_remapped: HashSet<_> = mappings
                 .iter()
@@ -83,21 +80,18 @@ impl DataFlowAnalyzer {
         let source_column_names: HashSet<_> =
             source.columns.iter().map(|c| c.name.clone()).collect();
 
-        // Excluded columns: only when copy_columns is MapOnly
-        summary.excluded_columns = match settings.copy_columns {
-            CopyColumns::MapOnly => {
-                // Only mapped columns are copied, the rest are excluded
-                source
-                    .columns
-                    .iter()
-                    .filter(|c| !mapped_source_columns.contains(&c.name))
-                    .map(|c| c.name.clone())
-                    .collect()
-            }
-            CopyColumns::All => {
-                // All source columns are copied, nothing is dropped
-                vec![]
-            }
+        // Excluded columns: only when the pipeline projects (a `select` block).
+        summary.excluded_columns = if has_projection {
+            // Only mapped columns are copied, the rest are excluded.
+            source
+                .columns
+                .iter()
+                .filter(|c| !mapped_source_columns.contains(&c.name))
+                .map(|c| c.name.clone())
+                .collect()
+        } else {
+            // All source columns are copied, nothing is dropped.
+            vec![]
         };
 
         // New columns: destination columns that don't exist in source

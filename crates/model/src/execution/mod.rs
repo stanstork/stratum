@@ -11,3 +11,4 @@ pub mod plugin;
 pub mod properties;
 pub mod references;
 pub mod row_count;
+pub mod tuning;

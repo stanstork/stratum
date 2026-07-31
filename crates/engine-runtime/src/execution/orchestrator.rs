@@ -1,6 +1,6 @@
 use crate::{
     actor::coordinator::PipelineCoordinator,
-    dag::endpoint::{DestinationEndpoint, HookPhase},
+    dag::endpoint::{DestinationEndpoint, HookPhase, SourceEndpoint},
     error::MigrationError,
 };
 use chrono;
@@ -9,10 +9,17 @@ use engine_config::settings::validated::ValidatedSettings;
 use engine_core::{event_bus::bus::EventBus, metrics::Metrics, schema::schema_ops::SchemaOps};
 use engine_infra::shutdown::ShutdownSignal;
 use engine_processing::{
+    channel::{BatchEnvelope, ByteBudget},
     consumer::Consumer,
     context::PipelineContext,
-    producer::{Producer, config::ProducerConfig},
+    io::{destination::Destination, source::Source},
+    producer::{
+        Producer,
+        components::integrity::{LaneHashSink, finalize_lane_sink},
+        config::ProducerConfig,
+    },
 };
+use engine_state::MerkleStore;
 use model::integrity::{algorithm::HashAlgorithm, config::IntegrityConfig};
 use model::{
     events::migration::MigrationEvent,
@@ -20,24 +27,61 @@ use model::{
         pipeline::{Pipeline, WriteMode},
         references::DataMode,
     },
-    records::batch::Batch,
+    pagination::cursor::QualCol,
 };
+use query_builder::offsets::{KeysetOffset, OffsetStrategyFactory};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
     time::Duration,
 };
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-const BATCH_CHANNEL_CAPACITY: usize = 64;
+/// Depth of the producer -> consumer batch channel, counted in batches. This is
+/// the row-count bound on the in-flight window: for normal-width rows, memory
+/// tracks row count, so a small read-ahead keeps both sides busy and absorbs
+/// jitter while capping memory. Extra depth buys nothing but memory.
+const BATCH_CHANNEL_CAPACITY: usize = 4;
+
+/// Byte bound on the in-flight window, complementing the batch-count bound above
+/// (whichever binds first throttles the producer). This is the wide-row guard: a batch of very
+/// wide rows draws proportionally more budget, so a channel's worth of them
+/// can't hold far more memory than a channel's worth of narrow rows. Sized well
+/// above a full narrow-row channel so it only binds when rows are unusually wide.
+const MAX_INFLIGHT_BYTES: usize = 128 * 1024 * 1024;
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// A discovered graph table whose integer-key span is at least this large is
+/// range-split into sub-lanes, so one big table doesn't bottleneck the
+/// per-table parallelism. Smaller tables migrate as a single lane each.
+const GRAPH_TABLE_RANGE_SPLIT_MIN_ROWS: u64 = 1_000_000;
+
+/// Split the inclusive key range `[lo, hi]` into `n` contiguous half-open
+/// `[start, end)` slices whose union is `[lo, hi+1)`. Remainder rows are spread
+/// across the first lanes so sizes differ by at most one.
+fn split_range(lo: u64, hi: u64, n: usize) -> Vec<(u64, u64)> {
+    let n = n as u64;
+    let span = hi - lo + 1;
+    let (chunk, rem) = (span / n, span % n);
+
+    let mut ranges = Vec::with_capacity(n as usize);
+    let mut start = lo;
+
+    for i in 0..n {
+        let end = start + chunk + u64::from(i < rem);
+        ranges.push((start, end));
+        start = end;
+    }
+    ranges
+}
 
 /// Orchestrates the complete pipeline execution lifecycle including hooks.
 /// The orchestrator ensures proper sequencing and error handling across all phases.
 pub struct PipelineOrchestrator {
     pipeline: Pipeline,
     ctx: PipelineContext,
+    source_ep: Arc<dyn SourceEndpoint>,
     dest_ep: Box<dyn DestinationEndpoint>,
     settings: ValidatedSettings,
     schema_ops: SchemaOps,
@@ -52,6 +96,7 @@ impl PipelineOrchestrator {
     pub fn new(
         pipeline: Pipeline,
         ctx: PipelineContext,
+        source_ep: Arc<dyn SourceEndpoint>,
         dest_ep: Box<dyn DestinationEndpoint>,
         settings: ValidatedSettings,
         schema_ops: SchemaOps,
@@ -63,6 +108,7 @@ impl PipelineOrchestrator {
         Self {
             pipeline,
             ctx,
+            source_ep,
             dest_ep,
             settings,
             schema_ops,
@@ -174,50 +220,253 @@ impl PipelineOrchestrator {
         self.publish_started().await;
         let start_time = std::time::Instant::now();
 
-        // Initialize Producer, Consumer, and Coordinator
-        let (coordinator, metrics) = self.build_coordinator().await?;
+        let metrics = Metrics::new();
+        let dest_metas = self.fetch_destination_metadata().await?;
 
-        // Run the pipeline with cancellation support
-        self.await_completion_or_cancel(coordinator, &metrics, start_time)
+        let lanes = self.plan_lanes().await?;
+        let lanes_num = lanes.len();
+
+        let integrity = self.build_integrity_config(&dest_metas);
+        let lane_sink: Option<LaneHashSink> = (lanes_num > 1 && integrity.is_some())
+            .then(|| Arc::new(std::sync::Mutex::new(HashMap::new())));
+
+        let mut coordinators = Vec::with_capacity(lanes_num);
+        for (source, part_id) in lanes {
+            // Each lane writes on its own connection so their COPYs actually run
+            // in parallel. A single lane reuses the shared destination handle.
+            let destination = if lanes_num == 1 {
+                self.ctx.destination.clone()
+            } else {
+                self.dest_ep
+                    .build_lane(&self.pipeline, self.source_ep.dialect())
+                    .await?
+            };
+
+            let config = self.build_producer_config(integrity.clone(), lane_sink.clone());
+            let coord = self
+                .build_lane_coordinator(
+                    source,
+                    destination,
+                    &part_id,
+                    config,
+                    &dest_metas,
+                    &metrics,
+                )
+                .await?;
+            coordinators.push((coord, part_id));
+        }
+
+        self.run_coordinators(coordinators, &metrics, start_time)
             .await?;
+
+        // Combine every lane's hashes into one receipt per table.
+        if let (Some(sink), Some(config)) = (&lane_sink, &integrity) {
+            let merkle_store = self.ctx.state.clone() as Arc<dyn MerkleStore>;
+            finalize_lane_sink(
+                sink,
+                config,
+                &merkle_store,
+                &self.pipeline.name,
+                &self.ctx.run_id,
+            )
+            .await
+            .map_err(|e| {
+                MigrationError::PipelineFailed(format!("integrity lane finalize failed: {e}"))
+            })?;
+        }
 
         Ok(metrics.snapshot().records_processed)
     }
 
-    async fn build_coordinator(&self) -> Result<(PipelineCoordinator, Metrics), MigrationError> {
-        let (batch_tx, batch_rx) = mpsc::channel::<Batch>(BATCH_CHANNEL_CAPACITY);
-        let metrics = Metrics::new();
+    async fn plan_lanes(&self) -> Result<Vec<(Source, String)>, MigrationError> {
+        let single = || vec![(self.ctx.source.clone(), "part-0".to_string())];
+        let requested = self.settings.lanes();
 
-        let dest_metas = self.fetch_destination_metadata().await?;
-        let config = self.build_producer_config(&dest_metas);
+        if requested <= 1 {
+            return Ok(single());
+        }
+
+        // Lanes are for pure data movement only.
+        if !self.pipeline.source.filters.is_empty() || !self.pipeline.source.joins.is_empty() {
+            debug!("filters or joins present; using a single lane");
+            return Ok(single());
+        }
+
+        // Graph pipelines parallelize across discovered tables rather than
+        // range-splitting a single table.
+        if self.pipeline.source.graph_references.is_some() {
+            return self.plan_graph_table_lanes().await;
+        }
+
+        let table = &self.pipeline.source.table;
+        let Some((pk, lo, hi)) = self.source_ep.int_key_range(table).await else {
+            return Ok(single());
+        };
+
+        // Don't split finer than there are keys.
+        let span = hi - lo + 1;
+        let lane_nums = (requested as u64).min(span).max(1) as usize;
+        if lane_nums <= 1 {
+            return Ok(single());
+        }
+
+        let mut lanes = Vec::with_capacity(lane_nums);
+        for (i, (rlo, rhi)) in split_range(lo, hi, lane_nums).into_iter().enumerate() {
+            let strategy = Arc::new(
+                KeysetOffset::new(vec![QualCol {
+                    table: table.clone(),
+                    column: pk.clone(),
+                }])
+                .with_lane(rlo, rhi),
+            );
+
+            let artifacts = self
+                .source_ep
+                .build(&self.pipeline, &self.ctx.mapping, strategy)
+                .await?;
+
+            lanes.push((artifacts.source, format!("part-{i}")));
+        }
+
+        info!(lanes = lane_nums, pk = %pk, key_min = lo, key_max = hi, "parallel range lanes enabled");
+        Ok(lanes)
+    }
+
+    /// Parallelize a graph migration by giving each discovered table its own
+    /// full-table lane (run through a bounded pool sized by `lanes`).
+    async fn plan_graph_table_lanes(&self) -> Result<Vec<(Source, String)>, MigrationError> {
+        let single = || vec![(self.ctx.source.clone(), "part-0".to_string())];
+
+        if self.settings.integrity().is_enabled() {
+            info!("integrity enabled; migrating graph tables sequentially");
+            return Ok(single());
+        }
+
+        // Source table names: the root plus every discovered table. `cascade_tables`
+        // are destination names, so map them back to source names for reading.
+        let mut src_tables = vec![self.pipeline.source.table.clone()];
+
+        for dest in &self.cascade_tables {
+            src_tables.push(self.ctx.mapping.entities.reverse_resolve(dest));
+        }
+
+        let mut seen = HashSet::new();
+        src_tables.retain(|t| !t.is_empty() && seen.insert(t.clone()));
+
+        if src_tables.len() <= 1 {
+            return Ok(single());
+        }
+
+        let requested = self.settings.lanes();
+        let mut lanes = Vec::new();
+
+        // A single part index across all sub-lanes keeps checkpoint namespaces
+        // unique whether a table contributes one lane or several range sub-lanes.
+        let mut part = 0usize;
+        for table in &src_tables {
+            for source in self.plan_table_sublanes(table, requested).await? {
+                lanes.push((source, format!("part-{part}")));
+                part += 1;
+            }
+        }
+
+        info!(
+            tables = src_tables.len(),
+            lanes = lanes.len(),
+            concurrency = requested,
+            "graph table parallelism enabled"
+        );
+        Ok(lanes)
+    }
+
+    /// Sources for one discovered table: range sub-lanes when it is large and has
+    /// a single integer primary key, otherwise a single full-table source.
+    async fn plan_table_sublanes(
+        &self,
+        table: &str,
+        requested: usize,
+    ) -> Result<Vec<Source>, MigrationError> {
+        if let Some((pk, lo, hi)) = self.source_ep.int_key_range(table).await {
+            let span = hi - lo + 1;
+            let lane_nums = (requested as u64).min(span).max(1) as usize;
+
+            if span >= GRAPH_TABLE_RANGE_SPLIT_MIN_ROWS && lane_nums > 1 {
+                let mut sources = Vec::with_capacity(lane_nums);
+
+                for (rlo, rhi) in split_range(lo, hi, lane_nums) {
+                    let strategy = Arc::new(
+                        KeysetOffset::new(vec![QualCol {
+                            table: table.to_string(),
+                            column: pk.clone(),
+                        }])
+                        .with_lane(rlo, rhi),
+                    );
+
+                    sources.push(self.source_ep.build_table_source(table, strategy).await?);
+                }
+
+                info!(
+                    table,
+                    ranges = lane_nums,
+                    key_min = lo,
+                    key_max = hi,
+                    "range-splitting large graph table"
+                );
+
+                return Ok(sources);
+            }
+        }
+
+        let offset = OffsetStrategyFactory::from_pagination(&self.pipeline.source.pagination);
+        let source = self.source_ep.build_table_source(table, offset).await?;
+
+        Ok(vec![source])
+    }
+
+    /// Build one producer/consumer lane over `source`, identified by `part_id`
+    /// (its own checkpoint namespace) and reporting into the shared `metrics`.
+    async fn build_lane_coordinator(
+        &self,
+        source: Source,
+        destination: Destination,
+        part_id: &str,
+        config: ProducerConfig,
+        dest_metas: &[TableMetadata],
+        metrics: &Metrics,
+    ) -> Result<PipelineCoordinator, MigrationError> {
+        let (batch_tx, batch_rx) = mpsc::channel::<BatchEnvelope>(BATCH_CHANNEL_CAPACITY);
+        let byte_budget = ByteBudget::new(MAX_INFLIGHT_BYTES);
 
         let producer = Producer::new(
             &self.ctx,
+            source,
+            part_id,
             batch_tx,
+            byte_budget,
             config,
-            self.settings.mapped_columns_only(),
+            self.pipeline.has_projection(),
         )
         .await
         .map_err(|e| MigrationError::InitializationError(e.to_string()))?;
 
         let consumer = Consumer::new(
             &self.ctx,
+            destination,
             batch_rx,
-            dest_metas,
+            dest_metas.to_vec(),
+            part_id,
             self.shutdown.clone(),
             metrics.clone(),
         )
         .await;
 
-        let coordinator = PipelineCoordinator::new(
+        Ok(PipelineCoordinator::new(
             producer,
             consumer,
             metrics.clone(),
             self.shutdown.cancel.clone(),
             self.event_bus.clone(),
-        );
-
-        Ok((coordinator, metrics))
+        ))
     }
 
     /// Fetches destination table metadata.
@@ -229,79 +478,108 @@ impl PipelineOrchestrator {
             .await
     }
 
-    fn build_producer_config(&self, dest_metas: &[TableMetadata]) -> ProducerConfig {
+    fn build_producer_config(
+        &self,
+        integrity: Option<IntegrityConfig>,
+        lane_sink: Option<LaneHashSink>,
+    ) -> ProducerConfig {
         let mut config = ProducerConfig::default().with_batch_size(self.settings.batch_size);
-
-        if self.settings.integrity().is_enabled() {
-            if self.pipeline.source.pagination.is_none() {
-                warn!(
-                    "integrity is enabled but no `paginate` block is set; without explicit \
-                     pagination the row order is non-deterministic, which may cause `verify` \
-                     to report false mismatches. Add a `paginate` block for reliable verification."
-                );
-            }
-
-            let tables = dest_metas
-                .iter()
-                .map(|m| (m.name.clone(), m.columns.keys().cloned().collect()))
-                .collect();
-
-            let column_types = dest_metas
-                .iter()
-                .map(|m| {
-                    let col_types = m
-                        .columns
-                        .values()
-                        .map(|c| (c.name.clone(), c.data_type.clone()))
-                        .collect();
-                    (m.name.clone(), col_types)
-                })
-                .collect();
-
-            let integrity =
-                IntegrityConfig::new(HashAlgorithm::Sha256, tables, &self.ctx.destination.name)
-                    .with_column_types(column_types)
-                    .with_store_row_hashes(self.settings.integrity().store_row_hashes());
-
+        if let Some(integrity) = integrity {
             config = config.with_integrity(integrity);
         }
-
+        config.lane_sink = lane_sink;
         config
     }
 
-    async fn await_completion_or_cancel(
+    /// Build the integrity config for this run, or `None` when integrity is off.
+    fn build_integrity_config(&self, dest_metas: &[TableMetadata]) -> Option<IntegrityConfig> {
+        if !self.settings.integrity().is_enabled() {
+            return None;
+        }
+        if self.pipeline.source.pagination.is_none() {
+            warn!(
+                "integrity is enabled but no `paginate` block is set; without explicit \
+                 pagination the row order is non-deterministic, which may cause `verify` \
+                 to report false mismatches. Add a `paginate` block for reliable verification."
+            );
+        }
+
+        let tables = dest_metas
+            .iter()
+            .map(|m| (m.name.clone(), m.columns.keys().cloned().collect()))
+            .collect();
+        let column_types = dest_metas
+            .iter()
+            .map(|m| {
+                let col_types = m
+                    .columns
+                    .values()
+                    .map(|c| (c.name.clone(), c.data_type.clone()))
+                    .collect();
+                (m.name.clone(), col_types)
+            })
+            .collect();
+
+        Some(
+            IntegrityConfig::new(HashAlgorithm::Sha256, tables, &self.ctx.destination.name)
+                .with_column_types(column_types)
+                .with_store_row_hashes(self.settings.integrity().store_row_hashes()),
+        )
+    }
+
+    /// Start every lane, then wait for all of them to finish - honoring pause and
+    /// shutdown across the whole set. A single lane is the common case; N lanes
+    /// run their producer/consumer pairs concurrently over disjoint key ranges.
+    async fn run_coordinators(
         &self,
-        coordinator: PipelineCoordinator,
+        coordinators: Vec<(PipelineCoordinator, String)>,
         metrics: &Metrics,
         start_time: std::time::Instant,
     ) -> Result<(), MigrationError> {
-        let part_id = "part-0".to_string(); // TODO: Make this dynamic when multi-part support is added
+        let concurrency = self.settings.lanes().max(1);
+        let sem = Arc::new(tokio::sync::Semaphore::new(concurrency));
+        let run_id = self.ctx.run_id.clone();
+        let item_id = self.ctx.item_id.clone();
 
-        coordinator
-            .start_snapshot_pipeline(self.ctx.run_id.clone(), self.ctx.item_id.clone(), part_id)
-            .await
-            .map_err(|e| {
-                error!(error = %e, "failed to start snapshot pipeline");
-                MigrationError::PipelineFailed(format!("Failed to start pipeline: {}", e))
-            })?;
+        let tasks: Vec<_> = coordinators
+            .into_iter()
+            .map(|(coordinator, part_id)| {
+                let sem = sem.clone();
+                let run_id = run_id.clone();
+                let item_id = item_id.clone();
+
+                async move {
+                    let _permit = sem
+                        .acquire_owned()
+                        .await
+                        .expect("lane semaphore is never closed");
+                    coordinator
+                        .start_snapshot_pipeline(run_id, item_id, part_id)
+                        .await?;
+                    coordinator.wait().await
+                }
+            })
+            .collect();
+
+        // All lanes must complete; the first error aborts the join.
+        let all_fut = async move { futures::future::try_join_all(tasks).await.map(|_| ()) };
 
         let cancel_fut = self.shutdown.cancel.cancelled();
         let pause_fut = self.shutdown.pause.cancelled();
-        let wait_fut = coordinator.wait();
 
         tokio::pin!(cancel_fut);
         tokio::pin!(pause_fut);
-        tokio::pin!(wait_fut);
+        tokio::pin!(all_fut);
 
         tokio::select! {
-            result = &mut wait_fut => {
+            result = &mut all_fut => {
                 self.handle_pipeline_result(result, metrics, start_time).await
             }
             _ = &mut pause_fut => {
-                self.handle_pause(wait_fut).await
+                self.handle_pause(all_fut).await
             }
             _ = &mut cancel_fut => {
-                self.handle_shutdown(wait_fut).await
+                self.handle_shutdown(all_fut).await
             }
         }
     }

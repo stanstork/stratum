@@ -2,13 +2,11 @@ use crate::traits::row_decoder::RowDecoder;
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use model::{
-    core::{
-        types::Type,
-        value::{FieldValue, Value},
-    },
-    records::{OpType, Record},
+    core::{types::Type, value::Value},
+    records::{OpType, Record, RecordSchema, SchemaColumn},
 };
 use rust_decimal::Decimal as RustDecimal;
+use std::sync::Arc;
 use std::{net::IpAddr, str::FromStr};
 use tokio_postgres::Row as PgRow;
 use tokio_postgres::types::{FromSql, Kind, Type as PgType};
@@ -35,31 +33,26 @@ impl<'a> FromSql<'a> for PgEnumText {
 pub struct PgRowDecoder<'a>(pub &'a PgRow);
 
 impl<'a> RowDecoder for PgRowDecoder<'a> {
-    fn decode(&self, table: &str) -> Record {
-        let fields = self
+    fn schema(&self, table: &str) -> Arc<RecordSchema> {
+        let columns = self
+            .0
+            .columns()
+            .iter()
+            .map(|col| SchemaColumn::new(col.name(), pg_type_to_canonical(col.type_())))
+            .collect();
+        RecordSchema::new(table, columns)
+    }
+
+    fn decode_with_schema(&self, schema: &Arc<RecordSchema>) -> Record {
+        let values = self
             .0
             .columns()
             .iter()
             .enumerate()
-            .map(|(idx, col)| {
-                let name = col.name().to_string();
-                let pg_type = col.type_();
-                let data_type = pg_type_to_canonical(pg_type);
-                let value = extract_value(self.0, idx, pg_type);
-
-                FieldValue {
-                    name,
-                    value,
-                    data_type,
-                }
-            })
+            .map(|(idx, col)| extract_value(self.0, idx, col.type_()))
             .collect();
 
-        Record {
-            schema: table.to_string(),
-            fields,
-            op_type: OpType::default(),
-        }
+        Record::new(Arc::clone(schema), values, OpType::default())
     }
 
     fn columns(&self) -> Vec<String> {

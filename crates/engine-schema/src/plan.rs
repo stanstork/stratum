@@ -34,8 +34,14 @@ pub struct SchemaPlan {
     /// Target dialect for DDL rendering.
     target_dialect: Box<dyn Dialect + Send + Sync>,
 
-    /// Indicates whether to ignore constraints during the migration process.
-    ignore_constraints: bool,
+    /// Create destination tables without a primary key (and never add one).
+    skip_primary_keys: bool,
+
+    /// Don't create foreign-key constraints on the destination.
+    skip_foreign_keys: bool,
+
+    /// Don't create secondary (non-constraint) indexes on the destination.
+    skip_indexes: bool,
 
     /// Indicates whether to create columns in the target table that are present in the mapping block only.
     mapped_columns_only: bool,
@@ -102,14 +108,18 @@ pub enum FkCreationStrategy {
 impl SchemaPlan {
     pub fn new(
         type_engine: TypeEngine,
-        ignore_constraints: bool,
+        skip_primary_keys: bool,
+        skip_foreign_keys: bool,
+        skip_indexes: bool,
         mapped_columns_only: bool,
         mapping: TransformationMetadata,
     ) -> Self {
         Self {
             type_engine,
             target_dialect: Box::new(dialect::Postgres),
-            ignore_constraints,
+            skip_primary_keys,
+            skip_foreign_keys,
+            skip_indexes,
             mapped_columns_only,
             drop_constraints: false,
             index_creation: IndexCreationStrategy::default(),
@@ -268,14 +278,17 @@ impl SchemaPlan {
         // When requested: drop existing FK constraints before data migration so that
         // a cascade run succeeds even if a prior schema_only run already created them.
         // FKs are re-added in the post phase as usual.
-        if self.drop_constraints && !self.ignore_constraints {
+        if self.drop_constraints && !self.skip_foreign_keys {
             pre.extend(self.drop_fk_ops());
         }
 
-        // Indexes: post-data by default, pre-data if configured
-        match self.index_creation {
-            IndexCreationStrategy::AfterData => post.extend(self.index_ops()),
-            IndexCreationStrategy::BeforeData => pre.extend(self.index_ops()),
+        // Indexes: post-data by default, pre-data if configured. Skipped entirely
+        // when `skip_indexes` is set.
+        if !self.skip_indexes {
+            match self.index_creation {
+                IndexCreationStrategy::AfterData => post.extend(self.index_ops()),
+                IndexCreationStrategy::BeforeData => pre.extend(self.index_ops()),
+            }
         }
 
         // FK constraints: post-data by default, pre-data if configured
@@ -398,7 +411,7 @@ impl SchemaPlan {
             let (sql, _) = qgen.create_table(
                 &resolved_table,
                 &resolved_columns,
-                self.ignore_constraints,
+                self.skip_primary_keys,
                 false,
             );
 
@@ -441,14 +454,16 @@ impl SchemaPlan {
 
     /// Generate ALTER TABLE ADD CONSTRAINT ops (FKs, CHECK, UNIQUE).
     fn constraint_ops(&self) -> Vec<SchemaOp> {
-        if self.ignore_constraints {
-            return Vec::new();
-        }
-
         let qgen = QueryGenerator::new(self.target_dialect.as_ref());
         let mut ops = Vec::new();
 
-        for (table, fks) in &self.fk_definitions {
+        // Foreign keys are skipped when `skip_foreign_keys` is set; UNIQUE/CHECK
+        // constraints below are unaffected.
+        for (table, fks) in self
+            .fk_definitions
+            .iter()
+            .filter(|_| !self.skip_foreign_keys)
+        {
             let resolved_table = self.mapping.entities.resolve(table);
 
             for fk in fks {
@@ -572,6 +587,14 @@ impl SchemaPlan {
     }
 
     pub async fn table_queries(&self) -> HashSet<(String, String)> {
+        self.build_table_queries(true).await
+    }
+
+    pub async fn table_queries_no_pk(&self) -> HashSet<(String, String)> {
+        self.build_table_queries(false).await
+    }
+
+    async fn build_table_queries(&self, include_pk: bool) -> HashSet<(String, String)> {
         let mut queries = HashSet::new();
 
         for (table, columns) in &self.column_definitions {
@@ -595,10 +618,13 @@ impl SchemaPlan {
                 .collect();
             resolved_columns.extend(new_computed);
 
+            // `skip_primary_keys` already drops the PK; `!include_pk` additionally
+            // defers it so it can be rebuilt in bulk after the load.
+            let omit_pk = self.skip_primary_keys || !include_pk;
             let (sql, _) = QueryGenerator::new(self.target_dialect.as_ref()).create_table(
                 &resolved_table,
                 &resolved_columns,
-                self.ignore_constraints,
+                omit_pk,
                 false,
             );
 
@@ -608,8 +634,37 @@ impl SchemaPlan {
         queries
     }
 
+    pub fn pk_queries(&self) -> HashSet<(String, String)> {
+        let mut queries = HashSet::new();
+
+        for (table, columns) in &self.column_definitions {
+            let resolved_table = self.mapping.entities.resolve(table);
+            let mut resolved_columns = self.resolve_column_definitions(table, columns);
+
+            if self.mapped_columns_only {
+                resolved_columns =
+                    self.filter_to_mapped_columns(&resolved_table, resolved_columns.clone());
+            }
+
+            let pk_cols: Vec<String> = resolved_columns
+                .iter()
+                .filter(|c| c.is_primary_key)
+                .map(|c| c.name.clone())
+                .collect();
+            if pk_cols.is_empty() {
+                continue;
+            }
+
+            let (sql, _) = QueryGenerator::new(self.target_dialect.as_ref())
+                .add_primary_key(&resolved_table, &pk_cols);
+            queries.insert((sql, resolved_table));
+        }
+
+        queries
+    }
+
     pub fn fk_queries(&self) -> HashSet<(String, String)> {
-        if self.ignore_constraints {
+        if self.skip_foreign_keys {
             return HashSet::new();
         }
 
