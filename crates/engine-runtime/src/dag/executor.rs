@@ -629,11 +629,14 @@ impl DagExecutor {
         let start_time = std::time::Instant::now();
         info!("starting pipeline");
 
+        let isolated = matches!(self.exec_config.strategy, ExecutionStrategy::Parallel);
+
         let source_ep: Arc<dyn SourceEndpoint> = Arc::from(
             resolve_source(
                 &pipeline.source.connection,
                 &self.exec_ctx,
                 &self.plugin_registry,
+                isolated,
             )
             .await?,
         );
@@ -641,6 +644,7 @@ impl DagExecutor {
             &pipeline.destination.connection,
             &self.exec_ctx,
             &self.plugin_registry,
+            isolated,
         )
         .await?;
 

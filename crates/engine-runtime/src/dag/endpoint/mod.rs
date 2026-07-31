@@ -146,6 +146,7 @@ pub async fn resolve_source(
     conn: &Connection,
     exec: &ExecutionContext,
     registry: &Arc<PluginRegistry>,
+    isolated: bool,
 ) -> Result<Box<dyn SourceEndpoint>, MigrationError> {
     match DataFormat::parse(&conn.driver) {
         Some(DataFormat::Wasm) => Ok(Box::new(WasmSourceEndpoint {
@@ -153,10 +154,18 @@ pub async fn resolve_source(
             plugin: wasm_plugin_name(conn)?,
         })),
         Some(DataFormat::Csv) => Ok(Box::new(CsvSourceEndpoint::new(conn).await?)),
-        _ => Ok(Box::new(DbSourceEndpoint {
-            driver: exec.resolve_driver(conn).await?,
-            introspector: exec.cached_source_introspector(conn).await?,
-        })),
+        _ => {
+            let driver = exec.resolve_driver(conn).await?;
+            let driver = if isolated {
+                driver.reconnect().await?
+            } else {
+                driver
+            };
+            Ok(Box::new(DbSourceEndpoint {
+                driver,
+                introspector: exec.cached_source_introspector(conn).await?,
+            }))
+        }
     }
 }
 
@@ -164,14 +173,21 @@ pub async fn resolve_destination(
     conn: &Connection,
     exec: &ExecutionContext,
     registry: &Arc<PluginRegistry>,
+    isolated: bool,
 ) -> Result<Box<dyn DestinationEndpoint>, MigrationError> {
     match DataFormat::parse(&conn.driver) {
         Some(DataFormat::Wasm) => Ok(Box::new(WasmDestinationEndpoint::new(
             registry.clone(),
             wasm_plugin_name(conn)?,
         )?)),
-        _ => Ok(Box::new(DbDestinationEndpoint(
-            exec.resolve_driver(conn).await?,
-        ))),
+        _ => {
+            let driver = exec.resolve_driver(conn).await?;
+            let driver = if isolated {
+                driver.reconnect().await?
+            } else {
+                driver
+            };
+            Ok(Box::new(DbDestinationEndpoint(driver)))
+        }
     }
 }
