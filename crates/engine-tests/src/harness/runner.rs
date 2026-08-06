@@ -136,15 +136,22 @@ pub async fn run_smql_with_pause(smql: &str, dest_table: &str, min_rows: i64) {
         env,
     ));
 
+    let pg = pg_pool().await;
+    let count_sql = format!("SELECT COUNT(*) FROM {dest_table}");
     loop {
         if handle.is_finished() {
             break;
         }
-        if pg_count_or_zero(dest_table).await >= min_rows {
+        let count: i64 = pg
+            .query_one(&count_sql, &[])
+            .await
+            .map(|row| row.get(0))
+            .unwrap_or(0); // table may not exist yet; treat as 0 progress
+        if count >= min_rows {
             signal.pause.cancel();
             break;
         }
-        tokio::time::sleep(Duration::from_millis(2)).await;
+        tokio::time::sleep(Duration::from_millis(1)).await;
     }
 
     let _ = handle.await;

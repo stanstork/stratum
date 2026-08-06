@@ -184,6 +184,14 @@ pub(super) fn estimates(out: &mut String, r: &MigrationReport, s: &Sty) {
             fmt_seconds(e.duration.max_seconds),
         )),
     );
+    if !e.duration.calibrated {
+        let _ = writeln!(
+            out,
+            "  {}  {}",
+            pad("", 10),
+            s.dim("rough - a prior guess; run apply once to calibrate to this machine"),
+        );
+    }
     let _ = writeln!(
         out,
         "  {}  ~{} MB peak",

@@ -241,6 +241,12 @@ Sled embedded KV database at `~/.stratum/state/`:
 - Resume: on restart, load checkpoint and skip processed rows
 - `WalEntry` model for write-ahead log entries
 
+`engine-state` also holds `CalibrationData` - a small, separate sled db at
+`~/.stratum/calibration` recording achieved throughput per destination write
+path. `apply` records into it; `plan` reads it to estimate duration from this
+machine's real rates instead of a cold-start prior (see [plan.md](plan.md)). It's
+a regenerable cache, independent of the run state store.
+
 #### EventBus (`engine-infra/event_bus/`)
 Pub/Sub for migration events:
 - `MigrationStarted`, `BatchProcessed`, `MigrationCompleted`, `Error`

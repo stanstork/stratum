@@ -1,5 +1,4 @@
 use crate::plan::{
-    diagnostics::calibration::CalibrationData,
     estimation::{
         duration::DurationEstimate, pipeline::PipelineEstimations, resource::ResourceEstimations,
     },
@@ -18,11 +17,23 @@ use crate::plan::{
         mapping::{ColumnMapping, MappingType},
     },
 };
+use engine_core::state::{CalibrationData, WriteClass};
 
 mod throughput {
-    pub const BASE_COPY: u64 = 40_000;
-    pub const BASE_INSERT: u64 = 10_000;
+    use engine_core::state::WriteClass;
+
     pub const MIN_SAFE: u64 = 100;
+
+    /// Cold-start throughput prior (rows/sec) for a write class, used only until
+    /// that class has been observed on this machine.
+    /// Once `apply` records a real observation, calibration replaces these.
+    pub fn prior_for(class: WriteClass) -> u64 {
+        match class {
+            WriteClass::Postgres => 100_000, // binary/text COPY
+            WriteClass::MySql => 75_000,     // LOAD DATA fast path
+            WriteClass::Other => 10_000,     // INSERT fallback / plugin sinks
+        }
+    }
 
     pub fn join_factor(count: usize) -> f64 {
         match count {
@@ -86,23 +97,28 @@ mod overhead {
 
 /// Estimates pipeline execution duration based on complexity factors
 pub struct DurationEstimator {
-    /// Base throughput (rows/sec) for simple pipelines
-    /// This is a conservative baseline that gets adjusted by complexity factors
+    /// Starting throughput (rows/sec): the machine's calibrated rate for this
+    /// write class when available, otherwise the conservative prior.
     baseline_throughput: u64,
 
-    /// Calibration data from previous runs
-    calibration: Option<CalibrationData>,
+    /// Whether `baseline_throughput` came from measured calibration. Drives the
+    /// confidence band and the "rough" label in the plan output.
+    calibrated: bool,
 }
 
 impl DurationEstimator {
-    pub fn new(is_fast_path: bool) -> Self {
-        Self {
-            baseline_throughput: if is_fast_path {
-                throughput::BASE_COPY
-            } else {
-                throughput::BASE_INSERT
+    /// Build an estimator for a destination write class, preferring this
+    /// machine's learned throughput and falling back to a prior otherwise.
+    pub fn new(class: WriteClass, calibration: Option<&CalibrationData>) -> Self {
+        match calibration.and_then(|c| c.throughput_for(class)) {
+            Some(measured) => Self {
+                baseline_throughput: measured,
+                calibrated: true,
             },
-            calibration: None,
+            None => Self {
+                baseline_throughput: throughput::prior_for(class),
+                calibrated: false,
+            },
         }
     }
 
@@ -114,13 +130,12 @@ impl DurationEstimator {
         mappings: &[ColumnMapping],
         joins: &[JoinPlan],
         settings: &PipelineSettings,
-        is_fast_path: bool,
     ) -> PipelineEstimations {
-        let tps = self.calculate_throughput(mappings, joins, settings, is_fast_path);
+        let tps = self.calculate_throughput(mappings, joins, settings);
 
-        // Base duration: rows / rows-per-second
+        // Base duration: rows / rows-per-second.
         let rows = source.total_rows.value;
-        let base_seconds = rows.checked_div(tps).unwrap_or(0);
+        let base_seconds = (rows as f64 / tps.max(1) as f64).round() as u64;
         let overhead_seconds = self.calculate_total_overhead(settings, destination);
 
         let batch_size = if settings.batch_size == 0 {
@@ -131,7 +146,10 @@ impl DurationEstimator {
         let batches = (rows as f64 / batch_size as f64).ceil() as u64;
 
         PipelineEstimations {
-            duration: DurationEstimate::from_seconds(base_seconds + overhead_seconds),
+            duration: DurationEstimate::from_seconds(
+                base_seconds + overhead_seconds,
+                self.calibrated,
+            ),
             rows_per_second: tps,
             batches: batches.max(1),
             memory_mb: self.estimate_memory(settings, mappings),
@@ -153,14 +171,10 @@ impl DurationEstimator {
         mappings: &[ColumnMapping],
         joins: &[JoinPlan],
         settings: &PipelineSettings,
-        _is_fast_path: bool,
     ) -> u64 {
-        // Base throughput already accounts for fast path (BASE_COPY) vs regular (BASE_INSERT)
-        let mut tps = self
-            .calibration
-            .as_ref()
-            .map(|c| c.avg_throughput as f64)
-            .unwrap_or(self.baseline_throughput as f64);
+        // Start from the class baseline (calibrated rate or prior), then scale by
+        // per-pipeline complexity.
+        let mut tps = self.baseline_throughput as f64;
 
         let computed_cols = mappings
             .iter()
@@ -189,8 +203,9 @@ impl DurationEstimator {
             _ => 0.95,
         };
 
-        // Worker scaling: square root indicates diminishing returns of parallelism
-        tps *= (settings.workers as f64).sqrt();
+        // Lane scaling: parallel key-range lanes raise throughput sublinearly and
+        // flatten near the destination's ingest ceiling.
+        tps *= (settings.lanes.max(1) as f64).sqrt();
 
         (tps as u64).max(throughput::MIN_SAFE)
     }

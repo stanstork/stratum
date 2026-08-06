@@ -45,7 +45,8 @@ DIAGNOSTICS
   · 2 notes hidden - see --json
 
 ESTIMATES
-  duration    5s   best 3s · worst 7s
+  duration    5s   best 2s · worst 15s
+              rough - a prior guess; run apply once to calibrate to this machine
   memory      ~32 MB peak
   transfer    ~13.4 MB   · 19 batches
 
@@ -63,6 +64,7 @@ The layout is grouped by **pipeline** (like `terraform plan`), not by category.
 - **DIAGNOSTICS** - warnings and errors in full (with a fix suggestion under `↳`);
   routine informational notes are collapsed to a count (`--json` has them all).
 - **ESTIMATES** - duration (with a best/worst range), peak memory, and transfer.
+  The duration is self-calibrating - see [Duration estimates](#duration-estimates).
 - **Verdict** - a rule, a totals line, and the exact next command to run.
 
 ### The change glyphs
@@ -84,6 +86,28 @@ executable. Color is always emphasis, never the only signal: every colored mark
 is also a distinct character, so the output still reads under `--no-color`, when
 piped to a file, or on a 16-color terminal. (With color off, `▸ ● ⧉ ◷` fall back
 to `> * # @`.)
+
+### Duration estimates
+
+The duration comes from the row count divided by an expected throughput, plus
+fixed overhead (connection setup, checkpoints). Throughput is **self-calibrating
+per machine**, so the estimate sharpens as you use Stratum:
+
+- **Before any run on this machine** the estimate rests on a conservative,
+  built-in prior for the destination write path (PostgreSQL COPY, MySQL
+  `LOAD DATA`, and a slower INSERT fallback are each different). Because a prior
+  is a guess, the estimate is labelled `rough` and its best/worst band is
+  deliberately wide.
+- **Each `apply` records the throughput it actually achieved**, keyed by write
+  path and normalized to a single lane, into a small store at
+  `~/.stratum/calibration`. The next `plan` uses that measured rate: the `rough`
+  label drops and the band tightens. The first real run replaces the prior
+  outright; later runs move a rolling average.
+
+The store is a regenerable cache - deleting `~/.stratum/calibration` just returns
+estimates to their cold-start priors. `lanes` are accounted for (more lanes raise
+the projected throughput sublinearly), so a `lanes = N` plan estimates faster than
+a single-lane one.
 
 ### Graph / cascade pipelines
 

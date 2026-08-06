@@ -426,6 +426,8 @@ Verification re-reads the destination and compares Merkle tree roots - it detect
 
 Stratum stores pipeline state in `~/.stratum/state/` (sled embedded KV). If a migration is interrupted, re-running the same command resumes from the last checkpoint - no rows are re-processed. Integrity receipts are stored in the same directory under `receipt:{pipeline}:{table}` keys.
 
+`apply` also records the throughput it achieves into a separate calibration cache (`~/.stratum/calibration`) so `stratum plan` can estimate duration from this machine's measured rates rather than a generic default; until then it shows a conservative, clearly-labelled rough estimate. See [docs/plan.md](docs/plan.md#duration-estimates).
+
 ## Documentation
 
 | Document | Description |
