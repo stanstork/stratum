@@ -174,18 +174,6 @@ impl ReportBuilder {
         }
     }
 
-    /// Destination write class for estimation.
-    fn write_class(driver: &DatabaseDriver, is_fast_path: bool) -> WriteClass {
-        if !is_fast_path {
-            return WriteClass::Other;
-        }
-        match driver {
-            DatabaseDriver::Postgres => WriteClass::Postgres,
-            DatabaseDriver::MySql => WriteClass::MySql,
-            _ => WriteClass::Other,
-        }
-    }
-
     pub async fn build(
         &self,
         core_plan: &CoreExecutionPlan,
@@ -388,15 +376,8 @@ impl ReportBuilder {
         resources: PipelineAnalysisResources,
         report: analysis::AnalysisReport,
     ) -> ReportBuilderResult<PipelinePlan> {
-        let settings = PipelineSettingsView::new(&resources.validated_settings);
-
-        // Determine if we can use high-performance streaming (fast path)
-        let is_fast_path = self
-            .determine_fast_path(&resources, settings.create_missing_tables())
-            .await;
-
         let settings = self.map_pipeline_settings(&resources.validated_settings);
-        let class = Self::write_class(&report.destination.driver, is_fast_path);
+        let class = Self::write_class(&report.destination.driver);
         let estimations = DurationEstimator::new(class, self.calibration.as_ref())
             .estimate_pipeline(
                 &report.source,
@@ -852,36 +833,11 @@ impl ReportBuilder {
         }
     }
 
-    async fn determine_fast_path(
-        &self,
-        resources: &PipelineAnalysisResources,
-        create_missing: bool,
-    ) -> bool {
-        let sink = resources.core_data_destination.sink();
-        match sink.support_fast_path().await {
-            Ok(true) => {
-                // Check if destination table has primary keys
-                match resources
-                    .dst_driver
-                    .table_metadata(&resources.core_data_destination.name())
-                    .await
-                {
-                    Ok(meta) => !meta.primary_keys.is_empty(),
-                    Err(_) if create_missing => {
-                        // Check source table for primary keys
-                        let src_table = resources
-                            .mapping
-                            .entities
-                            .reverse_resolve(&resources.core_data_destination.name());
-                        match resources.src_driver.table_metadata(&src_table).await {
-                            Ok(meta) => !meta.primary_keys.is_empty(),
-                            Err(_) => false,
-                        }
-                    }
-                    Err(_) => false,
-                }
-            }
-            _ => false,
+    fn write_class(driver: &DatabaseDriver) -> WriteClass {
+        match driver {
+            DatabaseDriver::Postgres => WriteClass::Postgres,
+            DatabaseDriver::MySql => WriteClass::MySql,
+            _ => WriteClass::Other,
         }
     }
 }

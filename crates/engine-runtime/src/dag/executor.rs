@@ -35,6 +35,7 @@ use query_builder::offsets::{OffsetStrategy, OffsetStrategyFactory};
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex},
+    time::Instant,
 };
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, instrument, warn};
@@ -122,6 +123,8 @@ impl DagExecutor {
     }
 
     pub async fn execute(self, dag: Dag) -> Result<(), MigrationError> {
+        let session_start = std::time::Instant::now();
+
         let mut failed_pipelines = HashSet::new();
 
         // Initialize state or resume from a paused run
@@ -138,7 +141,7 @@ impl DagExecutor {
             .await;
 
         // Complete run and finalize state
-        self.finalize_run(run_result, run_state, failed_pipelines)
+        self.finalize_run(run_result, run_state, failed_pipelines, session_start)
             .await
     }
 
@@ -345,6 +348,7 @@ impl DagExecutor {
         run_result: Result<(), MigrationError>,
         mut run_state: RunState,
         failed_pipelines: HashSet<String>,
+        session_start: Instant,
     ) -> Result<(), MigrationError> {
         self.calibration.flush();
 
@@ -389,8 +393,7 @@ impl DagExecutor {
                     .await?;
 
                 let total_rows: u64 = run_state.pipelines.iter().map(|p| p.rows_done).sum();
-                let elapsed =
-                    (chrono::Utc::now() - run_state.started_at).num_milliseconds() as f64 / 1000.0;
+                let elapsed = session_start.elapsed().as_secs_f64();
                 let rows_per_sec = if elapsed > 0.0 {
                     total_rows as f64 / elapsed
                 } else {
@@ -564,13 +567,11 @@ impl DagExecutor {
     /// Save RunState as paused with current pipeline statuses.
     async fn save_paused_state(
         &self,
-        base_state: &engine_state::models::RunState,
+        base_state: &RunState,
         failed_pipelines: &HashSet<String>,
         completed_pipelines: &HashSet<String>,
-        reason: engine_state::models::PauseReason,
+        reason: PauseReason,
     ) -> Result<(), MigrationError> {
-        use engine_state::models::{PipelineStatus, RunStatus};
-
         let mut state = base_state.clone();
         state.status = RunStatus::Paused {
             reason: reason.clone(),
@@ -706,16 +707,20 @@ impl DagExecutor {
             source.cascade_tables,
         );
 
-        // Execute: pre-DDL -> data migration -> post-DDL
+        let exec_start = std::time::Instant::now();
         let rows = orchestrator.execute().await?;
+        let exec_secs = exec_start.elapsed().as_secs_f64();
 
-        let elapsed_secs = start_time.elapsed().as_secs_f64();
-        info!(rows, elapsed_secs, "pipeline finished");
+        info!(
+            rows,
+            elapsed_secs = start_time.elapsed().as_secs_f64(),
+            "pipeline finished"
+        );
 
         self.calibration.observe(
             &pipeline.destination.connection.driver,
             rows,
-            elapsed_secs,
+            exec_secs,
             lanes,
         );
 
