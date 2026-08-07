@@ -1,4 +1,5 @@
 use crate::{
+    calibration::CalibrationRecorder,
     dag::{
         Dag,
         endpoint::{SourceEndpoint, resolve_destination, resolve_source},
@@ -47,6 +48,7 @@ pub struct DagExecutor {
     event_bus: EventBus,
     done_ops: Arc<Mutex<HashSet<String>>>,
     plugin_registry: Arc<PluginRegistry>,
+    calibration: CalibrationRecorder,
 }
 
 impl DagExecutor {
@@ -102,6 +104,7 @@ impl DagExecutor {
             event_bus,
             done_ops: Arc::new(Mutex::new(HashSet::new())),
             plugin_registry,
+            calibration: CalibrationRecorder::new(),
         })
     }
 
@@ -343,6 +346,8 @@ impl DagExecutor {
         mut run_state: RunState,
         failed_pipelines: HashSet<String>,
     ) -> Result<(), MigrationError> {
+        self.calibration.flush();
+
         match run_result {
             // Process finalize state when the migration actually completed cleanly or handled its pipeline failures
             Ok(()) | Err(MigrationError::PipelinesFailed(_)) => {
@@ -686,6 +691,8 @@ impl DagExecutor {
             schema_ops = expanded;
         }
 
+        let lanes = settings.lanes();
+
         let orchestrator = PipelineOrchestrator::new(
             pipeline.clone(),
             pipeline_ctx,
@@ -702,10 +709,14 @@ impl DagExecutor {
         // Execute: pre-DDL -> data migration -> post-DDL
         let rows = orchestrator.execute().await?;
 
-        info!(
+        let elapsed_secs = start_time.elapsed().as_secs_f64();
+        info!(rows, elapsed_secs, "pipeline finished");
+
+        self.calibration.observe(
+            &pipeline.destination.connection.driver,
             rows,
-            elapsed_secs = start_time.elapsed().as_secs_f64(),
-            "pipeline finished"
+            elapsed_secs,
+            lanes,
         );
 
         Ok(rows)

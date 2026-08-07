@@ -20,7 +20,7 @@ use crate::{
     },
     plan::{
         connection::{
-            plan::ConnectionPlan,
+            plan::{ConnectionPlan, DatabaseDriver},
             status::{ConnectionRole, ConnectionStatus},
         },
         define::{
@@ -57,6 +57,7 @@ use engine_core::{
         planner::SchemaPlanner,
         type_registry::{Dialect, TypeRegistry},
     },
+    state::{CalibrationData, WriteClass},
 };
 use engine_processing::io::destination::Destination;
 use engine_runtime::dag::Dag;
@@ -158,11 +159,31 @@ impl Default for ReportBuilderConfig {
 #[derive(Default)]
 pub struct ReportBuilder {
     config: ReportBuilderConfig,
+    /// Per-machine throughput learned from prior `apply` runs.
+    calibration: Option<CalibrationData>,
 }
 
 impl ReportBuilder {
     pub fn new(config: ReportBuilderConfig) -> Self {
-        Self { config }
+        let calibration = dirs::home_dir()
+            .map(|home| CalibrationData::path_for(&home))
+            .and_then(|path| CalibrationData::load(path).ok());
+        Self {
+            config,
+            calibration,
+        }
+    }
+
+    /// Destination write class for estimation.
+    fn write_class(driver: &DatabaseDriver, is_fast_path: bool) -> WriteClass {
+        if !is_fast_path {
+            return WriteClass::Other;
+        }
+        match driver {
+            DatabaseDriver::Postgres => WriteClass::Postgres,
+            DatabaseDriver::MySql => WriteClass::MySql,
+            _ => WriteClass::Other,
+        }
     }
 
     pub async fn build(
@@ -375,14 +396,15 @@ impl ReportBuilder {
             .await;
 
         let settings = self.map_pipeline_settings(&resources.validated_settings);
-        let estimations = DurationEstimator::new(is_fast_path).estimate_pipeline(
-            &report.source,
-            &report.destination,
-            &report.mappings,
-            &report.joins,
-            &settings,
-            is_fast_path,
-        );
+        let class = Self::write_class(&report.destination.driver, is_fast_path);
+        let estimations = DurationEstimator::new(class, self.calibration.as_ref())
+            .estimate_pipeline(
+                &report.source,
+                &report.destination,
+                &report.mappings,
+                &report.joins,
+                &settings,
+            );
 
         let data_flow_summary = DataFlowAnalyzer::analyze(
             &report.mappings,

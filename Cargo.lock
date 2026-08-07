@@ -1256,9 +1256,9 @@ name = "engine-planner"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "bincode",
  "chrono",
  "connectors",
+ "dirs",
  "engine-config",
  "engine-core",
  "engine-processing",
@@ -1272,7 +1272,6 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
- "sled",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
