@@ -38,7 +38,7 @@ pub fn encode_bytea(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(2 + 2 * bytes.len());
     out.push_str("\\x");
     for b in bytes {
-        write!(&mut out, "{:02x}", b).unwrap();
+        let _ = write!(&mut out, "{b:02x}");
     }
     out
 }

@@ -137,7 +137,12 @@ impl Validator for PipelineValidator {
                         plugin_name,
                     },
                 ) => Self::evaluate_wasm(plugin, plugin_name, input_mapping, row)?,
-                _ => unreachable!("rules and compiled state diverged"),
+                _ => {
+                    return Err(TransformError::Transformation(format!(
+                        "validation rule `{}` and its compiled state diverged",
+                        rule.label
+                    )));
+                }
             };
 
             if !passed {

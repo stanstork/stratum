@@ -183,7 +183,7 @@ macro_rules! add_joins {
                 join_kind,
                 table_ref!(&join.right.table),
                 Some(&join.right.alias),
-                join_on_expr!(join).unwrap(),
+                join_on_expr!(join).expect("join clause has at least one ON condition"),
             )
         })
     }};
@@ -195,7 +195,8 @@ macro_rules! add_where {
         let mut builder = $builder;
         if let Some(filter) = $filter {
             if let Some(expr) = &filter.expr {
-                builder = builder.where_clause(sql_filter_expr!(expr).unwrap());
+                builder = builder
+                    .where_clause(sql_filter_expr!(expr).expect("filter AST converts to SQL"));
             }
         }
         builder

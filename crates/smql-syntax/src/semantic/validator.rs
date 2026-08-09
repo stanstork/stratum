@@ -477,9 +477,8 @@ impl SemanticValidator {
         let refs = Self::extract_define_references(expr);
 
         for ref_name in refs {
-            if path.contains(&ref_name) {
+            if let Some(cycle_start) = path.iter().position(|n| n == &ref_name) {
                 // Found a cycle
-                let cycle_start = path.iter().position(|n| n == &ref_name).unwrap();
                 let mut cycle = path[cycle_start..].to_vec();
                 cycle.push(ref_name);
                 return Some(cycle);
@@ -584,9 +583,8 @@ impl SemanticValidator {
     ) -> Option<Vec<String>> {
         if let Some(deps) = graph.get(current) {
             for dep in deps {
-                if path.contains(dep) {
+                if let Some(cycle_start) = path.iter().position(|n| n == dep) {
                     // Found a cycle
-                    let cycle_start = path.iter().position(|n| n == dep).unwrap();
                     let mut cycle = path[cycle_start..].to_vec();
                     cycle.push(dep.clone());
                     return Some(cycle);

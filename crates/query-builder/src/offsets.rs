@@ -19,6 +19,19 @@ use model::{
 };
 use std::{convert::TryFrom, str::FromStr, sync::Arc};
 
+/// Errors raised while constructing an offset strategy from configuration.
+#[derive(Debug, thiserror::Error)]
+pub enum OffsetError {
+    #[error("`{0}` offset strategy requires a `cursor` column")]
+    MissingCursor(&'static str),
+
+    #[error("`{0}` offset strategy requires a `tiebreaker` column")]
+    MissingTiebreaker(&'static str),
+
+    #[error("unsupported offset strategy: `{0}`")]
+    UnsupportedStrategy(String),
+}
+
 #[async_trait]
 pub trait OffsetStrategy: Send + Sync {
     /// Applies the pagination logic (WHERE and ORDER BY) to a SelectBuilder.
@@ -153,12 +166,10 @@ fn int_literal(val: i64) -> Expr {
 fn numeric_literal(val: i128) -> Expr {
     if let Ok(casted) = i64::try_from(val) {
         int_literal(casted)
-    } else if val >= 0 {
-        let casted =
-            u64::try_from(val).expect("numeric cursor value exceeds supported unsigned range");
+    } else if let Ok(casted) = u64::try_from(val) {
         uint_literal(casted)
     } else {
-        panic!("numeric cursor value below supported signed range: {val}");
+        value(Value::Decimal(val.to_string().parse().unwrap_or_default()))
     }
 }
 
@@ -326,28 +337,38 @@ impl OffsetStrategy for TimestampOffset {
     ) -> SelectBuilder<FromState> {
         // Add WHERE clause based on cursor
         if let Cursor::CompositeTsPk { ts, id, .. } = cursor {
-            let dt_local = Utc
-                .timestamp_micros(*ts)
-                .unwrap()
-                .with_timezone(&self.tz)
-                .naive_local();
-            let ts_value = Value::Timestamp {
-                value: dt_local,
-                offset_secs: None,
-            };
-            // WHERE (ts > ?) OR (ts = ? AND pk > ?)
-            let cond1 = binary_expr(
-                ident_q(&self.ts_col),
-                BinaryOperator::Gt,
-                value(ts_value.clone()),
-            );
-            let cond2_left =
-                binary_expr(ident_q(&self.ts_col), BinaryOperator::Eq, value(ts_value));
-            let cond2_right = binary_expr(ident_q(&self.pk), BinaryOperator::Gt, uint_literal(*id));
-            let cond2 = binary_expr(cond2_left, BinaryOperator::And, cond2_right);
-            let where_cond = binary_expr(cond1, BinaryOperator::Or, cond2);
+            match Utc.timestamp_micros(*ts).single() {
+                Some(dt_utc) => {
+                    let dt_local = dt_utc.with_timezone(&self.tz).naive_local();
+                    let ts_value = Value::Timestamp {
+                        value: dt_local,
+                        offset_secs: None,
+                    };
+                    // WHERE (ts > ?) OR (ts = ? AND pk > ?)
+                    let cond1 = binary_expr(
+                        ident_q(&self.ts_col),
+                        BinaryOperator::Gt,
+                        value(ts_value.clone()),
+                    );
+                    let cond2_left =
+                        binary_expr(ident_q(&self.ts_col), BinaryOperator::Eq, value(ts_value));
+                    let cond2_right =
+                        binary_expr(ident_q(&self.pk), BinaryOperator::Gt, uint_literal(*id));
+                    let cond2 = binary_expr(cond2_left, BinaryOperator::And, cond2_right);
+                    let where_cond = binary_expr(cond1, BinaryOperator::Or, cond2);
 
-            builder = append_where(builder, where_cond);
+                    builder = append_where(builder, where_cond);
+                }
+                // A timestamp cursor outside the representable micro-second range
+                // can't anchor a boundary; omit the predicate (the ORDER BY still
+                // yields a deterministic scan) rather than panicking.
+                None => {
+                    tracing::warn!(
+                        ts = *ts,
+                        "timestamp cursor out of representable range; ignoring cursor predicate"
+                    );
+                }
+            }
         }
 
         // Add ORDER BY
@@ -563,7 +584,7 @@ pub struct OffsetStrategyFactory;
 
 impl OffsetStrategyFactory {
     /// Build a strategy from configuration.
-    pub fn from_config(config: &OffsetConfig) -> Arc<dyn OffsetStrategy> {
+    pub fn from_config(config: &OffsetConfig) -> Result<Arc<dyn OffsetStrategy>, OffsetError> {
         // If user didn't specify a cursor column -> default PK "id".
         let strategy = config
             .strategy
@@ -571,12 +592,12 @@ impl OffsetStrategyFactory {
             .unwrap_or("default")
             .to_lowercase();
 
-        match strategy.as_str() {
+        let strategy: Arc<dyn OffsetStrategy> = match strategy.as_str() {
             "pk" => {
                 let cursor = config
                     .cursor
                     .clone()
-                    .expect("PK offset requires 'cursor' column");
+                    .ok_or(OffsetError::MissingCursor("pk"))?;
                 match config.tiebreaker.clone() {
                     // A tiebreaker makes the order row-unique: the boundary becomes
                     // `(pk, tb) > (last_pk, last_tb)`, so a `with` join that fans out
@@ -594,11 +615,11 @@ impl OffsetStrategyFactory {
                 let col = config
                     .cursor
                     .clone()
-                    .expect("Numeric offset requires 'cursor' column");
+                    .ok_or(OffsetError::MissingCursor("numeric"))?;
                 let pk = config
                     .tiebreaker
                     .clone()
-                    .expect("Numeric offset requires 'tiebreaker' column");
+                    .ok_or(OffsetError::MissingTiebreaker("numeric"))?;
                 Arc::new(NumericOffset { col, pk })
             }
 
@@ -606,11 +627,11 @@ impl OffsetStrategyFactory {
                 let ts_col = config
                     .cursor
                     .clone()
-                    .unwrap_or_else(|| panic!("Timestamp offset requires 'cursor' column"));
+                    .ok_or(OffsetError::MissingCursor("timestamp"))?;
                 let pk = config
                     .tiebreaker
                     .clone()
-                    .expect("Timestamp offset requires 'tiebreaker' column");
+                    .ok_or(OffsetError::MissingTiebreaker("timestamp"))?;
                 let tz = config
                     .timezone
                     .as_deref()
@@ -622,8 +643,10 @@ impl OffsetStrategyFactory {
 
             "default" => Arc::new(DefaultOffset { offset: 0 }),
 
-            other => panic!("Unsupported offset strategy: {other}"),
-        }
+            other => return Err(OffsetError::UnsupportedStrategy(other.to_string())),
+        };
+
+        Ok(strategy)
     }
 
     /// Build a strategy from a concrete cursor (e.g., when resuming).
@@ -670,24 +693,27 @@ impl OffsetStrategyFactory {
 
             Cursor::None => Arc::new(DefaultOffset { offset: 0 }), // start from beginning
 
-            Cursor::Opaque(_) => {
-                unreachable!("Cursor::Opaque is consumed by WASM source readers, not SQL offsets")
-            }
+            // Opaque cursors belong to WASM source readers; a SQL offset should
+            // never receive one, but fall back to a safe scan rather than
+            // panicking if state and config ever disagree on a resume.
+            Cursor::Opaque(_) => Arc::new(DefaultOffset { offset: 0 }),
         }
     }
 
-    pub fn from_pagination(pagination: &Option<Pagination>) -> Arc<dyn OffsetStrategy> {
+    pub fn from_pagination(
+        pagination: &Option<Pagination>,
+    ) -> Result<Arc<dyn OffsetStrategy>, OffsetError> {
         if let Some(pagination) = pagination {
             let mut cursor: Option<QualCol> = None;
             let mut tiebreaker: Option<QualCol> = None;
             let mut timezone: Option<String> = None;
 
             if !pagination.column.is_empty() {
-                cursor = Some(QualCol::from_str(&pagination.column).unwrap());
+                cursor = QualCol::from_str(&pagination.column).ok();
             }
 
             if let Some(tb) = &pagination.tiebreaker {
-                tiebreaker = Some(QualCol::from_str(tb).unwrap());
+                tiebreaker = QualCol::from_str(tb).ok();
             }
 
             if let Some(tz) = &pagination.timezone {
@@ -703,7 +729,7 @@ impl OffsetStrategyFactory {
 
             OffsetStrategyFactory::from_config(&config)
         } else {
-            OffsetStrategyFactory::default_strategy()
+            Ok(OffsetStrategyFactory::default_strategy())
         }
     }
 

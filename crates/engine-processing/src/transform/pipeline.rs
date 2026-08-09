@@ -336,9 +336,10 @@ fn drain_removals(
 
     for (i, row) in scratch.drain(..).enumerate() {
         match rem.peek() {
-            Some(&(idx, _)) if idx == i => match rem.next().unwrap().1 {
-                Removal::Filter => filtered.push(row),
-                Removal::Fail(e) => failed.push((row, e)),
+            Some(&(idx, _)) if idx == i => match rem.next() {
+                Some((_, Removal::Filter)) => filtered.push(row),
+                Some((_, Removal::Fail(e))) => failed.push((row, e)),
+                None => rows.push(row),
             },
             _ => rows.push(row),
         }

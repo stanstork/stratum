@@ -83,7 +83,8 @@ async fn verify_pipeline(
         );
     }
 
-    let offset_strategy = OffsetStrategyFactory::from_pagination(&resolved_pagination);
+    let offset_strategy = OffsetStrategyFactory::from_pagination(&resolved_pagination)
+        .map_err(|e| VerifyError::InitializationError(e.to_string()))?;
 
     let cascade_meta = get_graph_expansion(pipeline, &driver, &mapping).await?;
     let cascade_tables = resolve_cascade_tables(pipeline, &mapping, &cascade_meta);

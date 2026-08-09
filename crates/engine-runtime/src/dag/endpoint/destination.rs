@@ -53,12 +53,16 @@ impl WasmDestinationEndpoint {
     }
 
     fn take_instance(&self) -> Result<PluginInstance, MigrationError> {
-        self.instance.lock().unwrap().take().ok_or_else(|| {
-            MigrationError::PipelineFailed(format!(
-                "wasm plugin '{}' already consumed; build() can only be called once",
-                self.plugin
-            ))
-        })
+        self.instance
+            .lock()
+            .expect("plugin instance lock poisoned")
+            .take()
+            .ok_or_else(|| {
+                MigrationError::PipelineFailed(format!(
+                    "wasm plugin '{}' already consumed; build() can only be called once",
+                    self.plugin
+                ))
+            })
     }
 }
 

@@ -787,11 +787,23 @@ fn build_expression(pair: Pair<Rule>) -> BuildResult<Expression> {
     build_expression_inner(pair, span)
 }
 
+/// A parse tree that is missing an expected child.
+fn missing_inner(span: Span, what: &str) -> BuildError {
+    BuildError {
+        message: format!("malformed {what}: expected a child node"),
+        line: span.line,
+        column: span.column,
+    }
+}
+
 fn build_expression_inner(pair: Pair<Rule>, span: Span) -> BuildResult<Expression> {
     match pair.as_rule() {
         Rule::expression => {
             // Unwrap the top-level expression rule
-            let inner = pair.into_inner().next().unwrap();
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| missing_inner(span, "expression"))?;
             build_expression_inner(inner, span)
         }
         Rule::logical_or => build_binary_expression(pair, span),
@@ -812,7 +824,9 @@ fn build_expression_inner(pair: Pair<Rule>, span: Span) -> BuildResult<Expressio
 
 fn build_binary_expression(pair: Pair<Rule>, span: Span) -> BuildResult<Expression> {
     let mut inner = pair.into_inner();
-    let left = inner.next().unwrap();
+    let left = inner
+        .next()
+        .ok_or_else(|| missing_inner(span, "binary expression operand"))?;
 
     // Check if there's an operator
     if let Some(op_pair) = inner.next() {
@@ -839,7 +853,9 @@ fn build_binary_expression(pair: Pair<Rule>, span: Span) -> BuildResult<Expressi
             }
         };
 
-        let right = inner.next().unwrap();
+        let right = inner
+            .next()
+            .ok_or_else(|| missing_inner(span, "binary expression right operand"))?;
 
         Ok(Expression::new(
             ExpressionKind::Binary {
@@ -856,7 +872,10 @@ fn build_binary_expression(pair: Pair<Rule>, span: Span) -> BuildResult<Expressi
 }
 
 fn build_primary_expression(pair: Pair<Rule>, span: Span) -> BuildResult<Expression> {
-    let inner = pair.into_inner().next().unwrap();
+    let inner = pair
+        .into_inner()
+        .next()
+        .ok_or_else(|| missing_inner(span, "primary expression"))?;
     build_primary_inner(inner, span)
 }
 
@@ -964,14 +983,18 @@ fn build_is_null_check(pair: Pair<Rule>, span: Span) -> BuildResult<Expression> 
         // Skip lparen
         inner.next();
         // Get the expression
-        let expr = inner.next().unwrap();
+        let expr = inner
+            .next()
+            .ok_or_else(|| missing_inner(span, "grouped expression"))?;
         let result = build_expression_inner(expr, span)?;
         // Skip rparen
         inner.next();
         result
     } else {
         // Regular primary expression
-        let primary = inner.next().unwrap();
+        let primary = inner
+            .next()
+            .ok_or_else(|| missing_inner(span, "primary expression"))?;
         build_primary_inner(primary, span)?
     };
 

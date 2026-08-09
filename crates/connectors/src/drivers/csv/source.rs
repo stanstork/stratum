@@ -52,7 +52,11 @@ impl CsvDataSource {
                 .columns
                 .iter()
                 .find(|c| c.name.eq_ignore_ascii_case(&normalize_col_name(hdr)))
-                .expect("Column metadata not found")
+                .ok_or_else(|| {
+                    FileError::InvalidFormat(format!(
+                        "CSV header `{hdr}` has no matching column in the schema for `{entity_name}`"
+                    ))
+                })?
                 .clone();
             headers_meta.push((hdr.clone(), col_meta));
         }

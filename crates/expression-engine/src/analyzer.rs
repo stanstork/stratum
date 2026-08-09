@@ -23,7 +23,7 @@ impl ExpressionAnalyzer {
             .iter()
             .filter_map(|col| {
                 if col.contains('.') {
-                    Some(col.split('.').next().unwrap().to_string())
+                    Some(col.split('.').next().unwrap_or(col).to_string())
                 } else {
                     None
                 }

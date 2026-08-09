@@ -146,11 +146,52 @@ impl Dialect for MySql {
 
     fn key_existence_query(
         &self,
-        _table_name: &str,
-        _key_columns: &[String],
-        _keys_batch: usize,
+        table_name: &str,
+        key_columns: &[String],
+        keys_batch: usize,
     ) -> String {
-        todo!("Implement batch key existence query for MySQL")
+        if keys_batch == 0 || key_columns.is_empty() {
+            return String::new();
+        }
+
+        let select_clause = key_columns
+            .iter()
+            .enumerate()
+            .map(|(i, col_name)| format!("v.c{} AS {}", i + 1, self.quote_identifier(col_name)))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let join_conditions = key_columns
+            .iter()
+            .enumerate()
+            .map(|(i, col_name)| format!("t.{} = v.c{}", self.quote_identifier(col_name), i + 1))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+
+        let derived = (0..keys_batch)
+            .map(|row| {
+                let cols = (0..key_columns.len())
+                    .map(|c| {
+                        if row == 0 {
+                            format!("? AS c{}", c + 1)
+                        } else {
+                            "?".to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("SELECT {cols}")
+            })
+            .collect::<Vec<_>>()
+            .join(" UNION ALL ");
+
+        format!(
+            "SELECT {} FROM ({}) AS v INNER JOIN {} AS t ON {}",
+            select_clause,
+            derived,
+            self.quote_identifier(table_name),
+            join_conditions
+        )
     }
 
     fn drop_primary_key(&self, table: &str) -> String {
