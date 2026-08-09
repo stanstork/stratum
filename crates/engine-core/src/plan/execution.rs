@@ -117,7 +117,7 @@ impl ExecutionPlan {
         self.hash_cache.get_or_init(|| {
             use sha2::{Digest, Sha256};
 
-            let value = serde_json::to_value(self).unwrap();
+            let value = serde_json::to_value(self).expect("ExecutionPlan serializes to JSON");
             let canonical = canonical_json(&value);
 
             let mut hasher = Sha256::new();
@@ -147,7 +147,7 @@ fn write_canonical(value: &serde_json::Value, buf: &mut String) {
                 if i > 0 {
                     buf.push(',');
                 }
-                write!(buf, "\"{}\":", key).unwrap();
+                let _ = write!(buf, "\"{key}\":");
                 write_canonical(&map[*key], buf);
             }
             buf.push('}');
@@ -164,7 +164,7 @@ fn write_canonical(value: &serde_json::Value, buf: &mut String) {
         }
         // Scalars: use serde_json's own formatting (already deterministic)
         other => {
-            write!(buf, "{}", other).unwrap();
+            let _ = write!(buf, "{other}");
         }
     }
 }

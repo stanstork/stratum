@@ -153,17 +153,22 @@ impl IntegrityState {
 
         let subtree_root = MerkleTree::root_from_hashes(&row_hashes, self.config.algorithm);
 
-        // Maps are pre-populated in `new()`, so we avoid `.entry().or_default()` String allocations
-        self.batch_roots.get_mut(key).unwrap().push(subtree_root);
+        // Maps are pre-populated per key in `new()`, so we avoid `.entry().or_default()`
+        // String allocations. A missing key is an internal invariant break; panic
+        // loudly rather than silently drop hashes and corrupt the receipt.
+        self.batch_roots
+            .get_mut(key)
+            .expect("integrity maps pre-populated per key in new()")
+            .push(subtree_root);
         self.rows_per_batch
             .get_mut(key)
-            .unwrap()
+            .expect("integrity maps pre-populated per key in new()")
             .push(rows.len() as u64);
 
         if self.config.store_row_hashes {
             self.row_hashes
                 .get_mut(key)
-                .unwrap()
+                .expect("integrity maps pre-populated per key in new()")
                 .extend_from_slice(&row_hashes);
         }
     }
@@ -174,7 +179,10 @@ impl IntegrityState {
         let empty_map = HashMap::new();
         let col_types = self.config.column_types.get(key).unwrap_or(&empty_map);
         let hasher = self.hashers.get_mut(key).expect("hasher pre-populated");
-        let set = self.cascade_hashes.get_mut(key).unwrap();
+        let set = self
+            .cascade_hashes
+            .get_mut(key)
+            .expect("integrity maps pre-populated per key in new()");
 
         for hash in hasher.hash_rows(rows, col_types) {
             set.insert(hash);

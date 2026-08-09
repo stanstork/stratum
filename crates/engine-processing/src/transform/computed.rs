@@ -147,7 +147,9 @@ impl Transform for ComputedTransform {
                     plan = Some(build_plan(row.schema(), computed_fields, &scratch));
                 }
 
-                apply_plan(row, &mut scratch, plan.as_ref().unwrap());
+                if let Some(p) = plan.as_ref() {
+                    apply_plan(row, &mut scratch, p);
+                }
             }
         });
     }

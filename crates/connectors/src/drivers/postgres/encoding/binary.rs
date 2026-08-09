@@ -269,7 +269,9 @@ impl PgBinaryEncoder {
                 } => {
                     // timestamptz is stored as UTC microseconds from the PG epoch.
                     let utc = match offset_secs {
-                        Some(off) => *ts - Duration::seconds(*off as i64),
+                        Some(off) => ts
+                            .checked_sub_signed(Duration::seconds(*off as i64))
+                            .unwrap_or(*ts),
                         None => *ts,
                     };
                     out.put_i64(timestamp_micros(utc)?);
@@ -441,7 +443,10 @@ fn nbase_groups(digits: &str, pad_left: bool) -> Vec<u16> {
     padded
         .as_bytes()
         .chunks(4)
-        .map(|c| std::str::from_utf8(c).unwrap().parse::<u16>().unwrap())
+        .map(|c| {
+            c.iter()
+                .fold(0u16, |acc, &b| acc * 10 + u16::from(b.saturating_sub(b'0')))
+        })
         .collect()
 }
 

@@ -59,7 +59,10 @@ impl DriverRegistry {
     {
         // Map schemes to driver id
         {
-            let mut scheme_map = self.scheme_map.write().unwrap();
+            let mut scheme_map = self
+                .scheme_map
+                .write()
+                .expect("driver registry lock poisoned");
             for scheme in info.schemes {
                 scheme_map.insert(scheme.to_string(), info.id.to_string());
             }
@@ -67,7 +70,7 @@ impl DriverRegistry {
 
         // Register factory
         {
-            let mut drivers = self.drivers.write().unwrap();
+            let mut drivers = self.drivers.write().expect("driver registry lock poisoned");
             drivers.insert(
                 info.id.to_string(),
                 RegisteredDriver {
@@ -82,12 +85,15 @@ impl DriverRegistry {
         let scheme = extract_scheme(url)?;
 
         let factory = {
-            let scheme_map = self.scheme_map.read().unwrap();
+            let scheme_map = self
+                .scheme_map
+                .read()
+                .expect("driver registry lock poisoned");
             let driver_id = scheme_map
                 .get(&scheme)
                 .ok_or_else(|| DriverError::UnsupportedScheme(scheme.clone()))?;
 
-            let drivers = self.drivers.read().unwrap();
+            let drivers = self.drivers.read().expect("driver registry lock poisoned");
             let registered = drivers
                 .get(driver_id)
                 .ok_or_else(|| DriverError::DriverNotFound(driver_id.clone()))?;

@@ -271,7 +271,10 @@ impl Producer {
         }
 
         if SnapshotReader::should_advance(&fetch_result) {
-            self.cursor = fetch_result.next_cursor.unwrap();
+            if let Some(next) = fetch_result.next_cursor {
+                self.cursor = next;
+            }
+
             return Ok(ProducerStatus::Working);
         }
 

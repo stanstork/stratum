@@ -37,7 +37,7 @@ impl Default for ProducerConfig {
     fn default() -> Self {
         Self {
             batch_size: 1000,
-            transform_concurrency: NonZeroUsize::new(8).unwrap(),
+            transform_concurrency: NonZeroUsize::new(8).expect("8 is non-zero"),
             idle_poll_interval: Duration::from_millis(500),
             sample_size: 10,
             max_retries: 3,

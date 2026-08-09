@@ -40,7 +40,12 @@ pub fn eval_env(args: &[Value], ctx: &EvalContext) -> Result<Value> {
                 }
             };
 
-            let default_value = args.get(1).unwrap();
+            let default_value =
+                args.get(1)
+                    .ok_or_else(|| ExpressionError::InvalidFunctionArgs {
+                        function: "env".to_string(),
+                        message: "env expects a default value as the second argument".to_string(),
+                    })?;
 
             // If env var exists, try to parse it as the type of the default value
             if let Some(env_str) = ctx.get_env(var_name) {

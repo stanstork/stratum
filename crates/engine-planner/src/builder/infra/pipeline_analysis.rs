@@ -1,5 +1,7 @@
 use crate::builder::{
-    ReportBuilder, errors::ReportBuilderResult, infra::metadata_cache::MetadataCacheRef,
+    ReportBuilder,
+    errors::{ReportBuilderError, ReportBuilderResult},
+    infra::metadata_cache::MetadataCacheRef,
 };
 use connectors::traits::introspector::SchemaIntrospector;
 use engine_config::settings::validated::ValidatedSettings;
@@ -76,7 +78,8 @@ impl PipelineAnalysisResources {
         let mut mapping = TransformationMetadata::new(pipeline);
         mapping.set_plugin_columns(plugin_columns(pipeline, plugin_registry));
 
-        let offset_strategy = OffsetStrategyFactory::from_pagination(&pipeline.source.pagination);
+        let offset_strategy = OffsetStrategyFactory::from_pagination(&pipeline.source.pagination)
+            .map_err(|e| ReportBuilderError::Config(e.to_string()))?;
 
         let core_data_source = dispatch_driver!(&src_driver, |d| {
             Arc::new(Source::new(d.clone(), pipeline, &mapping, offset_strategy).await?)

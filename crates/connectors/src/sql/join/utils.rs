@@ -24,7 +24,8 @@ pub fn find_join_path(
     queue.push_back(vec![start.to_string()]);
 
     while let Some(path) = queue.pop_front() {
-        let last = path.last().unwrap();
+        let Some(last) = path.last() else { continue };
+
         if last.eq_ignore_ascii_case(target) {
             return Some(path);
         }

@@ -1,3 +1,6 @@
+#![deny(clippy::unwrap_used)]
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
 pub mod cb;
 pub mod channel;
 pub mod consumer;

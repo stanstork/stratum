@@ -159,7 +159,7 @@ impl PipelineOrchestrator {
 
         for op in ops {
             {
-                let set = self.done_ops.lock().unwrap();
+                let set = self.done_ops.lock().expect("done_ops lock poisoned");
                 if set.contains(&op.sql) {
                     debug!(op = %op.description, "skipping already-executed schema op");
                     continue;
@@ -170,7 +170,10 @@ impl PipelineOrchestrator {
                 .apply_schema_ops(std::slice::from_ref(op), phase)
                 .await?;
 
-            self.done_ops.lock().unwrap().insert(op.sql.clone());
+            self.done_ops
+                .lock()
+                .expect("done_ops lock poisoned")
+                .insert(op.sql.clone());
         }
 
         Ok(())
@@ -417,7 +420,8 @@ impl PipelineOrchestrator {
             }
         }
 
-        let offset = OffsetStrategyFactory::from_pagination(&self.pipeline.source.pagination);
+        let offset = OffsetStrategyFactory::from_pagination(&self.pipeline.source.pagination)
+            .map_err(|e| MigrationError::Unexpected(e.to_string()))?;
         let source = self.source_ep.build_table_source(table, offset).await?;
 
         Ok(vec![source])

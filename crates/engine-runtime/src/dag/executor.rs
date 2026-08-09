@@ -453,7 +453,7 @@ impl DagExecutor {
                 .pipelines
                 .iter()
                 .find(|p| &p.name == name)
-                .unwrap();
+                .expect("DAG level name exists in plan pipelines");
 
             let has_failed_dep = pipeline
                 .dependencies
@@ -657,7 +657,8 @@ impl DagExecutor {
         let mut mapping = TransformationMetadata::new(pipeline);
         mapping.set_plugin_columns(plugin_columns(pipeline, &self.plugin_registry));
 
-        let offset_strategy = OffsetStrategyFactory::from_pagination(&pipeline.source.pagination);
+        let offset_strategy = OffsetStrategyFactory::from_pagination(&pipeline.source.pagination)
+            .map_err(|e| MigrationError::Unexpected(e.to_string()))?;
 
         let source = source_ep
             .build(pipeline, &mapping, offset_strategy.clone())

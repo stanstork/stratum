@@ -84,15 +84,16 @@ pub fn serialize_value(val: &Value, buf: &mut Vec<u8>) {
 
         Value::Date(d) => {
             buf.push(TAG_DATE);
-            let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+            let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).expect("1970-01-01 is a valid date");
             let days = d.signed_duration_since(epoch).num_days() as i32;
             buf.extend(&days.to_le_bytes());
         }
 
         Value::Timestamp { value, offset_secs } => {
             buf.push(TAG_TIMESTAMP);
-            // Normalize to UTC: subtract the UTC offset so stored value is always UTC
-            let utc = *value - chrono::Duration::seconds(offset_secs.unwrap_or(0) as i64);
+
+            let offset = chrono::Duration::seconds(offset_secs.unwrap_or(0) as i64);
+            let utc = value.checked_sub_signed(offset).unwrap_or(*value);
             let micros = utc
                 .signed_duration_since(chrono::NaiveDateTime::UNIX_EPOCH)
                 .num_microseconds()
@@ -266,7 +267,8 @@ fn canonical_json(v: &serde_json::Value) -> String {
                 .map(|k| {
                     format!(
                         "{}:{}",
-                        serde_json::to_string(k).unwrap(),
+                        serde_json::to_string(k)
+                            .expect("serializing a JSON string key is infallible"),
                         canonical_json(&map[k])
                     )
                 })
@@ -277,7 +279,7 @@ fn canonical_json(v: &serde_json::Value) -> String {
             let elems: Vec<String> = arr.iter().map(canonical_json).collect();
             format!("[{}]", elems.join(","))
         }
-        other => serde_json::to_string(other).unwrap(),
+        other => serde_json::to_string(other).expect("serializing a JSON primitive is infallible"),
     }
 }
 

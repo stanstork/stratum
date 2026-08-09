@@ -65,7 +65,7 @@ impl SqlFilterExpr {
                     .collect::<Vec<_>>();
                 match kept.len() {
                     0 => None,
-                    1 => Some(kept.into_iter().next().unwrap()),
+                    1 => kept.into_iter().next(),
                     _ => Some(SqlFilterExpr::And(kept)),
                 }
             }
@@ -77,7 +77,7 @@ impl SqlFilterExpr {
                     .collect::<Vec<_>>();
                 match kept.len() {
                     0 => None,
-                    1 => Some(kept.into_iter().next().unwrap()),
+                    1 => kept.into_iter().next(),
                     _ => Some(SqlFilterExpr::Or(kept)),
                 }
             }
