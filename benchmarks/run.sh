@@ -71,7 +71,7 @@ PG_PORT=54329
 BENCH_ROWS="${BENCH_ROWS:-100000000}"
 RUNS="${RUNS:-3}"
 SYNTH_RUNS="${SYNTH_RUNS:-1}"
-WORKLOADS="${WORKLOADS:-sakila synthetic synthetic_heavy synthetic_plugin_rust synthetic_plugin_js}"
+WORKLOADS="${WORKLOADS:-sakila synthetic synthetic_heavy synthetic_plugin_rust synthetic_plugin_js synthetic_filter_rust synthetic_filter_js}"
 TOOLS="${TOOLS:-stratum stratum-integrity stratum-lanes}"
 # pgloader is an opt-in comparison for PostgreSQL-target workloads only.
 WITH_PGLOADER="${WITH_PGLOADER:-0}"
@@ -95,6 +95,8 @@ PG_SRC_DB="${PG_SRC_DB:-bench_src}"        # PostgreSQL source seeded for the re
 PLUGIN_BUILD_DIR="$SCRIPT_DIR/plugins/build"
 PLUGIN_RUST_WASM="$PLUGIN_BUILD_DIR/order_net_rust.wasm"
 PLUGIN_JS_WASM="$PLUGIN_BUILD_DIR/order_net_js.wasm"
+PLUGIN_FILTER_RUST_WASM="$PLUGIN_BUILD_DIR/order_ok_rust.wasm"
+PLUGIN_FILTER_JS_WASM="$PLUGIN_BUILD_DIR/order_ok_js.wasm"
 
 SAKILA_TABLES=(actor address category city country customer film film_actor
     film_category inventory language payment rental staff store)
@@ -160,9 +162,9 @@ fi
 # Plugin workloads need native Stratum plus the host toolchain to build the two
 # transform plugins (Rust -> wasm32-wasip1, and `stratum plugin compile` for JS).
 # On any shortfall, drop the plugin workloads with a note rather than aborting.
-if [[ " $WORKLOADS " == *" synthetic_plugin_"* ]]; then
+if [[ " $WORKLOADS " == *" synthetic_plugin_"* || " $WORKLOADS " == *" synthetic_filter_"* ]]; then
     drop_plugins() {
-        WORKLOADS="$(tr ' ' '\n' <<<"$WORKLOADS" | grep -v '^synthetic_plugin_' | tr '\n' ' ')"
+        WORKLOADS="$(tr ' ' '\n' <<<"$WORKLOADS" | grep -vE '^synthetic_(plugin|filter)_' | tr '\n' ' ')"
     }
     if [[ $STRATUM_MODE != native ]]; then
         log "note: plugin workloads need native Stratum (build $STRATUM_BIN); skipping synthetic_plugin_*"
@@ -175,10 +177,16 @@ if [[ " $WORKLOADS " == *" synthetic_plugin_"* ]]; then
             && cp "$SCRIPT_DIR/plugins/rust/order_net/target/wasm32-wasip1/release/order_net.wasm" \
                 "$PLUGIN_RUST_WASM" \
             && "$STRATUM_BIN" plugin compile "$SCRIPT_DIR/plugins/js/order_net.js" \
-                -o "$PLUGIN_JS_WASM" >&2; then
-            log "plugins ready: $(basename "$PLUGIN_RUST_WASM"), $(basename "$PLUGIN_JS_WASM")"
+                -o "$PLUGIN_JS_WASM" >&2 \
+            && (cd "$REPO_ROOT" && cargo build --manifest-path benchmarks/plugins/rust/order_ok/Cargo.toml \
+                --target wasm32-wasip1 --release) >&2 \
+            && cp "$SCRIPT_DIR/plugins/rust/order_ok/target/wasm32-wasip1/release/order_ok.wasm" \
+                "$PLUGIN_FILTER_RUST_WASM" \
+            && "$STRATUM_BIN" plugin compile "$SCRIPT_DIR/plugins/js/order_ok.js" \
+                -o "$PLUGIN_FILTER_JS_WASM" >&2; then
+            log "plugins ready: transform ($(basename "$PLUGIN_RUST_WASM"), $(basename "$PLUGIN_JS_WASM")), filter ($(basename "$PLUGIN_FILTER_RUST_WASM"), $(basename "$PLUGIN_FILTER_JS_WASM"))"
         else
-            log "note: plugin build failed (needs the wasm32-wasip1 target + npx); skipping synthetic_plugin_*"
+            log "note: plugin build failed (needs the wasm32-wasip1 target + npx); skipping plugin/filter workloads"
             drop_plugins
         fi
     fi
@@ -318,6 +326,8 @@ validate() { # $1 = workload, $2 = pg db
             synthetic_heavy) tbl=orders_heavy ;;
             synthetic_plugin_rust) tbl=orders_plugin_rust ;;
             synthetic_plugin_js) tbl=orders_plugin_js ;;
+            synthetic_filter_rust) tbl=orders_filter_rust ;;
+            synthetic_filter_js) tbl=orders_filter_js ;;
         esac
         local dst
         dst=$(pg_scalar "$2" "SELECT COUNT(*) FROM $tbl" || echo MISSING)
@@ -373,6 +383,8 @@ stratum_url_env() { # $1 = forward pg dest db
         "BENCH_REV_MYSQL_URL=mysql://bench:bench@127.0.0.1:$MYSQL_PORT/$MYSQL_DEST_DB"
         "BENCH_PLUGIN_RUST_WASM=$PLUGIN_RUST_WASM"
         "BENCH_PLUGIN_JS_WASM=$PLUGIN_JS_WASM"
+        "BENCH_PLUGIN_FILTER_RUST_WASM=$PLUGIN_FILTER_RUST_WASM"
+        "BENCH_PLUGIN_FILTER_JS_WASM=$PLUGIN_FILTER_JS_WASM"
     )
 }
 
@@ -476,6 +488,8 @@ for workload in $WORKLOADS; do
         synthetic_heavy) rows=$BENCH_ROWS; dest_db=$PG_DEST_DB; n_runs=$SYNTH_RUNS ;;
         synthetic_plugin_rust) rows=$BENCH_ROWS; dest_db=$PG_DEST_DB; n_runs=$SYNTH_RUNS ;;
         synthetic_plugin_js) rows=$BENCH_ROWS; dest_db=$PG_DEST_DB; n_runs=$SYNTH_RUNS ;;
+        synthetic_filter_rust) rows=$BENCH_ROWS; dest_db=$PG_DEST_DB; n_runs=$SYNTH_RUNS ;;
+        synthetic_filter_js) rows=$BENCH_ROWS; dest_db=$PG_DEST_DB; n_runs=$SYNTH_RUNS ;;
         *) die "unknown workload '$workload'" ;;
     esac
 

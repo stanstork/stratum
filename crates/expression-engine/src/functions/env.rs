@@ -4,17 +4,18 @@ use crate::{
     types::parse_env_as_type,
 };
 use model::core::value::Value;
+use std::borrow::Cow;
 
 /// Evaluate env() function with type-aware default handling
 ///
 /// Syntax:
 /// - env("VAR_NAME") - Required variable, fails if missing
 /// - env("VAR_NAME", default) - Optional variable, returns typed default if missing
-pub fn eval_env(args: &[Value], ctx: &EvalContext) -> Result<Value> {
+pub fn eval_env(args: &[Cow<'_, Value>], ctx: &EvalContext) -> Result<Value> {
     match args.len() {
         1 => {
             // Required environment variable
-            let var_name = match args.first() {
+            let var_name = match args.first().map(|c| &**c) {
                 Some(Value::String(s)) => s.as_str(),
                 _ => {
                     return Err(ExpressionError::InvalidFunctionArgs {
@@ -30,7 +31,7 @@ pub fn eval_env(args: &[Value], ctx: &EvalContext) -> Result<Value> {
         }
         2 => {
             // Optional environment variable with default
-            let var_name = match args.first() {
+            let var_name = match args.first().map(|c| &**c) {
                 Some(Value::String(s)) => s.as_str(),
                 _ => {
                     return Err(ExpressionError::InvalidFunctionArgs {
@@ -42,6 +43,7 @@ pub fn eval_env(args: &[Value], ctx: &EvalContext) -> Result<Value> {
 
             let default_value =
                 args.get(1)
+                    .map(|c| &**c)
                     .ok_or_else(|| ExpressionError::InvalidFunctionArgs {
                         function: "env".to_string(),
                         message: "env expects a default value as the second argument".to_string(),
@@ -72,7 +74,12 @@ pub fn eval_env(args: &[Value], ctx: &EvalContext) -> Result<Value> {
 mod tests {
     use super::*;
     use engine_core::context::env::EnvContext;
+    use std::borrow::Cow;
     use std::collections::HashMap;
+
+    fn cow(vs: Vec<Value>) -> Vec<Cow<'static, Value>> {
+        vs.into_iter().map(Cow::Owned).collect()
+    }
 
     #[test]
     fn test_env_required_exists() {
@@ -87,7 +94,7 @@ mod tests {
         };
 
         let args = vec![Value::String("TEST_VAR".to_string())];
-        let result = eval_env(&args, &ctx).unwrap();
+        let result = eval_env(&cow(args), &ctx).unwrap();
         assert_eq!(result, Value::String("test_value".to_string()));
     }
 
@@ -103,7 +110,7 @@ mod tests {
         };
 
         let args = vec![Value::String("MISSING_VAR".to_string())];
-        let result = eval_env(&args, &ctx);
+        let result = eval_env(&cow(args), &ctx);
         assert!(result.is_err());
     }
 
@@ -123,7 +130,7 @@ mod tests {
             Value::String("BATCH_SIZE".to_string()),
             Value::Float(1000.0),
         ];
-        let result = eval_env(&args, &ctx).unwrap();
+        let result = eval_env(&cow(args), &ctx).unwrap();
         assert_eq!(result, Value::UInt(5000));
     }
 
@@ -143,7 +150,7 @@ mod tests {
             Value::String("ENABLE_FEATURE".to_string()),
             Value::Boolean(false),
         ];
-        let result = eval_env(&args, &ctx).unwrap();
+        let result = eval_env(&cow(args), &ctx).unwrap();
         assert_eq!(result, Value::Boolean(true));
     }
 
@@ -159,7 +166,7 @@ mod tests {
         };
 
         let args = vec![Value::String("MISSING".to_string()), Value::Float(1234.0)];
-        let result = eval_env(&args, &ctx).unwrap();
+        let result = eval_env(&cow(args), &ctx).unwrap();
         assert_eq!(result, Value::Float(1234.0));
     }
 
@@ -176,7 +183,7 @@ mod tests {
         };
 
         let args = vec![Value::String("BAD_INT".to_string()), Value::Float(100.0)];
-        let result = eval_env(&args, &ctx);
+        let result = eval_env(&cow(args), &ctx);
         assert!(result.is_err());
     }
 }

@@ -21,7 +21,7 @@ use connectors::{
 };
 use engine_wasm::runtime::instance::PluginInstance;
 use model::{
-    execution::pipeline::Pipeline,
+    execution::pipeline::{Pipeline, ValidationKind},
     pagination::{cursor::Cursor, page::FetchResult},
     transform::mapping::TransformationMetadata,
 };
@@ -29,7 +29,10 @@ use query_builder::{
     dialect::{self, Dialect},
     offsets::{OffsetStrategy, OffsetStrategyFactory},
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use tracing::warn;
 
 pub mod csv;
@@ -152,6 +155,14 @@ impl Source {
             None => offset_strategy,
         };
 
+        let is_cascade = cascade_meta
+            .as_ref()
+            .is_some_and(|m| m.keys().any(|t| !t.eq_ignore_ascii_case(&name)));
+
+        // Projection pushdown: when the pipeline declares a `select`, read only
+        // the source columns actually referenced (plus the pagination columns).
+        let projection = Self::compute_projection(pipeline, &offset_strategy, &filter, is_cascade);
+
         let primary = Self::build_primary_reader(
             &name,
             &format,
@@ -161,6 +172,7 @@ impl Source {
             offset_strategy,
             cascade_meta,
             primary_meta,
+            projection,
         )?;
 
         Ok(Source {
@@ -195,6 +207,7 @@ impl Source {
             offset_strategy,
             None,       // no cascade metadata -> fetch_single (whole table)
             Some(meta), // primary metadata for column selection
+            None,       // whole-table read: no projection pushdown
         )?;
 
         Ok(Source {
@@ -230,6 +243,73 @@ impl Source {
         }
     }
 
+    /// The set of source columns the pipeline actually needs from the primary
+    /// table: everything referenced by the `select`, `when`, plugin inputs,
+    /// validations, and filter, plus the pagination cursor columns. `None` when
+    /// the pipeline has no projection (migrate every column - no pushdown).
+    fn compute_projection(
+        pipeline: &Pipeline,
+        offset_strategy: &Arc<dyn OffsetStrategy>,
+        filter: &Option<Filter>,
+        is_cascade: bool,
+    ) -> Option<HashSet<String>> {
+        if !pipeline.has_projection() {
+            return None;
+        }
+
+        if !pipeline.source.joins.is_empty() || is_cascade {
+            return None;
+        }
+
+        let mut cols: HashSet<String> = HashSet::new();
+
+        // `select` expressions (primary and named/cascade selects).
+        for t in &pipeline.transformations {
+            t.expression.collect_column_refs(&mut cols);
+        }
+
+        for transforms in pipeline.named_transformations.values() {
+            for t in transforms {
+                t.expression.collect_column_refs(&mut cols);
+            }
+        }
+
+        // Plugin transform inputs are source columns.
+        for call in &pipeline.plugin_transforms {
+            for source_col in call.input_mapping.values() {
+                cols.insert(source_col.to_ascii_lowercase());
+            }
+        }
+
+        // Validations run on the row and may reference source columns.
+        for rule in &pipeline.validations {
+            match &rule.kind {
+                ValidationKind::Assert { check } => {
+                    check.collect_column_refs(&mut cols);
+                }
+                ValidationKind::WasmFilter { input_mapping, .. } => {
+                    for source_col in input_mapping.values() {
+                        cols.insert(source_col.to_ascii_lowercase());
+                    }
+                }
+            }
+        }
+
+        // Row filter pushed to the source references columns too.
+        if let Some(Filter::Sql(sf)) = filter {
+            for c in sf.columns() {
+                cols.insert(c.to_ascii_lowercase());
+            }
+        }
+
+        // Pagination cursor columns MUST be read or the cursor advances to NULL.
+        for c in offset_strategy.required_columns() {
+            cols.insert(c.to_ascii_lowercase());
+        }
+
+        Some(cols)
+    }
+
     /// Helper to isolate the complex logic of constructing the primary data reader
     #[allow(clippy::too_many_arguments)]
     fn build_primary_reader<D>(
@@ -241,6 +321,7 @@ impl Source {
         offset_strategy: Arc<dyn OffsetStrategy>,
         cascade_meta: Option<HashMap<String, TableMetadata>>,
         primary_meta_fallback: Option<TableMetadata>,
+        projection: Option<HashSet<String>>,
     ) -> Result<Arc<dyn SourceReader>, DriverError>
     where
         D: DataReader + SchemaIntrospector,
@@ -262,6 +343,7 @@ impl Source {
                     join,
                     sql_filter,
                     offset_strategy,
+                    projection,
                 );
 
                 if let Some(mut cascade) = cascade_meta {

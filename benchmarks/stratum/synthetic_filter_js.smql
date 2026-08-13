@@ -1,0 +1,75 @@
+// Benchmark: synthetic single-table load through a JavaScript (QuickJS) WASM *filter*
+// plugin, MySQL -> PostgreSQL.
+//
+// Same `bench.orders` source as synthetic.smql. Each row is validated by three
+// calls to the `order_ok` filter plugin (pass if the input is non-negative),
+// plus several copied-through source columns. The inputs (amount, quantity,
+// customer_id) are all non-negative, so every row passes and the full pipeline
+// runs - this measures the per-row plugin-FILTER invocation cost (three WASM
+// boundary crossings/row through the validation stage).
+//
+// The plugin .wasm and URLs come from the environment; run.sh builds the plugin.
+
+connection "src" {
+    driver = "mysql"
+    url    = env("BENCH_SYNTH_MYSQL_URL")
+}
+
+connection "dst" {
+    driver = "postgres"
+    url    = env("BENCH_SYNTH_PG_URL")
+}
+
+plugin "order_ok" {
+    path = env("BENCH_PLUGIN_FILTER_JS_WASM")
+}
+
+pipeline "orders_filter_js" {
+    from {
+        connection = connection.src
+        table      = "orders"
+    }
+
+    to {
+        connection = connection.dst
+        table      = "orders_filter_js"
+
+        postgres {
+            pk_creation = "post"
+            copy_format = "binary"
+        }
+    }
+
+    select {
+        order_id    = orders.id
+        customer_id = orders.customer_id
+        status      = orders.status
+        currency    = orders.currency
+        amount      = orders.amount
+        quantity    = orders.quantity
+        sku         = orders.sku
+        created_at  = orders.created_at
+    }
+
+    validate {
+        // Three filter-plugin calls per row (each is one WASM boundary crossing).
+        assert "amount_ok" {
+            check  = plugin.order_ok({ amount: orders.amount })
+            action = skip
+        }
+        assert "quantity_ok" {
+            check  = plugin.order_ok({ amount: orders.quantity })
+            action = skip
+        }
+        assert "customer_ok" {
+            check  = plugin.order_ok({ amount: orders.customer_id })
+            action = skip
+        }
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 50000
+        lanes                 = 1
+    }
+}

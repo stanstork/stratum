@@ -485,10 +485,12 @@ validate {
 ```
 
 Expression checks are compiled and run by the expression engine; plugin checks
-are dispatched to the WASM/JS runtime by the same per-row validator. A plugin
-call is only allowed as the *entire* `check` - it cannot be embedded inside a
-larger expression. When a plugin rejects a row, the reason it returns is used as
-the failure message, so `message` is typically omitted for plugin checks.
+are dispatched to the WASM/JS runtime by a batch-native validator that crosses
+the plugin boundary once per batch (not once per row) and gets back one verdict
+per row. A plugin call is only allowed as the *entire* `check` - it cannot be
+embedded inside a larger expression. When a plugin rejects a row, the reason it
+returns is used as the failure message, so `message` is typically omitted for
+plugin checks.
 
 ---
 

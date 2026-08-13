@@ -1,27 +1,30 @@
-use crate::transform::{
-    error::TransformError,
-    validation::{ValidationAction, ValidationResult},
+use crate::{
+    profile,
+    transform::{
+        error::TransformError,
+        validation::{Action, ValidationResult},
+    },
 };
 use model::records::Record;
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use tracing::warn;
 
 /// Split `rows` into maximal contiguous runs that share one schema `Arc` (i.e.
 /// one table) and call `f(offset, run)` for each.
 pub(crate) fn for_each_table(rows: &mut [Record], mut f: impl FnMut(usize, &mut [Record])) {
-    let mut start = 0;
+    let mut offset = 0;
 
-    while start < rows.len() {
-        let start_ptr = Arc::as_ptr(rows[start].schema());
-        let mut end = start + 1;
+    while offset < rows.len() {
+        let current_schema = rows[offset].schema();
 
-        while end < rows.len() && std::ptr::eq(Arc::as_ptr(rows[end].schema()), start_ptr) {
-            end += 1;
-        }
+        // Find the first row that has a different schema, or the end of the slice
+        let len = rows[offset..]
+            .iter()
+            .position(|r| !Arc::ptr_eq(current_schema, r.schema()))
+            .unwrap_or(rows.len() - offset);
 
-        f(start, &mut rows[start..end]);
-
-        start = end;
+        f(offset, &mut rows[offset..offset + len]);
+        offset += len;
     }
 }
 
@@ -68,6 +71,11 @@ pub trait Transform: Send + Sync {
     /// Apply to a single row in place.
     fn apply(&self, row: &mut Record) -> Result<(), TransformError>;
 
+    /// Stable label for profiling (which stage this is). Overridden per impl.
+    fn kind(&self) -> &'static str {
+        "transform"
+    }
+
     /// Apply to a whole batch.
     fn apply_batch(&self, rows: &mut [Record], failures: &mut Vec<(usize, TransformError)>) {
         for (i, row) in rows.iter_mut().enumerate() {
@@ -85,6 +93,17 @@ pub trait Filter: Send + Sync {
 
 pub trait Validator: Send + Sync {
     fn validate(&self, row: &Record) -> Result<ValidationResult, TransformError>;
+
+    /// Validate a whole batch at once, pushing one result per row.
+    fn validate_batch(
+        &self,
+        rows: &[Record],
+        out: &mut Vec<Result<ValidationResult, TransformError>>,
+    ) {
+        for row in rows {
+            out.push(self.validate(row));
+        }
+    }
 }
 
 pub trait TransformPipelineExt {
@@ -153,13 +172,13 @@ impl TransformPipeline {
     /// Run the whole pipeline over a batch, **stage by stage**.
     pub fn run_batch(&self, mut rows: Vec<Record>) -> BatchOutput {
         let mut filtered = Vec::new();
-        let mut failed: Vec<(Record, TransformError)> = Vec::new();
+        let mut failed = Vec::new();
 
-        let mut warn_scratch = Vec::new();
-        let mut scratch: Vec<Record> = Vec::new();
+        let mut scratch = Vec::new();
+        let mut val_results = Vec::new();
 
-        let mut failures: Vec<(usize, TransformError)> = Vec::new();
-        let mut removals: Vec<(usize, Removal)> = Vec::new();
+        let mut failures = Vec::new();
+        let mut removals = Vec::new();
 
         for stage in &self.stages {
             if rows.is_empty() {
@@ -169,14 +188,18 @@ impl TransformPipeline {
             match stage {
                 PipelineStage::Transform(transform) => {
                     failures.clear();
+
+                    let t = Instant::now();
                     transform.apply_batch(&mut rows, &mut failures);
+                    profile::record_stage(transform.kind(), t.elapsed());
 
                     if !failures.is_empty() {
                         removals.clear();
-
-                        for (idx, err) in failures.drain(..) {
-                            removals.push((idx, Removal::Fail(err)));
-                        }
+                        removals.extend(
+                            failures
+                                .drain(..)
+                                .map(|(idx, err)| (idx, Removal::Fail(err))),
+                        );
 
                         drain_removals(
                             &mut rows,
@@ -192,20 +215,41 @@ impl TransformPipeline {
                     filtered.extend(rows.extract_if(.., |row| !filter.should_keep(row)));
                 }
                 PipelineStage::Validation(validator) => {
-                    // Validate in place, recording removals by index.
+                    // Validate the whole batch at once, recording removals by index.
                     removals.clear();
+                    val_results.clear();
 
-                    for (i, row) in rows.iter_mut().enumerate() {
-                        match self.validate(row, validator, &mut warn_scratch) {
-                            // Passed or warned (non-fatal): keep the row.
-                            Ok(None) => {}
-                            // Skip action: route to filtered.
-                            Ok(Some(_)) => removals.push((i, Removal::Filter)),
-                            // Fail action: route to failed (fatal for the run).
+                    let t = Instant::now();
+                    validator.validate_batch(&rows, &mut val_results);
+
+                    for (i, res) in val_results.drain(..).enumerate() {
+                        match res {
+                            // Passed: keep the row.
+                            Ok(ValidationResult::Pass) => {}
+                            Ok(ValidationResult::Failed {
+                                rule,
+                                message,
+                                action,
+                            }) => match action {
+                                // Skip action: route to filtered.
+                                Action::Skip => removals.push((i, Removal::Filter)),
+                                // Fail action: route to failed (fatal for the run).
+                                Action::Fail => removals.push((
+                                    i,
+                                    Removal::Fail(TransformError::ValidationFailed {
+                                        rule,
+                                        message,
+                                    }),
+                                )),
+                                // Warn action: non-fatal, keep the row.
+                                Action::Warn => {}
+                            },
+                            // Evaluation error (bad expr, plugin crossing failure).
                             Err(e) => removals.push((i, Removal::Fail(e))),
                         }
-                        warn_scratch.clear();
                     }
+
+                    profile::record_stage("validation", t.elapsed());
 
                     if !removals.is_empty() {
                         drain_removals(
@@ -250,28 +294,24 @@ impl TransformPipeline {
         validator: &Arc<dyn Validator>,
         warnings: &mut Vec<ValidationWarning>,
     ) -> Result<Option<ApplyOutcome>, TransformError> {
-        let res = validator.validate(row)?;
-
         if let ValidationResult::Failed {
             rule,
             message,
             action,
-        } = res
+        } = validator.validate(row)?
         {
             match action {
-                ValidationAction::Skip => {
+                Action::Skip => {
                     warn!(rule = %rule, message = %message, "validation failed, skipping row");
                     return Ok(Some(ApplyOutcome::Skipped {
-                        reason: Some(format!("Validation '{}' failed: {}", rule, message)),
+                        reason: Some(format!("Validation '{rule}' failed: {message}")),
                     }));
                 }
-                ValidationAction::Fail => {
+                Action::Fail => {
                     return Err(TransformError::ValidationFailed { rule, message });
                 }
-                ValidationAction::Warn => {
+                Action::Warn => {
                     warn!(rule = %rule, message = %message, "validation failed, continuing");
-                    // `res` was destructured by value, so move the strings in
-                    // rather than cloning.
                     warnings.push(ValidationWarning { rule, message });
                 }
             }

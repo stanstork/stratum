@@ -10,7 +10,7 @@ transform("test_transform", {
     a: "f64",
     b: "f64",
   },
-  compute({ a, b }) {
-    return a + b;
+  compute(rows) {
+    return rows.map(({ a, b }) => a + b);
   },
 });

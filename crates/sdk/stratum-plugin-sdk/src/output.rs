@@ -1,4 +1,4 @@
-use crate::{exchange::json_v1, value::Value};
+use crate::value::Value;
 
 /// A single typed value returned by a transform plugin.
 #[derive(Debug, Clone)]
@@ -15,12 +15,6 @@ impl PluginOutput {
 
     pub fn null() -> Self {
         Self { value: Value::Null }
-    }
-
-    /// Serialize as the host-compatible `{"type": ..., "value": ...}` object.
-    pub fn to_json_bytes(&self) -> Vec<u8> {
-        let json = json_v1::value_to_json(&self.value);
-        serde_json::to_vec(&json).unwrap_or_default()
     }
 }
 

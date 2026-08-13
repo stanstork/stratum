@@ -72,6 +72,11 @@ pub trait OffsetStrategy: Send + Sync {
     /// Returns the name of the offset strategy.
     fn name(&self) -> String;
 
+    /// Columns this strategy reads from each fetched row to advance the cursor.
+    fn required_columns(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Whether this is the fallback OFFSET strategy with no deterministic order.
     fn is_default(&self) -> bool {
         false
@@ -181,6 +186,10 @@ fn default_pk() -> QualCol {
 }
 
 impl OffsetStrategy for PkOffset {
+    fn required_columns(&self) -> Vec<String> {
+        vec![self.pk.column.clone()]
+    }
+
     fn apply_to_builder(
         &self,
         mut builder: SelectBuilder<FromState>,
@@ -242,6 +251,10 @@ impl OffsetStrategy for PkOffset {
 }
 
 impl OffsetStrategy for NumericOffset {
+    fn required_columns(&self) -> Vec<String> {
+        vec![self.col.column.clone(), self.pk.column.clone()]
+    }
+
     fn apply_to_builder(
         &self,
         mut builder: SelectBuilder<FromState>,
@@ -329,6 +342,10 @@ impl NumericOffset {
 }
 
 impl OffsetStrategy for TimestampOffset {
+    fn required_columns(&self) -> Vec<String> {
+        vec![self.ts_col.column.clone(), self.pk.column.clone()]
+    }
+
     fn apply_to_builder(
         &self,
         mut builder: SelectBuilder<FromState>,
@@ -528,6 +545,10 @@ impl KeysetOffset {
 }
 
 impl OffsetStrategy for KeysetOffset {
+    fn required_columns(&self) -> Vec<String> {
+        self.keys.iter().map(|k| k.column.clone()).collect()
+    }
+
     fn apply_to_builder(
         &self,
         mut builder: SelectBuilder<FromState>,

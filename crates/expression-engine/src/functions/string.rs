@@ -3,11 +3,21 @@ use crate::{
     error::{ExpressionError, Result},
 };
 use model::core::value::Value;
+use std::borrow::Cow;
+
+/// First argument as `&Value`, borrowed through the `Cow` (no clone).
+fn arg0<'a>(args: &'a [Cow<'a, Value>]) -> Option<&'a Value> {
+    args.first().map(|c| &**c)
+}
 
 /// Convert string to lowercase
-pub fn eval_lower(args: &[Value], _ctx: &EvalContext) -> Result<Value> {
-    match args.first() {
-        Some(Value::String(s)) => Ok(Value::String(s.to_lowercase())),
+pub fn eval_lower(args: &[Cow<'_, Value>], _ctx: &EvalContext) -> Result<Value> {
+    match arg0(args) {
+        Some(Value::String(s)) => Ok(Value::String(if s.is_ascii() {
+            s.to_ascii_lowercase()
+        } else {
+            s.to_lowercase()
+        })),
         Some(other) => Err(ExpressionError::InvalidFunctionArgs {
             function: "lower".to_string(),
             message: format!("Expected string, got {:?}", other),
@@ -20,9 +30,13 @@ pub fn eval_lower(args: &[Value], _ctx: &EvalContext) -> Result<Value> {
 }
 
 /// Convert string to uppercase
-pub fn eval_upper(args: &[Value], _ctx: &EvalContext) -> Result<Value> {
-    match args.first() {
-        Some(Value::String(s)) => Ok(Value::String(s.to_uppercase())),
+pub fn eval_upper(args: &[Cow<'_, Value>], _ctx: &EvalContext) -> Result<Value> {
+    match arg0(args) {
+        Some(Value::String(s)) => Ok(Value::String(if s.is_ascii() {
+            s.to_ascii_uppercase()
+        } else {
+            s.to_uppercase()
+        })),
         Some(other) => Err(ExpressionError::InvalidFunctionArgs {
             function: "upper".to_string(),
             message: format!("Expected string, got {:?}", other),
@@ -35,8 +49,8 @@ pub fn eval_upper(args: &[Value], _ctx: &EvalContext) -> Result<Value> {
 }
 
 /// Strip leading and trailing whitespace from a string
-pub fn eval_trim(args: &[Value], _ctx: &EvalContext) -> Result<Value> {
-    match args.first() {
+pub fn eval_trim(args: &[Cow<'_, Value>], _ctx: &EvalContext) -> Result<Value> {
+    match arg0(args) {
         Some(Value::String(s)) => Ok(Value::String(s.trim().to_string())),
         Some(Value::Null) | None => Ok(Value::Null),
         Some(other) => Err(ExpressionError::InvalidFunctionArgs {
@@ -46,8 +60,8 @@ pub fn eval_trim(args: &[Value], _ctx: &EvalContext) -> Result<Value> {
     }
 }
 
-/// Concatenate multiple values into a string
-pub fn eval_concat(args: &[Value], _ctx: &EvalContext) -> Result<Value> {
+/// Concatenate multiple values into a string.
+pub fn eval_concat(args: &[Cow<'_, Value>], _ctx: &EvalContext) -> Result<Value> {
     let mut out = String::new();
     for arg in args {
         write_value_string(arg, &mut out);
@@ -84,7 +98,12 @@ fn write_value_string(value: &Value, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::borrow::Cow;
     use std::collections::HashMap;
+
+    fn args(vs: Vec<Value>) -> Vec<Cow<'static, Value>> {
+        vs.into_iter().map(Cow::Owned).collect()
+    }
 
     fn dummy_env_getter(_key: &str) -> Option<String> {
         None
@@ -105,8 +124,7 @@ mod tests {
     #[test]
     fn test_lower() {
         with_dummy_ctx(|ctx| {
-            let args = vec![Value::String("HELLO".to_string())];
-            let result = eval_lower(&args, ctx).unwrap();
+            let result = eval_lower(&args(vec![Value::String("HELLO".to_string())]), ctx).unwrap();
             assert_eq!(result, Value::String("hello".to_string()));
         });
     }
@@ -114,8 +132,7 @@ mod tests {
     #[test]
     fn test_upper() {
         with_dummy_ctx(|ctx| {
-            let args = vec![Value::String("world".to_string())];
-            let result = eval_upper(&args, ctx).unwrap();
+            let result = eval_upper(&args(vec![Value::String("world".to_string())]), ctx).unwrap();
             assert_eq!(result, Value::String("WORLD".to_string()));
         });
     }
@@ -123,12 +140,15 @@ mod tests {
     #[test]
     fn test_concat() {
         with_dummy_ctx(|ctx| {
-            let args = vec![
-                Value::String("Hello".to_string()),
-                Value::String(" ".to_string()),
-                Value::String("World".to_string()),
-            ];
-            let result = eval_concat(&args, ctx).unwrap();
+            let result = eval_concat(
+                &args(vec![
+                    Value::String("Hello".to_string()),
+                    Value::String(" ".to_string()),
+                    Value::String("World".to_string()),
+                ]),
+                ctx,
+            )
+            .unwrap();
             assert_eq!(result, Value::String("Hello World".to_string()));
         });
     }
@@ -136,8 +156,11 @@ mod tests {
     #[test]
     fn test_concat_mixed_types() {
         with_dummy_ctx(|ctx| {
-            let args = vec![Value::String("Count: ".to_string()), Value::Int(42)];
-            let result = eval_concat(&args, ctx).unwrap();
+            let result = eval_concat(
+                &args(vec![Value::String("Count: ".to_string()), Value::Int(42)]),
+                ctx,
+            )
+            .unwrap();
             assert_eq!(result, Value::String("Count: 42".to_string()));
         });
     }

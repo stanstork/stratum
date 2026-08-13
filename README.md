@@ -6,6 +6,8 @@
 
 Stratum is a declarative data pipeline engine written in Rust. It migrates data and schema between databases safely, with crash recovery, parallel execution, rich transformation capabilities, and cryptographic post-migration verification.
 
+On a 10M-row MySQL->PostgreSQL copy it sustains ~570K rows/s on a single lane and up to ~1.2M rows/s with parallel lanes ([benchmarks](docs/benchmarks.md)).
+
 ```smql
 connection "source" {
   driver = "mysql"

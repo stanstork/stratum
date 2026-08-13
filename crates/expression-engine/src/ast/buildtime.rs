@@ -4,7 +4,7 @@ use smql_syntax::ast::{
     expr::{Expression, ExpressionKind},
     literal::Literal,
 };
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 /// Evaluate AST expressions to values at build-time
 /// This is used during plan building for simple expressions (literals + function calls)
@@ -38,10 +38,9 @@ pub fn eval_ast_expression(
             }
         }
         ExpressionKind::FunctionCall { name, arguments } => {
-            // Evaluate arguments to values
-            let args: Vec<Value> = arguments
+            let args: Vec<Cow<'_, Value>> = arguments
                 .iter()
-                .map(|arg| eval_ast_expression(arg, definitions, env_getter))
+                .map(|arg| eval_ast_expression(arg, definitions, env_getter).map(Cow::Owned))
                 .collect::<Result<Vec<_>, _>>()?;
 
             let registry = FunctionRegistry::new();

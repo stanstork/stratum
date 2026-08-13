@@ -3,10 +3,10 @@ use crate::{
     plan::{builder::PlanBuilder, env::EnvVarCollector},
 };
 use model::execution::{
+    config::ExecutionConfig,
     connection::Connection,
     define::{EnvVar, GlobalDefinitions},
     errors::ConvertError,
-    execution_config::ExecutionConfig,
     pipeline::Pipeline,
     plugin::PluginDecl,
 };

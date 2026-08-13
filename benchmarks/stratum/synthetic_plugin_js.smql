@@ -3,10 +3,8 @@
 //
 // Identical to synthetic_plugin_rust.smql except the `order_net` transform is
 // the JavaScript plugin (compiled to WASM via QuickJS), so the JS and native
-// Rust plugin runtimes are measured on the same per-row transform.
-//
-// The plugin .wasm and the URLs come from the environment; run.sh compiles the
-// plugin and exports the paths.
+// Rust plugin runtimes are measured on the same work: three boundary crossings
+// per row plus a realistic set of copied-through columns.
 
 connection "src" {
     driver = "mysql"
@@ -39,8 +37,20 @@ pipeline "orders_plugin_js" {
     }
 
     select {
-        order_id = orders.id
-        net      = plugin.order_net({ amount: orders.amount, quantity: orders.quantity })
+        // Copy original columns through.
+        order_id    = orders.id
+        customer_id = orders.customer_id
+        status      = orders.status
+        currency    = orders.currency
+        amount      = orders.amount
+        quantity    = orders.quantity
+        sku         = orders.sku
+        created_at  = orders.created_at
+
+        // Three JS plugin calls per row (each is one boundary crossing).
+        net   = plugin.order_net({ amount: orders.amount,   quantity: orders.quantity })
+        score = plugin.order_net({ amount: orders.quantity, quantity: orders.customer_id })
+        ext   = plugin.order_net({ amount: orders.amount,   quantity: orders.customer_id })
     }
 
     settings {

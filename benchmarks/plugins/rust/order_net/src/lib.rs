@@ -2,10 +2,10 @@
 //!
 //! Deliberately identical logic to ../../js/order_net.js so the two plugin
 //! runtimes (native Rust compiled to WASM vs JavaScript on QuickJS-in-WASM) are
-//! measured on the exact same per-row transform. The transform is trivial on
-//! purpose: it isolates the per-row plugin-invocation cost (the WASM boundary +
-//! value marshalling) of each runtime rather than the arithmetic.
-use stratum_plugin_sdk::{PluginInput, PluginResult, stratum_transform};
+//! measured on the exact same transform. The transform is trivial on purpose: it
+//! isolates each runtime's plugin-invocation cost (the WASM boundary + value
+//! marshalling, now amortized across the whole batch) rather than the arithmetic.
+use stratum_plugin_sdk::{stratum_transform, PluginInput, PluginResult};
 
 #[stratum_transform(
     name = "order_net",
@@ -16,8 +16,13 @@ use stratum_plugin_sdk::{PluginInput, PluginResult, stratum_transform};
         { name = "quantity", type = "f64", nullable = false },
     ]
 )]
-fn order_net(input: PluginInput) -> PluginResult<f64> {
-    let amount = input.get_f64("amount")?;
-    let quantity = input.get_f64("quantity")?;
-    Ok(amount * quantity)
+fn order_net(inputs: Vec<PluginInput>) -> PluginResult<Vec<f64>> {
+    inputs
+        .iter()
+        .map(|input| {
+            let amount = input.get_f64("amount")?;
+            let quantity = input.get_f64("quantity")?;
+            Ok(amount * quantity)
+        })
+        .collect()
 }

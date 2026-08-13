@@ -52,12 +52,26 @@ function __stratum_dispatch(role, inputJson) {
 
     switch (role) {
         case "transform": {
-            const result = STORE.handler(unwrapRow(raw), STORE.config || {});
-            return JSON.stringify({ type: typeOf(d.output), value: result });
+            const rows = raw;
+            const results = STORE.handler(rows, STORE.config || {});
+            if (!Array.isArray(results) || results.length !== rows.length) {
+                throw new Error(
+                    `transform must return an array of ${rows.length} values, got ${Array.isArray(results) ? results.length : typeof results
+                    }`
+                );
+            }
+            return JSON.stringify(results);
         }
         case "filter": {
-            const decision = STORE.handler(unwrapRow(raw), STORE.config || {});
-            return JSON.stringify(decision); // {pass, reason?}
+            const rows = raw;
+            const decisions = STORE.handler(rows, STORE.config || {});
+            if (!Array.isArray(decisions) || decisions.length !== rows.length) {
+                throw new Error(
+                    `filter must return an array of ${rows.length} decisions, got ${Array.isArray(decisions) ? decisions.length : typeof decisions
+                    }`
+                );
+            }
+            return JSON.stringify(decisions); // [{pass, reason?}, ...]
         }
         case "source": {
             // raw = {cursor}. (Config plumbing into JS is not wired yet.)

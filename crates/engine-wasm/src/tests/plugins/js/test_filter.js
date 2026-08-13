@@ -6,10 +6,11 @@ filter("test_filter", {
   input: {
     value: "i64",
   },
-  evaluate({ value }) {
-    if (value > 0) {
-      return { pass: true };
-    }
-    return { pass: false, reason: "value must be positive" };
+  evaluate(rows) {
+    return rows.map(({ value }) =>
+      value > 0
+        ? { pass: true }
+        : { pass: false, reason: "value must be positive" }
+    );
   },
 });

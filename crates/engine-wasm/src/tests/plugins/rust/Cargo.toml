@@ -3,6 +3,7 @@ members = [
     "test_alloc",
     "test_sink",
     "test_transform",
+    "test_echo",
     "test_filter",
     "test_source",
     "test_infinite_loop",

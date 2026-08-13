@@ -9,8 +9,13 @@ use stratum_plugin_sdk::{PluginInput, PluginResult, stratum_transform};
         { name = "b", type = "f64", nullable = false },
     ]
 )]
-fn add(input: PluginInput) -> PluginResult<f64> {
-    let a = input.get_f64("a")?;
-    let b = input.get_f64("b")?;
-    Ok(a + b)
+fn add(inputs: Vec<PluginInput>) -> PluginResult<Vec<f64>> {
+    inputs
+        .iter()
+        .map(|input| {
+            let a = input.get_f64("a")?;
+            let b = input.get_f64("b")?;
+            Ok(a + b)
+        })
+        .collect()
 }

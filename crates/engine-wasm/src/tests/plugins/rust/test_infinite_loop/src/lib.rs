@@ -8,7 +8,7 @@ use stratum_plugin_sdk::{PluginInput, PluginResult, stratum_transform};
     output = "f64",
     input = []
 )]
-fn spin(_input: PluginInput) -> PluginResult<f64> {
+fn spin(_inputs: Vec<PluginInput>) -> PluginResult<Vec<f64>> {
     loop {
         std::hint::spin_loop();
     }

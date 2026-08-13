@@ -68,14 +68,12 @@ use model::execution::row_count::RowCount;
 use model::{
     core::value::Value,
     execution::{
-        execution_config::FailureStrategy as CoreFailureStrategy,
+        config::FailureStrategy as CoreFailureStrategy,
         pipeline::{BackoffStrategy, ErrorHandling, FailedRowsDestination, FileFormat, Pipeline},
     },
 };
 use model::{
-    execution::{
-        define::DefinitionSource, execution_config::ExecutionStrategy as CoreExecutionStrategy,
-    },
+    execution::{config::ExecutionStrategy as CoreExecutionStrategy, define::DefinitionSource},
     transform::mapping::TransformationMetadata,
 };
 use std::{

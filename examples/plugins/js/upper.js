@@ -6,7 +6,7 @@ transform("upper", {
   version: "1.0.0",
   output: "string",
   input: { name: "string" },
-  compute({ name }) {
-    return (name ?? "").toUpperCase();
+  compute(rows) {
+    return rows.map(({ name }) => (name ?? "").toUpperCase());
   },
 });

@@ -56,6 +56,9 @@ pub struct DbSourceReader {
 
     /// The offset strategy to use for pagination.
     offset_strategy: Arc<dyn OffsetStrategy>,
+
+    /// Projection pushdown for the primary table.
+    projection: Option<HashSet<String>>,
 }
 
 impl DbSourceReader {
@@ -64,6 +67,7 @@ impl DbSourceReader {
         join: Option<JoinSource>,
         filter: Option<SqlFilter>,
         offset_strategy: Arc<dyn OffsetStrategy>,
+        projection: Option<HashSet<String>>,
     ) -> Self {
         DbSourceReader {
             emitted_related: Mutex::new(HashMap::new()),
@@ -74,6 +78,7 @@ impl DbSourceReader {
             filter,
             cascade_joins: HashMap::new(),
             offset_strategy,
+            projection,
         }
     }
 
@@ -104,6 +109,16 @@ impl DbSourceReader {
     ) -> FetchRowsRequest {
         // base columns
         let mut columns = meta.select_fields();
+
+        // Projection pushdown.
+        if include_join_fields
+            && let Some(projection) = &self.projection
+            && columns
+                .iter()
+                .any(|f| Self::projection_matches(projection, &f.column))
+        {
+            columns.retain(|f| Self::projection_matches(projection, &f.column));
+        }
 
         // optionally merge in the JoinSource's extra fields
         if include_join_fields && let Some(join_source) = &self.join {
@@ -561,6 +576,10 @@ impl DbSourceReader {
         );
 
         Ok((rows, next_cursor, reached_end))
+    }
+
+    fn projection_matches(projection: &HashSet<String>, column: &str) -> bool {
+        projection.contains(column) || projection.iter().any(|p| p.eq_ignore_ascii_case(column))
     }
 }
 

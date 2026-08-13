@@ -4,6 +4,7 @@ use engine_core::{
     utils::make_item_id,
 };
 use engine_infra::shutdown::ShutdownSignal;
+use engine_processing::profile;
 use engine_runtime::{
     dag::{Dag, builder::DagBuilder, executor::DagExecutor},
     error::MigrationError,
@@ -118,6 +119,9 @@ fn build_dag(plan: &ExecutionPlan) -> Result<Dag, CliError> {
 
 /// Handles execution result consistently across modes
 fn handle_execution_result(result: Result<(), MigrationError>) -> Result<(), CliError> {
+    // Stage timing summary (no-op unless STRATUM_PROFILE is set).
+    profile::dump();
+
     match result {
         Ok(_) => {
             info!("migration completed successfully");
