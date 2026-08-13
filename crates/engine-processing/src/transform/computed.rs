@@ -1,7 +1,7 @@
 use super::pipeline::{Transform, for_each_table};
 use crate::transform::error::TransformError;
 use engine_core::context::env::EnvContext;
-use expression_engine::{Evaluator, PreparedExpr};
+use expression_engine::{EvalContext, Evaluator, Program, TreeExpr};
 use model::{
     core::value::Value,
     records::{Record, RecordSchema, SchemaColumn},
@@ -29,6 +29,13 @@ enum Slot {
     Append,
 }
 
+/// A computed field compiled either to the bytecode stack machine (fast path) or,
+/// when the VM declines to lower it, to the `TreeExpr` tree-walk.
+enum Compiled {
+    Vm(Program),
+    Tree(TreeExpr),
+}
+
 impl ComputedTransform {
     pub fn new(mapping: TransformationMetadata, env: Arc<EnvContext>) -> Self {
         Self { mapping, env }
@@ -36,36 +43,32 @@ impl ComputedTransform {
 }
 
 impl Transform for ComputedTransform {
+    fn kind(&self) -> &'static str {
+        "computed"
+    }
+
     fn apply(&self, row: &mut Record) -> Result<(), TransformError> {
-        let Some(computed_fields) = self.mapping.field_mappings.computed_fields.get(row.table())
-        else {
-            return Ok(());
+        let computed_fields = match self.mapping.field_mappings.computed_fields.get(row.table()) {
+            Some(fields) if !fields.is_empty() => fields,
+            _ => return Ok(()),
         };
 
-        if computed_fields.is_empty() {
-            return Ok(());
-        }
-
-        let env = &self.env;
-        let env_getter = |key: &str| env.get(key);
-
-        // Evaluate every computed expression against the (input) row.
+        let env_getter = |key: &str| self.env.get(key);
         let mut values = Vec::with_capacity(computed_fields.len());
 
+        // Evaluate every computed expression against the (input) row.
         for computed in computed_fields {
-            match computed
+            let val = computed
                 .expression
                 .evaluate(row, &self.mapping, &env_getter)
-            {
-                Some(v) => values.push(v),
-                None => {
-                    return Err(TransformError::Transformation(format!(
+                .ok_or_else(|| {
+                    TransformError::Transformation(format!(
                         "Failed to evaluate computed column `{}` in `{}`",
                         computed.name,
                         row.table()
-                    )));
-                }
-            }
+                    ))
+                })?;
+            values.push(val);
         }
 
         let input = Arc::clone(row.schema());
@@ -82,42 +85,60 @@ impl Transform for ComputedTransform {
                 return;
             };
 
-            let Some(computed_fields) = self
+            let computed_fields = match self
                 .mapping
                 .field_mappings
                 .computed_fields
                 .get(first.table())
-            else {
-                return;
+            {
+                Some(fields) if !fields.is_empty() => fields,
+                _ => return,
             };
-
-            if computed_fields.is_empty() {
-                return;
-            }
 
             let input_schema = Arc::clone(first.schema());
             let table = input_schema.table();
 
-            let prepared: Vec<PreparedExpr> = computed_fields
+            // compile: bind each expression to the schema (once per table run).
+            // Prefer the bytecode VM; fall back to the tree-walk for anything it declines to lower.
+            let compiled: Vec<Compiled> = computed_fields
                 .iter()
-                .map(|c| PreparedExpr::compile(&c.expression, &input_schema, &self.mapping, table))
+                .map(|c| {
+                    match Program::compile(&c.expression, &input_schema, &self.mapping, table) {
+                        Some(p) => Compiled::Vm(p),
+                        None => Compiled::Tree(TreeExpr::compile(
+                            &c.expression,
+                            &input_schema,
+                            &self.mapping,
+                            table,
+                        )),
+                    }
+                })
                 .collect();
 
-            let env = &self.env;
-            let env_getter = |key: &str| env.get(key);
-
+            let env_getter = |key: &str| self.env.get(key);
             let mut scratch: Vec<Value> = Vec::with_capacity(computed_fields.len());
             let mut plan: Option<Arc<ComputedPlan>> = None;
 
             for (i, row) in run.iter_mut().enumerate() {
                 scratch.clear();
 
-                // Evaluate every computed expression against this row.
-                let mut evaluated = true;
+                // One runtime context per row, shared by every VM field.
+                let ctx = EvalContext::Runtime {
+                    row_data: row,
+                    mapping: &self.mapping,
+                    env_getter: &env_getter,
+                };
 
-                for (expr, computed) in prepared.iter().zip(computed_fields) {
-                    match expr.eval(row, &self.mapping, &env_getter) {
-                        Some(v) => scratch.push(v),
+                let mut success = true;
+
+                for (compiled, computed) in compiled.iter().zip(computed_fields) {
+                    let value = match compiled {
+                        Compiled::Vm(p) => p.eval(row, &ctx),
+                        Compiled::Tree(e) => e.eval(row, &self.mapping, &env_getter),
+                    };
+
+                    match value {
+                        Some(v) => scratch.push(v.into_owned()),
                         None => {
                             failures.push((
                                 offset + i,
@@ -127,27 +148,26 @@ impl Transform for ComputedTransform {
                                     row.table()
                                 )),
                             ));
-                            evaluated = false;
+                            success = false;
                             break;
                         }
                     }
                 }
-                if !evaluated {
+
+                if !success {
                     continue;
                 }
 
-                // Build the plan on the first row of the run (all rows share a
-                // schema); re-derive only if the schema changes.
-                let need_plan = match &plan {
-                    Some(p) => !Arc::ptr_eq(&p.input, row.schema()),
-                    None => true,
-                };
-
-                if need_plan {
+                // Build the plan on the first row of the run (all rows share a schema);
+                // re-derive only if the schema changes.
+                if plan
+                    .as_ref()
+                    .is_none_or(|p| !Arc::ptr_eq(&p.input, row.schema()))
+                {
                     plan = Some(build_plan(row.schema(), computed_fields, &scratch));
                 }
 
-                if let Some(p) = plan.as_ref() {
+                if let Some(p) = &plan {
                     apply_plan(row, &mut scratch, p);
                 }
             }

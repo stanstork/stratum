@@ -25,7 +25,7 @@ use futures::stream::{self, StreamExt};
 use model::{
     events::migration::MigrationEvent,
     execution::{
-        execution_config::{ExecutionConfig, ExecutionStrategy, FailureStrategy},
+        config::{ExecutionConfig, ExecutionStrategy, FailureStrategy},
         flags::ExecutionFlags,
         pipeline::Pipeline,
     },

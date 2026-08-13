@@ -1,0 +1,15 @@
+[package]
+name = "order_ok"
+version = "0.1.0"
+edition = "2024"
+
+# Compiled to wasm32-wasip1 by benchmarks/run.sh; excluded from the root workspace.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+stratum-plugin-sdk = { path = "../../../../crates/sdk/stratum-plugin-sdk" }
+
+[profile.release]
+opt-level = 3
+lto = true

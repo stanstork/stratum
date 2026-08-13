@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use crate::{
     error::WasmError,
     exchange::{
-        json_v1,
-        types::{FilterDecision, PluginInput, PluginOutput, WriteResult},
+        ExchangeFormat, columnar_v1, json_v1,
+        types::{FilterDecision, PluginBatch, PluginInput, PluginOutput, SourcePage, WriteResult},
     },
     runtime::{
         host_functions::PluginState,
@@ -13,6 +15,89 @@ use crate::{
 use model::records::Record;
 use tracing::info;
 use wasmtime::{Engine, Instance, Linker, Module, Store, TypedFunc};
+
+/// Per-call resource budget.
+struct CallBudget {
+    fuel: u64,
+    max_output_bytes: usize,
+    epoch_ticks: u64,
+}
+
+/// Wall-clock ceiling (in 100ms epoch ticks) for a single batch call.
+const MAX_EPOCH_TICKS: u64 = 300;
+
+/// Host-memory ceiling for a single batch's output, regardless of batch size, so
+/// a misbehaving guest can't make the host allocate an unbounded output buffer.
+const MAX_OUTPUT_BYTES: usize = 256 * 1024 * 1024; // 256 MB
+
+macro_rules! require_export {
+    ($self:ident, $func_field:ident, $export_name:expr) => {
+        $self
+            .$func_field
+            .clone()
+            .ok_or_else(|| WasmError::MissingExport {
+                plugin: $self.metadata.name.clone(),
+                export: $export_name.to_string(),
+            })?
+    };
+}
+
+macro_rules! process_batch {
+    (
+        $self:ident,
+        $func_field:ident,
+        $export_name:expr,
+        $input_len:expr,
+        $serialize:expr,
+        $deserialize:expr
+    ) => {{
+        let func = require_export!($self, $func_field, $export_name);
+        let is_columnar = $self.metadata.exchange_format == ExchangeFormat::ColumnarV1;
+
+        let input_bytes = $serialize(is_columnar)?;
+        let budget = $self.batch_budget($input_len);
+        let output_bytes = $self.call_data_fn(func, &input_bytes, &budget)?;
+        let outputs = $deserialize(is_columnar, &output_bytes)?;
+
+        if outputs.len() != $input_len {
+            let action = $export_name
+                .strip_prefix("__stratum_")
+                .unwrap_or($export_name);
+            return Err(WasmError::InvalidOutput {
+                plugin: $self.metadata.name.clone(),
+                reason: format!(
+                    "{} returned {} results for {} inputs",
+                    action,
+                    outputs.len(),
+                    $input_len
+                ),
+            });
+        }
+
+        Ok(outputs)
+    }};
+}
+
+macro_rules! exec_hook {
+    ($self:ident, $func_field:ident, $hook_name:expr, $args:expr) => {{
+        let Some(func) = $self.$func_field.clone() else {
+            return Ok(());
+        };
+
+        $self.reset_fuel_and_epoch();
+        let status = func
+            .call(&mut $self.store, $args)
+            .map_err(|e| $self.classify_trap(e, $hook_name))?;
+
+        if status != 0 {
+            return Err(WasmError::PluginError {
+                plugin: $self.metadata.name.clone(),
+                message: format!("{}() returned status code {}", $hook_name, status),
+            });
+        }
+        Ok(())
+    }};
+}
 
 /// A live plugin instance. One per pipeline per plugin.
 pub struct PluginInstance {
@@ -164,35 +249,145 @@ impl PluginInstance {
         self.metadata.plugin_type
     }
 
-    /// Call a transform plugin. Returns the computed value.
-    pub fn call_transform(&mut self, input: &PluginInput) -> Result<PluginOutput, WasmError> {
-        let func = self
-            .transform_fn
-            .as_ref()
-            .ok_or_else(|| WasmError::MissingExport {
-                plugin: self.metadata.name.clone(),
-                export: "__stratum_transform".to_string(),
-            })?
-            .clone();
-        let input_bytes = json_v1::serialize_input(input, &self.metadata.input_schema)?;
-        let output_bytes = self.call_data_fn(func, &input_bytes)?;
-
-        json_v1::deserialize_output(&output_bytes, &self.metadata.name)
+    /// Call a transform plugin over a whole batch in one crossing. The batch is the
+    /// unit of the ABI - the plugin receives every input and returns one output per
+    /// input, in order.
+    pub fn call_transform(
+        &mut self,
+        inputs: &[PluginInput],
+    ) -> Result<Vec<PluginOutput>, WasmError> {
+        process_batch!(
+            self,
+            transform_fn,
+            "__stratum_transform",
+            inputs.len(),
+            |is_columnar| {
+                if is_columnar {
+                    columnar_v1::serialize_input_batch(inputs, &self.metadata.input_schema)
+                } else {
+                    json_v1::serialize_input_batch(inputs, &self.metadata.input_schema)
+                }
+            },
+            |is_columnar, bytes: &[u8]| {
+                if is_columnar {
+                    columnar_v1::deserialize_output_batch(bytes, &self.metadata.name)
+                } else {
+                    json_v1::deserialize_output_flat(
+                        bytes,
+                        &self.metadata.name,
+                        self.metadata.output_type.as_deref(),
+                    )
+                }
+            }
+        )
     }
 
-    /// Call a filter plugin. Returns pass/reject.
-    pub fn call_evaluate(&mut self, input: &PluginInput) -> Result<FilterDecision, WasmError> {
-        let func = self
-            .evaluate_fn
-            .as_ref()
-            .ok_or_else(|| WasmError::MissingExport {
-                plugin: self.metadata.name.clone(),
-                export: "__stratum_evaluate".to_string(),
-            })?
-            .clone();
-        let input_bytes = json_v1::serialize_input(input, &self.metadata.input_schema)?;
-        let output_bytes = self.call_data_fn(func, &input_bytes)?;
-        json_v1::deserialize_filter_decision(&output_bytes, &self.metadata.name)
+    /// Like `call_transform`, but builds the plugin input straight from source
+    /// records via `mapping` (plugin field -> source column) - no per-row
+    /// `PluginInput`/HashMap. Column resolution is hoisted out of the row loop.
+    pub fn call_transform_records(
+        &mut self,
+        rows: &[Record],
+        mapping: &HashMap<String, String>,
+    ) -> Result<Vec<PluginOutput>, WasmError> {
+        process_batch!(
+            self,
+            transform_fn,
+            "__stratum_transform",
+            rows.len(),
+            |is_columnar| {
+                if is_columnar {
+                    columnar_v1::serialize_input_from_records(
+                        rows,
+                        &self.metadata.input_schema,
+                        mapping,
+                    )
+                } else {
+                    json_v1::serialize_input_from_records(
+                        rows,
+                        &self.metadata.input_schema,
+                        mapping,
+                    )
+                }
+            },
+            |is_columnar, bytes: &[u8]| {
+                if is_columnar {
+                    columnar_v1::deserialize_output_batch(bytes, &self.metadata.name)
+                } else {
+                    json_v1::deserialize_output_flat(
+                        bytes,
+                        &self.metadata.name,
+                        self.metadata.output_type.as_deref(),
+                    )
+                }
+            }
+        )
+    }
+
+    /// Call a filter plugin over a whole batch in one crossing. Returns one
+    /// pass/reject decision per input, in order.
+    pub fn call_evaluate(
+        &mut self,
+        inputs: &[PluginInput],
+    ) -> Result<Vec<FilterDecision>, WasmError> {
+        process_batch!(
+            self,
+            evaluate_fn,
+            "__stratum_evaluate",
+            inputs.len(),
+            |is_columnar| {
+                if is_columnar {
+                    columnar_v1::serialize_input_batch(inputs, &self.metadata.input_schema)
+                } else {
+                    json_v1::serialize_input_batch(inputs, &self.metadata.input_schema)
+                }
+            },
+            |is_columnar, bytes: &[u8]| {
+                if is_columnar {
+                    columnar_v1::deserialize_filter_decision_batch(bytes, &self.metadata.name)
+                } else {
+                    json_v1::deserialize_filter_decision_batch(bytes, &self.metadata.name)
+                }
+            }
+        )
+    }
+
+    /// Like `call_evaluate`, but builds the plugin input straight from source
+    /// records via `mapping` (plugin field -> source column) - no per-row
+    /// `PluginInput`/HashMap. This is the batch-native filter path.
+    pub fn call_evaluate_records(
+        &mut self,
+        rows: &[Record],
+        mapping: &HashMap<String, String>,
+    ) -> Result<Vec<FilterDecision>, WasmError> {
+        process_batch!(
+            self,
+            evaluate_fn,
+            "__stratum_evaluate",
+            rows.len(),
+            |is_columnar| {
+                if is_columnar {
+                    columnar_v1::serialize_input_from_records(
+                        rows,
+                        &self.metadata.input_schema,
+                        mapping,
+                    )
+                } else {
+                    json_v1::serialize_input_from_records(
+                        rows,
+                        &self.metadata.input_schema,
+                        mapping,
+                    )
+                }
+            },
+            |is_columnar, bytes: &[u8]| {
+                if is_columnar {
+                    columnar_v1::deserialize_filter_decision_batch(bytes, &self.metadata.name)
+                } else {
+                    json_v1::deserialize_filter_decision_batch(bytes, &self.metadata.name)
+                }
+            }
+        )
     }
 
     /// Call a source plugin's read_page. The host treats the cursor as opaque
@@ -201,17 +396,15 @@ impl PluginInstance {
         &mut self,
         cursor: Option<&str>,
         _batch_size: usize,
-    ) -> Result<crate::exchange::types::SourcePage, WasmError> {
-        let func = self
-            .read_page_fn
-            .as_ref()
-            .ok_or_else(|| WasmError::MissingExport {
-                plugin: self.metadata.name.clone(),
-                export: "__stratum_read_page".to_string(),
-            })?
-            .clone();
+    ) -> Result<SourcePage, WasmError> {
+        let func = require_export!(self, read_page_fn, "__stratum_read_page");
+
         let input_bytes = json_v1::serialize_cursor(cursor)?;
-        let output_bytes = self.call_data_fn(func, &input_bytes)?;
+        // The cursor is a single small payload; the page the plugin produces is
+        // bounded by its own limits. Use the base (unscaled) budget.
+        let budget = self.batch_budget(1);
+        let output_bytes = self.call_data_fn(func, &input_bytes, &budget)?;
+
         json_v1::deserialize_source_page(&output_bytes, &self.metadata.name)
     }
 
@@ -220,58 +413,31 @@ impl PluginInstance {
     /// supplied to the plugin via its config at init time, so the wire
     /// payload carries only the records.
     pub fn call_write_batch(&mut self, rows: &[Record]) -> Result<WriteResult, WasmError> {
-        let func = self
-            .write_batch_fn
-            .as_ref()
-            .ok_or_else(|| WasmError::MissingExport {
-                plugin: self.metadata.name.clone(),
-                export: "__stratum_write_batch".to_string(),
-            })?
-            .clone();
-        let batch = crate::exchange::types::PluginBatch {
+        let func = require_export!(self, write_batch_fn, "__stratum_write_batch");
+
+        let batch = PluginBatch {
             records: rows.to_vec(),
         };
         let input_bytes = json_v1::serialize_batch(&batch)?;
-        let output_bytes = self.call_data_fn(func, &input_bytes)?;
+
+        // write_batch processes a whole batch in one crossing, like transform -
+        // scale the budget with the row count.
+        let budget = self.batch_budget(rows.len());
+        let output_bytes = self.call_data_fn(func, &input_bytes, &budget)?;
+
         json_v1::deserialize_write_result(&output_bytes, &self.metadata.name)
     }
 
     /// Call a sink plugin's prepare hook (`__stratum_prepare`). Invoked once
     /// before the first batch so the plugin can open connections, create staging tables, etc.
     pub fn call_prepare(&mut self) -> Result<(), WasmError> {
-        let Some(func) = self.prepare_fn.as_ref().cloned() else {
-            return Ok(());
-        };
-        self.reset_fuel_and_epoch();
-        let status = func
-            .call(&mut self.store, (0, 0))
-            .map_err(|e| self.classify_trap(e, "prepare"))?;
-        if status != 0 {
-            return Err(WasmError::PluginError {
-                plugin: self.metadata.name.clone(),
-                message: format!("prepare() returned status code {}", status),
-            });
-        }
-        Ok(())
+        exec_hook!(self, prepare_fn, "prepare", (0, 0))
     }
 
     /// Call a sink plugin's finalize hook (`__stratum_finalize`). Invoked once
     /// after the final batch so the plugin can flush buffers or commit.
     pub fn call_finalize(&mut self) -> Result<(), WasmError> {
-        let Some(func) = self.finalize_fn.as_ref().cloned() else {
-            return Ok(());
-        };
-        self.reset_fuel_and_epoch();
-        let status = func
-            .call(&mut self.store, ())
-            .map_err(|e| self.classify_trap(e, "finalize"))?;
-        if status != 0 {
-            return Err(WasmError::PluginError {
-                plugin: self.metadata.name.clone(),
-                message: format!("finalize() returned status code {}", status),
-            });
-        }
-        Ok(())
+        exec_hook!(self, finalize_fn, "finalize", ())
     }
 
     pub fn read_metadata(
@@ -279,18 +445,18 @@ impl PluginInstance {
         linker: &Linker<PluginState>,
         module: &Module,
     ) -> Result<PluginMetadata, WasmError> {
-        let state = PluginState::new(
-            "<inspect>".into(),
-            HostCapabilities::default(),
-            &ResourceLimits::for_io_plugins(),
-        );
+        let limits = ResourceLimits::for_io_plugins();
+        let state = PluginState::new("<inspect>".into(), HostCapabilities::default(), &limits);
+
         let mut store = Store::new(engine, state);
         store.limiter(|s| s);
-        let _ = store.set_fuel(ResourceLimits::for_io_plugins().max_execution_fuel);
+        let _ = store.set_fuel(limits.max_execution_fuel);
+
         // The engine enables epoch interruption, so a deadline must be set or
         // the first epoch check traps (default deadline is 0).
         store.epoch_deadline_trap();
-        store.set_epoch_deadline((ResourceLimits::for_io_plugins().timeout_ms / 100).max(1));
+        store.set_epoch_deadline((limits.timeout_ms / 100).max(1));
+
         let instance =
             linker
                 .instantiate(&mut store, module)
@@ -298,18 +464,21 @@ impl PluginInstance {
                     plugin: "<inspect>".into(),
                     source: e,
                 })?;
+
         let dealloc = Self::get_typed_func::<(u32, u32), ()>(
             &mut store,
             &instance,
             "<inspect>",
             "__stratum_dealloc",
         )?;
+
         let meta_fn = Self::get_typed_func::<(), u64>(
             &mut store,
             &instance,
             "<inspect>",
             "__stratum_metadata",
         )?;
+
         Self::load_metadata(&mut store, &instance, &meta_fn, &dealloc, "<inspect>")
     }
 
@@ -394,21 +563,22 @@ impl PluginInstance {
         // Deallocate (unconditionally)
         let _ = dealloc_fn.call(store, (ptr, len));
 
-        let status = call_result.map_err(|e| WasmError::Trap {
+        call_result.map_err(|e| WasmError::Trap {
             plugin: plugin.to_string(),
-            message: format!("call failed: {}", e),
-        })?;
-
-        Ok(status)
+            message: format!("call failed: {e}"),
+        })
     }
 
     /// Generic data call: write input bytes to guest, call function, read output bytes.
+    /// `budget` sizes fuel / output ceiling / wall-clock for this specific call,
+    /// scaled to the batch it carries.
     fn call_data_fn(
         &mut self,
         func: TypedFunc<(u32, u32), u64>,
         input_bytes: &[u8],
+        budget: &CallBudget,
     ) -> Result<Vec<u8>, WasmError> {
-        self.reset_fuel_and_epoch();
+        self.apply_budget(budget);
 
         let input_len = input_bytes.len() as u32;
 
@@ -442,13 +612,13 @@ impl PluginInstance {
         let out_ptr = (packed_result >> 32) as u32;
         let out_len = (packed_result & 0xFFFF_FFFF) as u32;
 
-        // Validate output size
-        if out_len as usize > self.limits.max_output_bytes {
+        // Validate output size against this call's (batch-scaled) ceiling.
+        if out_len as usize > budget.max_output_bytes {
             return Err(WasmError::InvalidOutput {
                 plugin: self.metadata.name.clone(),
                 reason: format!(
                     "output size {} exceeds limit {}",
-                    out_len, self.limits.max_output_bytes
+                    out_len, budget.max_output_bytes
                 ),
             });
         }
@@ -471,6 +641,27 @@ impl PluginInstance {
         let _ = self.store.set_fuel(self.limits.max_execution_fuel);
         let epoch_ticks = (self.limits.timeout_ms / 100).max(1);
         self.store.set_epoch_deadline(epoch_ticks);
+    }
+
+    /// Budget for a call carrying `rows` rows. The instance's configured limits
+    /// are the *per-row* rate; the batch gets that rate times the row count.
+    fn batch_budget(&self, rows: usize) -> CallBudget {
+        let n = rows.max(1) as u64;
+        let base_ticks = (self.limits.timeout_ms / 100).max(1);
+        CallBudget {
+            fuel: self.limits.max_execution_fuel.saturating_mul(n),
+            max_output_bytes: self
+                .limits
+                .max_output_bytes
+                .saturating_mul(rows.max(1))
+                .min(MAX_OUTPUT_BYTES),
+            epoch_ticks: base_ticks.saturating_mul(n).min(MAX_EPOCH_TICKS),
+        }
+    }
+
+    fn apply_budget(&mut self, budget: &CallBudget) {
+        let _ = self.store.set_fuel(budget.fuel);
+        self.store.set_epoch_deadline(budget.epoch_ticks);
     }
 
     fn get_memory(&mut self) -> Result<wasmtime::Memory, WasmError> {

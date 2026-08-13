@@ -7,11 +7,16 @@ use stratum_plugin_sdk::{FilterDecision, PluginInput, PluginResult, stratum_filt
         { name = "value", type = "i64", nullable = false },
     ]
 )]
-fn positive_only(input: PluginInput) -> PluginResult<FilterDecision> {
-    let value = input.get_i64("value")?;
-    if value > 0 {
-        Ok(FilterDecision::pass())
-    } else {
-        Ok(FilterDecision::reject("value must be positive"))
-    }
+fn positive_only(inputs: Vec<PluginInput>) -> PluginResult<Vec<FilterDecision>> {
+    inputs
+        .iter()
+        .map(|input| {
+            let value = input.get_i64("value")?;
+            Ok(if value > 0 {
+                FilterDecision::pass()
+            } else {
+                FilterDecision::reject("value must be positive")
+            })
+        })
+        .collect()
 }

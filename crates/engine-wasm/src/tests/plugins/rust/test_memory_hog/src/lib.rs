@@ -10,7 +10,7 @@ use stratum_plugin_sdk::{PluginInput, PluginResult, stratum_transform};
     output = "f64",
     input = []
 )]
-fn hog(_input: PluginInput) -> PluginResult<f64> {
+fn hog(_inputs: Vec<PluginInput>) -> PluginResult<Vec<f64>> {
     loop {
         // Grow by 16 pages (1 MB) per iteration. `memory_grow` returns
         // `usize::MAX` when the host refuses.

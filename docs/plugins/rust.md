@@ -22,8 +22,13 @@ role macros (`#[stratum_transform]`, `#[stratum_filter]`, `#[stratum_source]`,
   that decodes the wire payload, calls your function inside `catch_unwind` (a
   panic becomes a clean error, not an instance teardown), and encodes the result.
 
-The host calls these exports over a small JSON wire protocol. You never write any
-of that - you only write the handler body.
+The host calls these exports over a batch-native wire protocol. Transform and
+filter are invoked **once per batch**: the entry point decodes the whole batch
+into a `Vec<PluginInput>`, hands it to your function, and encodes the `Vec` of
+results you return. Native transform/filter plugins use the compact binary
+`columnar_v1` format at the boundary (baked into the plugin's metadata as
+`exchange_format`); source/sink use JSON. You never write any of that - you only
+write the handler body.
 
 For the gory details see [macro-expansion.md](./macro-expansion.md).
 
@@ -61,8 +66,9 @@ plugin "my_plugin" { path = "target/wasm32-wasip1/release/my_plugin.wasm" }
 
 ### transform
 
-`fn(PluginInput) -> PluginResult<T>` where `T: Into<Value>`. `output` declares
-the result type tag.
+`fn(Vec<PluginInput>) -> PluginResult<Vec<T>>` where `T: Into<Value>`. The
+handler receives the **whole batch** and returns one output per input, in order
+(you own the loop). `output` declares the result type tag.
 
 ```rust
 use stratum_plugin_sdk::{stratum_transform, PluginInput, PluginResult};
@@ -76,14 +82,24 @@ use stratum_plugin_sdk::{stratum_transform, PluginInput, PluginResult};
         { name = "b", type = "f64", nullable = false },
     ]
 )]
-fn add(input: PluginInput) -> PluginResult<f64> {
-    Ok(input.get_f64("a")? + input.get_f64("b")?)
+fn add(inputs: Vec<PluginInput>) -> PluginResult<Vec<f64>> {
+    inputs
+        .iter()
+        .map(|input| Ok(input.get_f64("a")? + input.get_f64("b")?))
+        .collect()
 }
 ```
 
+The `Vec<PluginInput>` signature is deliberate: it lets a plugin do real
+batch-level work (vectorized math, a single shared HTTP round-trip for the whole
+batch, etc.). For a trivial per-row transform, `iter().map(...).collect()` is the
+idiom - the length of the returned `Vec` must equal the number of inputs, or the
+host rejects the batch.
+
 ### filter
 
-`fn(PluginInput) -> PluginResult<FilterDecision>`. No `output`.
+`fn(Vec<PluginInput>) -> PluginResult<Vec<FilterDecision>>` - one decision per
+input, in order. No `output`.
 
 ```rust
 use stratum_plugin_sdk::{stratum_filter, FilterDecision, PluginInput, PluginResult};
@@ -93,12 +109,17 @@ use stratum_plugin_sdk::{stratum_filter, FilterDecision, PluginInput, PluginResu
     version = "1.0.0",
     input = [{ name = "value", type = "i64", nullable = false }]
 )]
-fn positive(input: PluginInput) -> PluginResult<FilterDecision> {
-    if input.get_i64("value")? > 0 {
-        Ok(FilterDecision::pass())
-    } else {
-        Ok(FilterDecision::reject("value must be positive"))
-    }
+fn positive(inputs: Vec<PluginInput>) -> PluginResult<Vec<FilterDecision>> {
+    inputs
+        .iter()
+        .map(|input| {
+            Ok(if input.get_i64("value")? > 0 {
+                FilterDecision::pass()
+            } else {
+                FilterDecision::reject("value must be positive")
+            })
+        })
+        .collect()
 }
 ```
 
@@ -199,12 +220,22 @@ Calling a denied capability returns a `capability_denied` error.
 
 Return `Err(PluginError::…)` for expected failures (`invalid_input`, `internal`,
 …). Panics are caught and converted to a plugin error, so a bug in your handler
-fails the row rather than tearing down the instance. How that row is handled
-(skip, DLQ, abort) is controlled by the check's `action` / the pipeline's `on_error`.
+fails the batch rather than tearing down the instance. Note that transform/filter
+handlers return one result per row but a single `Err` (or panic) fails the whole
+batch - validate individual rows and encode a per-row verdict (a
+`FilterDecision::reject`, a sentinel output value) when you want to reject a row
+without failing its neighbors. How a failure is handled (skip, DLQ, abort) is
+controlled by the check's `action` / the pipeline's `on_error`.
 
 ## Verifying the build
 
 ```bash
 stratum plugin inspect target/wasm32-wasip1/release/my_plugin.wasm
-stratum plugin test    target/wasm32-wasip1/release/my_plugin.wasm --input '{"a":2,"b":3}'
+# --input is a JSON array of rows (a batch); one output is printed per row.
+stratum plugin test    target/wasm32-wasip1/release/my_plugin.wasm --input '[{"a":2,"b":3},{"a":10,"b":1}]'
 ```
+
+The runnable batch-native examples in
+[`benchmarks/plugins/rust/`](../../benchmarks/plugins/rust/) (`order_net`, a
+transform, and `order_ok`, a filter) show the same `Vec<PluginInput>` pattern
+against a real benchmark pipeline.

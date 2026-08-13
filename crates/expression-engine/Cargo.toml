@@ -9,6 +9,7 @@ model = { path = "../model" }
 smql-syntax = { path = "../smql-syntax" }
 bigdecimal = "0.4"
 chrono = "0.4.39"
+smallvec = "1.15"
 tracing = "0.1"
 thiserror = "2.0"
 hex = "0.4"

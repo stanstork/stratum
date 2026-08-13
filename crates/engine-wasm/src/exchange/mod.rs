@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+pub mod columnar_v1;
 pub mod json_v1;
 pub mod types;
 
@@ -7,15 +8,13 @@ pub mod types;
 #[serde(rename_all = "snake_case")]
 pub enum ExchangeFormat {
     JsonV1,
-    // Future:
-    // MessagePackV1,
-    // FlatBufferV1,
+    ColumnarV1,
 }
 
 impl ExchangeFormat {
     /// Formats supported by the host, in preference order.
     pub fn supported() -> &'static [ExchangeFormat] {
-        &[ExchangeFormat::JsonV1]
+        &[ExchangeFormat::ColumnarV1, ExchangeFormat::JsonV1]
     }
 
     /// Negotiate format: pick the guest's preferred format if the host supports it.

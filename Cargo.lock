@@ -1462,6 +1462,7 @@ dependencies = [
  "engine-core",
  "hex",
  "model",
+ "smallvec",
  "smql-syntax",
  "thiserror 2.0.18",
  "tracing",

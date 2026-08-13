@@ -1,6 +1,5 @@
 use crate::{
     error::{PluginError, PluginResult},
-    exchange::json_v1,
     value::Value,
 };
 use bigdecimal::BigDecimal;
@@ -20,25 +19,17 @@ impl PluginInput {
         Self::default()
     }
 
-    /// Parse input from the raw JSON bytes delivered by the host.
-    pub fn from_json_bytes(bytes: &[u8]) -> PluginResult<Self> {
-        let json: JsonValue = serde_json::from_slice(bytes)?;
-        let obj = json
-            .as_object()
-            .ok_or_else(|| PluginError::invalid_input("input is not a JSON object"))?;
-        let mut fields = HashMap::with_capacity(obj.len());
-        for (k, v) in obj {
-            fields.insert(k.clone(), json_v1::json_to_value(v)?);
-        }
-        Ok(Self { fields })
-    }
-
     pub fn insert(&mut self, key: impl Into<String>, value: impl Into<Value>) {
         self.fields.insert(key.into(), value.into());
     }
 
     pub fn contains(&self, key: &str) -> bool {
         self.fields.contains_key(key)
+    }
+
+    /// The raw value for a field, if present (any `Value` variant, untyped).
+    pub fn get(&self, key: &str) -> Option<&Value> {
+        self.fields.get(key)
     }
 
     pub fn get_string(&self, key: &str) -> PluginResult<&str> {

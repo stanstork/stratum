@@ -9,10 +9,11 @@ const RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 filter("email_valid", {
   version: "1.0.0",
   input: { email: "string" },
-  evaluate({ email }) {
-    if (typeof email === "string" && RE.test(email)) {
-      return { pass: true };
-    }
-    return { pass: false, reason: `invalid email: ${email}` };
+  evaluate(rows) {
+    return rows.map(({ email }) =>
+      typeof email === "string" && RE.test(email)
+        ? { pass: true }
+        : { pass: false, reason: `invalid email: ${email}` }
+    );
   },
 });

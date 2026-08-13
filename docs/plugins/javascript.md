@@ -27,9 +27,13 @@ turned into a `.wasm` module in three steps (handled by
 At migration time the engine loads that `.wasm` like any other: on
 `__stratum_initialize` the runtime boots a QuickJS context, evaluates the
 embedded bundle (registering your handler), and applies the config; each
-role call (`__stratum_transform`, `__stratum_read_page`, …) marshals the row
-to/from JS values and invokes your handler. So the only differences from a native
-plugin are the QuickJS boot cost and a larger default resource budget.
+role call (`__stratum_transform`, `__stratum_read_page`, …) marshals the payload
+to/from JS values and invokes your handler. Transform and filter are called
+**once per batch** - your handler receives the array of rows and returns an array
+of results, one per row. JS plugins use the flat `json_v1` wire format (plain
+JSON arrays of bare values, no `{type, value}` envelope), so a row arrives as an
+ordinary JS object. The only differences from a native plugin are the QuickJS
+boot cost and a larger default resource budget.
 
 This means **every JS plugin embeds its own copy of the QuickJS runtime**
 (~5 MB). That's expected - the compiled `.wasm` is self-contained.
@@ -68,6 +72,9 @@ file.
 
 ### transform
 
+`compute(rows, config)` receives the **whole batch** (an array of row objects)
+and must return an array of the same length - one output value per row.
+
 ```js
 const { transform } = require("@stratum/plugin-sdk");
 
@@ -75,13 +82,16 @@ transform("adder", {
   version: "1.0.0",
   input:  { a: "f64", b: "f64" },
   output: "f64",
-  compute({ a, b }, config) {     // 2nd arg = plugin config (strings)
-    return a + b;
+  compute(rows, config) {         // 2nd arg = plugin config (strings)
+    return rows.map(({ a, b }) => (a ?? 0) + (b ?? 0));
   },
 });
 ```
 
 ### filter
+
+`evaluate(rows, config)` receives the batch and returns an array of decisions,
+one `{ pass }` object per row, in order.
 
 ```js
 const { filter } = require("@stratum/plugin-sdk");
@@ -89,8 +99,10 @@ const { filter } = require("@stratum/plugin-sdk");
 filter("positive", {
   version: "1.0.0",
   input: { value: "i64" },
-  evaluate({ value }, config) {
-    return value > 0 ? { pass: true } : { pass: false, reason: "must be positive" };
+  evaluate(rows, config) {
+    return rows.map(({ value }) =>
+      value > 0 ? { pass: true } : { pass: false, reason: "must be positive" }
+    );
   },
 });
 ```
@@ -139,8 +151,8 @@ The `config { ... }` block on the declaration is delivered to the handler:
 
 - `source` / `sink`: as the **first** argument (`readPage(config, cursor)`,
   `writeBatch(config, batch)`, `prepare(config)`, `finalize(config)`).
-- `transform` / `filter`: as the **second** argument (`compute(row, config)`,
-  `evaluate(row, config)`).
+- `transform` / `filter`: as the **second** argument (`compute(rows, config)`,
+  `evaluate(rows, config)`).
 
 Values are strings - parse them in the handler.
 
@@ -162,4 +174,11 @@ Values are strings - parse them in the handler.
 | Best for | hot paths, heavy logic | quick logic, no Rust setup |
 
 Both expose identical roles and config; pick by toolchain preference and
-performance needs. See [rust.md](./rust.md) for the native path.
+performance needs. On a 10M-row MySQL -> PostgreSQL benchmark a JS transform or
+filter runs at ~120-127k rows/s, versus ~486k (transform) / ~704k (filter)
+rows/s for the equivalent native Rust plugin. The batch-native ABI already
+amortizes the WASM boundary crossing, so that gap is the QuickJS interpreter
+executing your handler, not marshalling overhead. See [rust.md](./rust.md) for
+the native path, and
+[`benchmarks/plugins/js/`](../../benchmarks/plugins/js/) (`order_net.js`,
+`order_ok.js`) for the batch-form JS plugins the benchmark uses.

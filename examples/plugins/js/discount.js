@@ -10,8 +10,9 @@ transform("discount", {
   version: "1.0.0",
   output: "f64",
   input: { price: "f64" },
-  compute({ price }, config) {
+  compute(rows, config) {
     const rate = parseFloat(config.rate ?? "0");
-    return (price ?? 0) * (1 - (Number.isNaN(rate) ? 0 : rate));
+    const r = Number.isNaN(rate) ? 0 : rate; // constant per batch
+    return rows.map(({ price }) => (price ?? 0) * (1 - r));
   },
 });

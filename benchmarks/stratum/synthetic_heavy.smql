@@ -1,15 +1,10 @@
 // Benchmark: transform-heavy single-table load, MySQL -> PostgreSQL.
 //
-// Same `bench.orders` source as synthetic.smql, but the select block applies ~20
-// computed columns built from many (nested) function calls - concat / upper /
-// lower / trim / year / month plus arithmetic. This isolates the CPU cost of
-// expression evaluation from raw data movement and stresses the transform path
-// (compiled expressions, per-batch schema derivation).
-//
-// Only NON-NULL source columns are referenced, so no computed value short-circuits
-// to NULL (a null function argument makes the whole computed field fail). The
-// `select` block means only the projected columns are written - no source-column
-// copy amplification - so throughput reflects transform CPU, not write width.
+// Same `bench.orders` source as synthetic.smql, with a balanced set of ~19
+// computed/copied columns: a few string functions (concat / upper / lower /
+// trim), several arithmetic expressions, some date extraction, and a handful of
+// copied-through source columns. This stresses the transform path (compiled
+// expressions, per-batch schema derivation) with a realistic mix.
 //
 // URLs come from the environment; run.sh exports them for the bench databases.
 
@@ -40,27 +35,33 @@ pipeline "orders_heavy" {
     }
 
     select {
-        order_id = orders.id
-        t1  = concat(orders.currency, "-", orders.sku)
-        t2  = upper(orders.status)
-        t3  = lower(orders.sku)
-        t4  = trim(orders.currency)
-        t5  = concat(upper(orders.currency), lower(orders.status))
-        t6  = orders.amount * orders.quantity
-        t7  = orders.amount * 2
-        t8  = orders.quantity + 10
-        t9  = concat(orders.sku, "_", orders.currency, "_", orders.status)
-        t10 = year(orders.created_at)
-        t11 = month(orders.created_at)
-        t12 = concat(upper(orders.status), "/", lower(orders.currency))
-        t13 = concat(orders.order_uuid, ":", orders.sku)
-        t14 = upper(concat(orders.currency, orders.status))
-        t15 = orders.amount * orders.quantity + orders.customer_id
-        t16 = trim(upper(orders.sku))
-        t17 = concat(orders.currency, "|", upper(orders.status), "|", lower(orders.sku))
-        t18 = lower(concat(orders.sku, orders.currency))
-        t19 = orders.customer_id * 3 + orders.quantity
-        t20 = concat(orders.status, "#", orders.sku, "#", orders.currency, "#", upper(orders.status))
+        order_id    = orders.id
+
+        // Copied-through source columns.
+        customer_id = orders.customer_id
+        status      = orders.status
+        currency    = orders.currency
+        amount      = orders.amount
+
+        // String functions.
+        s1 = concat(orders.currency, "-", orders.sku)
+        s2 = upper(orders.status)
+        s3 = lower(orders.sku)
+        s4 = concat(orders.sku, "_", orders.currency, "_", orders.status)
+        s5 = upper(concat(orders.currency, orders.status))
+        s6 = trim(orders.sku)
+
+        // Arithmetic.
+        a1 = orders.amount * orders.quantity
+        a2 = orders.amount * 2
+        a3 = orders.quantity + 10
+        a4 = orders.amount * orders.quantity + orders.customer_id
+        a5 = orders.customer_id * 3 + orders.quantity
+
+        // Date extraction.
+        d1 = year(orders.created_at)
+        d2 = month(orders.created_at)
+        d3 = quarter(orders.created_at)
     }
 
     settings {

@@ -8,10 +8,11 @@ use crate::{
     error::{ExpressionError, Result},
 };
 use model::core::value::Value;
+use std::borrow::Cow;
 use std::collections::HashMap;
 
-/// Type alias for function implementations
-pub type FunctionImpl = fn(&[Value], &EvalContext) -> Result<Value>;
+/// Type alias for function implementations.
+pub type FunctionImpl = fn(&[Cow<'_, Value>], &EvalContext) -> Result<Value>;
 
 /// Registry of all available functions
 pub struct FunctionRegistry {
@@ -45,7 +46,7 @@ impl FunctionRegistry {
         self.functions.insert(name.to_lowercase(), func);
     }
 
-    pub fn call(&self, name: &str, args: &[Value], ctx: &EvalContext) -> Result<Value> {
+    pub fn call(&self, name: &str, args: &[Cow<'_, Value>], ctx: &EvalContext) -> Result<Value> {
         let func = self
             .functions
             .get(&name.to_lowercase())
@@ -79,6 +80,10 @@ mod tests {
     use super::*;
     use std::collections::HashMap as StdHashMap;
 
+    fn args(vs: Vec<Value>) -> Vec<Cow<'static, Value>> {
+        vs.into_iter().map(Cow::Owned).collect()
+    }
+
     fn dummy_env_getter(_key: &str) -> Option<String> {
         None
     }
@@ -111,8 +116,13 @@ mod tests {
             env_getter: &dummy_env_getter,
         };
 
-        let args = vec![Value::String("hello".to_string())];
-        let result = registry.call("upper", &args, &ctx).unwrap();
+        let result = registry
+            .call(
+                "upper",
+                &args(vec![Value::String("hello".to_string())]),
+                &ctx,
+            )
+            .unwrap();
         assert_eq!(result, Value::String("HELLO".to_string()));
     }
 
@@ -134,7 +144,7 @@ mod tests {
     fn test_custom_function_registration() {
         let mut registry = FunctionRegistry::new();
 
-        fn custom_func(args: &[Value], _ctx: &EvalContext) -> Result<Value> {
+        fn custom_func(args: &[Cow<'_, Value>], _ctx: &EvalContext) -> Result<Value> {
             Ok(Value::String(format!("custom: {:?}", args)))
         }
 

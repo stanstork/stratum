@@ -152,7 +152,12 @@ pub fn build_metadata_json(
     value.insert("name".into(), json!(name));
     value.insert("version".into(), json!(version));
     value.insert("type".into(), json!(plugin_type));
-    value.insert("exchange_format".into(), json!("json_v1"));
+
+    let exchange_format = match plugin_type {
+        "transform" | "filter" => "columnar_v1",
+        _ => "json_v1",
+    };
+    value.insert("exchange_format".into(), json!(exchange_format));
     value.insert("runtime".into(), json!("native"));
 
     if !input_schema.is_empty() {

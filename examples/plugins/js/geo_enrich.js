@@ -11,12 +11,14 @@ transform("geo_enrich", {
   version: "1.0.0",
   output: "string",
   input: { ip: "string" },
-  compute({ ip }) {
-    const resp = http.get(`https://ipapi.co/${ip}/country/`);
-    // resp = { status, headers, body }
-    if (resp.status !== 200) {
-      throw new Error(`geo lookup failed: HTTP ${resp.status}`);
-    }
-    return (resp.body || "").trim();
+  compute(rows) {
+    return rows.map(({ ip }) => {
+      const resp = http.get(`https://ipapi.co/${ip}/country/`);
+      // resp = { status, headers, body }
+      if (resp.status !== 200) {
+        throw new Error(`geo lookup failed: HTTP ${resp.status}`);
+      }
+      return (resp.body || "").trim();
+    });
   },
 });

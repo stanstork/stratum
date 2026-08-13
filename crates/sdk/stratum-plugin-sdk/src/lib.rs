@@ -1,3 +1,4 @@
+pub mod columnar;
 pub mod error;
 pub mod exchange;
 pub mod filter;

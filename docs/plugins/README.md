@@ -2,16 +2,20 @@
 
 Stratum can be extended with **WebAssembly plugins** that run inside the
 migration pipeline. A plugin is a sandboxed `.wasm` module the engine loads,
-calls per row (or per batch / per page), and enforces resource limits on.
+calls once per **batch** (or per page), and enforces resource limits on.
 
 Plugins come in four **roles**:
 
 | Role | Where it runs | Signature (conceptually) |
 |------|---------------|--------------------------|
-| **transform** | inside a pipeline's `select` | row field(s) -> one output value |
-| **filter** | inside a pipeline's `validate` | row field(s) -> pass / reject |
+| **transform** | inside a pipeline's `select` | batch of rows -> one output value per row |
+| **filter** | inside a pipeline's `validate` | batch of rows -> pass / reject per row |
 | **source** | as the pipeline's `from` connection | cursor -> page of rows |
 | **sink** | as the pipeline's `to` connection | batch of rows -> write result |
+
+All four roles are wired into the pipeline: transform/filter run inside a
+pipeline's `select`/`validate`, and source/sink run as endpoints (a `connection`
+with `driver = "wasm"`), with checkpoint/resume support.
 
 …and two **runtimes**:
 
@@ -24,6 +28,34 @@ Plugins come in four **roles**:
 Both runtimes implement the same host ABI and are loaded by the same engine, so
 a plugin's role and behavior are identical regardless of language - only the
 authoring experience and resource budget differ.
+
+## The ABI is batch-native
+
+Transform and filter plugins are called **once per batch**, not once per row.
+The host serializes the whole batch, crosses the WASM boundary a single time,
+and the guest returns exactly one result per input row (in order). This
+amortizes the boundary crossing (alloc / serialize / call / deserialize) over
+the entire batch instead of paying it per row - the dominant cost in a trivial
+transform. Both authoring SDKs surface this directly: a Rust handler takes
+`Vec<PluginInput>` and returns a `Vec` of outputs; a JS handler takes the array
+of rows and returns an array of results. The author owns the loop over the
+batch.
+
+Two binary/text **wire formats** carry the batch, negotiated per plugin via the
+metadata `exchange_format` field:
+
+- **`columnar_v1`** - the default for native Rust transform/filter plugins. A
+  compact binary frame of typed column arrays plus a validity bitmap (Arrow-ish).
+  The host and guest codecs are byte-identical mirrors. Much faster than JSON at
+  the boundary.
+- **`json_v1` (flat)** - used by JS transform/filter plugins. Flat JSON arrays of
+  bare values, with **no** `{type, value}` envelope (JS is dynamically typed, so
+  scalars need no type tag).
+
+The *enveloped* `{type, value}` JSON form is still in use: source/sink plugins
+exchange records that way, and `columnar_v1` falls back to a per-cell enveloped
+JSON encoding (`TAG_CELL`) for columns whose value types have no native columnar
+representation (mixed or host-only variants).
 
 ## Using a plugin in SMQL
 
@@ -114,9 +146,13 @@ plugin "geo" {
 
 The runtime enforces memory (`StoreLimits`), CPU (`fuel`), and wall-clock
 (`epoch`) budgets per call. A plugin that exceeds them traps; the host stays up
-and the row is routed to error handling. Defaults: transform/filter get a lean
-row budget (64 MiB / 1M fuel / 1s); source/sink and JS plugins get a larger IO
-budget (128 MiB / 100M fuel / 30s) because the QuickJS boot needs more headroom.
+and the failed batch is routed to error handling. Because transform/filter calls
+carry a whole batch, their fuel / output-size / wall-clock limits are treated as
+**per-row rates and scaled by the batch's row count** (capped at 256 MiB output
+and 30s wall-clock). Defaults: native transform/filter get 128 MiB memory with a
+per-row rate of 1M fuel / 1 MiB output / 1s; source/sink and JS plugins get a
+larger flat IO budget (128 MiB / 100M fuel / 16 MiB output / 30s) because the
+QuickJS boot needs more headroom.
 
 ## CLI
 
@@ -130,14 +166,31 @@ stratum plugin inspect plugins/upper.wasm
 # Validate every plugin referenced by an SMQL config (offline, no DB)
 stratum plugin validate -c migration.smql
 
-# Run a plugin once with sample input
-stratum plugin test plugins/upper.wasm --input '{"name":"ada"}'
+# Run a plugin over a batch of sample rows (input is a JSON ARRAY of rows;
+# a single object is accepted as a one-row batch)
+stratum plugin test plugins/upper.wasm --input '[{"name":"ada"},{"name":"grace"}]'
+stratum plugin test plugins/order_ok.wasm --mode filter --input '[{"amount":10},{"amount":-5}]'
 stratum plugin test plugins/feed.wasm  --mode source --json
 stratum plugin test plugins/sink.wasm  --mode sink --input '[{"id":1},{"id":2}]'
 ```
 
+`plugin test` prints one result per input row: transform emits the output value
+per row (`{"values":[...]}` with `--json`), filter emits `PASS`/`REJECT` per row
+(`{"passes":[true,false]}` with `--json`), source reports the page it produced,
+and sink reports `rows_written`.
+
 `plugin validate` cross-checks each plugin's declared input schema and role
 against how the pipelines use it, without touching a database.
+
+## Performance
+
+The batch-native ABI plus the `columnar_v1` wire format put native plugins close
+to built-in expressions. On a 10M-row MySQL -> PostgreSQL benchmark: a native
+Rust transform plugin sustains ~486k rows/s and a native Rust filter ~704k
+rows/s (columnar wire, near-native). The equivalent JavaScript plugin/filter
+runs at ~120-127k rows/s - that floor is the QuickJS interpreter itself, not the
+plugin boundary. Pick native Rust for hot paths; reach for JS when the logic is
+light and you'd rather skip the Rust toolchain.
 
 ## Authoring
 

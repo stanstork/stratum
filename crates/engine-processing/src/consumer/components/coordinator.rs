@@ -1,6 +1,6 @@
 use crate::{
     channel::BatchEnvelope, consumer::components::writer::BatchWriter, error::ConsumerError,
-    state_manager::StateManager,
+    profile, state_manager::StateManager,
 };
 use engine_core::{metrics::Metrics, state::models::Checkpoint};
 use engine_state::models::CheckpointStage;
@@ -65,6 +65,9 @@ impl BatchCoordinator {
 
     /// Process a single batch: write + checkpoint + metrics.
     pub async fn process_batch(&self, batch: &Batch) -> Result<(), ConsumerError> {
+        use std::time::Instant;
+
+        let t_total = Instant::now();
         let batch_id = batch.id.clone();
         let row_count = batch.rows.len();
         let byte_count = batch.size_bytes();
@@ -97,7 +100,11 @@ impl BatchCoordinator {
             })?;
 
         // Write to destination with retry
+        let t_write = Instant::now();
         let write_result = self.writer.write_batch(batch).await?;
+        let write_dur = t_write.elapsed();
+
+        profile::record(&profile::WRITE, write_dur);
 
         let new_rows = current_rows + row_count as u64;
 
@@ -135,6 +142,11 @@ impl BatchCoordinator {
             total_rows = new_rows,
             strategy = ?write_result.strategy,
             "batch processed"
+        );
+
+        profile::record(
+            &profile::CHECKPOINT,
+            t_total.elapsed().saturating_sub(write_dur),
         );
 
         Ok(())

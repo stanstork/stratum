@@ -56,21 +56,32 @@ pub fn run(
 
     match role.as_str() {
         "transform" => {
-            let out = inst.call_transform(&build_input(input)?)?;
+            let values: Vec<String> = inst
+                .call_transform(&build_inputs(input)?)?
+                .iter()
+                .map(|o| format!("{:?}", o.value))
+                .collect();
+
             emit(
                 as_json,
-                &format!("{:?}", out.value),
-                || serde_json::json!({ "value": format!("{:?}", out.value) }),
+                &values.join("\n"),
+                || serde_json::json!({ "values": values }),
             );
         }
         "filter" => {
-            let d = inst.call_evaluate(&build_input(input)?)?;
-            let pass = d.is_pass();
-            emit(
-                as_json,
-                if pass { "PASS" } else { "REJECT" },
-                || serde_json::json!({ "pass": pass }),
-            );
+            let passes: Vec<bool> = inst
+                .call_evaluate(&build_inputs(input)?)?
+                .iter()
+                .map(|d| d.is_pass())
+                .collect();
+
+            let human = passes
+                .iter()
+                .map(|&p| if p { "PASS" } else { "REJECT" })
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            emit(as_json, &human, || serde_json::json!({ "passes": passes }));
         }
         "source" => {
             let page = inst.call_read_page(cursor, 100)?;
@@ -84,8 +95,10 @@ pub fn run(
         "sink" => {
             let rows = build_records(input)?;
             inst.call_prepare()?; // no-op if the plugin has no prepare hook
+
             let res = inst.call_write_batch(&rows)?;
             inst.call_finalize()?;
+
             emit(
                 as_json,
                 &format!("rows_written={}", res.rows_written),
@@ -112,26 +125,55 @@ fn emit(as_json: bool, human: &str, json: impl FnOnce() -> serde_json::Value) {
     }
 }
 
-/// Build a `PluginInput` from a JSON object of plain scalars.
-fn build_input(src: Option<&str>) -> Result<PluginInput, CliError> {
-    let text = read_input(src)?;
-    if text.trim().is_empty() {
-        return Ok(PluginInput::new());
+/// Build a batch of `PluginInput`s from the test input.
+fn build_inputs(src: Option<&str>) -> Result<Vec<PluginInput>, CliError> {
+    let rows = parse_input_rows(src, false)?;
+
+    if rows.is_empty() {
+        return Ok(vec![PluginInput::new()]);
     }
-    let json: serde_json::Value = serde_json::from_str(text.trim())
-        .map_err(|e| CliError::UserMessage(format!("invalid input JSON: {e}")))?;
-    let obj = json
-        .as_object()
-        .ok_or_else(|| CliError::UserMessage("input must be a JSON object".into()))?;
-    let mut pin = PluginInput::new();
-    for (k, v) in obj {
-        pin.insert(k.clone(), json_to_value(v));
-    }
-    Ok(pin)
+
+    Ok(rows
+        .into_iter()
+        .map(|obj| {
+            let mut pin = PluginInput::new();
+            for (k, v) in obj {
+                pin.insert(k, json_to_value(&v));
+            }
+            pin
+        })
+        .collect())
 }
 
 /// Build a batch of `Record`s from a JSON array of rows or `{ "records": [...] }`.
 fn build_records(src: Option<&str>) -> Result<Vec<Record>, CliError> {
+    let rows = parse_input_rows(src, true)?;
+
+    Ok(rows
+        .into_iter()
+        .map(|obj| {
+            let fields = obj
+                .into_iter()
+                .map(|(name, v)| FieldValue {
+                    name,
+                    value: Some(json_to_value(&v)),
+                    // Placeholder: the wire layer only serializes name + value.
+                    data_type: Type::Unknown {
+                        source_name: String::new(),
+                        fallback_ddl: String::new(),
+                    },
+                })
+                .collect();
+
+            Record::from_fields("<test>", fields, OpType::Insert)
+        })
+        .collect())
+}
+
+fn parse_input_rows(
+    src: Option<&str>,
+    allow_records_wrapper: bool,
+) -> Result<Vec<serde_json::Map<String, serde_json::Value>>, CliError> {
     let text = read_input(src)?;
     if text.trim().is_empty() {
         return Ok(Vec::new());
@@ -139,40 +181,37 @@ fn build_records(src: Option<&str>) -> Result<Vec<Record>, CliError> {
 
     let json: serde_json::Value = serde_json::from_str(text.trim())
         .map_err(|e| CliError::UserMessage(format!("invalid input JSON: {e}")))?;
-    let rows = match &json {
-        serde_json::Value::Array(a) => a.clone(),
-        serde_json::Value::Object(o) => o
-            .get("records")
-            .and_then(|r| r.as_array())
-            .cloned()
-            .ok_or_else(|| {
-                CliError::UserMessage("expected a JSON array of rows or {\"records\":[...]}".into())
-            })?,
+
+    let rows = match json {
+        serde_json::Value::Array(a) => a,
+        serde_json::Value::Object(mut o) => {
+            if allow_records_wrapper && o.contains_key("records") {
+                let records = o.remove("records").unwrap();
+                if let serde_json::Value::Array(a) = records {
+                    a
+                } else {
+                    return Err(CliError::UserMessage(
+                        "expected 'records' to be a JSON array".into(),
+                    ));
+                }
+            } else {
+                // Treat a single unwrapped object as a batch of 1
+                vec![serde_json::Value::Object(o)]
+            }
+        }
         _ => {
             return Err(CliError::UserMessage(
-                "expected a JSON array of rows".into(),
+                "input must be a JSON array of row objects (or a single object)".into(),
             ));
         }
     };
 
-    let mut records = Vec::with_capacity(rows.len());
-    for row in rows {
-        let obj = row
-            .as_object()
-            .ok_or_else(|| CliError::UserMessage("each record must be a JSON object".into()))?;
-        let fields = obj
-            .iter()
-            .map(|(k, v)| FieldValue {
-                name: k.clone(),
-                value: Some(json_to_value(v)),
-                // Placeholder: the wire layer only serializes name + value.
-                data_type: Type::Unknown {
-                    source_name: String::new(),
-                    fallback_ddl: String::new(),
-                },
-            })
-            .collect();
-        records.push(Record::from_fields("<test>", fields, OpType::Insert));
-    }
-    Ok(records)
+    rows.into_iter()
+        .map(|row| match row {
+            serde_json::Value::Object(obj) => Ok(obj),
+            _ => Err(CliError::UserMessage(
+                "each input row must be a JSON object".into(),
+            )),
+        })
+        .collect()
 }

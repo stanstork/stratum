@@ -1,6 +1,5 @@
-use std::str::FromStr;
-
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// Execution configuration for DAG orchestration
 /// Compiled from the execution {} block

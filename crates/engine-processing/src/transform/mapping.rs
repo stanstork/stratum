@@ -12,12 +12,10 @@ fn set_batch_schema(
     rows: &mut [Record],
     input: &Arc<RecordSchema>,
     new_schema: &Arc<RecordSchema>,
-    per_row: impl Fn(&mut Record),
+    mut per_row: impl FnMut(&mut Record),
 ) {
-    let input_ptr = Arc::as_ptr(input);
-
     for row in rows.iter_mut() {
-        if std::ptr::eq(Arc::as_ptr(row.schema()), input_ptr) {
+        if Arc::ptr_eq(row.schema(), input) {
             row.set_schema(Arc::clone(new_schema));
         } else {
             per_row(row);
@@ -67,17 +65,15 @@ impl TableMapper {
 }
 
 impl Transform for FieldMapper {
+    fn kind(&self) -> &'static str {
+        "field-rename"
+    }
+
     fn apply(&self, row: &mut Record) -> Result<(), TransformError> {
-        // No renames for this table -> names pass through unchanged.
-        if !self.ns_map.contains(row.table()) {
-            return Ok(());
+        if self.ns_map.contains(row.table()) {
+            let renamed = self.rename_schema(row.schema());
+            row.set_schema(renamed);
         }
-
-        let input = Arc::clone(row.schema());
-        let renamed = self.rename_schema(&input);
-
-        row.set_schema(renamed);
-
         Ok(())
     }
 
@@ -104,12 +100,13 @@ impl Transform for FieldMapper {
 }
 
 impl Transform for TableMapper {
+    fn kind(&self) -> &'static str {
+        "table-map"
+    }
+
     fn apply(&self, row: &mut Record) -> Result<(), TransformError> {
-        let input = Arc::clone(row.schema());
-        let retabled = self.retable_schema(&input);
-
+        let retabled = self.retable_schema(row.schema());
         row.set_schema(retabled);
-
         Ok(())
     }
 

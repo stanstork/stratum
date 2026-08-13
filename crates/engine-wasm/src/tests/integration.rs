@@ -2,13 +2,13 @@
 mod tests {
     use crate::{
         error::WasmError,
-        exchange::{json_v1, types::PluginInput},
+        exchange::{columnar_v1, types::PluginInput},
         registry::{PluginDef, PluginRegistry},
         runtime::{
             engine::{WasmEngine, WasmEngineConfig},
             limits::{HostCapabilities, ResourceLimits},
         },
-        schema::PluginType,
+        schema::{PluginField, PluginType},
     };
     use model::core::value::Value;
     use std::path::{Path, PathBuf};
@@ -94,15 +94,25 @@ mod tests {
         assert_eq!(status, 0, "initialize failed");
         println!("Plugin initialized (status={})", status);
 
-        // 8. Build input: a=10.0, b=3.0
+        // 8. Build input: a=10.0, b=3.0 (columnar wire needs the schema for columns)
         let mut input = PluginInput::new();
         input.insert("a".into(), Value::Float(10.0));
         input.insert("b".into(), Value::Float(3.0));
-        let input_bytes = json_v1::serialize_input(&input, &[]).unwrap();
-        println!(
-            "Sending input: {}",
-            std::str::from_utf8(&input_bytes).unwrap()
-        );
+
+        let schema = [
+            PluginField {
+                name: "a".into(),
+                field_type: "f64".into(),
+                nullable: false,
+            },
+            PluginField {
+                name: "b".into(),
+                field_type: "f64".into(),
+                nullable: false,
+            },
+        ];
+        let input_bytes = columnar_v1::serialize_input_batch(&[input], &schema).unwrap();
+        println!("Sending columnar input: {} bytes", input_bytes.len());
 
         // 9. Write input into guest memory
         let input_len = input_bytes.len() as u32;
@@ -126,11 +136,11 @@ mod tests {
             .unwrap();
         let _ = dealloc_fn.call(&mut store, (out_ptr, out_len));
 
-        let out_str = std::str::from_utf8(&out_bytes).unwrap();
-        println!("Raw output: {}", out_str);
+        println!("Raw columnar output: {} bytes", out_bytes.len());
 
         // 12. Deserialize through our exchange layer
-        let output = json_v1::deserialize_output(&out_bytes, "test_transform").unwrap();
+        let outputs = columnar_v1::deserialize_output_batch(&out_bytes, "test_transform").unwrap();
+        let output = outputs.into_iter().next().unwrap();
         println!("Deserialized: {:?}", output.value);
 
         assert_eq!(output.value, Value::Float(13.0));
@@ -182,9 +192,89 @@ mod tests {
         input.insert("a".into(), Value::Float(10.0));
         input.insert("b".into(), Value::Float(3.0));
 
-        let output = instance.call_transform(&input).unwrap();
+        let output = instance.call_transform(&[input]).unwrap().pop().unwrap();
         // Test plugin returns a + b
         assert_eq!(output.value, Value::Float(13.0));
+    }
+
+    /// Round-trip every Value type through the real columnar host <-> guest boundary
+    /// using the identity `test_echo` plugin. This is the cross-boundary safety
+    /// net: any byte-level disagreement between the host and guest codecs shows
+    /// up as a changed value here (the host round-trip unit tests only exercise
+    /// one side).
+    #[tokio::test]
+    async fn test_echo_roundtrips_every_type_across_the_boundary() {
+        use bigdecimal::BigDecimal;
+        use chrono::{NaiveDate, NaiveTime};
+        use std::str::FromStr;
+
+        let mut engine = WasmEngine::new(WasmEngineConfig::default()).unwrap();
+        let module = engine
+            .load_module(&test_plugin_path("test_echo.wasm"))
+            .unwrap();
+        let mut instance = engine
+            .instantiate(
+                &module,
+                "test_echo".into(),
+                HostCapabilities::default(),
+                ResourceLimits::for_row_plugins(),
+                None,
+            )
+            .unwrap();
+
+        let date = NaiveDate::from_ymd_opt(2026, 8, 10).unwrap();
+        let cases = vec![
+            Value::Null,
+            Value::Boolean(true),
+            Value::Int(-42),
+            Value::UInt(u64::MAX),
+            Value::Float(3.5),
+            Value::String("héllo 🌍".into()),
+            Value::Binary(vec![0, 1, 2, 255]),
+            Value::Date(date),
+            Value::Time {
+                value: NaiveTime::from_hms_nano_opt(23, 59, 59, 987_654_321).unwrap(),
+                offset_secs: None,
+            },
+            Value::Timestamp {
+                value: date.and_hms_opt(14, 30, 0).unwrap(),
+                offset_secs: Some(-3600),
+            },
+            Value::Uuid(uuid::Uuid::from_u128(
+                0xdead_beef_dead_beef_dead_beef_dead_beef,
+            )),
+            Value::Decimal(BigDecimal::from_str("-12345.6789").unwrap()),
+            Value::Json(serde_json::json!({"k": [1, 2, 3]})),
+        ];
+
+        // One row at a time so a mismatch names the exact type.
+        for expected in &cases {
+            let mut input = PluginInput::new();
+            input.insert("x".into(), expected.clone());
+            let out = instance.call_transform(&[input]).unwrap().pop().unwrap();
+            assert_eq!(out.value, *expected, "type did not survive the boundary");
+        }
+
+        // A column mixing several *non-null* variants can't use a native tag, so
+        // it falls back to the per-cell CELL path.
+        let mixed = vec![
+            Value::Int(-7),
+            Value::String("mixed".into()),
+            Value::Boolean(false),
+            Value::Null,
+            Value::Float(2.25),
+        ];
+        let inputs: Vec<PluginInput> = mixed
+            .iter()
+            .map(|v| {
+                let mut p = PluginInput::new();
+                p.insert("x".into(), v.clone());
+                p
+            })
+            .collect();
+        let outs = instance.call_transform(&inputs).unwrap();
+        let got: Vec<Value> = outs.into_iter().map(|o| o.value).collect();
+        assert_eq!(got, mixed, "mixed-scalar batch did not round-trip via CELL");
     }
 
     #[tokio::test]
@@ -206,13 +296,13 @@ mod tests {
         // Pass case: value > 0
         let mut input = PluginInput::new();
         input.insert("value".into(), Value::Int(42));
-        let decision = instance.call_evaluate(&input).unwrap();
+        let decision = instance.call_evaluate(&[input]).unwrap().pop().unwrap();
         assert!(decision.is_pass());
 
         // Reject case: value <= 0
         let mut input = PluginInput::new();
         input.insert("value".into(), Value::Int(-1));
-        let decision = instance.call_evaluate(&input).unwrap();
+        let decision = instance.call_evaluate(&[input]).unwrap().pop().unwrap();
         assert!(!decision.is_pass());
     }
 
@@ -240,7 +330,7 @@ mod tests {
             .unwrap();
 
         let input = PluginInput::new();
-        let result = instance.call_transform(&input);
+        let result = instance.call_transform(&[input]);
         assert!(matches!(result, Err(WasmError::FuelExhausted { .. })));
     }
 
@@ -266,7 +356,7 @@ mod tests {
             .unwrap();
 
         let input = PluginInput::new();
-        let result = instance.call_transform(&input);
+        let result = instance.call_transform(&[input]);
         assert!(matches!(
             result,
             Err(WasmError::MemoryExceeded { .. }) | Err(WasmError::Trap { .. })

@@ -10,7 +10,7 @@ use model::{
     core::value::Value,
     execution::{
         expr::CompiledExpression,
-        pipeline::{ValidationKind, ValidationRule},
+        pipeline::{ValidationAction, ValidationKind, ValidationRule},
     },
     records::Record,
     transform::mapping::TransformationMetadata,
@@ -21,7 +21,7 @@ use std::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ValidationAction {
+pub enum Action {
     Skip, // Filter out the row
     Fail, // Stop the pipeline
     Warn, // Log warning but continue
@@ -32,24 +32,43 @@ pub enum ValidationResult {
     Failed {
         rule: String,
         message: String,
-        action: ValidationAction,
+        action: Action,
     },
 }
 
-/// Pre-built per-rule state. Indexed by rule position.
-enum CompiledRule {
-    Assert,
+/// Executable state for a validation rule, resolved once at construction.
+enum RuleExecutor {
+    Assert(CompiledExpression),
     WasmFilter {
         plugin: Box<Mutex<PluginInstance>>,
         plugin_name: String,
+        input_mapping: HashMap<String, String>,
     },
+}
+
+/// A pre-compiled validation rule: its metadata plus its executable state.
+struct ActiveRule {
+    label: String,
+    message: String,
+    action: Action,
+    executor: RuleExecutor,
+}
+
+impl ActiveRule {
+    /// Build the `Failed` result for this rule.
+    fn failed(&self, reject_reason: Option<String>) -> ValidationResult {
+        ValidationResult::Failed {
+            rule: self.label.clone(),
+            message: reject_reason.unwrap_or_else(|| self.message.clone()),
+            action: self.action,
+        }
+    }
 }
 
 /// Validator that evaluates validation rules from a Pipeline. Supports both
 /// expression-based asserts and WASM filter plugins.
 pub struct PipelineValidator {
-    rules: Vec<ValidationRule>,
-    compiled: Vec<CompiledRule>,
+    rules: Vec<ActiveRule>,
     metadata: TransformationMetadata,
     env: Arc<EnvContext>,
 }
@@ -61,27 +80,46 @@ impl PipelineValidator {
         env: Arc<EnvContext>,
         plugin_registry: &PluginRegistry,
     ) -> Result<Self, TransformError> {
-        let compiled = rules
-            .iter()
-            .map(|rule| match &rule.kind {
-                ValidationKind::Assert { .. } => Ok(CompiledRule::Assert),
-                ValidationKind::WasmFilter { plugin_name, .. } => {
-                    let plugin = plugin_registry.instantiate(plugin_name).map_err(|e| {
-                        TransformError::Transformation(format!(
-                            "validation plugin '{plugin_name}' instantiation failed: {e}"
-                        ))
-                    })?;
-                    Ok(CompiledRule::WasmFilter {
-                        plugin: Box::new(Mutex::new(plugin)),
-                        plugin_name: plugin_name.clone(),
-                    })
-                }
+        let rules = rules
+            .into_iter()
+            .map(|rule| {
+                let action = match rule.action {
+                    ValidationAction::Skip => Action::Skip,
+                    ValidationAction::Fail => Action::Fail,
+                    ValidationAction::Warn | ValidationAction::Continue => Action::Warn,
+                };
+
+                let executor = match rule.kind {
+                    ValidationKind::Assert { check } => RuleExecutor::Assert(check),
+                    ValidationKind::WasmFilter {
+                        plugin_name,
+                        input_mapping,
+                    } => {
+                        let plugin = plugin_registry.instantiate(&plugin_name).map_err(|e| {
+                            TransformError::Transformation(format!(
+                                "validation plugin '{plugin_name}' instantiation failed: {e}"
+                            ))
+                        })?;
+
+                        RuleExecutor::WasmFilter {
+                            plugin: Box::new(Mutex::new(plugin)),
+                            plugin_name,
+                            input_mapping,
+                        }
+                    }
+                };
+
+                Ok(ActiveRule {
+                    label: rule.label,
+                    message: rule.message,
+                    action,
+                    executor,
+                })
             })
             .collect::<Result<Vec<_>, TransformError>>()?;
 
         Ok(Self {
             rules,
-            compiled,
             metadata,
             env,
         })
@@ -93,11 +131,10 @@ impl PipelineValidator {
         rule_label: &str,
         row: &Record,
     ) -> Result<bool, TransformError> {
-        let env = self.env.clone();
-        let env_getter = move |key: &str| env.get(key);
+        let env_getter = |key: &str| self.env.get(key);
+
         match check.evaluate(row, &self.metadata, &env_getter) {
-            Some(Value::Boolean(true)) => Ok(true),
-            Some(Value::Boolean(false)) => Ok(false),
+            Some(Value::Boolean(b)) => Ok(b),
             Some(_) => Err(TransformError::Transformation(format!(
                 "Validation rule '{rule_label}' returned non-boolean value"
             ))),
@@ -113,57 +150,120 @@ impl PipelineValidator {
     ) -> Result<(bool, Option<String>), TransformError> {
         let input = PluginInput::from_record(row, input_mapping);
         let mut guard = plugin.lock().expect("validation plugin mutex poisoned");
-        let decision = guard.call_evaluate(&input).map_err(|e| {
-            TransformError::Transformation(format!("wasm filter '{plugin_name}' failed: {e}"))
-        })?;
+
+        let decision = guard
+            .call_evaluate(&[input])
+            .map_err(|e| {
+                TransformError::Transformation(format!("wasm filter '{plugin_name}' failed: {e}"))
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                TransformError::Transformation(format!(
+                    "wasm filter '{plugin_name}' returned no decision"
+                ))
+            })?;
+
         Ok(match decision {
             FilterDecision::Pass => (true, None),
             FilterDecision::Reject { reason } => (false, Some(reason)),
         })
     }
+
+    /// Evaluate a WASM filter rule over a whole batch in one crossing.
+    fn evaluate_wasm_batch(
+        plugin: &Mutex<PluginInstance>,
+        plugin_name: &str,
+        input_mapping: &HashMap<String, String>,
+        rows: &[Record],
+    ) -> Result<Vec<FilterDecision>, TransformError> {
+        let mut guard = plugin.lock().expect("validation plugin mutex poisoned");
+        guard
+            .call_evaluate_records(rows, input_mapping)
+            .map_err(|e| {
+                TransformError::Transformation(format!("wasm filter '{plugin_name}' failed: {e}"))
+            })
+    }
 }
 
 impl Validator for PipelineValidator {
     fn validate(&self, row: &Record) -> Result<ValidationResult, TransformError> {
-        for (rule, compiled) in self.rules.iter().zip(self.compiled.iter()) {
-            let (passed, reject_reason) = match (&rule.kind, compiled) {
-                (ValidationKind::Assert { check }, CompiledRule::Assert) => {
+        for rule in &self.rules {
+            let (passed, reject_reason) = match &rule.executor {
+                RuleExecutor::Assert(check) => {
                     (self.evaluate_assert(check, &rule.label, row)?, None)
                 }
-                (
-                    ValidationKind::WasmFilter { input_mapping, .. },
-                    CompiledRule::WasmFilter {
-                        plugin,
-                        plugin_name,
-                    },
-                ) => Self::evaluate_wasm(plugin, plugin_name, input_mapping, row)?,
-                _ => {
-                    return Err(TransformError::Transformation(format!(
-                        "validation rule `{}` and its compiled state diverged",
-                        rule.label
-                    )));
-                }
+                RuleExecutor::WasmFilter {
+                    plugin,
+                    plugin_name,
+                    input_mapping,
+                } => Self::evaluate_wasm(plugin, plugin_name, input_mapping, row)?,
             };
 
             if !passed {
-                let action = match rule.action {
-                    model::execution::pipeline::ValidationAction::Skip => ValidationAction::Skip,
-                    model::execution::pipeline::ValidationAction::Fail => ValidationAction::Fail,
-                    model::execution::pipeline::ValidationAction::Warn => ValidationAction::Warn,
-                    model::execution::pipeline::ValidationAction::Continue => {
-                        ValidationAction::Warn
-                    }
-                };
-
-                let message = reject_reason.unwrap_or_else(|| rule.message.clone());
-                return Ok(ValidationResult::Failed {
-                    rule: rule.label.clone(),
-                    message,
-                    action,
-                });
+                return Ok(rule.failed(reject_reason));
             }
         }
 
         Ok(ValidationResult::Pass)
+    }
+
+    /// Batch-native validation. Rules run in order across the whole batch.
+    fn validate_batch(
+        &self,
+        rows: &[Record],
+        out: &mut Vec<Result<ValidationResult, TransformError>>,
+    ) {
+        // `None` = still passing every rule evaluated so far.
+        let mut decided: Vec<Option<Result<ValidationResult, TransformError>>> =
+            std::iter::repeat_with(|| None).take(rows.len()).collect();
+
+        for rule in &self.rules {
+            match &rule.executor {
+                RuleExecutor::Assert(check) => {
+                    for (i, row) in rows.iter().enumerate() {
+                        if decided[i].is_some() {
+                            continue;
+                        }
+                        match self.evaluate_assert(check, &rule.label, row) {
+                            Ok(true) => {}
+                            Ok(false) => decided[i] = Some(Ok(rule.failed(None))),
+                            Err(e) => decided[i] = Some(Err(e)),
+                        }
+                    }
+                }
+                RuleExecutor::WasmFilter {
+                    plugin,
+                    plugin_name,
+                    input_mapping,
+                } => {
+                    match Self::evaluate_wasm_batch(plugin, plugin_name, input_mapping, rows) {
+                        Ok(decisions) => {
+                            for (i, decision) in decisions.into_iter().enumerate() {
+                                if decided[i].is_some() {
+                                    continue;
+                                }
+                                if let FilterDecision::Reject { reason } = decision {
+                                    decided[i] = Some(Ok(rule.failed(Some(reason))));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            // A crossing failure is fatal for the run.
+                            let msg = e.to_string();
+                            for slot in decided.iter_mut().filter(|s| s.is_none()) {
+                                *slot = Some(Err(TransformError::Transformation(msg.clone())));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        out.extend(
+            decided
+                .into_iter()
+                .map(|slot| slot.unwrap_or(Ok(ValidationResult::Pass))),
+        );
     }
 }

@@ -3,10 +3,10 @@ use connectors::drivers::postgres::config::{CopyFormat, PgConflictAction, PkCrea
 use model::{
     core::value::Value,
     execution::{
+        config::{ExecutionConfig, ExecutionStrategy, FailureStrategy},
         connection::Connection,
         define::DefinitionInfo,
         errors::ConvertError,
-        execution_config::{ExecutionConfig, ExecutionStrategy, FailureStrategy},
         expr::{BinaryOp, CompiledExpression, UnaryOp, WhenBranch},
         pipeline::{
             BackoffStrategy, DataDestination, DataSource, ErrorHandling, FailedRowsConfig,

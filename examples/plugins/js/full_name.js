@@ -16,7 +16,7 @@ transform("full_name", {
     first: "string",
     last: "string",
   },
-  compute({ first, last }) {
-    return [first, last].filter(Boolean).join(" ");
+  compute(rows) {
+    return rows.map(({ first, last }) => [first, last].filter(Boolean).join(" "));
   },
 });

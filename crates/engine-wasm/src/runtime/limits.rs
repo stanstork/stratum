@@ -16,10 +16,10 @@ pub struct ResourceLimits {
 impl ResourceLimits {
     pub fn for_row_plugins() -> Self {
         Self {
-            max_memory_bytes: 64 * 1024 * 1024, // 64 MB
-            max_execution_fuel: 1_000_000,
-            max_output_bytes: 1024 * 1024, // 1 MB
-            timeout_ms: 1_000,
+            max_memory_bytes: 128 * 1024 * 1024, // 128 MB
+            max_execution_fuel: 1_000_000,       // per-row fuel rate
+            max_output_bytes: 1024 * 1024,       // per-row output rate (1 MB)
+            timeout_ms: 1_000,                   // per-row wall-clock rate
         }
     }
 

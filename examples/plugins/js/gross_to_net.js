@@ -8,7 +8,7 @@ transform("gross_to_net", {
   version: "1.0.0",
   output: "f64",
   input: { gross: "f64", rate: "f64" },
-  compute({ gross, rate }) {
-    return (gross ?? 0) * (1 - (rate ?? 0));
+  compute(rows) {
+    return rows.map(({ gross, rate }) => (gross ?? 0) * (1 - (rate ?? 0)));
   },
 });

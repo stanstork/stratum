@@ -66,14 +66,22 @@ of the `LOAD DATA` write path. The PG source table is seeded once from
 
 ## Plugin workloads (Rust vs JS WASM)
 
-`synthetic_plugin_rust` and `synthetic_plugin_js` run the same one-column
-transform (`net = amount * quantity`) through a WASM transform plugin - one
-compiled from native Rust, one from JavaScript (QuickJS) - so the two plugin
-runtimes are compared on identical per-row work. They are **Stratum-only** and
-need **native Stratum** plus the host toolchain: the `wasm32-wasip1` target
-(`rustup target add wasm32-wasip1`) and `npx` (Node.js). `run.sh` builds both
-plugins into `plugins/build/` before the run; if native Stratum or the toolchain
-is missing it logs a note and skips just these two workloads.
+Four Stratum-only workloads, in two matched Rust-vs-JS pairs so the WASM runtimes
+are compared on identical per-row work:
+
+- **Transform** (`synthetic_plugin_rust`, `synthetic_plugin_js`) invoke the same
+  `order_net` transform (`a * b`) **three times per row** (plus several
+  copied-through source columns), through a WASM transform plugin.
+- **Filter** (`synthetic_filter_rust`, `synthetic_filter_js`) validate an 8-column
+  projection of `orders` with three `order_ok` filter calls per row through the
+  validation stage (pass if non-negative; every row passes).
+
+Each pair is one plugin compiled from native Rust and one from JavaScript
+(QuickJS). All four are **Stratum-only** and need **native Stratum** plus the host
+toolchain: the `wasm32-wasip1` target (`rustup target add wasm32-wasip1`) and
+`npx` (Node.js). `run.sh` builds all four plugins into `plugins/build/` before the
+run; if native Stratum or the toolchain is missing it logs a note and skips just
+these workloads.
 
 ## Layout
 
@@ -83,8 +91,8 @@ is missing it logs a note and skips just these two workloads.
 | `compose.yml` | dedicated bench databases (MySQL 8.0 :33307, PostgreSQL 16 :54329) - isolated from the dev compose |
 | `Dockerfile.stratum` | image built to run Stratum when no `STRATUM_BIN` is present |
 | `Dockerfile.pgloader` | image built for docker-mode pgloader v4 (JVM rewrite, from its JAR) |
-| `stratum/*.smql` | Stratum configs (credential-free; URLs injected via env); `synthetic_lanes.smql` (4-lane), `synthetic_heavy.smql` (~20 computed columns), `synthetic_plugin_{rust,js}.smql` (WASM transform plugin), `synthetic_reverse.smql` (PG->MySQL) |
-| `plugins/` | transform plugins for the plugin workloads: `rust/order_net` (native -> wasm32), `js/order_net.js` (JS -> QuickJS wasm); `run.sh` builds both into `plugins/build/` |
+| `stratum/*.smql` | Stratum configs (credential-free; URLs injected via env); `synthetic_lanes.smql` (4-lane), `synthetic_heavy.smql` (~19 mixed computed/copied columns: some string fns + arithmetic + dates), `synthetic_plugin_{rust,js}.smql` (WASM transform plugin, 3 calls/row), `synthetic_filter_{rust,js}.smql` (WASM filter plugin, 3 calls/row), `synthetic_reverse.smql` (PG->MySQL) |
+| `plugins/` | WASM plugins for the plugin workloads: `rust/order_net` + `js/order_net.js` (transform, `a * b`), `rust/order_ok` + `js/order_ok.js` (filter, non-negative check); `run.sh` builds all four into `plugins/build/` |
 | `pgloader/*.load.tpl` | pgloader configs (URLs substituted by `run.sh`) |
 | `synthetic/` | deterministic generators: `generate_mysql.sql` (MySQL source), `generate_pg.sql` (PG source for the reverse run) |
 | `results/<ts>/` | per-run output: `summary.md`, `summary.tsv`, `env.txt`, raw logs (gitignored) |
@@ -96,7 +104,7 @@ is missing it logs a note and skips just these two workloads.
 | `BENCH_ROWS` | `100000000` | synthetic table size |
 | `RUNS` | `3` | repetitions per Sakila scenario (median reported) |
 | `SYNTH_RUNS` | `1` | repetitions per synthetic scenario |
-| `WORKLOADS` | `sakila synthetic synthetic_heavy synthetic_plugin_rust synthetic_plugin_js` | forward (MySQL->PG) workloads; `synthetic_heavy` and the `synthetic_plugin_*` cases are Stratum-only |
+| `WORKLOADS` | `sakila synthetic synthetic_heavy synthetic_plugin_rust synthetic_plugin_js synthetic_filter_rust synthetic_filter_js` | forward (MySQL->PG) workloads; `synthetic_heavy`, the `synthetic_plugin_*`, and the `synthetic_filter_*` cases are Stratum-only |
 | `TOOLS` | `stratum stratum-integrity stratum-lanes` | Stratum scenarios (`stratum-lanes` = 4 PK-range lanes, integer-PK tables only) |
 | `WITH_PGLOADER` | `0` | also run pgloader on PG-target workloads (comparison) |
 | `STRATUM_BIN` | `target/release/stratum` | Stratum binary; if it is absent, Stratum runs in Docker |

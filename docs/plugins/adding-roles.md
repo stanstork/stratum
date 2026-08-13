@@ -20,8 +20,14 @@ a different combination of:
 
 When you add a role, you'll touch (roughly) five layers in this order:
 
-1. **Wire format** - define the JSON shape the host sends and the plugin
-   returns. Pick names for the input and output payload types.
+1. **Wire format** - define the shape the host sends and the plugin returns,
+   and pick names for the input and output payload types. Roles are free to
+   choose their codec via the metadata `exchange_format` field: source/sink use
+   JSON (`json_v1`), while the batch-native transform/filter roles use the binary
+   `columnar_v1` format (see `stratum-plugin-sdk/src/columnar.rs` and its host
+   mirror). A JSON payload (the aggregator example below) is the simplest place
+   to start; reuse the columnar codec if your role is batch-heavy and needs the
+   throughput.
 2. **Host ABI** - decide the exported symbol name (e.g.
    `__stratum_aggregate`) and the function signature. Almost always
    `(ptr: u32, len: u32) -> u64` for "bytes in, packed (ptr, len) out".

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::LazyLock;
 
 use crate::{context::EvalContext, eval::binary::BinaryOpEvaluator, functions::FunctionRegistry};
@@ -47,9 +48,9 @@ impl Evaluator for CompiledExpression {
             }
 
             CompiledExpression::FunctionCall { name, args } => {
-                let evaluated_args: Vec<Value> = args
+                let evaluated_args: Vec<Cow<'_, Value>> = args
                     .iter()
-                    .map(|arg| arg.evaluate(row, mapping, env_getter))
+                    .map(|arg| arg.evaluate(row, mapping, env_getter).map(Cow::Owned))
                     .collect::<Option<Vec<_>>>()?;
                 eval_function(name, &evaluated_args, row, mapping, env_getter)
             }
@@ -145,7 +146,7 @@ fn eval_binary_op(left: &Value, right: &Value, op: &BinaryOp) -> Option<Value> {
 
 fn eval_function(
     name: &str,
-    args: &[Value],
+    args: &[Cow<'_, Value>],
     row: &Record,
     mapping: &TransformationMetadata,
     env_getter: &dyn Fn(&str) -> Option<String>,

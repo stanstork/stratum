@@ -26,6 +26,8 @@ pub fn expand(attr: AttrArgs, user_fn: ItemFn) -> syn::Result<TokenStream> {
     let user_ident = &user_fn.sig.ident;
     let tail = pack_result_tail();
 
+    // Batch-native ABI: the user's function takes `Vec<PluginInput>` and returns one
+    // `FilterDecision` per input, owning the iteration. No per-row entry point.
     let role_entry = quote! {
         #[unsafe(no_mangle)]
         pub extern "C" fn __stratum_evaluate(ptr: u32, len: u32) -> u64 {
@@ -34,9 +36,10 @@ pub fn expand(attr: AttrArgs, user_fn: ItemFn) -> syn::Result<TokenStream> {
             };
             let result = ::std::panic::catch_unwind(
                 || -> ::std::result::Result<::std::vec::Vec<u8>, ::stratum_plugin_sdk::PluginError> {
-                    let input = ::stratum_plugin_sdk::PluginInput::from_json_bytes(&input_bytes)?;
-                    let decision: ::stratum_plugin_sdk::FilterDecision = #user_ident(input)?;
-                    Ok(decision.to_json_bytes())
+                    let inputs = ::stratum_plugin_sdk::columnar::decode_input_batch(&input_bytes)?;
+                    let decisions: ::std::vec::Vec<::stratum_plugin_sdk::FilterDecision> =
+                        #user_ident(inputs)?;
+                    Ok(::stratum_plugin_sdk::columnar::encode_filter_batch(&decisions))
                 },
             );
             #tail

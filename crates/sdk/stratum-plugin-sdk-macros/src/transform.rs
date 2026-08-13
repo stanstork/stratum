@@ -27,6 +27,10 @@ pub fn expand(attr: AttrArgs, user_fn: ItemFn) -> syn::Result<TokenStream> {
     let user_ident = &user_fn.sig.ident;
     let tail = pack_result_tail();
 
+    // Batch-native ABI: the host hands the whole batch across the boundary as one
+    // JSON array. The user's function takes `Vec<PluginInput>` and returns one
+    // output per input - it owns the iteration (and can process the batch however
+    // it likes). There is no per-row entry point.
     let role_entry = quote! {
         #[unsafe(no_mangle)]
         pub extern "C" fn __stratum_transform(ptr: u32, len: u32) -> u64 {
@@ -36,9 +40,12 @@ pub fn expand(attr: AttrArgs, user_fn: ItemFn) -> syn::Result<TokenStream> {
             };
             let result = ::std::panic::catch_unwind(
                 || -> ::std::result::Result<::std::vec::Vec<u8>, ::stratum_plugin_sdk::PluginError> {
-                    let input = ::stratum_plugin_sdk::PluginInput::from_json_bytes(&input_bytes)?;
-                    let value: ::stratum_plugin_sdk::Value = #user_ident(input)?.into();
-                    Ok(::stratum_plugin_sdk::PluginOutput::new(value).to_json_bytes())
+                    let inputs = ::stratum_plugin_sdk::columnar::decode_input_batch(&input_bytes)?;
+                    let values: ::std::vec::Vec<::stratum_plugin_sdk::Value> = #user_ident(inputs)?
+                        .into_iter()
+                        .map(::core::convert::Into::into)
+                        .collect();
+                    Ok(::stratum_plugin_sdk::columnar::encode_output_batch(&values))
                 },
             );
             #tail

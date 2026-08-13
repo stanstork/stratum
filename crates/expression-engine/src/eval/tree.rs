@@ -8,31 +8,32 @@ use model::{
     records::{Record, RecordSchema},
     transform::mapping::TransformationMetadata,
 };
+use std::borrow::Cow;
 use tracing::warn;
 
-/// An expression bound to a specific batch schema + mapping.
-pub enum PreparedExpr {
+/// An expression tree bound to a specific batch schema + mapping.
+pub enum TreeExpr {
     /// Column resolved to a positional index into the row's values.
     Column(usize),
     Literal(Value),
     Binary {
-        left: Box<PreparedExpr>,
+        left: Box<TreeExpr>,
         op: BinaryOp,
-        right: Box<PreparedExpr>,
+        right: Box<TreeExpr>,
     },
     Function {
         /// Kept only for the diagnostic on evaluation failure.
         name: String,
         f: FunctionImpl,
-        args: Vec<PreparedExpr>,
+        args: Vec<TreeExpr>,
     },
-    /// Not confidently preparable (joins, `when`, `is null`, unknown function,
-    /// column absent from this schema): evaluate the original expression so
-    /// behaviour is identical to the un-prepared path.
+    /// Can't be resolved ahead of time (joins, `when`, `is null`, unknown
+    /// function, column absent from this schema): evaluate the original
+    /// expression so behaviour is identical to the fully-dynamic path.
     Dynamic(CompiledExpression),
 }
 
-impl PreparedExpr {
+impl TreeExpr {
     /// Bind `expr` to `schema`/`mapping`/`table`, resolving names to indices and
     /// function pointers. Done once per batch.
     pub fn compile(
@@ -40,9 +41,9 @@ impl PreparedExpr {
         schema: &RecordSchema,
         mapping: &TransformationMetadata,
         table: &str,
-    ) -> PreparedExpr {
+    ) -> TreeExpr {
         match expr {
-            CompiledExpression::Literal(v) => PreparedExpr::Literal(v.clone()),
+            CompiledExpression::Literal(v) => TreeExpr::Literal(v.clone()),
 
             CompiledExpression::Identifier(name) => Self::column_or_dynamic(schema, name, expr),
 
@@ -67,7 +68,7 @@ impl PreparedExpr {
                     .unwrap_or(false);
 
                 if has_foreign {
-                    return PreparedExpr::Dynamic(expr.clone());
+                    return TreeExpr::Dynamic(expr.clone());
                 }
 
                 // Otherwise it's a same-table reference, possibly renamed: resolve
@@ -76,7 +77,7 @@ impl PreparedExpr {
                 Self::column_or_dynamic(schema, &resolved, expr)
             }
 
-            CompiledExpression::Binary { left, op, right } => PreparedExpr::Binary {
+            CompiledExpression::Binary { left, op, right } => TreeExpr::Binary {
                 left: Box::new(Self::compile(left, schema, mapping, table)),
                 op: *op,
                 right: Box::new(Self::compile(right, schema, mapping, table)),
@@ -85,7 +86,7 @@ impl PreparedExpr {
             CompiledExpression::Grouped(inner) => Self::compile(inner, schema, mapping, table),
 
             CompiledExpression::FunctionCall { name, args } => match lookup_function(name) {
-                Some(f) => PreparedExpr::Function {
+                Some(f) => TreeExpr::Function {
                     name: name.clone(),
                     f,
                     args: args
@@ -93,45 +94,49 @@ impl PreparedExpr {
                         .map(|a| Self::compile(a, schema, mapping, table))
                         .collect(),
                 },
-                None => PreparedExpr::Dynamic(expr.clone()),
+                None => TreeExpr::Dynamic(expr.clone()),
             },
 
             // Unary, When, IsNull, IsNotNull, Array, empty DotPath: rarer and/or
             // branch-y - defer to the dynamic path so behaviour is unchanged.
-            _ => PreparedExpr::Dynamic(expr.clone()),
+            _ => TreeExpr::Dynamic(expr.clone()),
         }
     }
 
     /// Evaluate against one row.
-    pub fn eval(
-        &self,
-        row: &Record,
+    pub fn eval<'a>(
+        &'a self,
+        row: &'a Record,
         mapping: &TransformationMetadata,
         env_getter: &dyn Fn(&str) -> Option<String>,
-    ) -> Option<Value> {
+    ) -> Option<Cow<'a, Value>> {
         match self {
-            PreparedExpr::Column(i) => row.value_at(*i).cloned(),
+            TreeExpr::Column(i) => row.value_at(*i).map(Cow::Borrowed),
 
-            PreparedExpr::Literal(v) => Some(v.clone()),
+            TreeExpr::Literal(v) => Some(Cow::Borrowed(v)),
 
-            PreparedExpr::Binary { left, op, right } => {
+            TreeExpr::Binary { left, op, right } => {
                 let l = left.eval(row, mapping, env_getter)?;
                 let r = right.eval(row, mapping, env_getter)?;
-                BinaryOpEvaluator::new(&l, &r, op).evaluate()
+                BinaryOpEvaluator::new(&l, &r, op)
+                    .evaluate()
+                    .map(Cow::Owned)
             }
 
-            PreparedExpr::Function { name, f, args } => {
-                let mut argv = Vec::with_capacity(args.len());
+            TreeExpr::Function { name, f, args } => {
+                let mut argv: Vec<Cow<'_, Value>> = Vec::with_capacity(args.len());
                 for a in args {
                     argv.push(a.eval(row, mapping, env_getter)?);
                 }
+
                 let ctx = EvalContext::Runtime {
                     row_data: row,
                     mapping,
                     env_getter,
                 };
+
                 match f(&argv, &ctx) {
-                    Ok(value) => Some(value),
+                    Ok(value) => Some(Cow::Owned(value)),
                     Err(e) => {
                         warn!(function = %name, error = %e, "function evaluation failed");
                         None
@@ -139,7 +144,7 @@ impl PreparedExpr {
                 }
             }
 
-            PreparedExpr::Dynamic(expr) => expr.evaluate(row, mapping, env_getter),
+            TreeExpr::Dynamic(expr) => expr.evaluate(row, mapping, env_getter).map(Cow::Owned),
         }
     }
 
@@ -147,10 +152,10 @@ impl PreparedExpr {
         schema: &RecordSchema,
         name: &str,
         original: &CompiledExpression,
-    ) -> PreparedExpr {
+    ) -> TreeExpr {
         match schema.index_of(name) {
-            Some(i) => PreparedExpr::Column(i),
-            None => PreparedExpr::Dynamic(original.clone()),
+            Some(i) => TreeExpr::Column(i),
+            None => TreeExpr::Dynamic(original.clone()),
         }
     }
 }

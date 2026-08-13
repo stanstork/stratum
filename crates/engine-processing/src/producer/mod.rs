@@ -1,6 +1,7 @@
 use crate::channel::{BatchEnvelope, ByteBudget};
 use crate::context::PipelineContext;
 use crate::io::source::Source;
+use crate::profile;
 use crate::transform::wasm::WasmTransform;
 use crate::{
     error::ProducerError,
@@ -262,7 +263,12 @@ impl Producer {
     }
 
     async fn process_snapshot_batch(&mut self) -> Result<ProducerStatus, ProducerError> {
+        use std::time::Instant;
+
+        let t_fetch = Instant::now();
         let fetch_result = self.reader.fetch(self.cursor.clone()).await?;
+
+        profile::record(&profile::FETCH, t_fetch.elapsed());
 
         // Handle empty/end cases
         if SnapshotReader::is_complete(&fetch_result) {
@@ -288,12 +294,16 @@ impl Producer {
         let next = fetch_result.next_cursor.unwrap_or(Cursor::None);
 
         // Transform data - will process entire batch even if some rows fail
+        let t_transform = Instant::now();
         let transform_result = self
             .transformer
             .transform(&self.ids.run_id(), &batch_id, fetch_result.rows)
             .await?;
 
-        // Process batch - stats are recorded only after successful completion
+        profile::record(&profile::TRANSFORM, t_transform.elapsed());
+
+        // Process batch - stats are recorded only after successful completion.
+        let t_proc = Instant::now();
         self.coordinator
             .process_batch(
                 batch_id,
@@ -302,6 +312,8 @@ impl Producer {
                 next.clone(),
             )
             .await?;
+
+        profile::record(&profile::SEND, t_proc.elapsed());
 
         // Advance cursor
         self.cursor = next;

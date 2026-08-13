@@ -8,10 +8,11 @@ const { filter } = require("@stratum/plugin-sdk");
 filter("in_range", {
   version: "1.0.0",
   input: { value: "i64", max: "i64" },
-  evaluate({ value, max }) {
-    if (value >= 0 && value <= max) {
-      return { pass: true };
-    }
-    return { pass: false, reason: `value ${value} outside [0, ${max}]` };
+  evaluate(rows) {
+    return rows.map(({ value, max }) =>
+      value >= 0 && value <= max
+        ? { pass: true }
+        : { pass: false, reason: `value ${value} outside [0, ${max}]` }
+    );
   },
 });

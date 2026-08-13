@@ -10,7 +10,7 @@ use stratum_plugin_sdk::{PluginInput, PluginResult, config, stratum_transform};
     output = "i64",
     input = []
 )]
-fn alloc(_input: PluginInput) -> PluginResult<i64> {
+fn alloc(inputs: Vec<PluginInput>) -> PluginResult<Vec<i64>> {
     let mb: usize = config()
         .get("alloc_mb")
         .and_then(|s| s.parse().ok())
@@ -32,5 +32,5 @@ fn alloc(_input: PluginInput) -> PluginResult<i64> {
         j += 4096;
     }
     black_box(&buf);
-    Ok(black_box(acc) as i64)
+    Ok(vec![black_box(acc) as i64; inputs.len()])
 }

@@ -14,19 +14,27 @@ use stratum_plugin_sdk::{stratum_transform, PluginInput, PluginResult};
     output = "f64",
     input = [{ name = "total", type = "f64", nullable = false }]
 )]
-fn calculate_discount(input: PluginInput) -> PluginResult<f64> {
-    let total = input.get_f64("total")?;
-    Ok(total * 0.9)
+fn calculate_discount(inputs: Vec<PluginInput>) -> PluginResult<Vec<f64>> {
+    inputs
+        .iter()
+        .map(|input| Ok(input.get_f64("total")? * 0.9))
+        .collect()
 }
 ```
+
+The handler takes the **whole batch** (`Vec<PluginInput>`) and returns one output
+per input - the ABI is batch-native, so there is no per-row entry point. The
+macro decodes the batch, calls your function, and encodes the results.
 
 ## What the compiler sees after expansion
 
 ```rust
 // 1. The user function is re-emitted unchanged.
-fn calculate_discount(input: PluginInput) -> PluginResult<f64> {
-    let total = input.get_f64("total")?;
-    Ok(total * 0.9)
+fn calculate_discount(inputs: Vec<PluginInput>) -> PluginResult<Vec<f64>> {
+    inputs
+        .iter()
+        .map(|input| Ok(input.get_f64("total")? * 0.9))
+        .collect()
 }
 
 // 2. Anonymous const block - keeps generated `use` items out of the
@@ -53,9 +61,11 @@ const _: () = {
     }
 
     // Metadata JSON baked in at compile time from the attribute args.
+    // Native transform/filter plugins declare `columnar_v1`; source/sink declare
+    // `json_v1`. The host reads this field to pick the wire codec.
     static __STRATUM_METADATA_JSON: &str =
         "{\"name\":\"discount\",\"version\":\"1.0.0\",\"type\":\"transform\",\
-          \"exchange_format\":\"json_v1\",\"runtime\":\"native\",\
+          \"exchange_format\":\"columnar_v1\",\"runtime\":\"native\",\
           \"input_schema\":[{\"name\":\"total\",\"type\":\"f64\",\"nullable\":false}],\
           \"output_type\":\"f64\"}";
 
@@ -106,12 +116,17 @@ const _: () = {
                 ::std::vec::Vec<u8>,
                 ::stratum_plugin_sdk::PluginError,
             > {
-                let input =
-                    ::stratum_plugin_sdk::PluginInput::from_json_bytes(&input_bytes)?;
-                // `.into()` lifts the user's f64 into Value automatically.
-                let value: ::stratum_plugin_sdk::Value =
-                    calculate_discount(input)?.into();
-                Ok(::stratum_plugin_sdk::PluginOutput::new(value).to_json_bytes())
+                // Decode the whole batch from the columnar_v1 frame the host wrote.
+                let inputs =
+                    ::stratum_plugin_sdk::columnar::decode_input_batch(&input_bytes)?;
+                // `.into()` lifts each user f64 into a Value automatically.
+                let values: ::std::vec::Vec<::stratum_plugin_sdk::Value> =
+                    calculate_discount(inputs)?
+                        .into_iter()
+                        .map(::core::convert::Into::into)
+                        .collect();
+                // Encode the outputs as a single-column columnar batch.
+                Ok(::stratum_plugin_sdk::columnar::encode_output_batch(&values))
             },
         );
 
@@ -144,14 +159,17 @@ stash a role-specific config. The role-specific entry points differ as follows.
 
 ### Filter (`#[stratum_filter]`)
 
-Same shape as transform, but:
+Same shape as transform (batch in, batch out, `columnar_v1`), but:
 
-- Function renamed `__stratum_evaluate`
-- No `.into()` - `FilterDecision` is concrete
+- Export renamed `__stratum_evaluate`
+- The handler returns `Vec<FilterDecision>` directly - no `.into()`, since
+  `FilterDecision` is concrete - and the decisions are encoded as a two-column
+  columnar batch (`pass`: bool, `reason`: string).
 
 ```rust
-let decision: FilterDecision = my_filter(input)?;
-Ok(decision.to_json_bytes())
+let inputs = columnar::decode_input_batch(&input_bytes)?;
+let decisions: Vec<FilterDecision> = my_filter(inputs)?;
+Ok(columnar::encode_filter_batch(&decisions))
 ```
 
 ### Source (`#[stratum_source]`)
