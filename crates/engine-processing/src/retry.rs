@@ -14,8 +14,6 @@ pub fn classify_driver_error(err: &DriverError) -> RetryDisposition {
         DriverError::TransactionError(_) => RetryDisposition::Stop,
         DriverError::Unknown(_) => RetryDisposition::Stop,
         DriverError::UnsupportedFormat(_) => RetryDisposition::Stop,
-        DriverError::UnsupportedScheme(_) => RetryDisposition::Stop,
-        DriverError::DriverNotFound(_) => RetryDisposition::Stop,
         DriverError::InvalidUrl(_) => RetryDisposition::Stop,
         DriverError::CircularReference(_) => RetryDisposition::Stop,
         DriverError::UnsupportedDriver(_) => RetryDisposition::Stop,

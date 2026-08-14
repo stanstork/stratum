@@ -1,6 +1,9 @@
 use crate::transform::error::FailedRowWriterError;
-use connectors::traits::{introspector::SchemaIntrospector, writer::DataWriter};
-use engine_core::context::exec::ExecutionContext;
+use connectors::{
+    error::DriverError,
+    traits::{introspector::SchemaIntrospector, writer::DataWriter},
+};
+use engine_core::{context::exec::ExecutionContext, dispatch_driver};
 use model::{
     execution::{
         connection::Connection,
@@ -9,7 +12,12 @@ use model::{
     },
     records::Record,
 };
-use std::{fs::OpenOptions, io::Write, path::Path, sync::Arc};
+use std::{
+    fs::OpenOptions,
+    io::{BufWriter, Write},
+    path::Path,
+    sync::Arc,
+};
 use tracing::{debug, error, info};
 
 /// Writer for failed rows to various destinations.
@@ -45,10 +53,7 @@ impl FailedRowWriter {
                     .await
             }
             FailedRowsDestination::File { path, format } => {
-                for failed_row in failed_rows {
-                    self.write_to_file(failed_row, path, format)?;
-                }
-                Ok(())
+                self.write_to_file(failed_rows, path, format)
             }
         }
     }
@@ -60,30 +65,19 @@ impl FailedRowWriter {
         table: &str,
         schema: Option<&str>,
     ) -> Result<(), FailedRowWriterError> {
-        if failed_rows.is_empty() {
-            return Ok(());
-        }
+        let table_name = schema.map_or_else(|| table.to_string(), |s| format!("{s}.{table}"));
 
-        let table_name = if let Some(schema) = schema {
-            format!("{}.{}", schema, table)
-        } else {
-            table.to_string()
+        let driver = match self.context.resolve_driver(connection).await {
+            Ok(driver) => driver,
+            Err(DriverError::UnsupportedDriver(_)) => {
+                return Err(FailedRowWriterError::NoDestination);
+            }
+            Err(e) => return Err(e.into()),
         };
 
-        // Get typed driver based on connection type and write
-        match connection.driver.as_str() {
-            "postgres" | "postgresql" => {
-                let driver = self.context.get_pg_driver(connection).await?;
-                self.write_with_driver(&*driver, failed_rows, &table_name)
-                    .await
-            }
-            "mysql" => {
-                let driver = self.context.get_mysql_driver(connection).await?;
-                self.write_with_driver(&*driver, failed_rows, &table_name)
-                    .await
-            }
-            _ => Err(FailedRowWriterError::NoDestination),
-        }
+        dispatch_driver!(&driver, |d| {
+            self.write_with_driver(&**d, failed_rows, &table_name).await
+        })
     }
 
     /// Generic write method that works with any driver implementing the required traits.
@@ -114,12 +108,12 @@ impl FailedRowWriter {
 
     fn write_to_file(
         &self,
-        failed_row: &FailedRow,
+        failed_rows: &[FailedRow],
         path: &str,
         format: &FileFormat,
     ) -> Result<(), FailedRowWriterError> {
         match format {
-            FileFormat::Json => self.write_to_json(failed_row, path),
+            FileFormat::Json => self.write_to_json(failed_rows, path),
             FileFormat::Csv => {
                 error!("CSV format not yet implemented for failed rows");
                 Err(FailedRowWriterError::UnsupportedFormat(FileFormat::Csv))
@@ -133,20 +127,25 @@ impl FailedRowWriter {
 
     fn write_to_json(
         &self,
-        failed_row: &FailedRow,
+        failed_rows: &[FailedRow],
         path: &str,
     ) -> Result<(), FailedRowWriterError> {
         if let Some(parent) = Path::new(path).parent() {
             std::fs::create_dir_all(parent)?;
         }
 
-        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        let mut writer = BufWriter::new(file);
 
-        // Serialize and write as JSONL (one JSON object per line)
-        let json = serde_json::to_string(failed_row)?;
-        writeln!(file, "{}", json)?;
+        // Stream JSON directly to the buffered writer instead of allocating intermediate Strings
+        for row in failed_rows {
+            serde_json::to_writer(&mut writer, row)?;
+            writer.write_all(b"\n")?;
+        }
 
-        debug!(id = %failed_row.id, path = %path, "wrote failed row to file");
+        writer.flush()?;
+
+        debug!(count = failed_rows.len(), path = %path, "wrote failed rows to file");
         Ok(())
     }
 }
@@ -191,7 +190,7 @@ mod tests {
         let env = Arc::new(EnvContext::empty());
         let plan = ExecutionPlan::build(&doc, env.clone()).unwrap();
         let state = Arc::new(SledStateStore::open(tempfile::tempdir().unwrap().path()).unwrap());
-        Arc::new(ExecutionContext::new(&plan, state, env).await.unwrap())
+        Arc::new(ExecutionContext::new(&plan, state, env))
     }
 
     #[tokio::test]

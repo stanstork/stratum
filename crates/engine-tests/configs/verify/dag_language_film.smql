@@ -7,7 +7,7 @@
 // config and verifies each receipt independently. Both pipelines must
 // produce a passing verify result for the overall verify to succeed.
 //
-// skip_foreign_keys on film avoids FK enforcement complications
+// skip_fk on film avoids FK enforcement complications
 // (original_language_id is nullable and may reference nothing).
 
 
@@ -40,8 +40,8 @@ pipeline "migrate_film" {
 
     settings {
         create_missing_tables = true
-        skip_primary_keys = true
-        skip_foreign_keys = true
+        skip_pk               = true
+        skip_fk               = true
         batch_size            = 200
     }
 }

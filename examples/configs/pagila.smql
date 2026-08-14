@@ -26,7 +26,7 @@
 // and a table's FKs are only emitted when the referenced table is part of the same
 // pipeline - so they are filtered out automatically. `after = [...]` orders the
 // *data* load so parent rows land before children. (To skip FKs use
-// `skip_foreign_keys = true`; keep `skip_primary_keys` off, since MySQL needs the
+// `skip_fk = true`; keep `skip_pk` off, since MySQL needs the
 // primary key for its AUTO_INCREMENT columns. Use examples/configs/pagila-graph.smql
 // to migrate the whole FK graph with constraints.)
 

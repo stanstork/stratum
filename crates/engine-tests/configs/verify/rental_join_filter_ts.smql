@@ -9,7 +9,7 @@
 //   - computed columns (customer_name = concat) in the receipt hashes
 //   - a filtered source (receipt covers only staff_id=1 rows)
 //   - non-PK (timestamp) cursor with tiebreaker across many pages
-//   - skip_foreign_keys avoids FK failures against non-existent tables
+//   - skip_fk avoids FK failures against non-existent tables
 //
 // Note: destination table is named "rental" (same as source) so that the
 // verifier's offset strategy can resolve column qualifiers against the PG table.
@@ -51,8 +51,8 @@ pipeline "verify_rental_join_filter" {
 
     settings {
         create_missing_tables = true
-        skip_primary_keys = true
-        skip_foreign_keys = true
+        skip_pk               = true
+        skip_fk               = true
         batch_size            = 200
     }
 }

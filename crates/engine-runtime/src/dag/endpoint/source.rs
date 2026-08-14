@@ -12,6 +12,7 @@ use engine_core::{
     plan::cascade::resolve_cascade_tables,
     schema::{
         graph_expander::GraphExpander,
+        plan::SchemaObjectFlags,
         schema_ops::SchemaOps,
         type_registry::{Dialect, TypeRegistry},
     },
@@ -85,30 +86,19 @@ impl CsvSourceEndpoint {
 }
 
 impl DbSourceEndpoint {
-    #[allow(clippy::too_many_arguments)]
     async fn expand_graph(
         &self,
         root_table: &str,
         mapping: &TransformationMetadata,
         refs: &GraphReferences,
         dest_dialect: Dialect,
-        skip_primary_keys: bool,
-        skip_foreign_keys: bool,
-        skip_indexes: bool,
+        flags: SchemaObjectFlags,
     ) -> Result<(Option<SchemaOps>, Option<HashMap<String, TableMetadata>>), MigrationError> {
         let source_dialect = self.driver.dialect();
         let type_registry = Arc::new(TypeRegistry::new(source_dialect, dest_dialect));
         let expander = GraphExpander::new(self.introspector.clone(), type_registry, source_dialect);
         let result = expander
-            .expand(
-                root_table,
-                refs,
-                mapping,
-                skip_primary_keys,
-                skip_foreign_keys,
-                skip_indexes,
-                false,
-            )
+            .expand(root_table, refs, mapping, flags, false)
             .await
             .map_err(MigrationError::from)?;
         let cascade_meta =
@@ -138,9 +128,7 @@ impl SourceEndpoint for DbSourceEndpoint {
                     mapping,
                     refs,
                     dest_dialect,
-                    pipeline.setting_flag("skip_primary_keys"),
-                    pipeline.setting_flag("skip_foreign_keys"),
-                    pipeline.setting_flag("skip_indexes"),
+                    SchemaObjectFlags::from_pipeline(pipeline),
                 )
                 .await?
             }

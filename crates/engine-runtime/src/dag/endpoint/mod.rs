@@ -163,7 +163,7 @@ pub async fn resolve_source(
             };
             Ok(Box::new(DbSourceEndpoint {
                 driver,
-                introspector: exec.cached_source_introspector(conn).await?,
+                introspector: exec.source_introspector(conn).await?,
             }))
         }
     }

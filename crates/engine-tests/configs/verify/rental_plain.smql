@@ -6,7 +6,7 @@
 // destination sides.
 //
 // rental: 16,044 rows, batch_size=500 -> ~33 pages.
-// skip_foreign_keys avoids FK failures (customer/inventory/staff not migrated).
+// skip_fk avoids FK failures (customer/inventory/staff not migrated).
 
 
 
@@ -21,8 +21,8 @@ pipeline "verify_rental_plain" {
 
     settings {
         create_missing_tables = true
-        skip_primary_keys = true
-        skip_foreign_keys = true
+        skip_pk               = true
+        skip_fk               = true
         batch_size            = 500
     }
 }

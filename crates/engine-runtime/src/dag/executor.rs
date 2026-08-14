@@ -92,7 +92,7 @@ impl DagExecutor {
                 MigrationError::InitializationError(format!("Failed to open state store: {e}"))
             })?,
         );
-        let exec_ctx = ExecutionContext::new(&plan, state, env).await?;
+        let exec_ctx = ExecutionContext::new(&plan, state, env);
         let exec_config = plan.execution_config.clone();
         let plugin_registry = load_registry(&plan.plugins)?;
 
@@ -146,8 +146,8 @@ impl DagExecutor {
     }
 
     async fn init_or_resume_run(&self) -> Result<(RunState, HashSet<String>), MigrationError> {
-        let run_id = self.exec_ctx.run_id();
-        let existing_run = self.exec_ctx.state.load_run_state(&run_id).await?;
+        let run_id = self.exec_ctx.run_id().to_string();
+        let existing_run = self.exec_ctx.state().load_run_state(&run_id).await?;
 
         let resuming = matches!(
             existing_run.as_ref().map(|r| &r.status),
@@ -175,7 +175,7 @@ impl DagExecutor {
 
         let run_state = self.build_initial_run_state(&run_id, existing_run, &completed_pipelines);
 
-        self.exec_ctx.state.save_run_state(&run_state).await?;
+        self.exec_ctx.state().save_run_state(&run_state).await?;
 
         let wal_entry = if resuming {
             WalEntry::RunResumed { run_id }
@@ -185,7 +185,7 @@ impl DagExecutor {
                 plan_hash: self.plan.hash().to_string(),
             }
         };
-        self.exec_ctx.state.append_wal(&wal_entry).await?;
+        self.exec_ctx.state().append_wal(&wal_entry).await?;
 
         Ok((run_state, completed_pipelines))
     }
@@ -359,7 +359,7 @@ impl DagExecutor {
                     completed_at: chrono::Utc::now(),
                 };
 
-                let run_id = self.exec_ctx.run_id();
+                let run_id = self.exec_ctx.run_id().to_string();
                 for ps in &mut run_state.pipelines {
                     if ps.status == PipelineStatus::Pending {
                         if failed_pipelines.contains(&ps.name) {
@@ -375,7 +375,7 @@ impl DagExecutor {
                     // count, summed across every lane/part of the pipeline).
                     if let Ok(total) = self
                         .exec_ctx
-                        .state
+                        .state()
                         .total_rows_done(&run_id, &ps.item_id)
                         .await
                         && total > 0
@@ -384,11 +384,11 @@ impl DagExecutor {
                     }
                 }
 
-                self.exec_ctx.state.save_run_state(&run_state).await?;
+                self.exec_ctx.state().save_run_state(&run_state).await?;
                 self.exec_ctx
-                    .state
+                    .state()
                     .append_wal(&WalEntry::RunDone {
-                        run_id: self.exec_ctx.run_id(),
+                        run_id: self.exec_ctx.run_id().to_string(),
                     })
                     .await?;
 
@@ -551,8 +551,8 @@ impl DagExecutor {
             // lanes), falling back to prior count + this session's metrics.
             match self
                 .exec_ctx
-                .state
-                .total_rows_done(&self.exec_ctx.run_id(), &ps.item_id)
+                .state()
+                .total_rows_done(self.exec_ctx.run_id(), &ps.item_id)
                 .await
             {
                 Ok(total) if total > 0 => ps.rows_done = total,
@@ -560,7 +560,7 @@ impl DagExecutor {
             }
         }
 
-        self.exec_ctx.state.save_run_state(run_state).await?;
+        self.exec_ctx.state().save_run_state(run_state).await?;
         Ok(())
     }
 
@@ -578,7 +578,7 @@ impl DagExecutor {
             paused_at: chrono::Utc::now(),
         };
 
-        let run_id = self.exec_ctx.run_id();
+        let run_id = self.exec_ctx.run_id().to_string();
         for ps in &mut state.pipelines {
             if completed_pipelines.contains(&ps.name) {
                 ps.status = PipelineStatus::Completed;
@@ -591,7 +591,7 @@ impl DagExecutor {
             // Update rows_done from checkpoints (cumulative across all lanes).
             if let Ok(total) = self
                 .exec_ctx
-                .state
+                .state()
                 .total_rows_done(&run_id, &ps.item_id)
                 .await
                 && total > 0
@@ -600,11 +600,11 @@ impl DagExecutor {
             }
         }
 
-        self.exec_ctx.state.save_run_state(&state).await?;
+        self.exec_ctx.state().save_run_state(&state).await?;
         self.exec_ctx
-            .state
+            .state()
             .append_wal(&WalEntry::RunPaused {
-                run_id: self.exec_ctx.run_id(),
+                run_id: self.exec_ctx.run_id().to_string(),
                 reason,
             })
             .await?;
@@ -739,7 +739,7 @@ impl DagExecutor {
         offset_strategy: Arc<dyn OffsetStrategy>,
     ) -> Result<PipelineContext, MigrationError> {
         let exec_ctx = Arc::new(self.exec_ctx.clone());
-        let run_id = self.exec_ctx.run_id();
+        let run_id = self.exec_ctx.run_id().to_string();
         let item_id = make_item_id(self.plan.hash(), &pipeline.destination.table, idx);
 
         let pipeline_ctx = PipelineContext::builder(exec_ctx.clone())
@@ -749,7 +749,7 @@ impl DagExecutor {
             .destination(destination)
             .pipeline(pipeline.clone())
             .mapping(mapping)
-            .state(self.exec_ctx.state.clone())
+            .state(self.exec_ctx.state().clone())
             .offset_strategy(offset_strategy)
             .cursor(Cursor::None)
             .plugin_registry(self.plugin_registry.clone())

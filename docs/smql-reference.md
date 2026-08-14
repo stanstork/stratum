@@ -674,10 +674,15 @@ settings {
 | `batch_size` | integer | `1000` | Rows per batch |
 | `create_missing_tables` | bool | `false` | Create the destination table if it doesn't exist |
 | `create_missing_columns` | bool | `false` | Add missing columns to an existing destination table |
-| `skip_primary_keys` | bool | `false` | Create destination tables without a primary key (and never add one) |
-| `skip_foreign_keys` | bool | `false` | Don't create foreign-key constraints on the destination |
-| `skip_indexes` | bool | `false` | Don't create secondary (non-constraint) indexes on the destination |
+| `skip_pk` | bool | `false` | Create destination tables without a primary key (and never add one) |
+| `skip_fk` | bool | `false` | Don't create foreign-key constraints on the destination |
+| `skip_idx` | bool | `false` | Don't create secondary (non-constraint) indexes on the destination |
+| `skip_seq` | bool | `false` | Don't create identity/auto-increment sequences on the destination |
+| `skip_unique` | bool | `false` | Don't create UNIQUE constraints on the destination |
+| `skip_check` | bool | `false` | Don't create CHECK constraints on the destination |
 | `lanes` | integer (1–32) | `1` | Parallel copy workers - see [lanes](#lanes--parallel-copy) below |
+
+> The `skip_*` schema flags apply only to tables Stratum creates (`create_missing_tables = true`) and only for SQL destinations. All default to `false` - the destination reproduces the source's indexes, sequences, and constraints for the columns that survive any projection.
 
 #### `lanes` - parallel copy
 

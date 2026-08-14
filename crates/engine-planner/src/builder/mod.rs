@@ -53,7 +53,7 @@ use engine_core::{
     plan::execution::ExecutionPlan as CoreExecutionPlan,
     retry::RetryPolicy,
     schema::{
-        plan::SchemaPlan,
+        plan::{SchemaObjectFlags, SchemaPlan},
         planner::SchemaPlanner,
         type_registry::{Dialect, TypeRegistry},
     },
@@ -328,7 +328,7 @@ impl ReportBuilder {
 
         // A WASM source feeding a real DB destination can still create/extend the
         // destination table; preview those changes (mirrors the DB<->DB path).
-        let schema_changes = wasm_schema::wasm_source_schema_changes(
+        let schema_changes = wasm_schema::source_changes(
             self,
             pipeline,
             src_ep.as_ref(),
@@ -551,7 +551,7 @@ impl ReportBuilder {
         let mut pool = ConnectionPool::new();
         for (plan, core_conn) in connection_plans.iter().zip(&core_plan.connections) {
             if let ConnectionStatus::Connected { .. } = &plan.status {
-                pool.get_or_create(core_conn).await.map_err(|e| {
+                pool.driver(core_conn).await.map_err(|e| {
                     ReportBuilderError::Connection(ConnectionError::Failed {
                         name: core_conn.name.clone(),
                         reason: e.to_string(),
@@ -635,9 +635,14 @@ impl ReportBuilder {
             introspector.clone(),
             source_dialect,
             mapping.clone(),
-            view.skip_primary_keys(),
-            view.skip_foreign_keys(),
-            view.skip_indexes(),
+            SchemaObjectFlags {
+                skip_pk: view.skip_pk(),
+                skip_fk: view.skip_fk(),
+                skip_idx: view.skip_idx(),
+                skip_seq: view.skip_seq(),
+                skip_unique: view.skip_unique(),
+                skip_check: view.skip_check(),
+            },
             pipeline.has_projection(),
             type_registry,
         );

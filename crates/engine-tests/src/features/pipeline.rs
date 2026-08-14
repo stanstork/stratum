@@ -197,8 +197,8 @@ mod tests {
                 }
                 settings {
                     create_missing_tables = true
-                    skip_primary_keys = true
-                    skip_foreign_keys = true
+                    skip_pk = true
+                    skip_fk = true
                 }
             }
         "#,
@@ -521,8 +521,8 @@ mod tests {
 
                 settings {
                     create_missing_tables = true
-                    skip_primary_keys = true
-                    skip_foreign_keys = true
+                    skip_pk = true
+                    skip_fk = true
                     batch_size = 500
                 }
 
@@ -585,8 +585,8 @@ mod tests {
 
                 settings {
                     create_missing_tables = true
-                    skip_primary_keys = true
-                    skip_foreign_keys = true
+                    skip_pk = true
+                    skip_fk = true
                     batch_size = 500
                 }
 

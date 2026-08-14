@@ -43,14 +43,8 @@ pub enum DbError {
 
 #[derive(Debug, Error)]
 pub enum DriverError {
-    #[error("Unsupported scheme: {0}")]
-    UnsupportedScheme(String),
-
     #[error("Unsupported format: {0}")]
     UnsupportedFormat(String),
-
-    #[error("Driver not found for driver id: {0}")]
-    DriverNotFound(String),
 
     #[error("Invalid URL: {0}")]
     InvalidUrl(String),

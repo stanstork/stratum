@@ -32,7 +32,7 @@ impl<D: SchemaDriver> MigrationSetting for CreateMissingColumnsSetting<D> {
 }
 
 impl<D: SchemaDriver> CreateMissingColumnsSetting<D> {
-    pub async fn new(ctx: SchemaSettingContext<D>) -> Self {
+    pub fn new(ctx: SchemaSettingContext<D>) -> Self {
         Self { context: ctx }
     }
 

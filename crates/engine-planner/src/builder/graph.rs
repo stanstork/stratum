@@ -11,6 +11,7 @@ use engine_core::{
     dispatch_driver,
     schema::{
         graph_expander::{GraphExpander, GraphExpansionResult},
+        plan::SchemaObjectFlags,
         schema_ops::{SchemaOp, SchemaOps},
         type_registry::{Dialect, TypeRegistry},
     },
@@ -20,7 +21,6 @@ use engine_wasm::registry::PluginRegistry;
 use model::execution::pipeline::Pipeline;
 use model::execution::row_count::RowCount;
 use model::transform::mapping::TransformationMetadata;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 /// Analyzes a single graph/cascade pipeline into one parent [`PipelinePlan`] whose
@@ -61,11 +61,13 @@ impl<'a> GraphAnalyzer<'a> {
                 .builder
                 .analyze_db_pipeline(&single, dag, connections, plugin_registry, None)
                 .await?;
+
             let row_count = sub.source.effective_row_count().clone();
             counts.push(row_count.clone());
 
             conversions += sub.data_flow_summary.type_conversions;
             unsafe_conversions += sub.data_flow_summary.unsafe_conversions;
+
             diagnostics.extend(sub.diagnostics.clone());
             cascade_tables.push(CascadeTablePlan {
                 source_table: table.clone(),
@@ -80,13 +82,15 @@ impl<'a> GraphAnalyzer<'a> {
         }
 
         // Collapse identical diagnostics.
-        let mut seen = HashSet::new();
-        diagnostics.retain(|d| seen.insert((d.code.clone(), d.message.clone())));
+        diagnostics
+            .sort_unstable_by(|a, b| a.code.cmp(&b.code).then_with(|| a.message.cmp(&b.message)));
+        diagnostics.dedup_by(|a, b| a.code == b.code && a.message == b.message);
 
         // The parent plan drives the summary/estimates/verdict. Analyze the root
         // table for its shape, then override the row total with the cascade sum.
         let root_single = cascade_table_pipeline(pipeline, &pipeline.source.table);
         let total = (!counts.is_empty()).then(|| RowCount::sum(counts.iter()));
+
         let mut plan = self
             .builder
             .analyze_db_pipeline(&root_single, dag, connections, plugin_registry, total)
@@ -100,6 +104,7 @@ impl<'a> GraphAnalyzer<'a> {
         plan.data_flow_summary.type_conversions = conversions;
         plan.data_flow_summary.unsafe_conversions = unsafe_conversions;
         plan.cascade_tables = cascade_tables;
+
         Ok(plan)
     }
 }
@@ -109,18 +114,18 @@ impl<'a> GraphAnalyzer<'a> {
 /// field mappings that apply to it.
 fn cascade_table_pipeline(pipeline: &Pipeline, table: &str) -> Pipeline {
     let mut single = pipeline.clone();
+
     single.source.table = table.to_string();
     single.source.graph_references = None;
     single.source.filters.clear();
     single.source.joins.clear();
 
-    let dest = pipeline
+    single.destination.table = single
         .destination
         .table_map
         .get(table)
         .cloned()
         .unwrap_or_else(|| table.to_string());
-    single.destination.table = dest;
     single.destination.table_map.clear();
 
     // Pick the transforms that apply to this table.
@@ -134,11 +139,13 @@ fn cascade_table_pipeline(pipeline: &Pipeline, table: &str) -> Pipeline {
             .unwrap_or_default()
     };
     single.named_transformations.clear();
+
     // Validations are authored against the root table; don't apply them to the
     // other discovered tables.
     if table != pipeline.source.table {
         single.validations.clear();
     }
+
     single
 }
 
@@ -154,6 +161,7 @@ async fn expand_graph(
         ReportBuilderError::Config("graph migrations require a database source".into())
     })?;
     let source_dialect = src_driver.dialect();
+
     let dest_driver = &pipeline.destination.connection.driver;
     let dest_dialect = Dialect::parse(dest_driver).ok_or_else(|| {
         ReportBuilderError::Config(format!(
@@ -166,24 +174,19 @@ async fn expand_graph(
         .graph_references
         .as_ref()
         .expect("graph_references present");
+
     let mapping = TransformationMetadata::new(pipeline);
     let introspector: Arc<dyn SchemaIntrospector> =
         dispatch_driver!(src_driver, |d| d.clone() as Arc<dyn SchemaIntrospector>);
     let type_registry = Arc::new(TypeRegistry::new(source_dialect, dest_dialect));
     let expander = GraphExpander::new(introspector, type_registry, source_dialect);
 
-    let skip_pk = pipeline.setting_flag("skip_primary_keys");
-    let skip_fk = pipeline.setting_flag("skip_foreign_keys");
-    let skip_idx = pipeline.setting_flag("skip_indexes");
-
     expander
         .expand(
             &pipeline.source.table,
             refs,
             &mapping,
-            skip_pk,
-            skip_fk,
-            skip_idx,
+            SchemaObjectFlags::from_pipeline(pipeline),
             false,
         )
         .await
@@ -195,8 +198,8 @@ async fn expand_graph(
         })
 }
 
-/// Convert the ordered DDL ops from graph expansion into report schema changes.
-fn schema_ops_to_changes(ops: &SchemaOps) -> Vec<SchemaChange> {
+/// Convert an ordered set of DDL ops into report schema changes.
+pub(crate) fn schema_ops_to_changes(ops: &SchemaOps) -> Vec<SchemaChange> {
     ops.pre
         .iter()
         .chain(ops.post.iter())
@@ -204,8 +207,9 @@ fn schema_ops_to_changes(ops: &SchemaOps) -> Vec<SchemaChange> {
         .collect()
 }
 
-fn op_to_change(op: &SchemaOp) -> SchemaChange {
+pub(crate) fn op_to_change(op: &SchemaOp) -> SchemaChange {
     let upper = op.sql.trim_start().to_uppercase();
+
     let change_type = if upper.starts_with("CREATE TABLE") {
         SchemaChangeType::CreateTable
     } else if upper.starts_with("CREATE TYPE") {
@@ -215,6 +219,7 @@ fn op_to_change(op: &SchemaOp) -> SchemaChange {
     } else {
         SchemaChangeType::AddConstraint
     };
+
     SchemaChange {
         change_type,
         entity: quoted_ident(&op.description),

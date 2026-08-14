@@ -1,5 +1,5 @@
 use crate::{
-    plan::SchemaPlan,
+    plan::{SchemaObjectFlags, SchemaPlan},
     planner::SchemaPlanner,
     schema_ops::SchemaOps,
     type_registry::{Dialect, TypeRegistry},
@@ -54,15 +54,12 @@ impl GraphExpander {
     }
 
     /// Expand the FK graph from the root table and produce schema operations.
-    #[allow(clippy::too_many_arguments)]
     pub async fn expand(
         &self,
         root_table: &str,
         refs: &GraphReferences,
         mapping: &TransformationMetadata,
-        skip_primary_keys: bool,
-        skip_foreign_keys: bool,
-        skip_indexes: bool,
+        flags: SchemaObjectFlags,
         mapped_columns_only: bool,
     ) -> Result<GraphExpansionResult, DriverError> {
         // Build full metadata graph from root table
@@ -88,9 +85,7 @@ impl GraphExpander {
             .build_schema_ops(
                 &filtered_tables,
                 mapping,
-                skip_primary_keys,
-                skip_foreign_keys,
-                skip_indexes,
+                flags,
                 mapped_columns_only,
                 refs.drop_constraints,
             )
@@ -194,14 +189,11 @@ impl GraphExpander {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn build_schema_ops(
         &self,
         tables: &[String],
         mapping: &TransformationMetadata,
-        skip_primary_keys: bool,
-        skip_foreign_keys: bool,
-        skip_indexes: bool,
+        flags: SchemaObjectFlags,
         mapped_columns_only: bool,
         drop_constraints: bool,
     ) -> Result<SchemaOps, DriverError> {
@@ -214,9 +206,7 @@ impl GraphExpander {
             self.introspector.clone(),
             self.source_dialect,
             augmented,
-            skip_primary_keys,
-            skip_foreign_keys,
-            skip_indexes,
+            flags,
             mapped_columns_only,
             (*self.type_registry).clone(),
         );

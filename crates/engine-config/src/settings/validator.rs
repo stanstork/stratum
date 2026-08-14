@@ -87,23 +87,37 @@ impl<'a> SettingsValidator<'a> {
         builder: &mut ValidatedSettingsBuilder,
         errors: &mut Vec<String>,
     ) {
-        if (settings.skip_primary_keys || settings.skip_foreign_keys || settings.skip_indexes)
-            && !self.is_sql_destination()
-        {
+        let any_skip = settings.skip_pk
+            || settings.skip_fk
+            || settings.skip_idx
+            || settings.skip_seq
+            || settings.skip_unique
+            || settings.skip_check;
+        if any_skip && !self.is_sql_destination() {
             errors.push(
-                "skip_primary_keys / skip_foreign_keys / skip_indexes are only supported for SQL destinations"
+                "skip_pk / skip_fk / skip_idx / skip_seq / \
+                 skip_unique / skip_check are only supported for SQL destinations"
                     .to_string(),
             );
             return;
         }
-        if settings.skip_primary_keys {
-            builder.skip_primary_keys = Some(true);
+        if settings.skip_pk {
+            builder.skip_pk = Some(true);
         }
-        if settings.skip_foreign_keys {
-            builder.skip_foreign_keys = Some(true);
+        if settings.skip_fk {
+            builder.skip_fk = Some(true);
         }
-        if settings.skip_indexes {
-            builder.skip_indexes = Some(true);
+        if settings.skip_idx {
+            builder.skip_idx = Some(true);
+        }
+        if settings.skip_seq {
+            builder.skip_seq = Some(true);
+        }
+        if settings.skip_unique {
+            builder.skip_unique = Some(true);
+        }
+        if settings.skip_check {
+            builder.skip_check = Some(true);
         }
     }
 
@@ -177,9 +191,12 @@ impl<'a> SettingsValidator<'a> {
             batch_size = settings.batch_size(),
             create_missing_tables = settings.create_missing_tables(),
             create_missing_columns = settings.create_missing_columns(),
-            skip_primary_keys = settings.skip_primary_keys(),
-            skip_foreign_keys = settings.skip_foreign_keys(),
-            skip_indexes = settings.skip_indexes(),
+            skip_pk = settings.skip_pk(),
+            skip_fk = settings.skip_fk(),
+            skip_idx = settings.skip_idx(),
+            skip_seq = settings.skip_seq(),
+            skip_unique = settings.skip_unique(),
+            skip_check = settings.skip_check(),
             dry_run = settings.is_dry_run(),
             "validated settings"
         );
