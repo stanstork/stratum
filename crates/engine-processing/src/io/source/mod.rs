@@ -26,7 +26,7 @@ use model::{
     transform::mapping::TransformationMetadata,
 };
 use query_builder::{
-    dialect::{self, Dialect},
+    dialect::{self, QueryDialect},
     offsets::{OffsetStrategy, OffsetStrategyFactory},
 };
 use std::{
@@ -235,7 +235,7 @@ impl Source {
         &self.name
     }
 
-    pub fn query_dialect(&self) -> Box<dyn Dialect> {
+    pub fn query_dialect(&self) -> Box<dyn QueryDialect> {
         match self.format {
             DataFormat::MySql => Box::new(dialect::MySql),
             DataFormat::Postgres => Box::new(dialect::Postgres),

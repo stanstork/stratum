@@ -176,7 +176,7 @@ impl ValidationAnalyzer {
             .joins(join_clauses)
             .build();
         let dialect = ctx.source_dialect.as_query_dialect();
-        let generator = QueryGenerator::new(dialect.as_ref());
+        let generator = QueryGenerator::new(dialect);
         let (sql, params) = generator.validation_estimation(&request, filter_expr, 10_000);
 
         let rows = ctx

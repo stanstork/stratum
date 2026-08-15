@@ -5,7 +5,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use model::{core::value::Value, records::Record};
-use query_builder::dialect::Dialect;
+use query_builder::dialect::QueryDialect;
 
 #[async_trait]
 pub trait DataReader: Driver {
@@ -27,7 +27,7 @@ pub trait DataReader: Driver {
 /// The lone integer primary key of `table`, if it has exactly one and it is an
 /// integer in this `dialect`. Used to decide whether range-lane splitting
 /// applies before running the min/max probe.
-pub(crate) fn single_int_pk(meta: &TableMetadata, dialect: &dyn Dialect) -> Option<String> {
+pub(crate) fn single_int_pk(meta: &TableMetadata, dialect: &dyn QueryDialect) -> Option<String> {
     if meta.primary_keys.len() != 1 {
         return None;
     }

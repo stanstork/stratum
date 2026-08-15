@@ -71,7 +71,7 @@ impl SchemaAnalyzer {
         let existing_columns = dest_metadata.columns();
 
         let dialect = ctx.dest_dialect.as_query_dialect();
-        let generator = QueryGenerator::new(dialect.as_ref());
+        let generator = QueryGenerator::new(dialect);
 
         let changes: Vec<SchemaChange> = planned_columns
             .into_iter()

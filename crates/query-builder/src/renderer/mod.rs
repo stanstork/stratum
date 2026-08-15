@@ -1,6 +1,6 @@
 //! Defines the core rendering trait and context for converting AST to SQL.
 
-use crate::{ast::common::TableRef, dialect::Dialect};
+use crate::{ast::common::TableRef, dialect::QueryDialect};
 use model::core::value::Value;
 
 pub mod alter_table;
@@ -29,11 +29,11 @@ pub trait Render {
 pub struct Renderer<'a> {
     pub sql: String,
     pub params: Vec<Value>,
-    pub dialect: &'a dyn Dialect,
+    pub dialect: &'a dyn QueryDialect,
 }
 
 impl<'a> Renderer<'a> {
-    pub fn new(dialect: &'a dyn Dialect) -> Self {
+    pub fn new(dialect: &'a dyn QueryDialect) -> Self {
         Self {
             sql: String::new(),
             params: Vec::new(),

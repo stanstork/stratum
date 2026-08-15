@@ -4,6 +4,7 @@ use connectors::{
     sql::metadata::{column::ColumnMetadata, index::IndexType},
 };
 use model::core::{convert::IntoCanonical, types::Type};
+use query_builder::dialect::QueryDialect;
 use std::{collections::HashMap, sync::Arc};
 
 /// Describes how to transform a value during type conversion
@@ -128,11 +129,14 @@ impl Dialect {
         }
     }
 
-    /// Convert to the query_builder Dialect trait object for SQL generation
-    pub fn as_query_dialect(&self) -> Box<dyn query_builder::dialect::Dialect + Send + Sync> {
+    /// Resolve to the query-builder [`QueryDialect`] renderer for this dialect.
+    pub fn as_query_dialect(&self) -> &'static (dyn QueryDialect + Send + Sync) {
+        static MYSQL: query_builder::dialect::MySql = query_builder::dialect::MySql;
+        static POSTGRES: query_builder::dialect::Postgres = query_builder::dialect::Postgres;
+
         match self {
-            Dialect::MySql => Box::new(query_builder::dialect::MySql),
-            Dialect::Postgres => Box::new(query_builder::dialect::Postgres),
+            Dialect::MySql => &MYSQL,
+            Dialect::Postgres => &POSTGRES,
         }
     }
 }

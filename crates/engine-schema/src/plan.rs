@@ -18,7 +18,7 @@ use model::{
     core::types::Type, execution::expr::CompiledExpression,
     transform::mapping::TransformationMetadata,
 };
-use query_builder::dialect::{self, Dialect};
+use query_builder::dialect::{self, QueryDialect};
 use std::collections::{HashMap, HashSet, hash_map::Entry};
 use tracing::warn;
 
@@ -57,7 +57,7 @@ pub struct SchemaPlan {
     type_engine: TypeEngine,
 
     /// Target dialect for DDL rendering.
-    target_dialect: Box<dyn Dialect + Send + Sync>,
+    target_dialect: &'static (dyn QueryDialect + Send + Sync),
 
     /// Create destination tables without a primary key (and never add one).
     skip_pk: bool,
@@ -151,7 +151,7 @@ impl SchemaPlan {
     ) -> Self {
         Self {
             type_engine,
-            target_dialect: Box::new(dialect::Postgres),
+            target_dialect: &dialect::Postgres,
             skip_pk: flags.skip_pk,
             defer_pk: false,
             skip_fk: flags.skip_fk,
@@ -175,7 +175,7 @@ impl SchemaPlan {
         }
     }
 
-    pub fn set_target_dialect(&mut self, dialect: Box<dyn Dialect + Send + Sync>) {
+    pub fn set_target_dialect(&mut self, dialect: &'static (dyn QueryDialect + Send + Sync)) {
         self.target_dialect = dialect;
     }
 
@@ -367,7 +367,7 @@ impl SchemaPlan {
             return Vec::new();
         }
 
-        let qgen = QueryGenerator::new(self.target_dialect.as_ref());
+        let qgen = QueryGenerator::new(self.target_dialect);
         let mut ops = Vec::new();
 
         for (table, column) in &self.enum_definitions {
@@ -469,7 +469,7 @@ impl SchemaPlan {
     /// Generate CREATE SEQUENCE ops, skipping sequences whose owning column was
     /// dropped by projection.
     fn sequence_ops(&self) -> Vec<SchemaOp> {
-        let qgen = QueryGenerator::new(self.target_dialect.as_ref());
+        let qgen = QueryGenerator::new(self.target_dialect);
         let dest_cols = self.dest_column_index();
 
         self.sequence_definitions
@@ -514,7 +514,7 @@ impl SchemaPlan {
 
     /// Generate CREATE TABLE ops (topologically sorted, no FKs inline).
     fn table_ops(&self) -> Vec<SchemaOp> {
-        let qgen = QueryGenerator::new(self.target_dialect.as_ref());
+        let qgen = QueryGenerator::new(self.target_dialect);
         let dep_graph = self.build_dependency_graph();
 
         // Get topological order; fall back to deterministic partial order on cycle
@@ -565,7 +565,7 @@ impl SchemaPlan {
             return Vec::new();
         }
 
-        let qgen = QueryGenerator::new(self.target_dialect.as_ref());
+        let qgen = QueryGenerator::new(self.target_dialect);
         let dep_graph = self.build_dependency_graph();
         let table_order = dep_graph.without_self_refs().partial_topo_order();
 
@@ -607,7 +607,7 @@ impl SchemaPlan {
 
     /// Generate CREATE INDEX ops.
     fn index_ops(&self) -> Vec<SchemaOp> {
-        let qgen = QueryGenerator::new(self.target_dialect.as_ref());
+        let qgen = QueryGenerator::new(self.target_dialect);
         let mut ops = Vec::new();
 
         // Non-unique indexes first, then unique (unique may depend on data).
@@ -659,7 +659,7 @@ impl SchemaPlan {
 
     /// Generate ALTER TABLE ADD CONSTRAINT ops (FKs, CHECK, UNIQUE).
     fn constraint_ops(&self) -> Vec<SchemaOp> {
-        let qgen = QueryGenerator::new(self.target_dialect.as_ref());
+        let qgen = QueryGenerator::new(self.target_dialect);
         let dest_cols = self.dest_column_index();
         let mut ops = Vec::new();
 
@@ -787,7 +787,7 @@ impl SchemaPlan {
     /// Generate ALTER TABLE DROP CONSTRAINT IF EXISTS ops for all named FK constraints.
     /// Emitted in pre-migration so data is written without active FK constraints.
     fn drop_fk_ops(&self) -> Vec<SchemaOp> {
-        let qgen = QueryGenerator::new(self.target_dialect.as_ref());
+        let qgen = QueryGenerator::new(self.target_dialect);
         let mut ops = Vec::new();
 
         for (table, fks) in &self.fk_definitions {
@@ -1547,7 +1547,7 @@ mod tests {
         );
 
         // MySQL: `DROP FOREIGN KEY`, no `IF EXISTS` (unsupported there).
-        plan.set_target_dialect(Box::new(dialect::MySql));
+        plan.set_target_dialect(&dialect::MySql);
         let my_drop = plan
             .build_ops()
             .pre

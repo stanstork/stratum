@@ -19,7 +19,7 @@ use query_builder::{
         load_data::LoadDataBuilder, merge::MergeBuilder, select::SelectBuilder,
         truncate_table::TruncateTableBuilder,
     },
-    dialect::Dialect,
+    dialect::QueryDialect,
     renderer::{Render, Renderer},
 };
 use query_builder::{table_ref, value};
@@ -43,11 +43,11 @@ use crate::{
 };
 
 pub struct QueryGenerator<'a> {
-    dialect: &'a dyn Dialect,
+    dialect: &'a dyn QueryDialect,
 }
 
 impl<'a> QueryGenerator<'a> {
-    pub fn new(dialect: &'a dyn Dialect) -> Self {
+    pub fn new(dialect: &'a dyn QueryDialect) -> Self {
         Self { dialect }
     }
 
@@ -427,7 +427,7 @@ impl<'a> QueryGenerator<'a> {
         self.render_ast(ast)
     }
 
-    /// Dialect-specific DDL to drop a table's primary key.
+    /// Dialect specific DDL to drop a table's primary key.
     pub fn drop_primary_key(&self, table: &str) -> String {
         self.dialect.drop_primary_key(table)
     }
@@ -701,7 +701,7 @@ fn map_value_to_expr(
     value: Value,
     col_meta: &ColumnMetadata,
     data_type: &Type,
-    dialect: &dyn Dialect,
+    dialect: &dyn QueryDialect,
 ) -> Expr {
     // For NULL, PostgreSQL casts so it can infer the column type in ambiguous
     // contexts (e.g. bytea). MySQL's CAST rejects type names like `varchar` /

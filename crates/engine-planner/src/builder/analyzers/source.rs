@@ -194,7 +194,7 @@ impl<S: SchemaDriver> SourceAnalyzer<S> {
             .limit(1)
             .build();
         let dialect = ctx.source_dialect.as_query_dialect();
-        let generator = QueryGenerator::new(dialect.as_ref());
+        let generator = QueryGenerator::new(dialect);
         let (sql, params) = generator.select(&request);
 
         let explain_sql = format!("{}{}", prefix, sql);

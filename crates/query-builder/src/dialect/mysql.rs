@@ -1,10 +1,10 @@
-use super::Dialect;
+use super::QueryDialect;
 use model::core::types::Type;
 
 #[derive(Debug, Clone)]
 pub struct MySql;
 
-impl Dialect for MySql {
+impl QueryDialect for MySql {
     fn quote_identifier(&self, ident: &str) -> String {
         format!(r#"`{ident}`"#)
     }

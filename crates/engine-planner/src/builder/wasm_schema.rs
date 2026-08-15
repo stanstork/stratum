@@ -91,7 +91,7 @@ async fn add_column_changes(
     let existing_columns = dest_meta.columns();
 
     let dialect = dest_dialect.as_query_dialect();
-    let generator = QueryGenerator::new(dialect.as_ref());
+    let generator = QueryGenerator::new(dialect);
 
     planned_columns
         .into_iter()

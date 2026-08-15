@@ -1,10 +1,10 @@
-use super::Dialect;
+use super::QueryDialect;
 use model::core::types::Type;
 
 #[derive(Debug, Clone)]
 pub struct Postgres;
 
-impl Dialect for Postgres {
+impl QueryDialect for Postgres {
     fn quote_identifier(&self, ident: &str) -> String {
         format!(r#""{ident}""#)
     }

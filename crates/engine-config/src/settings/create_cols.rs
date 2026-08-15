@@ -78,7 +78,7 @@ impl<D: SchemaDriver> CreateMissingColumnsSetting<D> {
             };
 
             let query_dialect = self.context.destination.dialect.as_query_dialect();
-            let generator = QueryGenerator::new(query_dialect.as_ref());
+            let generator = QueryGenerator::new(query_dialect);
 
             for (src_col, dst_col) in columns.forward_map() {
                 if dest_meta.get_column(&dst_col).is_none() {
@@ -109,7 +109,7 @@ impl<D: SchemaDriver> CreateMissingColumnsSetting<D> {
         let source = self.context.source.introspector.clone();
         if let Some(computed) = self.context.mapping.field_mappings.get_computed(table) {
             let query_dialect = self.context.destination.dialect.as_query_dialect();
-            let generator = QueryGenerator::new(query_dialect.as_ref());
+            let generator = QueryGenerator::new(query_dialect);
 
             // Resolved computed-column types, so a later computed column can
             // reference an earlier one in the same select.

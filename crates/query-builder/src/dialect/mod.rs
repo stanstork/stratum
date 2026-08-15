@@ -6,7 +6,7 @@ pub use postgres::Postgres;
 
 use model::core::types::Type;
 
-pub trait Dialect: Send + Sync {
+pub trait QueryDialect: Send + Sync {
     /// Wraps an identifier (like a table or column name) in the correct
     /// quotation marks for the dialect.
     ///
