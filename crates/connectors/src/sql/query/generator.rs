@@ -461,6 +461,10 @@ impl<'a> QueryGenerator<'a> {
         self.render_ast(query_ast)
     }
 
+    pub fn drop_foreign_key(&self, table: &str, constraint_name: &str) -> String {
+        self.dialect.drop_foreign_key(table, constraint_name)
+    }
+
     pub fn create_enum(&self, name: &str, values: &[String]) -> (String, Vec<Value>) {
         let builder = CreateEnumBuilder::new(
             TypeName {

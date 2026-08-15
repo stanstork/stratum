@@ -46,6 +46,9 @@ pub trait Dialect: Send + Sync {
     /// and must drop the constraint by its catalog name.
     fn drop_primary_key(&self, table: &str) -> String;
 
+    /// DDL to drop a named foreign-key constraint.
+    fn drop_foreign_key(&self, table: &str, constraint: &str) -> String;
+
     /// Returns the random function name for this dialect.
     ///
     /// - PostgreSQL uses `RANDOM()`

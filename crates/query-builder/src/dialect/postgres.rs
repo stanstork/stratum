@@ -212,6 +212,14 @@ impl Dialect for Postgres {
         )
     }
 
+    fn drop_foreign_key(&self, table: &str, constraint: &str) -> String {
+        format!(
+            "ALTER TABLE {} DROP CONSTRAINT IF EXISTS {};",
+            self.quote_identifier(table),
+            self.quote_identifier(constraint)
+        )
+    }
+
     fn random_fn(&self) -> &'static str {
         "RANDOM()"
     }

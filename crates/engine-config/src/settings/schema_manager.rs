@@ -20,6 +20,10 @@ pub async fn apply_schema_ops(
                 info!(op = %op.description, "schema object already exists, skipping");
                 continue;
             }
+            if op.idempotent && err.is_missing_object() {
+                info!(op = %op.description, "schema object already absent, skipping");
+                continue;
+            }
             if op.skip_if_missing_ref && is_relation_not_found_error(&err) {
                 info!(op = %op.description, "referenced table missing in destination, skipping");
                 continue;

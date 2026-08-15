@@ -787,22 +787,21 @@ impl SchemaPlan {
     /// Generate ALTER TABLE DROP CONSTRAINT IF EXISTS ops for all named FK constraints.
     /// Emitted in pre-migration so data is written without active FK constraints.
     fn drop_fk_ops(&self) -> Vec<SchemaOp> {
+        let qgen = QueryGenerator::new(self.target_dialect.as_ref());
         let mut ops = Vec::new();
 
         for (table, fks) in &self.fk_definitions {
             let resolved_table = self.mapping.entities.resolve(table);
-            let quoted_table = self.target_dialect.quote_identifier(&resolved_table);
 
             for fk in fks {
                 let Some(name) = &fk.constraint_name else {
                     continue; // can't reference anonymous constraints by name
                 };
-                let quoted_name = self.target_dialect.quote_identifier(name);
+
+                let sql = qgen.drop_foreign_key(&resolved_table, name);
 
                 ops.push(SchemaOp {
-                    sql: format!(
-                        "ALTER TABLE {quoted_table} DROP CONSTRAINT IF EXISTS {quoted_name};"
-                    ),
+                    sql,
                     description: format!(
                         "Drop foreign key '{}' on '{}' before data migration",
                         name, resolved_table
@@ -1510,6 +1509,59 @@ mod tests {
             last_pk < first_fk,
             "deferred PKs must be added before FKs that may reference them: {:?}",
             ops.post
+        );
+    }
+
+    #[test]
+    fn drop_fk_ops_are_dialect_specific() {
+        let mut plan = empty_plan();
+        register(&mut plan, "users", vec![int_col("id", true)]);
+        register(
+            &mut plan,
+            "orders",
+            vec![int_col("id", true), int_col("user_id", false)],
+        );
+        plan.add_fk_def(
+            "orders",
+            ForeignKeyDef {
+                constraint_name: Some("fk_orders_users".into()),
+                columns: vec!["user_id".into()],
+                referenced_table: "users".into(),
+                referenced_columns: vec!["id".into()],
+                on_delete: ForeignKeyAction::NoAction,
+                on_update: ForeignKeyAction::NoAction,
+            },
+        );
+        plan.set_drop_constraints(true);
+
+        // Postgres (default target): `DROP CONSTRAINT IF EXISTS`.
+        let pg_drop = plan
+            .build_ops()
+            .pre
+            .into_iter()
+            .find(|o| o.sql.to_uppercase().contains("DROP CONSTRAINT"))
+            .expect("a pre DROP op on Postgres");
+        assert_eq!(
+            pg_drop.sql,
+            r#"ALTER TABLE "orders" DROP CONSTRAINT IF EXISTS "fk_orders_users";"#
+        );
+
+        // MySQL: `DROP FOREIGN KEY`, no `IF EXISTS` (unsupported there).
+        plan.set_target_dialect(Box::new(dialect::MySql));
+        let my_drop = plan
+            .build_ops()
+            .pre
+            .into_iter()
+            .find(|o| o.sql.to_uppercase().contains("DROP FOREIGN KEY"))
+            .expect("a pre DROP op on MySQL");
+        assert_eq!(
+            my_drop.sql,
+            "ALTER TABLE `orders` DROP FOREIGN KEY `fk_orders_users`;"
+        );
+        assert!(
+            !my_drop.sql.to_uppercase().contains("IF EXISTS"),
+            "MySQL has no IF EXISTS for constraint drops: {}",
+            my_drop.sql
         );
     }
 

@@ -78,3 +78,13 @@ pub enum DriverError {
     #[error("Unsupported driver: {0}")]
     UnsupportedDriver(String),
 }
+
+impl DriverError {
+    pub fn is_missing_object(&self) -> bool {
+        match self {
+            DriverError::MySqlError(mysql_async::Error::Server(e)) => e.code == 1091,
+            DriverError::QueryError(msg) => msg.contains("1091"),
+            _ => false,
+        }
+    }
+}

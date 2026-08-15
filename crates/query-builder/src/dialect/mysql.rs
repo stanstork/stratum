@@ -201,6 +201,14 @@ impl Dialect for MySql {
         )
     }
 
+    fn drop_foreign_key(&self, table: &str, constraint: &str) -> String {
+        format!(
+            "ALTER TABLE {} DROP FOREIGN KEY {};",
+            self.quote_identifier(table),
+            self.quote_identifier(constraint)
+        )
+    }
+
     fn random_fn(&self) -> &'static str {
         "RAND()"
     }
