@@ -3,18 +3,19 @@ use connectors::sql::metadata::index::IndexType;
 use model::core::types::Type;
 use std::collections::HashMap;
 
-pub mod mysql_to_pg;
-pub mod pg_to_mysql;
+pub mod to_mysql;
+pub mod to_postgres;
 
-/// Trait that each dialect-pair converter must implement.
+/// Trait implemented by each target-dialect converter.
 ///
-/// Provides column type conversion and index type mapping
-/// for a specific (source -> target) dialect pair.
+/// Input is always a canonical [`Type`] (produced by the source dialect's
+/// `IntoCanonical`), so a converter only needs to know its *target* dialect -
+/// one converter per target.
 pub trait DialectConverter: Send + Sync {
-    /// Convert a source column type to the target dialect's equivalent.
+    /// Convert a canonical column type to the target dialect's equivalent.
     fn convert_type(&self, source: &Type) -> ConversionResult;
 
-    /// Return index type overrides for this dialect pair.
+    /// Return index type overrides for the target dialect.
     /// Missing entries pass through unchanged.
     fn index_type_map(&self) -> HashMap<IndexType, IndexType>;
 

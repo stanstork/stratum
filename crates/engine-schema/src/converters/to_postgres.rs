@@ -4,9 +4,9 @@ use connectors::sql::metadata::index::IndexType;
 use model::core::types::{IntSize, Type};
 use std::collections::HashMap;
 
-pub struct MysqlToPg;
+pub struct ToPostgres;
 
-impl DialectConverter for MysqlToPg {
+impl DialectConverter for ToPostgres {
     fn index_type_map(&self) -> HashMap<IndexType, IndexType> {
         HashMap::from([(IndexType::FullText, IndexType::Gin)])
     }
