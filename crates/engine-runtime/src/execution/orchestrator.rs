@@ -459,7 +459,6 @@ impl PipelineOrchestrator {
             batch_rx,
             dest_metas.to_vec(),
             part_id,
-            self.shutdown.clone(),
             metrics.clone(),
         )
         .await;

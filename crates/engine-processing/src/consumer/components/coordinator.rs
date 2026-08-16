@@ -44,25 +44,6 @@ impl BatchCoordinator {
         self.batch_rx.recv().await
     }
 
-    /// Try to receive and process one batch.
-    pub async fn try_process_one(&mut self) -> Result<bool, ConsumerError> {
-        match self.batch_rx.try_recv() {
-            Ok(envelope) => {
-                self.process_batch(&envelope.batch).await?;
-                Ok(true)
-            }
-            Err(mpsc::error::TryRecvError::Empty) => Ok(false),
-            Err(mpsc::error::TryRecvError::Disconnected) => {
-                debug!("batch channel disconnected");
-                Ok(false)
-            }
-        }
-    }
-
-    pub fn is_channel_closed(&self) -> bool {
-        self.batch_rx.is_closed()
-    }
-
     /// Process a single batch: write + checkpoint + metrics.
     pub async fn process_batch(&self, batch: &Batch) -> Result<(), ConsumerError> {
         use std::time::Instant;
