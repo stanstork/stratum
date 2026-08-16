@@ -93,9 +93,9 @@ loudly on any mismatch - a number only counts if the data actually arrived.
   has only a primary key, so both tools do identical work - create the table,
   copy every row. No index-parity ambiguity.
 - **Sakila is not a like-for-like comparison** - see the caveat in its section
-  below. On this workload pgloader also builds the secondary indexes and foreign
-  keys, so it does more work than Stratum's tables + PK copy. Treat Sakila as
-  directional only.
+  below. Stratum builds the tables, primary keys, and secondary indexes, but
+  not the foreign keys; pgloader also builds the foreign keys, so it still does
+  somewhat more work. Treat Sakila as directional only.
 - **JVM in UTC**: pgloader v4 must run with `-Duser.timezone=UTC`, or its
   MySQL JDBC driver throws `HOUR_OF_DAY: 3 -> 4` on any timestamp that lands in
   a daylight-saving gap in the JVM's local zone. The data is fine - Stratum
@@ -252,15 +252,16 @@ tables out into independent pipelines run concurrently (`execution { parallel }`
 
 | scenario | wall (s, median) | rows/s | peak RSS | scope |
 |---|---|---|---|---|
-| stratum | 0.4 | 119k | 0.14 GB | tables + data (PK only) |
+| stratum | 0.4 | 119k | 0.14 GB | tables + data + secondary indexes (no FKs) |
 | stratum `--integrity` | 0.4 | 113k | 0.16 GB | + Merkle receipts |
 | pgloader v4 | 3.2 | 14.4k | 0.69 GB | tables + data **+ 37 indexes + 18 FKs** |
 
 Stratum finishes in ~0.4 s; pgloader in ~3.2 s. The two do **different work**
-here, though, so the numbers aren't directly comparable:
-on this run pgloader also built the full schema (37 secondary indexes + 18 FKs)
-that Stratum's config skips, and at 46k rows ~2 s of pgloader's wall time is JVM
-startup + JIT. Directional only.
+here, though, so the numbers aren't directly comparable: Stratum builds the
+tables, primary keys, and secondary indexes, but a fanned-out `tables = [...]`
+run does not recreate foreign keys (its independent per-table pipelines have no
+cross-table ordering), so pgloader still does more - it also builds the 18 FKs.
+At 46k rows ~2 s of pgloader's wall time is JVM startup + JIT. Directional only.
 <!-- BENCH_SAMPLE_END -->
 
 ## Reading the numbers honestly
