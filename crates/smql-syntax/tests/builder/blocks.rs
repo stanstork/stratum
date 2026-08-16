@@ -118,6 +118,45 @@ fn test_parse_pipeline() {
 }
 
 #[test]
+fn test_non_after_attribute_is_not_read_as_dependencies() {
+    // A pipeline-level attribute that is not `after` (here `description`) must
+    // not be misread as the DAG dependency list.
+    let input = r#"
+        pipeline "sync" {
+            description = "copy users"
+            from { connection = connection.db }
+            to { connection = connection.db }
+        }
+    "#;
+
+    let doc = parse(input).expect("parse should succeed");
+    let pipeline = &doc.pipelines[0];
+    assert!(
+        pipeline.after.is_none(),
+        "non-`after` attribute leaked into dependencies: {:?}",
+        pipeline.after
+    );
+}
+
+#[test]
+fn test_after_attribute_populates_dependencies() {
+    let input = r#"
+        pipeline "sync" {
+            after = [pipeline.seed]
+            from { connection = connection.db }
+            to { connection = connection.db }
+        }
+    "#;
+
+    let doc = parse(input).expect("parse should succeed");
+    let pipeline = &doc.pipelines[0];
+    assert!(
+        pipeline.after.is_some(),
+        "`after` attribute did not populate dependencies"
+    );
+}
+
+#[test]
 fn test_parse_validate_block() {
     let input = r#"
         pipeline "sync" {

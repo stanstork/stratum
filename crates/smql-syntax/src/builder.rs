@@ -170,7 +170,10 @@ fn build_pipeline_block(pair: Pair<Rule>) -> BuildResult<PipelineBlock> {
                 name = parse_string_literal(inner.as_str());
             }
             Rule::attribute => {
-                after = Some(build_after_dependencies(inner)?);
+                let attr = build_attribute(inner)?;
+                if attr.key.name == "after" {
+                    after = Some(vec![attr.value]);
+                }
             }
             Rule::from_block => {
                 from = Some(build_from_block(inner)?);
@@ -276,18 +279,6 @@ fn build_nested_block(pair: Pair<Rule>) -> BuildResult<NestedBlock> {
         attributes,
         span,
     })
-}
-
-fn build_after_dependencies(pair: Pair<Rule>) -> BuildResult<Vec<Expression>> {
-    let mut deps = Vec::new();
-
-    for inner in pair.into_inner() {
-        if inner.as_rule() == Rule::expression {
-            deps.push(build_expression(inner)?);
-        }
-    }
-
-    Ok(deps)
 }
 
 fn build_from_block(pair: Pair<Rule>) -> BuildResult<FromBlock> {
