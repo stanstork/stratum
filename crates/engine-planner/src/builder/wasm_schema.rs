@@ -12,11 +12,9 @@ use connectors::{
     traits::introspector::SchemaIntrospector,
 };
 use engine_config::settings::validated::ValidatedSettings;
-use engine_core::{
-    dispatch_driver,
-    schema::{plan::SchemaPlan, type_registry::Dialect},
-};
+use engine_core::dispatch_driver;
 use engine_processing::io::source::wasm::introspector::PluginIntrospector;
+use engine_schema::{plan::SchemaPlan, type_registry::Dialect};
 use engine_wasm::registry::{PluginRegistry, plugin_columns};
 use model::{
     execution::{flags::IntegrityMode, pipeline::Pipeline},

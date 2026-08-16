@@ -15,7 +15,7 @@ use connectors::{
         introspector::SchemaIntrospector,
     },
 };
-use engine_core::schema::type_registry::Dialect;
+use engine_schema::type_registry::Dialect;
 use engine_wasm::schema::PluginField;
 use model::core::convert::FromCanonical;
 use std::collections::HashMap;

@@ -13,8 +13,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use connectors::sql::{metadata::column::ColumnMetadata, query::column::ColumnDef};
-use engine_core::schema::plan::SchemaPlan;
 use engine_processing::io::driver::SchemaDriver;
+use engine_schema::plan::SchemaPlan;
 use expression_engine::ExpressionAnalyzer;
 use model::{
     core::types::{FloatSize, IntSize, Type},

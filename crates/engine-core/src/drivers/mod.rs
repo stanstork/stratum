@@ -1,10 +1,11 @@
-use crate::{context::exec::ConnectionPool, dispatch_driver, schema::type_registry::Dialect};
+use crate::{context::exec::ConnectionPool, dispatch_driver};
 use connectors::{
     drivers::{mysql::driver::MySqlDriver, postgres::driver::PgDriver},
     error::DriverError,
     sql::metadata::table::TableMetadata,
     traits::introspector::SchemaIntrospector,
 };
+use engine_schema::type_registry::Dialect;
 use model::execution::connection::Connection;
 use std::sync::Arc;
 

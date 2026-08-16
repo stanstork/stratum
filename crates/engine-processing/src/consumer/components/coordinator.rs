@@ -2,7 +2,8 @@ use crate::{
     channel::BatchEnvelope, consumer::components::writer::BatchWriter, error::ConsumerError,
     profile, state_manager::StateManager,
 };
-use engine_core::{metrics::Metrics, state::models::Checkpoint};
+use engine_infra::metrics::Metrics;
+use engine_state::models::Checkpoint;
 use engine_state::models::CheckpointStage;
 use model::records::batch::Batch;
 use tokio::sync::mpsc;

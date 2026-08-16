@@ -6,17 +6,14 @@ use crate::plan::{
     schema::{change::SchemaChange, types::SchemaChangeType},
 };
 use connectors::traits::introspector::SchemaIntrospector;
-use engine_core::{
-    context::exec::ConnectionPool,
-    dispatch_driver,
-    schema::{
-        graph_expander::{GraphExpander, GraphExpansionResult},
-        plan::SchemaObjectFlags,
-        schema_ops::{SchemaOp, SchemaOps},
-        type_registry::{Dialect, TypeRegistry},
-    },
-};
+use engine_core::{context::exec::ConnectionPool, dispatch_driver};
 use engine_runtime::dag::Dag;
+use engine_schema::{
+    graph_expander::{GraphExpander, GraphExpansionResult},
+    plan::SchemaObjectFlags,
+    schema_ops::{SchemaOp, SchemaOps},
+    type_registry::{Dialect, TypeRegistry},
+};
 use engine_wasm::registry::PluginRegistry;
 use model::execution::pipeline::Pipeline;
 use model::execution::row_count::RowCount;

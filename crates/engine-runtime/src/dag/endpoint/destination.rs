@@ -6,18 +6,15 @@ use connectors::{
     sql::metadata::{column::ColumnMetadata, table::TableMetadata},
 };
 use engine_config::settings::{self, ValidatedSettings};
-use engine_core::{
-    dispatch_driver,
-    drivers::DriverRef,
-    schema::{
-        schema_ops::{SchemaOp, SchemaOps},
-        type_registry::Dialect,
-    },
-};
+use engine_core::{dispatch_driver, drivers::DriverRef};
 use engine_processing::{
     context::PipelineContext,
     hooks::executor::HookExecutor,
     io::destination::{Destination, IntoDestination},
+};
+use engine_schema::{
+    schema_ops::{SchemaOp, SchemaOps},
+    type_registry::Dialect,
 };
 use engine_wasm::{
     registry::PluginRegistry, runtime::instance::PluginInstance, schema::PluginField,

@@ -6,8 +6,8 @@ use super::{
 };
 use crate::settings::SchemaSettingContext;
 use connectors::{drivers::postgres::config::PkCreation, traits::introspector::SchemaIntrospector};
-use engine_core::schema::{schema_ops::SchemaOps, type_registry::Dialect};
 use engine_processing::context::PipelineContext;
+use engine_schema::{schema_ops::SchemaOps, type_registry::Dialect};
 use model::{core::value::Value, execution::flags::IntegrityMode};
 use std::{collections::HashMap, sync::Arc};
 

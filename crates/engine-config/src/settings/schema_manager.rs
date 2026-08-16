@@ -1,7 +1,7 @@
 use crate::settings::{driver::SchemaDriver, error::SettingsError};
 use connectors::error::DriverError;
 use connectors::traits::executor::QueryExecutor;
-use engine_core::schema::schema_ops::SchemaOp;
+use engine_schema::schema_ops::SchemaOp;
 use tracing::{debug, error, info};
 
 /// Execute a sequence of schema operations against a destination driver.

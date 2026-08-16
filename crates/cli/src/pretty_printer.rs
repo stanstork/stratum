@@ -1,6 +1,6 @@
 use crossterm::ExecutableCommand;
 use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
-use engine_core::event_bus::bus::EventBus;
+use engine_infra::event_bus::bus::EventBus;
 use model::events::migration::MigrationEvent;
 use std::collections::HashMap;
 use std::io::{self, Write, stdout};

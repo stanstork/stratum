@@ -10,6 +10,7 @@ connectors = { path = "../connectors" }
 smql-syntax = { path = "../smql-syntax" }
 query-builder = { path = "../query-builder" }
 engine-core = { path = "../engine-core" }
+engine-schema = { path = "../engine-schema" }
 engine-state = { path = "../engine-state" }
 engine-processing = { path = "../engine-processing" }
 engine-config = { path = "../engine-config" }

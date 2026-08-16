@@ -21,7 +21,8 @@ use crate::{
         validation::PipelineValidator,
     },
 };
-use engine_core::{context::env::EnvContext, retry::RetryPolicy};
+use engine_core::context::env::EnvContext;
+use engine_infra::retry::RetryPolicy;
 use engine_state::MerkleStore;
 use engine_wasm::registry::PluginRegistry;
 use model::{

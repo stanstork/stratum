@@ -153,7 +153,8 @@ impl FailedRowWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use engine_core::{plan::execution::ExecutionPlan, state::sled_store::SledStateStore};
+    use engine_core::plan::execution::ExecutionPlan;
+    use engine_state::sled_store::SledStateStore;
     use model::{core::value::Value, execution::failed_row::ProcessingStage};
     use std::collections::HashMap;
     use tempfile::NamedTempFile;

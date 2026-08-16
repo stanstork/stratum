@@ -1,4 +1,4 @@
-use engine_core::schema::type_registry::Dialect;
+use engine_schema::type_registry::Dialect;
 use std::fmt::Display;
 
 #[derive(Debug, Clone, Copy, PartialEq)]

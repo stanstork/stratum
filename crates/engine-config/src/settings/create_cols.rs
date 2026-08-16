@@ -7,12 +7,12 @@ use connectors::sql::{
     metadata::{column::ColumnMetadata, table::TableMetadata},
     query::{column::ColumnDef, generator::QueryGenerator},
 };
-use engine_core::schema::{
+use engine_processing::context::PipelineContext;
+use engine_schema::{
     schema_ops::{SchemaOp, SchemaOps},
     types::{ComputedTypes, ExpressionWrapper, TypeInferencer},
     utils::create_column_def,
 };
-use engine_processing::context::PipelineContext;
 use model::{core::types::Type, execution::expr::CompiledExpression};
 use std::sync::Arc;
 

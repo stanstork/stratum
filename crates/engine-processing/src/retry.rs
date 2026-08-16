@@ -1,6 +1,6 @@
 use crate::io::error::SinkError;
 use connectors::error::{DbError, DriverError};
-use engine_core::retry::RetryDisposition;
+use engine_infra::retry::RetryDisposition;
 use mysql_async::Error as MySqlError;
 use tokio_postgres::{Error as PgError, error::SqlState};
 

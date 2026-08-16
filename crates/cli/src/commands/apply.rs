@@ -1,8 +1,6 @@
 use crate::{config, error::CliError, pretty_printer::PrettyPrinter, tui::orchestrator::run_tui};
-use engine_core::{
-    context::env::EnvContext, event_bus::bus::EventBus, plan::execution::ExecutionPlan,
-    utils::make_item_id,
-};
+use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan, utils::make_item_id};
+use engine_infra::event_bus::bus::EventBus;
 use engine_infra::shutdown::ShutdownSignal;
 use engine_processing::profile;
 use engine_runtime::{

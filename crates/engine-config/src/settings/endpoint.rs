@@ -1,5 +1,5 @@
 use connectors::traits::introspector::SchemaIntrospector;
-use engine_core::schema::type_registry::Dialect;
+use engine_schema::type_registry::Dialect;
 use std::sync::Arc;
 
 /// Represents a database endpoint (source or destination) with its metadata.

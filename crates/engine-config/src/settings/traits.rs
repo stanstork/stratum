@@ -1,7 +1,7 @@
 use super::{error::SettingsError, phase::MigrationSettingsPhase};
 use async_trait::async_trait;
-use engine_core::schema::schema_ops::SchemaOps;
 use engine_processing::context::PipelineContext;
+use engine_schema::schema_ops::SchemaOps;
 
 #[async_trait]
 pub trait MigrationSetting: Send + Sync {

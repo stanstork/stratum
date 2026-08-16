@@ -9,17 +9,17 @@ use crate::{
 };
 use engine_core::{
     context::{env::EnvContext, exec::ExecutionContext},
-    event_bus::bus::EventBus,
     plan::execution::ExecutionPlan,
-    state::{StateStore, models::WalEntry, sled_store::SledStateStore},
     utils::make_item_id,
 };
+use engine_infra::event_bus::bus::EventBus;
 use engine_infra::shutdown::ShutdownSignal;
 use engine_processing::{
     context::PipelineContext,
     io::{destination::Destination, source::Source},
 };
 use engine_state::models::{PauseReason, PipelineRunState, PipelineStatus, RunState, RunStatus};
+use engine_state::{StateStore, models::WalEntry, sled_store::SledStateStore};
 use engine_wasm::registry::{PluginRegistry, load_registry, plugin_columns};
 use futures::stream::{self, StreamExt};
 use model::{

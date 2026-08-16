@@ -1,7 +1,7 @@
 use super::TickAction;
 use crate::actor::messages::ProducerMsg;
 use crate::error::ActorError;
-use engine_core::{event_bus::bus::EventBus, metrics::Metrics};
+use engine_infra::{event_bus::bus::EventBus, metrics::Metrics};
 use engine_processing::{
     cb::{CircuitBreaker, CircuitBreakerState},
     error::ProducerError,

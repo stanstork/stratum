@@ -5,13 +5,12 @@ use crate::builder::{
 };
 use connectors::traits::introspector::SchemaIntrospector;
 use engine_config::settings::validated::ValidatedSettings;
-use engine_core::{
-    context::exec::ConnectionPool, dispatch_driver, drivers::DriverRef, schema::plan::SchemaPlan,
-};
+use engine_core::{context::exec::ConnectionPool, dispatch_driver, drivers::DriverRef};
 use engine_processing::io::{
     destination::{Destination, IntoDestination},
     source::Source,
 };
+use engine_schema::plan::SchemaPlan;
 use engine_wasm::registry::{PluginRegistry, plugin_columns};
 use model::{execution::pipeline::Pipeline, transform::mapping::TransformationMetadata};
 use query_builder::offsets::OffsetStrategyFactory;

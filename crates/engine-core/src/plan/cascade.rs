@@ -1,5 +1,5 @@
-use crate::schema::dep_graph::DependencyGraph;
 use connectors::sql::metadata::table::TableMetadata;
+use engine_schema::dep_graph::DependencyGraph;
 use model::{
     execution::{pipeline::Pipeline, references::DataMode},
     transform::mapping::TransformationMetadata,

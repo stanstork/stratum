@@ -5,7 +5,7 @@ use crate::{
     retry::{classify_driver_error, classify_sink_error},
 };
 use connectors::sql::metadata::table::TableMetadata;
-use engine_core::retry::RetryPolicy;
+use engine_infra::retry::RetryPolicy;
 use model::records::Record;
 use model::records::batch::Batch;
 use tracing::{debug, trace, warn};

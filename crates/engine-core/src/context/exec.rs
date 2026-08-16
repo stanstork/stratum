@@ -1,12 +1,11 @@
-use crate::{
-    context::env::EnvContext, drivers::DriverRef, plan::execution::ExecutionPlan,
-    schema::metadata_cache::MetadataCache, state::sled_store::SledStateStore,
-};
+use crate::{context::env::EnvContext, drivers::DriverRef, plan::execution::ExecutionPlan};
 use connectors::{
     drivers::{mysql::driver::MySqlDriver, postgres::driver::PgDriver},
     error::DriverError,
     traits::{driver::Driver, introspector::SchemaIntrospector},
 };
+use engine_schema::metadata_cache::MetadataCache;
+use engine_state::sled_store::SledStateStore;
 use model::execution::connection::Connection;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::RwLock;

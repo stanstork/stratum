@@ -11,7 +11,7 @@ use connectors::{
         driver::Driver, executor::QueryExecutor, transaction::Transactional, writer::DataWriter,
     },
 };
-use engine_core::schema::type_registry::{Dialect, TypeRegistry};
+use engine_schema::type_registry::{Dialect, TypeRegistry};
 use model::{core::convert::IntoCanonical, execution::pipeline::WriteMode, records::Record};
 use query_builder::dialect::Postgres as PgDialect;
 use std::sync::Arc;

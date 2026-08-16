@@ -14,7 +14,7 @@ use connectors::{
     sql::metadata::table::TableMetadata,
     traits::driver::Driver,
 };
-use engine_core::schema::type_registry::Dialect;
+use engine_schema::type_registry::Dialect;
 use engine_wasm::runtime::instance::PluginInstance;
 use model::{
     core::value::Value,

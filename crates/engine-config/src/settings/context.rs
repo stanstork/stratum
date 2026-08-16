@@ -4,8 +4,8 @@ use super::{
     error::SettingsError,
 };
 use crate::settings::validated::ValidatedSettings;
-use engine_core::schema::planner::SchemaPlanner;
-use engine_core::schema::{
+use engine_schema::planner::SchemaPlanner;
+use engine_schema::{
     plan::{SchemaObjectFlags, SchemaPlan},
     type_registry::TypeRegistry,
     types::TypeEngine,

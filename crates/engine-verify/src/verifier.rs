@@ -8,11 +8,11 @@ use engine_core::{
     dispatch_driver,
     drivers::DriverRef,
     plan::{cascade::resolve_cascade_tables, execution::ExecutionPlan},
-    schema::{
-        graph_expander::GraphExpander,
-        plan::SchemaObjectFlags,
-        type_registry::{Dialect, TypeRegistry},
-    },
+};
+use engine_schema::{
+    graph_expander::GraphExpander,
+    plan::SchemaObjectFlags,
+    type_registry::{Dialect, TypeRegistry},
 };
 use engine_state::{MerkleStore, sled_store::SledStateStore};
 use model::{

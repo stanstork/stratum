@@ -5,8 +5,8 @@ use super::{
 use crate::settings::error::SettingsError;
 use async_trait::async_trait;
 use connectors::drivers::postgres::config::PkCreation;
-use engine_core::schema::schema_ops::SchemaOps;
 use engine_processing::context::PipelineContext;
+use engine_schema::schema_ops::SchemaOps;
 use tracing::{info, warn};
 
 pub struct CreateMissingTablesSetting<D: SchemaDriver> {

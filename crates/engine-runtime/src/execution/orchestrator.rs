@@ -6,8 +6,8 @@ use crate::{
 use chrono;
 use connectors::sql::metadata::table::TableMetadata;
 use engine_config::settings::validated::ValidatedSettings;
-use engine_core::{event_bus::bus::EventBus, metrics::Metrics, schema::schema_ops::SchemaOps};
 use engine_infra::shutdown::ShutdownSignal;
+use engine_infra::{event_bus::bus::EventBus, metrics::Metrics};
 use engine_processing::{
     channel::{BatchEnvelope, ByteBudget},
     consumer::Consumer,
@@ -19,6 +19,7 @@ use engine_processing::{
         config::ProducerConfig,
     },
 };
+use engine_schema::schema_ops::{SchemaOp, SchemaOps};
 use engine_state::MerkleStore;
 use model::integrity::{algorithm::HashAlgorithm, config::IntegrityConfig};
 use model::{
@@ -149,7 +150,7 @@ impl PipelineOrchestrator {
     async fn execute_schema_ops(
         &self,
         phase: &str,
-        ops: &[engine_core::schema::schema_ops::SchemaOp],
+        ops: &[SchemaOp],
     ) -> Result<(), MigrationError> {
         if ops.is_empty() {
             return Ok(());

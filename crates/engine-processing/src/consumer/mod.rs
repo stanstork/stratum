@@ -8,7 +8,7 @@ use crate::{
     state_manager::StateManager,
 };
 use connectors::sql::metadata::table::TableMetadata;
-use engine_core::{metrics::Metrics, retry::RetryPolicy};
+use engine_infra::{metrics::Metrics, retry::RetryPolicy};
 use engine_state::models::CheckpointStage;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};

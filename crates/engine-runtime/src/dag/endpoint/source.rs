@@ -6,20 +6,16 @@ use connectors::{
     sql::metadata::table::TableMetadata,
     traits::{introspector::SchemaIntrospector, reader::DataReader},
 };
-use engine_core::{
-    dispatch_driver,
-    drivers::DriverRef,
-    plan::cascade::resolve_cascade_tables,
-    schema::{
-        graph_expander::GraphExpander,
-        plan::SchemaObjectFlags,
-        schema_ops::SchemaOps,
-        type_registry::{Dialect, TypeRegistry},
-    },
-};
+use engine_core::{dispatch_driver, drivers::DriverRef, plan::cascade::resolve_cascade_tables};
 use engine_processing::io::{
     format::DataFormat,
     source::{Source, csv::introspector::CsvIntrospector, wasm::introspector::PluginIntrospector},
+};
+use engine_schema::{
+    graph_expander::GraphExpander,
+    plan::SchemaObjectFlags,
+    schema_ops::SchemaOps,
+    type_registry::{Dialect, TypeRegistry},
 };
 use engine_wasm::registry::PluginRegistry;
 use model::{

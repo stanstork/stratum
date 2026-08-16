@@ -1,5 +1,6 @@
 use crate::io::{destination::Destination, source::Source};
-use engine_core::{context::exec::ExecutionContext, state::sled_store::SledStateStore};
+use engine_core::context::exec::ExecutionContext;
+use engine_state::sled_store::SledStateStore;
 use engine_wasm::registry::PluginRegistry;
 use model::{
     execution::pipeline::Pipeline, pagination::cursor::Cursor,
