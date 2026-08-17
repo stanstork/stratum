@@ -15,11 +15,17 @@ pub struct ValidatedSettings {
     pub create_missing_columns: bool,
     /// Skip primary keys: create destination tables without a PK and never add
     /// one (also disables `pk_creation` deferral).
-    pub skip_primary_keys: bool,
+    pub skip_pk: bool,
     /// Skip foreign keys: don't create FK constraints on the destination.
-    pub skip_foreign_keys: bool,
+    pub skip_fk: bool,
     /// Skip secondary indexes: don't create non-constraint indexes on the destination.
-    pub skip_indexes: bool,
+    pub skip_idx: bool,
+    /// Skip sequences: don't create identity/auto-increment sequences on the destination.
+    pub skip_seq: bool,
+    /// Skip UNIQUE constraints on the destination.
+    pub skip_unique: bool,
+    /// Skip CHECK constraints on the destination.
+    pub skip_check: bool,
     /// Parallel range lanes for a single-table snapshot copy (>= 1).
     pub lanes: usize,
     /// When the destination primary key is created relative to the bulk load.
@@ -36,9 +42,12 @@ impl ValidatedSettings {
             batch_size: 1000,
             create_missing_tables: false,
             create_missing_columns: false,
-            skip_primary_keys: false,
-            skip_foreign_keys: false,
-            skip_indexes: false,
+            skip_pk: false,
+            skip_fk: false,
+            skip_idx: false,
+            skip_seq: false,
+            skip_unique: false,
+            skip_check: false,
             lanes: 1,
             pk_creation: PkCreation::Pre,
             dry_run,
@@ -67,9 +76,12 @@ impl ValidatedSettings {
             batch_size: builder.batch_size.unwrap_or(1000),
             create_missing_tables: builder.create_missing_tables.unwrap_or(false),
             create_missing_columns: builder.create_missing_columns.unwrap_or(false),
-            skip_primary_keys: builder.skip_primary_keys.unwrap_or(false),
-            skip_foreign_keys: builder.skip_foreign_keys.unwrap_or(false),
-            skip_indexes: builder.skip_indexes.unwrap_or(false),
+            skip_pk: builder.skip_pk.unwrap_or(false),
+            skip_fk: builder.skip_fk.unwrap_or(false),
+            skip_idx: builder.skip_idx.unwrap_or(false),
+            skip_seq: builder.skip_seq.unwrap_or(false),
+            skip_unique: builder.skip_unique.unwrap_or(false),
+            skip_check: builder.skip_check.unwrap_or(false),
             lanes: builder.lanes.unwrap_or(1),
             pk_creation: builder.pk_creation.unwrap_or_default(),
             dry_run: builder.dry_run,
@@ -89,16 +101,28 @@ impl ValidatedSettings {
         self.create_missing_columns
     }
 
-    pub fn skip_primary_keys(&self) -> bool {
-        self.skip_primary_keys
+    pub fn skip_pk(&self) -> bool {
+        self.skip_pk
     }
 
-    pub fn skip_foreign_keys(&self) -> bool {
-        self.skip_foreign_keys
+    pub fn skip_fk(&self) -> bool {
+        self.skip_fk
     }
 
-    pub fn skip_indexes(&self) -> bool {
-        self.skip_indexes
+    pub fn skip_idx(&self) -> bool {
+        self.skip_idx
+    }
+
+    pub fn skip_seq(&self) -> bool {
+        self.skip_seq
+    }
+
+    pub fn skip_unique(&self) -> bool {
+        self.skip_unique
+    }
+
+    pub fn skip_check(&self) -> bool {
+        self.skip_check
     }
 
     pub fn lanes(&self) -> usize {
@@ -137,9 +161,12 @@ pub struct ValidatedSettingsBuilder {
     pub batch_size: Option<usize>,
     pub create_missing_tables: Option<bool>,
     pub create_missing_columns: Option<bool>,
-    pub skip_primary_keys: Option<bool>,
-    pub skip_foreign_keys: Option<bool>,
-    pub skip_indexes: Option<bool>,
+    pub skip_pk: Option<bool>,
+    pub skip_fk: Option<bool>,
+    pub skip_idx: Option<bool>,
+    pub skip_seq: Option<bool>,
+    pub skip_unique: Option<bool>,
+    pub skip_check: Option<bool>,
     pub lanes: Option<usize>,
     pub pk_creation: Option<PkCreation>,
     pub dry_run: bool,
@@ -170,18 +197,33 @@ impl ValidatedSettingsBuilder {
         self
     }
 
-    pub fn skip_primary_keys(mut self, skip: bool) -> Self {
-        self.skip_primary_keys = Some(skip);
+    pub fn skip_pk(mut self, skip: bool) -> Self {
+        self.skip_pk = Some(skip);
         self
     }
 
-    pub fn skip_foreign_keys(mut self, skip: bool) -> Self {
-        self.skip_foreign_keys = Some(skip);
+    pub fn skip_fk(mut self, skip: bool) -> Self {
+        self.skip_fk = Some(skip);
         self
     }
 
-    pub fn skip_indexes(mut self, skip: bool) -> Self {
-        self.skip_indexes = Some(skip);
+    pub fn skip_idx(mut self, skip: bool) -> Self {
+        self.skip_idx = Some(skip);
+        self
+    }
+
+    pub fn skip_seq(mut self, skip: bool) -> Self {
+        self.skip_seq = Some(skip);
+        self
+    }
+
+    pub fn skip_unique(mut self, skip: bool) -> Self {
+        self.skip_unique = Some(skip);
+        self
+    }
+
+    pub fn skip_check(mut self, skip: bool) -> Self {
+        self.skip_check = Some(skip);
         self
     }
 

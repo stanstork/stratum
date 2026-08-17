@@ -1,10 +1,11 @@
-use crate::{context::exec::ConnectionPool, dispatch_driver, schema::type_registry::Dialect};
+use crate::{context::exec::ConnectionPool, dispatch_driver};
 use connectors::{
     drivers::{mysql::driver::MySqlDriver, postgres::driver::PgDriver},
     error::DriverError,
     sql::metadata::table::TableMetadata,
     traits::introspector::SchemaIntrospector,
 };
+use engine_schema::type_registry::Dialect;
 use model::execution::connection::Connection;
 use std::sync::Arc;
 
@@ -33,11 +34,11 @@ impl DriverRef {
     ) -> Result<Self, DriverError> {
         match driver_str {
             "postgres" | "postgresql" => {
-                let d = connections.get_or_create_postgres(connection).await?;
+                let d = connections.postgres(connection).await?;
                 Ok(DriverRef::Postgres(d))
             }
             "mysql" => {
-                let d = connections.get_or_create_mysql(connection).await?;
+                let d = connections.mysql(connection).await?;
                 Ok(DriverRef::MySql(d))
             }
             other => Err(DriverError::UnsupportedDriver(format!(

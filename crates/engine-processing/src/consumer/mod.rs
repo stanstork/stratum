@@ -8,49 +8,16 @@ use crate::{
     state_manager::StateManager,
 };
 use connectors::sql::metadata::table::TableMetadata;
-use engine_core::{metrics::Metrics, retry::RetryPolicy};
-use engine_infra::shutdown::ShutdownSignal;
+use engine_infra::{metrics::Metrics, retry::RetryPolicy};
 use engine_state::models::CheckpointStage;
 use tokio::sync::mpsc;
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 pub mod components;
 pub mod config;
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum ConsumerStatus {
-    /// Work is ongoing; the actor should schedule another tick immediately.
-    Working,
-    /// The consumer is idle (waiting for batches).
-    Idle,
-    /// The consumer has finished (channel closed, all work done).
-    Finished,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ConsumerMode {
-    /// Consumer is idle, waiting to start.
-    Idle,
-
-    /// Consumer is actively processing batches.
-    Running,
-
-    /// Consumer is flushing pending writes before shutdown.
-    Flushing,
-
-    /// Consumer has finished all work.
-    Finished,
-}
-
 pub struct Consumer {
-    // Components
     coordinator: BatchCoordinator,
-
-    // Communication
-    shutdown: ShutdownSignal,
-
-    // State
-    mode: ConsumerMode,
     ids: ItemId,
 }
 
@@ -61,7 +28,6 @@ impl Consumer {
         batch_rx: mpsc::Receiver<BatchEnvelope>,
         dest_metadata: Vec<TableMetadata>,
         part_id: &str,
-        shutdown: ShutdownSignal,
         metrics: Metrics,
     ) -> Self {
         let run_id = ctx.run_id.clone();
@@ -86,12 +52,7 @@ impl Consumer {
         let state_manager = StateManager::new(ids.clone(), state_store);
         let coordinator = BatchCoordinator::new(writer, state_manager, metrics.clone(), batch_rx);
 
-        Self {
-            coordinator,
-            shutdown,
-            mode: ConsumerMode::Idle,
-            ids,
-        }
+        Self { coordinator, ids }
     }
 
     pub async fn start(&mut self) -> Result<(), ConsumerError> {
@@ -104,7 +65,6 @@ impl Consumer {
         // Sink one-time setup before any batch is written.
         self.coordinator.prepare().await?;
 
-        self.mode = ConsumerMode::Running;
         debug!("consumer started");
         Ok(())
     }
@@ -150,67 +110,7 @@ impl Consumer {
             }
         }
 
-        self.mode = ConsumerMode::Running;
         Ok(())
-    }
-
-    pub async fn tick(&mut self) -> Result<ConsumerStatus, ConsumerError> {
-        match self.mode {
-            ConsumerMode::Idle => {
-                // Not yet started
-                Ok(ConsumerStatus::Idle)
-            }
-
-            ConsumerMode::Finished => {
-                // Already finished, nothing to do
-                Ok(ConsumerStatus::Finished)
-            }
-
-            ConsumerMode::Running => {
-                if self.should_stop() {
-                    debug!("stop signal received, entering flush mode");
-                    self.mode = ConsumerMode::Flushing;
-                    return Ok(ConsumerStatus::Working); // Continue to flush
-                }
-
-                match self.coordinator.try_process_one().await {
-                    Ok(true) => {
-                        // Successfully processed a batch
-                        // More batches may be available, return Working
-                        Ok(ConsumerStatus::Working)
-                    }
-                    Ok(false) => {
-                        // No batch available right now
-                        // Check if channel is closed (producer finished)
-                        if self.coordinator.is_channel_closed() {
-                            debug!("batch channel closed and drained, consumer finished");
-                            self.mode = ConsumerMode::Finished;
-                            return Ok(ConsumerStatus::Finished);
-                        }
-                        // Channel still open, just idle
-                        Ok(ConsumerStatus::Idle)
-                    }
-                    Err(e) => {
-                        error!(error = %e, "failed to process batch");
-                        // On error, enter flushing mode to clean up
-                        self.mode = ConsumerMode::Flushing;
-                        Err(e)
-                    }
-                }
-            }
-
-            ConsumerMode::Flushing => {
-                // Flush any pending writes before finishing
-                debug!("flushing consumer writes");
-
-                if let Err(e) = self.coordinator.try_process_one().await {
-                    error!(error = %e, "failed to flush on shutdown");
-                }
-
-                self.mode = ConsumerMode::Finished;
-                Ok(ConsumerStatus::Finished)
-            }
-        }
     }
 
     /// Await the next batch from the producer (cancel-safe). `None` means the
@@ -231,17 +131,11 @@ impl Consumer {
             "stopping consumer"
         );
 
-        self.mode = ConsumerMode::Finished;
         debug!("consumer stopped");
         Ok(())
     }
 
     pub fn rows_written(&self) -> u64 {
         self.coordinator.rows_processed()
-    }
-
-    /// Check if we should stop processing.
-    fn should_stop(&self) -> bool {
-        self.shutdown.cancel.is_cancelled()
     }
 }

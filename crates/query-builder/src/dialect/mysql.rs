@@ -1,10 +1,10 @@
-use super::Dialect;
+use super::QueryDialect;
 use model::core::types::Type;
 
 #[derive(Debug, Clone)]
 pub struct MySql;
 
-impl Dialect for MySql {
+impl QueryDialect for MySql {
     fn quote_identifier(&self, ident: &str) -> String {
         format!(r#"`{ident}`"#)
     }
@@ -198,6 +198,14 @@ impl Dialect for MySql {
         format!(
             "ALTER TABLE {} DROP PRIMARY KEY",
             self.quote_identifier(table)
+        )
+    }
+
+    fn drop_foreign_key(&self, table: &str, constraint: &str) -> String {
+        format!(
+            "ALTER TABLE {} DROP FOREIGN KEY {};",
+            self.quote_identifier(table),
+            self.quote_identifier(constraint)
         )
     }
 

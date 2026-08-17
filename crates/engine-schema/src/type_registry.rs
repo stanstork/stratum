@@ -1,9 +1,10 @@
-use crate::converters::{DialectConverter, mysql_to_pg::MysqlToPg, pg_to_mysql::PgToMysql};
+use crate::converters::{DialectConverter, to_mysql::ToMysql, to_postgres::ToPostgres};
 use connectors::{
     drivers::{mysql::types::MySqlTypeConverter, postgres::types::PgTypeConverter},
     sql::metadata::{column::ColumnMetadata, index::IndexType},
 };
 use model::core::{convert::IntoCanonical, types::Type};
+use query_builder::dialect::QueryDialect;
 use std::{collections::HashMap, sync::Arc};
 
 /// Describes how to transform a value during type conversion
@@ -128,11 +129,14 @@ impl Dialect {
         }
     }
 
-    /// Convert to the query_builder Dialect trait object for SQL generation
-    pub fn as_query_dialect(&self) -> Box<dyn query_builder::dialect::Dialect + Send + Sync> {
+    /// Resolve to the query-builder [`QueryDialect`] renderer for this dialect.
+    pub fn as_query_dialect(&self) -> &'static (dyn QueryDialect + Send + Sync) {
+        static MYSQL: query_builder::dialect::MySql = query_builder::dialect::MySql;
+        static POSTGRES: query_builder::dialect::Postgres = query_builder::dialect::Postgres;
+
         match self {
-            Dialect::MySql => Box::new(query_builder::dialect::MySql),
-            Dialect::Postgres => Box::new(query_builder::dialect::Postgres),
+            Dialect::MySql => &MYSQL,
+            Dialect::Postgres => &POSTGRES,
         }
     }
 }
@@ -229,11 +233,7 @@ fn strip_pg_casts(expr: &str) -> String {
 }
 
 /// Registry for type mappings between source and destination databases.
-///
 /// Uses the canonical Type enum as the universal type representation.
-/// Dialect-pair converters are registered at construction time; adding a new
-/// database only requires a new module in `converters/` implementing
-/// `DialectConverter` and a registration entry in `build_converters()`.
 #[derive(Clone)]
 pub struct TypeRegistry {
     /// Custom type overrides (source_type_name -> Type)
@@ -242,7 +242,7 @@ pub struct TypeRegistry {
     source_dialect: Dialect,
     /// Target database dialect
     target_dialect: Dialect,
-    /// Dialect-pair converter (None = same dialect, passthrough)
+    /// Target-dialect converter (None = same dialect, passthrough)
     converter: Option<Arc<dyn DialectConverter>>,
     /// Cached index type overrides (built once from converter)
     index_type_map: HashMap<IndexType, IndexType>,
@@ -262,13 +262,17 @@ impl std::fmt::Debug for TypeRegistry {
 impl TypeRegistry {
     /// Create a new TypeRegistry for the given source and target dialects.
     ///
-    /// Looks up the converter for (source, target) from the global registry.
-    /// Same-dialect pairs use passthrough (no converter needed).
+    /// The source dialect canonicalizes into the universal `Type` before
+    /// conversion, so the converter is chosen by *target* alone. Same-dialect
+    /// pairs skip conversion (the canonical type renders directly).
     pub fn new(source: Dialect, target: Dialect) -> Self {
-        let converter: Option<Arc<dyn DialectConverter>> = match (source, target) {
-            (Dialect::MySql, Dialect::Postgres) => Some(Arc::new(MysqlToPg)),
-            (Dialect::Postgres, Dialect::MySql) => Some(Arc::new(PgToMysql)),
-            _ => None,
+        let converter: Option<Arc<dyn DialectConverter>> = if source == target {
+            None
+        } else {
+            match target {
+                Dialect::Postgres => Some(Arc::new(ToPostgres)),
+                Dialect::MySql => Some(Arc::new(ToMysql)),
+            }
         };
 
         let index_type_map = converter

@@ -6,7 +6,7 @@ pub use postgres::Postgres;
 
 use model::core::types::Type;
 
-pub trait Dialect: Send + Sync {
+pub trait QueryDialect: Send + Sync {
     /// Wraps an identifier (like a table or column name) in the correct
     /// quotation marks for the dialect.
     ///
@@ -45,6 +45,9 @@ pub trait Dialect: Send + Sync {
     /// direct `ALTER TABLE … DROP PRIMARY KEY`, while PostgreSQL has no such form
     /// and must drop the constraint by its catalog name.
     fn drop_primary_key(&self, table: &str) -> String;
+
+    /// DDL to drop a named foreign-key constraint.
+    fn drop_foreign_key(&self, table: &str, constraint: &str) -> String;
 
     /// Returns the random function name for this dialect.
     ///

@@ -1,15 +1,11 @@
-use crate::{
-    context::env::EnvContext,
-    drivers::DriverRef,
-    plan::execution::ExecutionPlan,
-    schema::{metadata_cache::MetadataCache, type_registry::Dialect},
-    state::sled_store::SledStateStore,
-};
+use crate::{context::env::EnvContext, drivers::DriverRef, plan::execution::ExecutionPlan};
 use connectors::{
     drivers::{mysql::driver::MySqlDriver, postgres::driver::PgDriver},
     error::DriverError,
     traits::{driver::Driver, introspector::SchemaIntrospector},
 };
+use engine_schema::metadata_cache::MetadataCache;
+use engine_state::sled_store::SledStateStore;
 use model::execution::connection::Connection;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::RwLock;
@@ -20,97 +16,74 @@ const METADATA_CACHE_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Clone)]
 pub struct ExecutionContext {
     /// Connection pool - reuses drivers across pipelines
-    connection_pool: Arc<RwLock<ConnectionPool>>,
+    conn_pool: Arc<RwLock<ConnectionPool>>,
 
     /// Read-through metadata caches, shared across every pipeline.
     /// Only source (read-only) introspection is cached here; the
     /// destination is mutated by DDL mid-pipeline and must not be cached.
-    metadata_caches: Arc<RwLock<HashMap<String, Arc<dyn SchemaIntrospector>>>>,
+    meta_caches: Arc<RwLock<HashMap<String, Arc<dyn SchemaIntrospector>>>>,
 
-    pub run_id: String,
-    pub state: Arc<SledStateStore>,
-    pub env: Arc<EnvContext>,
+    run_id: String,
+    state: Arc<SledStateStore>,
+    env: Arc<EnvContext>,
 }
 
 impl ExecutionContext {
-    pub async fn new(
-        plan: &ExecutionPlan,
-        state: Arc<SledStateStore>,
-        env: Arc<EnvContext>,
-    ) -> Result<Self, DriverError> {
+    pub fn new(plan: &ExecutionPlan, state: Arc<SledStateStore>, env: Arc<EnvContext>) -> Self {
         let run_id = plan.run_id();
+        let conn_pool = Arc::new(RwLock::new(ConnectionPool::new()));
+        let meta_caches = Arc::new(RwLock::new(HashMap::new()));
 
-        Ok(ExecutionContext {
-            connection_pool: Arc::new(RwLock::new(ConnectionPool::new())),
-            metadata_caches: Arc::new(RwLock::new(HashMap::new())),
+        ExecutionContext {
+            conn_pool,
+            meta_caches,
             run_id,
             state,
             env,
-        })
+        }
     }
 
-    pub fn run_id(&self) -> String {
-        self.run_id.clone()
+    pub fn run_id(&self) -> &str {
+        &self.run_id
     }
 
-    /// Get a driver from the pool (trait object).
-    pub async fn get_driver(&self, conn: &Connection) -> Result<Arc<dyn Driver>, DriverError> {
-        let mut pool = self.connection_pool.write().await;
-        pool.get_or_create(conn).await
+    pub fn state(&self) -> &Arc<SledStateStore> {
+        &self.state
     }
 
-    /// Get a typed PostgreSQL driver for full capability access.
-    pub async fn get_pg_driver(&self, conn: &Connection) -> Result<Arc<PgDriver>, DriverError> {
-        let mut pool = self.connection_pool.write().await;
-        pool.get_or_create_postgres(conn).await
-    }
-
-    /// Get a typed MySQL driver for full capability access.
-    pub async fn get_mysql_driver(
-        &self,
-        conn: &Connection,
-    ) -> Result<Arc<MySqlDriver>, DriverError> {
-        let mut pool = self.connection_pool.write().await;
-        pool.get_or_create_mysql(conn).await
+    pub fn env(&self) -> &Arc<EnvContext> {
+        &self.env
     }
 
     /// Resolve a connection to a typed `DriverRef`, reusing pooled connections.
     pub async fn resolve_driver(&self, conn: &Connection) -> Result<DriverRef, DriverError> {
-        let mut pool = self.connection_pool.write().await;
+        let mut pool = self.conn_pool.write().await;
         DriverRef::resolve(&conn.driver, conn, &mut pool).await
     }
 
     /// A read-through introspector for a **source** connection,
     /// cached by `conn.name` and shared across pipelines.
-    pub async fn cached_source_introspector(
+    pub async fn source_introspector(
         &self,
         conn: &Connection,
     ) -> Result<Arc<dyn SchemaIntrospector>, DriverError> {
-        if let Some(cache) = self.metadata_caches.read().await.get(&conn.name) {
+        if let Some(cache) = self.meta_caches.read().await.get(&conn.name) {
             return Ok(cache.clone());
         }
 
-        let dialect = Dialect::parse(&conn.driver)
-            .ok_or_else(|| DriverError::UnsupportedScheme(conn.driver.clone()))?;
+        let driver = self.resolve_driver(conn).await?;
+        let dialect = driver.dialect();
+        let cache: Arc<dyn SchemaIntrospector> = crate::dispatch_driver!(driver, |d| {
+            Arc::new(MetadataCache::new(d, dialect, METADATA_CACHE_TIMEOUT))
+                as Arc<dyn SchemaIntrospector>
+        });
 
-        let cache: Arc<dyn SchemaIntrospector> = match conn.driver.as_str() {
-            "postgres" | "postgresql" => Arc::new(MetadataCache::new(
-                self.get_pg_driver(conn).await?,
-                dialect,
-                METADATA_CACHE_TIMEOUT,
-            )),
-            "mysql" => Arc::new(MetadataCache::new(
-                self.get_mysql_driver(conn).await?,
-                dialect,
-                METADATA_CACHE_TIMEOUT,
-            )),
-            other => return Err(DriverError::UnsupportedScheme(other.to_string())),
-        };
+        let mut caches = self.meta_caches.write().await;
+        if let Some(existing_cache) = caches.get(&conn.name) {
+            return Ok(existing_cache.clone());
+        }
 
-        self.metadata_caches
-            .write()
-            .await
-            .insert(conn.name.clone(), cache.clone());
+        caches.insert(conn.name.clone(), cache.clone());
         Ok(cache)
     }
 }
@@ -129,63 +102,49 @@ impl ConnectionPool {
         }
     }
 
-    pub async fn get_or_create(
-        &mut self,
-        conn: &Connection,
-    ) -> Result<Arc<dyn Driver>, DriverError> {
-        match conn.driver.as_str() {
-            "postgres" | "postgresql" => {
-                let driver = self.get_or_create_postgres(conn).await?;
-                Ok(driver as Arc<dyn Driver>)
-            }
-            "mysql" => {
-                let driver = self.get_or_create_mysql(conn).await?;
-                Ok(driver as Arc<dyn Driver>)
-            }
-            driver => Err(DriverError::UnsupportedScheme(driver.to_string())),
+    pub async fn driver(&mut self, conn: &Connection) -> Result<Arc<dyn Driver>, DriverError> {
+        let driver_ref = DriverRef::resolve(&conn.driver, conn, self).await?;
+
+        match driver_ref {
+            DriverRef::Postgres(pg) => Ok(pg as Arc<dyn Driver>),
+            DriverRef::MySql(mysql) => Ok(mysql as Arc<dyn Driver>),
         }
     }
 
     /// Get or create a PostgreSQL driver with full type information.
-    pub async fn get_or_create_postgres(
-        &mut self,
-        conn: &Connection,
-    ) -> Result<Arc<PgDriver>, DriverError> {
+    pub async fn postgres(&mut self, conn: &Connection) -> Result<Arc<PgDriver>, DriverError> {
         if let Some(driver) = self.pg_drivers.get(&conn.name) {
             return Ok(driver.clone());
         }
 
-        let url = conn
-            .properties
-            .get_string("url")
-            .ok_or_else(|| DriverError::InvalidUrl("missing 'url' property".to_string()))?;
-
+        let url = Self::get_url(conn)?;
         let driver = match conn.properties.get_string("schema") {
             Some(schema) => PgDriver::connect_with_schema(&url, &schema).await?,
             None => PgDriver::connect(&url).await?,
         };
+
         let driver = Arc::new(driver);
         self.pg_drivers.insert(conn.name.clone(), driver.clone());
         Ok(driver)
     }
 
     /// Get or create a MySQL driver with full type information.
-    pub async fn get_or_create_mysql(
-        &mut self,
-        conn: &Connection,
-    ) -> Result<Arc<MySqlDriver>, DriverError> {
+    pub async fn mysql(&mut self, conn: &Connection) -> Result<Arc<MySqlDriver>, DriverError> {
         if let Some(driver) = self.mysql_drivers.get(&conn.name) {
             return Ok(driver.clone());
         }
 
-        let url = conn
-            .properties
-            .get_string("url")
-            .ok_or_else(|| DriverError::InvalidUrl("missing 'url' property".to_string()))?;
-
+        let url = Self::get_url(conn)?;
         let driver = Arc::new(MySqlDriver::connect(&url).await?);
+
         self.mysql_drivers.insert(conn.name.clone(), driver.clone());
         Ok(driver)
+    }
+
+    fn get_url(conn: &Connection) -> Result<String, DriverError> {
+        conn.properties
+            .get_string("url")
+            .ok_or_else(|| DriverError::InvalidUrl("missing 'url' property".to_string()))
     }
 }
 

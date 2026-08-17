@@ -8,10 +8,11 @@ use engine_core::{
     dispatch_driver,
     drivers::DriverRef,
     plan::{cascade::resolve_cascade_tables, execution::ExecutionPlan},
-    schema::{
-        graph_expander::GraphExpander,
-        type_registry::{Dialect, TypeRegistry},
-    },
+};
+use engine_schema::{
+    graph_expander::GraphExpander,
+    plan::SchemaObjectFlags,
+    type_registry::{Dialect, TypeRegistry},
 };
 use engine_state::{MerkleStore, sled_store::SledStateStore};
 use model::{
@@ -41,7 +42,7 @@ pub async fn verify(
     env: Arc<EnvContext>,
 ) -> Result<Vec<VerificationResult>, VerifyError> {
     let state = init_state()?;
-    let exec_ctx = ExecutionContext::new(&plan, state.clone(), env).await?;
+    let exec_ctx = ExecutionContext::new(&plan, state.clone(), env);
     let mut results: Vec<VerificationResult> = Vec::new();
 
     for pipeline in &plan.pipelines {
@@ -432,7 +433,13 @@ async fn expand_graph_references(
         // Verify only consumes the discovered-table set below, never the schema
         // ops, so the skip_* flags are irrelevant here.
         expander
-            .expand(root_table, refs, mapping, false, false, false, false)
+            .expand(
+                root_table,
+                refs,
+                mapping,
+                SchemaObjectFlags::default(),
+                false,
+            )
             .await
             .map_err(|e| VerifyError::InitializationError(e.to_string()))?
     });

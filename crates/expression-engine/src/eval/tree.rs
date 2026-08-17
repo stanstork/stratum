@@ -111,7 +111,7 @@ impl TreeExpr {
         env_getter: &dyn Fn(&str) -> Option<String>,
     ) -> Option<Cow<'a, Value>> {
         match self {
-            TreeExpr::Column(i) => row.value_at(*i).map(Cow::Borrowed),
+            TreeExpr::Column(i) => row.eval_value_at(*i),
 
             TreeExpr::Literal(v) => Some(Cow::Borrowed(v)),
 

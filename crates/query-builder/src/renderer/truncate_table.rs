@@ -15,11 +15,11 @@ impl Render for TruncateTable {
 mod tests {
     use crate::{
         ast::{common::TableRef, truncate_table::TruncateTable},
-        dialect::{MySql, Postgres},
+        dialect::{MySql, Postgres, QueryDialect},
         renderer::{Render, Renderer},
     };
 
-    fn render(dialect: &dyn crate::dialect::Dialect, name: &str) -> String {
+    fn render(dialect: &dyn QueryDialect, name: &str) -> String {
         let mut r = Renderer::new(dialect);
         TruncateTable {
             table: TableRef {

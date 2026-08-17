@@ -77,12 +77,12 @@ impl TypeEngine {
     }
 
     /// Normalize a generated column expression from the source dialect's syntax to plain SQL.
-    pub fn normalize_generated_expression(&self, expr: &str) -> String {
+    pub fn normalize_generated_expr(&self, expr: &str) -> String {
         self.source_dialect.normalize_generated_expression(expr)
     }
 
     /// Normalize a column DEFAULT expression from the source dialect for target DDL.
-    pub fn normalize_default_expression(&self, expr: &str) -> String {
+    pub fn normalize_default_expr(&self, expr: &str) -> String {
         let stripped = self.source_dialect.normalize_default_expression(expr);
         self.type_registry
             .target_dialect()

@@ -65,7 +65,7 @@ impl DependencyGraph {
 
     /// Compute topological order using Kahn's algorithm
     /// Returns tables in dependency order (dependencies come before dependents)
-    pub fn topological_order(&self) -> Result<Vec<String>, DependencyError> {
+    pub fn topo_order(&self) -> Result<Vec<String>, DependencyError> {
         let mut in_degree = HashMap::new();
         for table in &self.tables {
             let degree = self
@@ -116,7 +116,7 @@ impl DependencyGraph {
 
     /// Compute reverse topological order (for DROP operations)
     pub fn reverse_topological_order(&self) -> Result<Vec<String>, DependencyError> {
-        let mut forward = self.topological_order()?;
+        let mut forward = self.topo_order()?;
         forward.reverse();
         Ok(forward)
     }
@@ -141,7 +141,7 @@ impl DependencyGraph {
     /// Level 1: depends only on level 0
     /// Level 2: depends on level 0 or 1, etc.
     pub fn execution_levels(&self) -> Result<Vec<Vec<String>>, DependencyError> {
-        let topo_order = self.topological_order()?;
+        let topo_order = self.topo_order()?;
         let mut levels: Vec<Vec<String>> = Vec::new();
         let mut table_levels: HashMap<String, usize> = HashMap::new();
 
@@ -185,7 +185,7 @@ impl DependencyGraph {
     /// Acyclically-ordered tables come first; any remaining tables that are part
     /// of a cycle are appended in alphabetical order. The result is always
     /// deterministic, unlike falling back to HashMap iteration order.
-    pub fn partial_topological_order(&self) -> Vec<String> {
+    pub fn partial_topo_order(&self) -> Vec<String> {
         let mut in_degree: HashMap<String, usize> = self
             .tables
             .iter()
@@ -255,7 +255,7 @@ impl DependencyGraph {
     }
 
     /// Build graph without self-references (for initial schema creation)
-    pub fn without_self_references(&self) -> Self {
+    pub fn without_self_refs(&self) -> Self {
         let mut new_graph = Self::new();
 
         for table in &self.tables {
@@ -287,7 +287,7 @@ mod tests {
         graph.add_dependency("A".to_string(), "B".to_string());
         graph.add_dependency("B".to_string(), "C".to_string());
 
-        let order = graph.topological_order().unwrap();
+        let order = graph.topo_order().unwrap();
 
         // C should come before B, B before A
         let c_idx = order.iter().position(|t| t == "C").unwrap();
@@ -312,7 +312,7 @@ mod tests {
         graph.add_dependency("B".to_string(), "D".to_string());
         graph.add_dependency("C".to_string(), "D".to_string());
 
-        let order = graph.topological_order().unwrap();
+        let order = graph.topo_order().unwrap();
 
         let d_idx = order.iter().position(|t| t == "D").unwrap();
         let b_idx = order.iter().position(|t| t == "B").unwrap();
@@ -337,7 +337,7 @@ mod tests {
         graph.add_dependency("B".to_string(), "C".to_string());
         graph.add_dependency("C".to_string(), "A".to_string());
 
-        let result = graph.topological_order();
+        let result = graph.topo_order();
 
         assert!(result.is_err());
         if let Err(DependencyError::CircularDependency(msg)) = result {
@@ -375,7 +375,7 @@ mod tests {
         graph.add_dependency("B".to_string(), "A".to_string());
         graph.add_dependency("C".to_string(), "A".to_string());
 
-        let order = graph.partial_topological_order();
+        let order = graph.partial_topo_order();
 
         // All tables present
         assert_eq!(order.len(), 3);
@@ -395,7 +395,7 @@ mod tests {
         graph.add_dependency("A".to_string(), "B".to_string());
         graph.add_dependency("B".to_string(), "C".to_string());
 
-        let order = graph.partial_topological_order();
+        let order = graph.partial_topo_order();
         let c_idx = order.iter().position(|t| t == "C").unwrap();
         let b_idx = order.iter().position(|t| t == "B").unwrap();
         let a_idx = order.iter().position(|t| t == "A").unwrap();
@@ -409,7 +409,7 @@ mod tests {
         // A references itself (e.g., parent_id FK to same table)
         graph.add_dependency("A".to_string(), "A".to_string());
 
-        let result = graph.topological_order();
+        let result = graph.topo_order();
 
         // Self-reference creates a cycle
         assert!(result.is_err());

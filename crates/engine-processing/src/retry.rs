@@ -1,6 +1,6 @@
 use crate::io::error::SinkError;
 use connectors::error::{DbError, DriverError};
-use engine_core::retry::RetryDisposition;
+use engine_infra::retry::RetryDisposition;
 use mysql_async::Error as MySqlError;
 use tokio_postgres::{Error as PgError, error::SqlState};
 
@@ -14,8 +14,6 @@ pub fn classify_driver_error(err: &DriverError) -> RetryDisposition {
         DriverError::TransactionError(_) => RetryDisposition::Stop,
         DriverError::Unknown(_) => RetryDisposition::Stop,
         DriverError::UnsupportedFormat(_) => RetryDisposition::Stop,
-        DriverError::UnsupportedScheme(_) => RetryDisposition::Stop,
-        DriverError::DriverNotFound(_) => RetryDisposition::Stop,
         DriverError::InvalidUrl(_) => RetryDisposition::Stop,
         DriverError::CircularReference(_) => RetryDisposition::Stop,
         DriverError::UnsupportedDriver(_) => RetryDisposition::Stop,

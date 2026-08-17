@@ -1,5 +1,5 @@
 use crate::{
-    plan::SchemaPlan,
+    plan::{SchemaObjectFlags, SchemaPlan},
     type_registry::{Dialect, TypeRegistry},
     types::TypeEngine,
 };
@@ -28,22 +28,17 @@ pub struct SchemaPlanner {
     introspector: Arc<dyn SchemaIntrospector>,
     source_dialect: Dialect,
     mapping: TransformationMetadata,
-    skip_primary_keys: bool,
-    skip_foreign_keys: bool,
-    skip_indexes: bool,
+    flags: SchemaObjectFlags,
     mapped_columns_only: bool,
     type_registry: Arc<TypeRegistry>,
 }
 
 impl SchemaPlanner {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         introspector: Arc<dyn SchemaIntrospector>,
         source_dialect: Dialect,
         mapping: TransformationMetadata,
-        skip_primary_keys: bool,
-        skip_foreign_keys: bool,
-        skip_indexes: bool,
+        flags: SchemaObjectFlags,
         mapped_columns_only: bool,
         type_registry: TypeRegistry,
     ) -> Self {
@@ -51,9 +46,7 @@ impl SchemaPlanner {
             introspector,
             source_dialect,
             mapping,
-            skip_primary_keys,
-            skip_foreign_keys,
-            skip_indexes,
+            flags,
             mapped_columns_only,
             type_registry: Arc::new(type_registry),
         }
@@ -91,9 +84,7 @@ impl SchemaPlanner {
 
         let mut plan = SchemaPlan::new(
             type_engine,
-            self.skip_primary_keys,
-            self.skip_foreign_keys,
-            self.skip_indexes,
+            self.flags,
             self.mapped_columns_only,
             self.mapping.clone(),
         );

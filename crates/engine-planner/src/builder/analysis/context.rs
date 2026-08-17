@@ -2,9 +2,9 @@ use crate::builder::{
     analyzers::sample::SampleConfig, infra::metadata_cache::MetadataCache, utils::MaskingPolicy,
 };
 use crate::plan::sample::method::SamplingMethod;
-use engine_core::schema::plan::SchemaPlan;
-use engine_core::schema::type_registry::Dialect;
 use engine_processing::io::driver::SchemaDriver;
+use engine_schema::plan::SchemaPlan;
+use engine_schema::type_registry::Dialect;
 use engine_wasm::registry::PluginRegistry;
 use model::core::value::Value;
 use model::transform::mapping::TransformationMetadata;

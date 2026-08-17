@@ -5,8 +5,8 @@ use super::{
 use crate::settings::error::SettingsError;
 use async_trait::async_trait;
 use connectors::drivers::postgres::config::PkCreation;
-use engine_core::schema::schema_ops::{SchemaOp, SchemaOps};
 use engine_processing::context::PipelineContext;
+use engine_schema::schema_ops::SchemaOps;
 use tracing::{info, warn};
 
 pub struct CreateMissingTablesSetting<D: SchemaDriver> {
@@ -25,13 +25,13 @@ impl<D: SchemaDriver> MigrationSetting for CreateMissingTablesSetting<D> {
 }
 
 impl<D: SchemaDriver> CreateMissingTablesSetting<D> {
-    pub async fn new(ctx: SchemaSettingContext<D>) -> Self {
+    pub fn new(ctx: SchemaSettingContext<D>) -> Self {
         Self { context: ctx }
     }
 
     async fn build_schema_ops(&self) -> Result<SchemaOps, SettingsError> {
-        let defer_pk = self.context.settings.pk_creation() == PkCreation::Post
-            && !self.context.settings.skip_primary_keys();
+        let settings = &self.context.settings;
+        let defer_pk = settings.pk_creation() == PkCreation::Post && !settings.skip_pk();
 
         // If the table already exists, bail out. `pk_creation = "post"` only
         // applies to tables we create, so warn and leave an existing PK as-is.
@@ -51,61 +51,15 @@ impl<D: SchemaDriver> CreateMissingTablesSetting<D> {
         let src_name = self.context.mapping.entities.reverse_resolve(dest_name);
 
         let schema_planner = self.context.init_schema_planner().await?;
-        let plan = schema_planner.plan_schema(&src_name).await?;
+        let mut plan = schema_planner.plan_schema(&src_name).await?;
 
-        let mut ops = SchemaOps::empty();
-
-        // Enum queries -> pre (idempotent)
-        for (sql, name) in plan.enum_queries() {
-            ops.pre.push(SchemaOp {
-                sql,
-                description: format!("Create enum type '{}'", name),
-                idempotent: true,
-                skip_if_missing_ref: false,
-            });
-        }
-
-        // Table queries -> pre. With `pk_creation = "post"` the tables are
-        // created without their primary key and it is added back after the load,
+        // With `pk_creation = "post"` the tables are created without their primary
+        // key and it is added back after the load (in the post phase, before FKs),
         // so per-row index maintenance doesn't slow the bulk COPY.
-        let table_queries = if defer_pk {
-            plan.table_queries_no_pk().await
-        } else {
-            plan.table_queries().await
-        };
-        for (sql, name) in table_queries {
-            ops.pre.push(SchemaOp {
-                sql,
-                description: format!("Create table '{}'", name),
-                idempotent: false,
-                skip_if_missing_ref: false,
-            });
-        }
-
-        // Deferred primary keys -> post, *before* the FKs (an FK may reference a
-        // PK/unique that must already exist).
-        if defer_pk {
-            for (sql, name) in plan.pk_queries() {
-                ops.post.push(SchemaOp {
-                    sql,
-                    description: format!("Add primary key on '{}'", name),
-                    idempotent: false,
-                    skip_if_missing_ref: false,
-                });
-            }
-        }
-
-        // FK queries -> post
-        for (sql, name) in plan.fk_queries() {
-            ops.post.push(SchemaOp {
-                sql,
-                description: format!("Add foreign key constraint on '{}'", name),
-                idempotent: false,
-                skip_if_missing_ref: true,
-            });
-        }
+        plan.defer_pk(defer_pk);
 
         info!("planned create-missing-tables");
-        Ok(ops)
+
+        Ok(plan.build_ops())
     }
 }

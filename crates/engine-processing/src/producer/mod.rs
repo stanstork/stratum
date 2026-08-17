@@ -21,7 +21,8 @@ use crate::{
         validation::PipelineValidator,
     },
 };
-use engine_core::{context::env::EnvContext, retry::RetryPolicy};
+use engine_core::context::env::EnvContext;
+use engine_infra::retry::RetryPolicy;
 use engine_state::MerkleStore;
 use engine_wasm::registry::PluginRegistry;
 use model::{
@@ -29,6 +30,7 @@ use model::{
     transform::mapping::TransformationMetadata,
 };
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::debug;
 
@@ -43,11 +45,9 @@ pub fn build_transform_pipeline(
     mapped_columns_only: bool,
     env: Arc<EnvContext>,
 ) -> Result<TransformPipeline, ProducerError> {
-    let mut tp = TransformPipeline::new();
-
-    // Each transform is only added if it's needed. Entity/table remap and
-    // column renames come first so later stages see the target-shaped row.
-    tp = tp
+    // Chain the initial transforms. Entity/table remap and column renames
+    // come first so later stages see the target-shaped row.
+    let mut tp = TransformPipeline::new()
         .add_if(!mapping.entities.is_empty(), || {
             TableMapper::new(mapping.entities.clone())
         })
@@ -76,12 +76,12 @@ pub fn build_transform_pipeline(
 
     // Computed columns (including `when`) evaluate top-to-bottom and may
     // reference source columns, earlier computed columns, and plugin outputs.
-    tp = tp.add_if(!mapping.field_mappings.computed_fields.is_empty(), || {
-        ComputedTransform::new(mapping.clone(), env.clone())
-    });
-
     // Prune unmapped columns last, once plugin inputs have been consumed.
-    tp = tp.add_if(mapped_columns_only, || FieldPruner::new(mapping.clone()));
+    tp = tp
+        .add_if(!mapping.field_mappings.computed_fields.is_empty(), || {
+            ComputedTransform::new(mapping.clone(), env.clone())
+        })
+        .add_if(mapped_columns_only, || FieldPruner::new(mapping.clone()));
 
     if !pipeline.validations.is_empty() {
         let validator = PipelineValidator::new(
@@ -140,19 +140,11 @@ impl Producer {
         mut config: ProducerConfig,
         mapped_columns_only: bool,
     ) -> Result<Self, ProducerError> {
-        let exec_ctx = ctx.exec_ctx.clone();
-        let run_id = ctx.run_id.clone();
-        let item_id = ctx.item_id.clone();
-        let part_id = part_id.to_string();
-        let pipeline = ctx.pipeline.clone();
-        let mapping = ctx.mapping.clone();
-        let state_store = ctx.state.clone();
-        let cursor = ctx.cursor.clone();
-
-        let ids = ItemId::new(run_id, item_id, part_id);
+        let ids = ItemId::new(ctx.run_id.clone(), ctx.item_id.clone(), part_id.to_string());
 
         // Create retry policy from pipeline config, fallback to database defaults
-        let retry_config = pipeline
+        let retry_config = ctx
+            .pipeline
             .error_handling
             .as_ref()
             .and_then(|eh| eh.retry.as_ref());
@@ -161,25 +153,26 @@ impl Producer {
         // Create components
         let reader = SnapshotReader::new(source, retry_policy, config.batch_size);
 
-        let env = exec_ctx.env.clone();
         let transform_pipeline = build_transform_pipeline(
-            &pipeline,
+            &ctx.pipeline,
             &ctx.plugin_registry,
-            &mapping,
+            &ctx.mapping,
             mapped_columns_only,
-            env,
+            ctx.exec_ctx.env().clone(),
         )?;
+
         let transformer = TransformService::new(
-            exec_ctx,
+            ctx.exec_ctx.clone(),
             transform_pipeline,
-            pipeline.name.clone(),
-            pipeline.error_handling.clone(),
+            ctx.pipeline.name.clone(),
+            ctx.pipeline.error_handling.clone(),
         );
 
-        let state_manager = StateManager::new(ids.clone(), state_store.clone());
+        let state_manager = StateManager::new(ids.clone(), ctx.state.clone());
         let mut coordinator = BatchCoordinator::new(batch_tx, byte_budget, state_manager);
+
         if let Some(integrity) = config.integrity.take() {
-            let merkle_store = state_store as Arc<dyn MerkleStore>;
+            let merkle_store = ctx.state.clone() as Arc<dyn MerkleStore>;
             coordinator =
                 coordinator.enable_integrity(integrity, merkle_store, config.lane_sink.clone());
         }
@@ -188,11 +181,11 @@ impl Producer {
             reader,
             transformer,
             coordinator,
-            cursor,
+            cursor: ctx.cursor.clone(),
             mode: ProducerMode::Idle,
             ids,
+            pipeline_name: ctx.pipeline.name.clone(),
             config,
-            pipeline_name: pipeline.name.clone(),
         })
     }
 
@@ -213,6 +206,7 @@ impl Producer {
         part_id: &str,
     ) -> Result<(), ProducerError> {
         self.cursor = self.coordinator.state_manager().resume_cursor().await?;
+
         debug!(
             run_id = run_id,
             item_id = item_id,
@@ -263,8 +257,6 @@ impl Producer {
     }
 
     async fn process_snapshot_batch(&mut self) -> Result<ProducerStatus, ProducerError> {
-        use std::time::Instant;
-
         let t_fetch = Instant::now();
         let fetch_result = self.reader.fetch(self.cursor.clone()).await?;
 
@@ -280,7 +272,6 @@ impl Producer {
             if let Some(next) = fetch_result.next_cursor {
                 self.cursor = next;
             }
-
             return Ok(ProducerStatus::Working);
         }
 

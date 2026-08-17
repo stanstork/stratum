@@ -43,13 +43,20 @@ impl FunctionRegistry {
     }
 
     pub fn register(&mut self, name: &str, func: FunctionImpl) {
-        self.functions.insert(name.to_lowercase(), func);
+        self.functions.insert(name.to_ascii_lowercase(), func);
+    }
+
+    fn lookup(&self, name: &str) -> Option<&FunctionImpl> {
+        if name.bytes().any(|b| b.is_ascii_uppercase()) {
+            self.functions.get(&name.to_ascii_lowercase())
+        } else {
+            self.functions.get(name)
+        }
     }
 
     pub fn call(&self, name: &str, args: &[Cow<'_, Value>], ctx: &EvalContext) -> Result<Value> {
         let func = self
-            .functions
-            .get(&name.to_lowercase())
+            .lookup(name)
             .ok_or_else(|| ExpressionError::UnknownFunction(name.to_string()))?;
 
         func(args, ctx)
@@ -57,11 +64,11 @@ impl FunctionRegistry {
 
     /// Resolve a function name to its implementation pointer.
     pub fn get(&self, name: &str) -> Option<FunctionImpl> {
-        self.functions.get(&name.to_lowercase()).copied()
+        self.lookup(name).copied()
     }
 
     pub fn has_function(&self, name: &str) -> bool {
-        self.functions.contains_key(&name.to_lowercase())
+        self.lookup(name).is_some()
     }
 
     pub fn function_names(&self) -> Vec<&str> {
@@ -102,9 +109,16 @@ mod tests {
     #[test]
     fn test_registry_case_insensitive() {
         let registry = FunctionRegistry::new();
+        // Uppercase/mixed names take the allocating fold path...
         assert!(registry.has_function("ENV"));
         assert!(registry.has_function("Lower"));
         assert!(registry.has_function("UPPER"));
+        // ...lowercase names take the zero-alloc path; both must resolve the
+        // same implementation, and unknown names miss.
+        assert!(registry.get("upper").is_some());
+        assert!(registry.get("UPPER").is_some());
+        assert!(registry.get("nope").is_none());
+        assert!(registry.get("NoPe").is_none());
     }
 
     #[test]

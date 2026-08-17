@@ -1,5 +1,5 @@
-use crate::schema::dep_graph::DependencyGraph;
 use connectors::sql::metadata::table::TableMetadata;
+use engine_schema::dep_graph::DependencyGraph;
 use model::{
     execution::{pipeline::Pipeline, references::DataMode},
     transform::mapping::TransformationMetadata,
@@ -19,8 +19,8 @@ pub fn topological_sort_tables(tables: &HashMap<String, TableMetadata>) -> Vec<S
         }
     }
     graph
-        .without_self_references()
-        .topological_order()
+        .without_self_refs()
+        .topo_order()
         .unwrap_or_else(|_| tables.keys().cloned().collect())
 }
 

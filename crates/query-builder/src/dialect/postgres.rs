@@ -1,10 +1,10 @@
-use super::Dialect;
+use super::QueryDialect;
 use model::core::types::Type;
 
 #[derive(Debug, Clone)]
 pub struct Postgres;
 
-impl Dialect for Postgres {
+impl QueryDialect for Postgres {
     fn quote_identifier(&self, ident: &str) -> String {
         format!(r#""{ident}""#)
     }
@@ -209,6 +209,14 @@ impl Dialect for Postgres {
              WHERE conrelid = '{table}'::regclass AND contype = 'p'; \
              IF c IS NOT NULL THEN EXECUTE 'ALTER TABLE {quoted} DROP CONSTRAINT ' || quote_ident(c); \
              END IF; END $$;"
+        )
+    }
+
+    fn drop_foreign_key(&self, table: &str, constraint: &str) -> String {
+        format!(
+            "ALTER TABLE {} DROP CONSTRAINT IF EXISTS {};",
+            self.quote_identifier(table),
+            self.quote_identifier(constraint)
         )
     }
 

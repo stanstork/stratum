@@ -2,6 +2,7 @@ use crate::core::{
     types::Type,
     value::{FieldValue, Value},
 };
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -90,9 +91,26 @@ impl Record {
         self.values.get(i).and_then(|v| v.as_ref())
     }
 
+    /// Value at a position for expression evaluation. An out-of-range index
+    /// yields `None` (a genuine error), while an in-range SQL `NULL` yields `Value::Null`.
+    pub fn eval_value_at(&self, i: usize) -> Option<Cow<'_, Value>> {
+        match self.values.get(i) {
+            Some(Some(v)) => Some(Cow::Borrowed(v)),
+            Some(None) => Some(Cow::Owned(Value::Null)),
+            None => None,
+        }
+    }
+
     /// Value of a named column, if present and non-null.
     pub fn value(&self, name: &str) -> Option<&Value> {
         self.index_of(name).and_then(|i| self.value_at(i))
+    }
+
+    /// Named-column value for expression evaluation: an unknown column yields
+    /// `None`, while an in-range SQL `NULL` yields `Value::Null`. The name-keyed
+    /// twin of [`Record::eval_value_at`].
+    pub fn eval_value(&self, name: &str) -> Option<Cow<'_, Value>> {
+        self.index_of(name).and_then(|i| self.eval_value_at(i))
     }
 
     /// Value of a named column, cloned; missing/null → [`Value::Null`].
@@ -219,6 +237,25 @@ mod project_tests {
                 other => panic!("slot {i} = {other:?}"),
             })
             .collect()
+    }
+
+    #[test]
+    fn eval_value_at_treats_in_range_null_as_value_null() {
+        let schema = RecordSchema::new(
+            "t",
+            vec![
+                SchemaColumn::new("a", Value::Int(0).data_type()),
+                SchemaColumn::new("b", Value::Int(0).data_type()),
+            ],
+        );
+        // Column 0 present; column 1 is SQL NULL (bare `None`, PostgreSQL spelling).
+        let r = Record::new(schema, vec![Some(Value::Int(7)), None], OpType::Insert);
+
+        assert_eq!(r.eval_value_at(0).as_deref(), Some(&Value::Int(7)));
+        // An in-range NULL is a value, not a missing column: computed, not DLQ'd.
+        assert_eq!(r.eval_value_at(1).as_deref(), Some(&Value::Null));
+        // Out of range is still a genuine error.
+        assert!(r.eval_value_at(2).is_none());
     }
 
     #[test]

@@ -17,10 +17,10 @@ use crate::plan::{
         mapping::{ColumnMapping, MappingType},
     },
 };
-use engine_core::state::{CalibrationData, WriteClass};
+use engine_state::{CalibrationData, WriteClass};
 
 mod throughput {
-    use engine_core::state::WriteClass;
+    use engine_state::WriteClass;
 
     pub const MIN_SAFE: u64 = 100;
 

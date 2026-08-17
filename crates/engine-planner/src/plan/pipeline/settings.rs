@@ -16,11 +16,17 @@ pub struct PipelineSettings {
     #[serde(skip_serializing_if = "is_false")]
     pub create_missing_columns: bool,
     #[serde(skip_serializing_if = "is_false")]
-    pub skip_primary_keys: bool,
+    pub skip_pk: bool,
     #[serde(skip_serializing_if = "is_false")]
-    pub skip_foreign_keys: bool,
+    pub skip_fk: bool,
     #[serde(skip_serializing_if = "is_false")]
-    pub skip_indexes: bool,
+    pub skip_idx: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub skip_seq: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub skip_unique: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub skip_check: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub dry_run: bool,
 
@@ -40,9 +46,12 @@ impl PipelineSettings {
             batch_size: settings.batch_size,
             create_missing_tables: settings.create_missing_tables,
             create_missing_columns: settings.create_missing_columns,
-            skip_primary_keys: settings.skip_primary_keys,
-            skip_foreign_keys: settings.skip_foreign_keys,
-            skip_indexes: settings.skip_indexes,
+            skip_pk: settings.skip_pk,
+            skip_fk: settings.skip_fk,
+            skip_idx: settings.skip_idx,
+            skip_seq: settings.skip_seq,
+            skip_unique: settings.skip_unique,
+            skip_check: settings.skip_check,
             lanes: settings.lanes,
             dry_run: settings.dry_run,
             workers: 1,
@@ -57,9 +66,12 @@ impl PipelineSettings {
             batch_size: self.batch_size,
             create_missing_tables: self.create_missing_tables,
             create_missing_columns: self.create_missing_columns,
-            skip_primary_keys: self.skip_primary_keys,
-            skip_foreign_keys: self.skip_foreign_keys,
-            skip_indexes: self.skip_indexes,
+            skip_pk: self.skip_pk,
+            skip_fk: self.skip_fk,
+            skip_idx: self.skip_idx,
+            skip_seq: self.skip_seq,
+            skip_unique: self.skip_unique,
+            skip_check: self.skip_check,
             lanes: self.lanes,
             pk_creation: Default::default(),
             dry_run: self.dry_run,

@@ -95,7 +95,7 @@ impl JoinAnalyzer {
         match join_on_expr!(clause) {
             Ok(expr) => {
                 let dialect = ctx.source_dialect.as_query_dialect();
-                let mut renderer = Renderer::new(dialect.as_ref());
+                let mut renderer = Renderer::new(dialect);
                 expr.render(&mut renderer);
                 renderer.finish().0
             }

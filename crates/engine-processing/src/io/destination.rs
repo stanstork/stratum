@@ -14,7 +14,7 @@ use connectors::{
     sql::metadata::table::TableMetadata,
     traits::driver::Driver,
 };
-use engine_core::schema::type_registry::Dialect;
+use engine_schema::type_registry::Dialect;
 use engine_wasm::runtime::instance::PluginInstance;
 use model::{
     core::value::Value,
@@ -25,7 +25,10 @@ use model::{
     },
     records::Record,
 };
-use query_builder::{ast::load_data::LoadDataConflict, dialect};
+use query_builder::{
+    ast::load_data::LoadDataConflict,
+    dialect::{self, QueryDialect},
+};
 use std::{collections::HashMap, sync::Arc};
 
 /// Read a driver-specific tuning value from an endpoint's dialect block.
@@ -143,7 +146,7 @@ impl Destination {
         self.sink.finalize().await
     }
 
-    pub fn dialect(&self) -> Option<Box<dyn dialect::Dialect>> {
+    pub fn query_dialect(&self) -> Option<Box<dyn QueryDialect>> {
         match self.format {
             DataFormat::Postgres => Some(Box::new(dialect::Postgres)),
             DataFormat::MySql => Some(Box::new(dialect::MySql)),

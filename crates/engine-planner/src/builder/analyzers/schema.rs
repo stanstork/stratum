@@ -1,5 +1,8 @@
 use crate::{
-    builder::analysis::{AnalysisContext, AnalyzerError, AnalyzerResult, PlanAnalyzer},
+    builder::{
+        analysis::{AnalysisContext, AnalyzerError, AnalyzerResult, PlanAnalyzer},
+        graph,
+    },
     plan::schema::{change::SchemaChange, types::SchemaChangeType},
 };
 use async_trait::async_trait;
@@ -40,54 +43,7 @@ impl SchemaAnalyzer {
         dest_table: &str,
         ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<Vec<SchemaChange>> {
-        let mut changes = Vec::new();
-
-        // Core Table Creation
-        let table_queries = ctx.schema_plan.table_queries().await;
-        let (create_sql, _) = table_queries
-            .iter()
-            .find(|q| q.1.eq_ignore_ascii_case(dest_table))
-            .ok_or_else(|| {
-                AnalyzerError::error(
-                    "schema",
-                    format!("No table query generated for target: {}", dest_table),
-                )
-            })?;
-
-        changes.push(SchemaChange {
-            change_type: SchemaChangeType::CreateTable,
-            entity: dest_table.to_string(),
-            description: format!("Create new table '{}'", dest_table),
-            ddl: Some(create_sql.clone()),
-            is_breaking: false,
-            is_reversible: true,
-        });
-
-        // Custom Enum Types - enum_queries() returns a HashSet
-        let enum_queries = ctx.schema_plan.enum_queries();
-
-        for (sql, column_name) in enum_queries {
-            changes.push(SchemaChange {
-                change_type: SchemaChangeType::CreateEnum,
-                entity: format!("{}.{}", dest_table, column_name),
-                description: format!("Create custom enum type for column '{}'", column_name),
-                ddl: Some(sql),
-                is_breaking: false,
-                is_reversible: true,
-            });
-        }
-
-        // Foreign Key Constraints
-        for (sql, column_name) in ctx.schema_plan.fk_queries() {
-            changes.push(SchemaChange {
-                change_type: SchemaChangeType::AddConstraint,
-                entity: format!("{}.{}", dest_table, column_name),
-                description: format!("Add foreign key constraint to column '{}'", column_name),
-                ddl: Some(sql),
-                is_breaking: false,
-                is_reversible: true,
-            });
-        }
+        let changes = graph::schema_ops_to_changes(&ctx.schema_plan.build_ops());
 
         info!(target: "analyzer", table = %dest_table, changes = changes.len(), "planned new table creation");
 
@@ -100,8 +56,6 @@ impl SchemaAnalyzer {
         dest_table: &str,
         ctx: &AnalysisContext<S, D>,
     ) -> AnalyzerResult<Vec<SchemaChange>> {
-        let mut changes = Vec::new();
-
         let dest_metadata = ctx
             .dest_cache
             .table_metadata(dest_table)
@@ -109,7 +63,7 @@ impl SchemaAnalyzer {
             .map_err(|e| {
                 AnalyzerError::error(
                     "schema",
-                    format!("Metadata retrieval failed for {}: {}", dest_table, e),
+                    format!("Metadata retrieval failed for {dest_table}: {e}"),
                 )
             })?;
 
@@ -117,36 +71,35 @@ impl SchemaAnalyzer {
         let existing_columns = dest_metadata.columns();
 
         let dialect = ctx.dest_dialect.as_query_dialect();
-        let generator = QueryGenerator::new(dialect.as_ref());
+        let generator = QueryGenerator::new(dialect);
 
-        for planned_col in planned_columns {
-            let col_name = planned_col.name();
-            let exists = existing_columns
-                .iter()
-                .any(|c| c.name.eq_ignore_ascii_case(col_name));
+        let changes: Vec<SchemaChange> = planned_columns
+            .into_iter()
+            .filter(|planned_col| {
+                !existing_columns
+                    .iter()
+                    .any(|c| c.name.eq_ignore_ascii_case(planned_col.name()))
+            })
+            .map(|planned_col| {
+                let col_name = planned_col.name().to_string();
+                let (sql, _) = generator.add_column(dest_table, planned_col);
 
-            if !exists {
-                let (sql, _) = generator.add_column(dest_table, planned_col.clone());
-
-                changes.push(SchemaChange {
+                SchemaChange {
                     change_type: SchemaChangeType::AddColumn,
-                    entity: format!("{}.{}", dest_table, col_name),
-                    description: format!(
-                        "Add missing column '{}' to table '{}'",
-                        col_name, dest_table
-                    ),
+                    entity: format!("{dest_table}.{col_name}"),
+                    description: format!("Add missing column '{col_name}' to table '{dest_table}'"),
                     ddl: Some(sql),
                     is_breaking: false,
                     is_reversible: true,
-                });
-            }
-        }
+                }
+            })
+            .collect();
 
         if changes.is_empty() {
             info!(target: "analyzer", table = %dest_table, "schema matches target, no changes required");
+        } else {
+            info!(target: "analyzer", table = %dest_table, changes = changes.len(), "identified schema changes for modification");
         }
-
-        info!(target: "analyzer", table = %dest_table, changes = changes.len(), "identified schema changes for modification");
 
         Ok(changes)
     }

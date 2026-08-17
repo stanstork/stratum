@@ -84,7 +84,7 @@ impl Program {
 
         for instr in &self.code {
             match *instr {
-                Instr::Col(i) => stack.push(Cow::Borrowed(row.value_at(i as usize)?)),
+                Instr::Col(i) => stack.push(row.eval_value_at(i as usize)?),
                 Instr::Const(k) => stack.push(Cow::Borrowed(&self.consts[k as usize])),
                 Instr::Bin(op) => {
                     // rhs is on top; pop rhs then lhs.
@@ -94,7 +94,7 @@ impl Program {
                     stack.push(Cow::Owned(out));
                 }
                 Instr::Call { f, argc, name } => {
-                    let base = stack.len() - argc as usize;
+                    let base = stack.len().checked_sub(argc as usize)?;
                     // The top `argc` slots ARE the argument slice - no argv alloc.
                     match f(&stack[base..], ctx) {
                         Ok(v) => {
@@ -108,22 +108,28 @@ impl Program {
                     }
                 }
                 Instr::ColColBin(a, b, op) => {
-                    let l = row.value_at(a as usize)?;
-                    let r = row.value_at(b as usize)?;
-                    stack.push(Cow::Owned(BinaryOpEvaluator::new(l, r, &op).evaluate()?));
+                    let l = row.eval_value_at(a as usize)?;
+                    let r = row.eval_value_at(b as usize)?;
+                    stack.push(Cow::Owned(
+                        BinaryOpEvaluator::new(l.as_ref(), r.as_ref(), &op).evaluate()?,
+                    ));
                 }
                 Instr::ColConstBin(a, k, op) => {
-                    let l = row.value_at(a as usize)?;
+                    let l = row.eval_value_at(a as usize)?;
                     let r = &self.consts[k as usize];
-                    stack.push(Cow::Owned(BinaryOpEvaluator::new(l, r, &op).evaluate()?));
+                    stack.push(Cow::Owned(
+                        BinaryOpEvaluator::new(l.as_ref(), r, &op).evaluate()?,
+                    ));
                 }
                 Instr::ConstColBin(k, a, op) => {
                     let l = &self.consts[k as usize];
-                    let r = row.value_at(a as usize)?;
-                    stack.push(Cow::Owned(BinaryOpEvaluator::new(l, r, &op).evaluate()?));
+                    let r = row.eval_value_at(a as usize)?;
+                    stack.push(Cow::Owned(
+                        BinaryOpEvaluator::new(l, r.as_ref(), &op).evaluate()?,
+                    ));
                 }
                 Instr::Col1Call { col, f, name } => {
-                    let arg = [Cow::Borrowed(row.value_at(col as usize)?)];
+                    let arg = [row.eval_value_at(col as usize)?];
                     match f(&arg, ctx) {
                         Ok(v) => stack.push(Cow::Owned(v)),
                         Err(e) => {
@@ -390,5 +396,63 @@ mod tests {
 
             assert_eq!(vm_out, tree_out, "VM/tree mismatch for {expr:?}");
         }
+    }
+
+    /// A reference to a SQL NULL column must evaluate to `Value::Null`, not fail.
+    #[test]
+    fn null_column_evaluates_to_null_not_error() {
+        let schema = RecordSchema::new(
+            "orders",
+            vec![
+                SchemaColumn::new("amount", Type::Boolean),
+                SchemaColumn::new("name", Type::Boolean),
+            ],
+        );
+        // `name` is SQL NULL, spelled as PostgreSQL's bare `None`.
+        let rec = Record::new(
+            std::sync::Arc::clone(&schema),
+            vec![Some(Value::Float(2.5)), None],
+            OpType::Insert,
+        );
+        let mapping = meta();
+        let env = |_: &str| -> Option<String> { None };
+        let ctx = EvalContext::Runtime {
+            row_data: &rec,
+            mapping: &mapping,
+            env_getter: &env,
+        };
+
+        // A bare column read yields the null value; superinstructions that read
+        // a NULL column must read it as NULL and let the op decide, rather than
+        // failing at the read. `amount * name` (arithmetic with NULL) now
+        // propagates NULL instead of routing the row to the DLQ.
+        for expr in [
+            col("name"),
+            bin(col("name"), BinaryOp::Equal, lit(Value::Int(0))),
+            bin(col("amount"), BinaryOp::Multiply, col("name")),
+        ] {
+            let prog =
+                Program::compile(&expr, &schema, &mapping, "orders").expect("compiles to VM");
+            let tree = TreeExpr::compile(&expr, &schema, &mapping, "orders");
+
+            let vm_out = prog.eval(&rec, &ctx).map(|c| c.into_owned());
+            let tree_out = tree.eval(&rec, &mapping, &env).map(|c| c.into_owned());
+
+            assert!(
+                vm_out.is_some(),
+                "a NULL column must not fail eval (would route the row to the DLQ): {expr:?}"
+            );
+            assert_eq!(
+                vm_out, tree_out,
+                "VM and tree walk must agree on NULL: {expr:?}"
+            );
+        }
+
+        // The bare reference is the null value itself.
+        let prog = Program::compile(&col("name"), &schema, &mapping, "orders").unwrap();
+        assert_eq!(
+            prog.eval(&rec, &ctx).map(|c| c.into_owned()),
+            Some(Value::Null)
+        );
     }
 }

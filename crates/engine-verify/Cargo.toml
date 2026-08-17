@@ -8,6 +8,7 @@ license.workspace = true
 model = { path = "../model" }
 engine-state = { path = "../engine-state" }
 engine-core = { path = "../engine-core" }
+engine-schema = { path = "../engine-schema" }
 connectors = { path = "../connectors" }
 query-builder = { path = "../query-builder" }
 

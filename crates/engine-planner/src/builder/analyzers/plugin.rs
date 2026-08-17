@@ -10,10 +10,9 @@ use crate::{
     },
 };
 use connectors::sql::metadata::column::ColumnMetadata;
-use engine_core::{
-    plan::execution::ExecutionPlan as CoreExecutionPlan, schema::type_registry::Dialect,
-};
+use engine_core::plan::execution::ExecutionPlan as CoreExecutionPlan;
 use engine_processing::io::format::DataFormat;
+use engine_schema::type_registry::Dialect;
 use engine_wasm::{registry::PluginRegistry, schema::PluginField};
 use expression_engine::ExpressionAnalyzer;
 use model::{

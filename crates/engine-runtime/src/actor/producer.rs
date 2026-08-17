@@ -1,14 +1,13 @@
 use super::TickAction;
 use crate::actor::messages::ProducerMsg;
 use crate::error::ActorError;
-use engine_core::{event_bus::bus::EventBus, metrics::Metrics};
+use engine_infra::{event_bus::bus::EventBus, metrics::Metrics};
 use engine_processing::{
     cb::{CircuitBreaker, CircuitBreakerState},
     error::ProducerError,
     producer::{Producer, ProducerStatus},
 };
 use model::events::migration::{MigrationEvent, ProducerMode};
-use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
@@ -215,24 +214,14 @@ pub async fn run_producer(
         };
 
     let mut task = ProducerTask::new(producer, metrics, event_bus, run_id, item_id, part_id);
-    let idle_delay = Duration::from_millis(500);
-    let mut tick_interval = tokio::time::interval(Duration::from_millis(1));
-    tick_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-    // Main loop: tick producer and handle messages
     loop {
         tokio::select! {
-            _ = tick_interval.tick() => {
-                match task.tick().await {
-                    TickAction::Continue => tick_interval.reset_immediately(),
-                    TickAction::Idle => {
-                        tick_interval = tokio::time::interval(idle_delay);
-                        tick_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                    }
-                    TickAction::Done => return Ok(()),
-                    TickAction::Failed(e) => return Err(e),
-                }
-            }
+            action = task.tick() => match action {
+                TickAction::Continue | TickAction::Idle => {}
+                TickAction::Done => return Ok(()),
+                TickAction::Failed(e) => return Err(e),
+            },
             msg = rx.recv() => match msg {
                 Some(ProducerMsg::Stop { run_id, item_id }) => {
                     return match task.handle_stop(run_id, item_id).await {

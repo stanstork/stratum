@@ -3,6 +3,7 @@ use crate::{
         ReportBuilder,
         endpoint::{PlanDestinationEndpoint, PlanSourceEndpoint},
         errors::{ReportBuilderError, ReportBuilderResult, SourceAnalyzerError},
+        graph,
     },
     plan::schema::{change::SchemaChange, types::SchemaChangeType},
 };
@@ -11,11 +12,9 @@ use connectors::{
     traits::introspector::SchemaIntrospector,
 };
 use engine_config::settings::validated::ValidatedSettings;
-use engine_core::{
-    dispatch_driver,
-    schema::{plan::SchemaPlan, type_registry::Dialect},
-};
+use engine_core::dispatch_driver;
 use engine_processing::io::source::wasm::introspector::PluginIntrospector;
+use engine_schema::{plan::SchemaPlan, type_registry::Dialect};
 use engine_wasm::registry::{PluginRegistry, plugin_columns};
 use model::{
     execution::{flags::IntegrityMode, pipeline::Pipeline},
@@ -24,7 +23,7 @@ use model::{
 use std::sync::Arc;
 
 /// Preview the schema changes for a WASM-source -> DB-destination pipeline.
-pub(crate) async fn wasm_source_schema_changes(
+pub(crate) async fn source_changes(
     builder: &ReportBuilder,
     pipeline: &Pipeline,
     src_ep: &dyn PlanSourceEndpoint,
@@ -35,12 +34,13 @@ pub(crate) async fn wasm_source_schema_changes(
         return Ok(Vec::new());
     };
 
-    let meta = plugin_registry.metadata(plugin).map_err(|e| {
-        ReportBuilderError::SourceAnalyzer(SourceAnalyzerError::QueryFailed(format!(
-            "could not load source plugin '{}': {}",
-            plugin, e
-        )))
-    })?;
+    let err_mapper =
+        |msg: String| ReportBuilderError::SourceAnalyzer(SourceAnalyzerError::QueryFailed(msg));
+
+    let meta = plugin_registry
+        .metadata(plugin)
+        .map_err(|e| err_mapper(format!("could not load source plugin '{plugin}': {e}")))?;
+
     if meta.output_schema.is_empty() {
         return Ok(Vec::new());
     }
@@ -60,76 +60,22 @@ pub(crate) async fn wasm_source_schema_changes(
     let dest_table = &pipeline.destination.table;
     let dest_exists =
         dispatch_driver!(dest_driver, |d| d.table_exists(dest_table).await).map_err(|e| {
-            ReportBuilderError::SourceAnalyzer(SourceAnalyzerError::QueryFailed(format!(
-                "could not check destination table '{}': {}",
-                dest_table, e
-            )))
+            err_mapper(format!(
+                "could not check destination table '{dest_table}': {e}"
+            ))
         })?;
 
     if dest_exists {
         let dest_meta = dispatch_driver!(dest_driver, |d| d.table_metadata(dest_table).await)
             .map_err(|e| {
-                ReportBuilderError::SourceAnalyzer(SourceAnalyzerError::QueryFailed(format!(
-                    "could not introspect destination table '{}': {}",
-                    dest_table, e
-                )))
+                err_mapper(format!(
+                    "could not introspect destination table '{dest_table}': {e}"
+                ))
             })?;
         Ok(add_column_changes(dest_table, &schema_plan, &dest_meta, dest_dialect).await)
     } else {
-        create_table_changes(dest_table, &schema_plan).await
+        Ok(graph::schema_ops_to_changes(&schema_plan.build_ops()))
     }
-}
-
-/// Build CREATE TABLE (+ enum/FK) changes from a fresh schema plan.
-async fn create_table_changes(
-    dest_table: &str,
-    plan: &SchemaPlan,
-) -> ReportBuilderResult<Vec<SchemaChange>> {
-    let mut changes = Vec::new();
-
-    let table_queries = plan.table_queries().await;
-    let (create_sql, _) = table_queries
-        .iter()
-        .find(|q| q.1.eq_ignore_ascii_case(dest_table))
-        .ok_or_else(|| {
-            ReportBuilderError::SourceAnalyzer(SourceAnalyzerError::QueryFailed(format!(
-                "No table query generated for target: {}",
-                dest_table
-            )))
-        })?;
-
-    changes.push(SchemaChange {
-        change_type: SchemaChangeType::CreateTable,
-        entity: dest_table.to_string(),
-        description: format!("Create new table '{}'", dest_table),
-        ddl: Some(create_sql.clone()),
-        is_breaking: false,
-        is_reversible: true,
-    });
-
-    for (sql, column_name) in plan.enum_queries() {
-        changes.push(SchemaChange {
-            change_type: SchemaChangeType::CreateEnum,
-            entity: format!("{}.{}", dest_table, column_name),
-            description: format!("Create custom enum type for column '{}'", column_name),
-            ddl: Some(sql),
-            is_breaking: false,
-            is_reversible: true,
-        });
-    }
-
-    for (sql, column_name) in plan.fk_queries() {
-        changes.push(SchemaChange {
-            change_type: SchemaChangeType::AddConstraint,
-            entity: format!("{}.{}", dest_table, column_name),
-            description: format!("Add foreign key constraint to column '{}'", column_name),
-            ddl: Some(sql),
-            is_breaking: false,
-            is_reversible: true,
-        });
-    }
-
-    Ok(changes)
 }
 
 /// Build ADD COLUMN changes for columns the existing destination is missing.
@@ -139,34 +85,31 @@ async fn add_column_changes(
     dest_meta: &TableMetadata,
     dest_dialect: Dialect,
 ) -> Vec<SchemaChange> {
-    let mut changes = Vec::new();
     let planned_columns = plan.resolved_column_defs().await;
     let existing_columns = dest_meta.columns();
 
     let dialect = dest_dialect.as_query_dialect();
-    let generator = QueryGenerator::new(dialect.as_ref());
+    let generator = QueryGenerator::new(dialect);
 
-    for planned_col in planned_columns {
-        let col_name = planned_col.name();
-        let exists = existing_columns
-            .iter()
-            .any(|c| c.name.eq_ignore_ascii_case(col_name));
-        if exists {
-            continue;
-        }
-        let (sql, _) = generator.add_column(dest_table, planned_col.clone());
-        changes.push(SchemaChange {
-            change_type: SchemaChangeType::AddColumn,
-            entity: format!("{}.{}", dest_table, col_name),
-            description: format!(
-                "Add missing column '{}' to table '{}'",
-                col_name, dest_table
-            ),
-            ddl: Some(sql),
-            is_breaking: false,
-            is_reversible: true,
-        });
-    }
+    planned_columns
+        .into_iter()
+        .filter(|planned_col| {
+            !existing_columns
+                .iter()
+                .any(|c| c.name.eq_ignore_ascii_case(planned_col.name()))
+        })
+        .map(|planned_col| {
+            let col_name = planned_col.name().to_string();
+            let (sql, _) = generator.add_column(dest_table, planned_col);
 
-    changes
+            SchemaChange {
+                change_type: SchemaChangeType::AddColumn,
+                entity: format!("{dest_table}.{col_name}"),
+                description: format!("Add missing column '{col_name}' to table '{dest_table}'"),
+                ddl: Some(sql),
+                is_breaking: false,
+                is_reversible: true,
+            }
+        })
+        .collect()
 }

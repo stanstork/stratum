@@ -450,7 +450,7 @@ impl<S: SchemaDriver> SampleCollector<S> {
     ) -> Result<(Vec<Record>, Option<SampleQuery>), SampleCollectorError> {
         let request = self.build_sample_request(pipeline, mapping).await?;
         let dialect = ctx.source_dialect.as_query_dialect();
-        let generator = QueryGenerator::new(dialect.as_ref());
+        let generator = QueryGenerator::new(dialect);
         let (sql, params) = generator.select(&request);
         let query = Some(SampleQuery {
             sql: sql.clone(),

@@ -18,7 +18,7 @@ use connectors::{
         introspector::SchemaIntrospector,
     },
 };
-use engine_core::schema::type_registry::Dialect;
+use engine_schema::type_registry::Dialect;
 use model::core::{convert::FromCanonical, types::Type};
 use std::collections::HashMap;
 

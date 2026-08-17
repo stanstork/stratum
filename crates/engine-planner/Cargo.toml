@@ -9,6 +9,9 @@ model = { path = "../model" }
 connectors = { path = "../connectors" }
 query-builder = { path = "../query-builder" }
 engine-core = { path = "../engine-core" }
+engine-schema = { path = "../engine-schema" }
+engine-state = { path = "../engine-state" }
+engine-infra = { path = "../engine-infra" }
 engine-runtime = { path = "../engine-runtime" }
 engine-processing = { path = "../engine-processing" }
 engine-wasm = { path = "../engine-wasm" }

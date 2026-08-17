@@ -3,7 +3,7 @@ use crate::{
     actor::messages::{ConsumerMsg, ProducerMsg},
     error::ActorError,
 };
-use engine_core::{event_bus::bus::EventBus, metrics::Metrics};
+use engine_infra::{event_bus::bus::EventBus, metrics::Metrics};
 use engine_processing::{consumer::Consumer, producer::Producer};
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;

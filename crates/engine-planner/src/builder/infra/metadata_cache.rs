@@ -1,7 +1,8 @@
-pub use engine_core::schema::metadata_cache::{CacheStats, MetadataCache};
+pub use engine_schema::metadata_cache::{CacheStats, MetadataCache};
 
 use connectors::drivers::{mysql::driver::MySqlDriver, postgres::driver::PgDriver};
-use engine_core::{drivers::DriverRef, schema::type_registry::Dialect};
+use engine_core::drivers::DriverRef;
+use engine_schema::type_registry::Dialect;
 use model::execution::row_count::RowCount;
 use std::sync::Arc;
 

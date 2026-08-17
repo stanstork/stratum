@@ -43,14 +43,8 @@ pub enum DbError {
 
 #[derive(Debug, Error)]
 pub enum DriverError {
-    #[error("Unsupported scheme: {0}")]
-    UnsupportedScheme(String),
-
     #[error("Unsupported format: {0}")]
     UnsupportedFormat(String),
-
-    #[error("Driver not found for driver id: {0}")]
-    DriverNotFound(String),
 
     #[error("Invalid URL: {0}")]
     InvalidUrl(String),
@@ -83,4 +77,14 @@ pub enum DriverError {
 
     #[error("Unsupported driver: {0}")]
     UnsupportedDriver(String),
+}
+
+impl DriverError {
+    pub fn is_missing_object(&self) -> bool {
+        match self {
+            DriverError::MySqlError(mysql_async::Error::Server(e)) => e.code == 1091,
+            DriverError::QueryError(msg) => msg.contains("1091"),
+            _ => false,
+        }
+    }
 }

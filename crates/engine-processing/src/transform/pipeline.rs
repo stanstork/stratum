@@ -11,19 +11,21 @@ use tracing::warn;
 
 /// Split `rows` into maximal contiguous runs that share one schema `Arc` (i.e.
 /// one table) and call `f(offset, run)` for each.
-pub(crate) fn for_each_table(rows: &mut [Record], mut f: impl FnMut(usize, &mut [Record])) {
+pub(crate) fn for_each_table_mut(rows: &mut [Record], mut f: impl FnMut(usize, &mut [Record])) {
     let mut offset = 0;
+    for chunk in rows.chunk_by_mut(|a, b| Arc::ptr_eq(a.schema(), b.schema())) {
+        let len = chunk.len();
+        f(offset, chunk);
+        offset += len;
+    }
+}
 
-    while offset < rows.len() {
-        let current_schema = rows[offset].schema();
-
-        // Find the first row that has a different schema, or the end of the slice
-        let len = rows[offset..]
-            .iter()
-            .position(|r| !Arc::ptr_eq(current_schema, r.schema()))
-            .unwrap_or(rows.len() - offset);
-
-        f(offset, &mut rows[offset..offset + len]);
+/// Read-only twin of [`for_each_table_mut`], for stages that only inspect rows.
+pub(crate) fn for_each_table(rows: &[Record], mut f: impl FnMut(usize, &[Record])) {
+    let mut offset = 0;
+    for chunk in rows.chunk_by(|a, b| Arc::ptr_eq(a.schema(), b.schema())) {
+        let len = chunk.len();
+        f(offset, chunk);
         offset += len;
     }
 }

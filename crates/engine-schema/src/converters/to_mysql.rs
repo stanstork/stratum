@@ -4,9 +4,9 @@ use connectors::sql::metadata::index::IndexType;
 use model::core::types::Type;
 use std::collections::HashMap;
 
-pub struct PgToMysql;
+pub struct ToMysql;
 
-impl DialectConverter for PgToMysql {
+impl DialectConverter for ToMysql {
     fn index_type_map(&self) -> HashMap<IndexType, IndexType> {
         HashMap::from([
             (IndexType::Gin, IndexType::BTree),

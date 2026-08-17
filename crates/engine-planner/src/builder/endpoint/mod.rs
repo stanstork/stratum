@@ -9,10 +9,9 @@ use crate::{
     },
 };
 pub use destination::{DbPlanDestinationEndpoint, WasmPlanDestinationEndpoint};
-use engine_core::{
-    context::exec::ConnectionPool, drivers::DriverRef, schema::type_registry::Dialect,
-};
+use engine_core::{context::exec::ConnectionPool, drivers::DriverRef};
 use engine_processing::io::format::DataFormat;
+use engine_schema::type_registry::Dialect;
 use engine_wasm::{registry::PluginRegistry, schema::PluginField};
 use model::{
     core::types::Type,

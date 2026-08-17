@@ -5,13 +5,12 @@ use crate::builder::{
 };
 use connectors::traits::introspector::SchemaIntrospector;
 use engine_config::settings::validated::ValidatedSettings;
-use engine_core::{
-    context::exec::ConnectionPool, dispatch_driver, drivers::DriverRef, schema::plan::SchemaPlan,
-};
+use engine_core::{context::exec::ConnectionPool, dispatch_driver, drivers::DriverRef};
 use engine_processing::io::{
     destination::{Destination, IntoDestination},
     source::Source,
 };
+use engine_schema::plan::SchemaPlan;
 use engine_wasm::registry::{PluginRegistry, plugin_columns};
 use model::{execution::pipeline::Pipeline, transform::mapping::TransformationMetadata};
 use query_builder::offsets::OffsetStrategyFactory;
@@ -138,16 +137,28 @@ impl<'a> PipelineSettingsView<'a> {
         Self { settings }
     }
 
-    pub fn skip_primary_keys(&self) -> bool {
-        self.settings.skip_primary_keys()
+    pub fn skip_pk(&self) -> bool {
+        self.settings.skip_pk()
     }
 
-    pub fn skip_foreign_keys(&self) -> bool {
-        self.settings.skip_foreign_keys()
+    pub fn skip_fk(&self) -> bool {
+        self.settings.skip_fk()
     }
 
-    pub fn skip_indexes(&self) -> bool {
-        self.settings.skip_indexes()
+    pub fn skip_idx(&self) -> bool {
+        self.settings.skip_idx()
+    }
+
+    pub fn skip_seq(&self) -> bool {
+        self.settings.skip_seq()
+    }
+
+    pub fn skip_unique(&self) -> bool {
+        self.settings.skip_unique()
+    }
+
+    pub fn skip_check(&self) -> bool {
+        self.settings.skip_check()
     }
 
     pub fn batch_size(&self) -> usize {

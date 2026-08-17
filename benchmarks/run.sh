@@ -626,7 +626,7 @@ fi
         echo
         echo "pgloader comparison notes: on \`sakila\`, pgloader v4 also builds secondary"
         echo "indexes and foreign keys (its WITH toggles to skip them were removed), while"
-        echo "stratum builds tables + primary keys only - so \`sakila\` is not scope-matched;"
+        echo "stratum builds tables + primary keys and secondary indexes but not foreign keys - so \`sakila\` is not scope-matched;"
         echo "\`synthetic\` (table + PK, one table) is the clean head-to-head. Run stratum and"
         echo "pgloader the same way (both native, or both docker) for a fair wall-clock; peak"
         echo "RSS for a dockerized tool is \`docker stats\`-sampled (~1-2s) and approximate."

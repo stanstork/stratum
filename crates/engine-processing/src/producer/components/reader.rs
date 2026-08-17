@@ -1,6 +1,6 @@
 use crate::io::source::Source;
 use crate::{error::ProducerError, retry::classify_driver_error};
-use engine_core::retry::{RetryError, RetryPolicy};
+use engine_infra::retry::{RetryError, RetryPolicy};
 use model::pagination::{cursor::Cursor, page::FetchResult};
 
 /// Handles data fetching from source with retry logic.

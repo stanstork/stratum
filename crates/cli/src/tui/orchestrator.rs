@@ -11,7 +11,8 @@ use crate::{
         terminal::TerminalGuard,
     },
 };
-use engine_core::{context::env::EnvContext, event_bus::bus::EventBus};
+use engine_core::context::env::EnvContext;
+use engine_infra::event_bus::bus::EventBus;
 use engine_infra::shutdown::ShutdownSignal;
 use indicatif::{ProgressBar, ProgressStyle};
 use model::{

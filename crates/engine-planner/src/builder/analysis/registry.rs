@@ -24,7 +24,8 @@ use crate::{
 
 use async_trait::async_trait;
 use engine_processing::io::driver::SchemaDriver;
-use model::execution::pipeline::Pipeline;
+use engine_schema::plan::SchemaPlan;
+use model::{execution::pipeline::Pipeline, transform::mapping::TransformationMetadata};
 use std::{sync::Arc, time::Duration};
 
 /// Aggregated results from all analyzers
@@ -162,8 +163,8 @@ pub struct AnalyzerRegistry<S: SchemaDriver, D: SchemaDriver> {
 impl<S: SchemaDriver, D: SchemaDriver> AnalyzerRegistry<S, D> {
     pub fn new(
         source_cache: Arc<MetadataCache<S>>,
-        schema_plan: Arc<engine_core::schema::plan::SchemaPlan>,
-        mapping: &model::transform::mapping::TransformationMetadata,
+        schema_plan: Arc<SchemaPlan>,
+        mapping: &TransformationMetadata,
         dest_driver: Arc<D>,
         _timeout: Duration,
     ) -> Self {

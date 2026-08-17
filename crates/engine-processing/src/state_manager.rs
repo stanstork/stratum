@@ -1,12 +1,10 @@
 use crate::item::ItemId;
-use engine_core::{
-    error::StateStoreError,
-    state::{
-        StateStore,
-        models::{Checkpoint, CheckpointSummary, WalEntry},
-    },
-};
+use engine_core::error::StateStoreError;
 use engine_state::models::CheckpointStage;
+use engine_state::{
+    StateStore,
+    models::{Checkpoint, CheckpointSummary, WalEntry},
+};
 use model::pagination::cursor::Cursor;
 use std::sync::Arc;
 use tracing::{debug, warn};

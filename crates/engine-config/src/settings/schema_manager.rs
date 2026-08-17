@@ -1,7 +1,7 @@
 use crate::settings::{driver::SchemaDriver, error::SettingsError};
 use connectors::error::DriverError;
 use connectors::traits::executor::QueryExecutor;
-use engine_core::schema::schema_ops::SchemaOp;
+use engine_schema::schema_ops::SchemaOp;
 use tracing::{debug, error, info};
 
 /// Execute a sequence of schema operations against a destination driver.
@@ -18,6 +18,10 @@ pub async fn apply_schema_ops(
         if let Err(err) = driver.execute(&op.sql).await {
             if op.idempotent && is_type_already_exists_error(&err) {
                 info!(op = %op.description, "schema object already exists, skipping");
+                continue;
+            }
+            if op.idempotent && err.is_missing_object() {
+                info!(op = %op.description, "schema object already absent, skipping");
                 continue;
             }
             if op.skip_if_missing_ref && is_relation_not_found_error(&err) {

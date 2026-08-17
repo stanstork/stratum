@@ -3,16 +3,14 @@ use async_trait::async_trait;
 use connectors::{sql::metadata::table::TableMetadata, traits::introspector::SchemaIntrospector};
 pub use destination::{DbDestinationEndpoint, WasmDestinationEndpoint};
 use engine_config::settings::ValidatedSettings;
-use engine_core::{
-    context::exec::ExecutionContext,
-    schema::{
-        schema_ops::{SchemaOp, SchemaOps},
-        type_registry::Dialect,
-    },
-};
+use engine_core::context::exec::ExecutionContext;
 use engine_processing::{
     context::PipelineContext,
     io::{destination::Destination, format::DataFormat, source::Source},
+};
+use engine_schema::{
+    schema_ops::{SchemaOp, SchemaOps},
+    type_registry::Dialect,
 };
 use engine_wasm::registry::PluginRegistry;
 use model::{
@@ -163,7 +161,7 @@ pub async fn resolve_source(
             };
             Ok(Box::new(DbSourceEndpoint {
                 driver,
-                introspector: exec.cached_source_introspector(conn).await?,
+                introspector: exec.source_introspector(conn).await?,
             }))
         }
     }

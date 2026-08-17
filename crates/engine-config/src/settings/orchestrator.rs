@@ -6,8 +6,8 @@ use super::{
 };
 use crate::settings::SchemaSettingContext;
 use connectors::{drivers::postgres::config::PkCreation, traits::introspector::SchemaIntrospector};
-use engine_core::schema::{schema_ops::SchemaOps, type_registry::Dialect};
 use engine_processing::context::PipelineContext;
+use engine_schema::{schema_ops::SchemaOps, type_registry::Dialect};
 use model::{core::value::Value, execution::flags::IntegrityMode};
 use std::{collections::HashMap, sync::Arc};
 
@@ -87,13 +87,13 @@ where
     let mut all_settings: Vec<Box<dyn MigrationSetting>> = Vec::new();
 
     if validated.create_missing_tables() {
-        let missing_tables_setting = CreateMissingTablesSetting::new(schema_ctx.clone()).await;
-        all_settings.push(Box::new(missing_tables_setting));
+        let missing_tables = CreateMissingTablesSetting::new(schema_ctx.clone());
+        all_settings.push(Box::new(missing_tables));
     }
 
     if validated.create_missing_columns() {
-        let missing_cols_setting = CreateMissingColumnsSetting::new(schema_ctx.clone()).await;
-        all_settings.push(Box::new(missing_cols_setting));
+        let missing_cols = CreateMissingColumnsSetting::new(schema_ctx.clone());
+        all_settings.push(Box::new(missing_cols));
     }
 
     // Settings are already created in phase order due to enum ordering

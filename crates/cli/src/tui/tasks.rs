@@ -1,8 +1,6 @@
 use crate::tui::app::command::MigrationCommand;
-use engine_core::{
-    context::env::EnvContext, event_bus::bus::EventBus,
-    plan::execution::ExecutionPlan as CoreExecutionPlan,
-};
+use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan as CoreExecutionPlan};
+use engine_infra::event_bus::bus::EventBus;
 use engine_infra::shutdown::ShutdownSignal;
 use engine_runtime::dag::{Dag, executor::DagExecutor};
 use model::{events::migration::MigrationEvent, execution::flags::ExecutionFlags};

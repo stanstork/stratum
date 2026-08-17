@@ -1,5 +1,6 @@
 use super::pipeline::Filter;
 use model::{records::Record, transform::mapping::TransformationMetadata};
+use std::collections::HashSet;
 
 /// Filters out rows that have no mapped fields for their table.
 pub struct EmptyRowFilter;
@@ -12,41 +13,37 @@ impl Filter for EmptyRowFilter {
 
 /// Filters out rows from tables that have no mappings defined.
 pub struct UnmappedTableFilter {
-    mapping: TransformationMetadata,
+    mapped: HashSet<String>,
 }
 
 impl UnmappedTableFilter {
     pub fn new(mapping: TransformationMetadata) -> Self {
-        Self { mapping }
-    }
+        let mut mapped = HashSet::new();
 
-    fn has_any_mapping(&self, table: &str) -> bool {
-        // Check if table has entity mapping
-        if self.mapping.entities.contains_target(table) {
-            return true;
+        // Tables that are a mapping target.
+        mapped.extend(mapping.entities.target_to_source.keys().cloned());
+
+        // Tables that have at least one field rename.
+        for (table, renames) in &mapping.field_mappings.field_renames {
+            if !renames.source_to_target.is_empty() {
+                mapped.insert(table.clone());
+            }
         }
 
-        // Check if table has field mappings
-        if let Some(field_renames) = self.mapping.field_mappings.field_renames.get(table)
-            && !field_renames.source_to_target.is_empty()
-        {
-            return true;
+        // Tables that have at least one computed field.
+        for (table, computed) in &mapping.field_mappings.computed_fields {
+            if !computed.is_empty() {
+                mapped.insert(table.clone());
+            }
         }
 
-        // Check if table has computed fields
-        if let Some(computed_fields) = self.mapping.field_mappings.computed_fields.get(table)
-            && !computed_fields.is_empty()
-        {
-            return true;
-        }
-
-        false
+        Self { mapped }
     }
 }
 
 impl Filter for UnmappedTableFilter {
     fn should_keep(&self, row: &Record) -> bool {
-        self.has_any_mapping(row.table())
+        self.mapped.contains(row.table())
     }
 }
 
@@ -87,6 +84,44 @@ mod tests {
         },
         records::OpType,
     };
+
+    #[test]
+    fn unmapped_table_filter_keeps_mapped_drops_unmapped() {
+        use model::transform::mapping::{
+            FieldTransformations, NameResolver, TransformationMetadata,
+        };
+        use std::collections::{HashMap, HashSet};
+
+        // `users` is an entity target; `orders` has a field rename; `audit_log`
+        // has nothing.
+        let entities =
+            NameResolver::new(HashMap::from([("users".to_string(), "users".to_string())]));
+        let mut field_mappings = FieldTransformations::new();
+        field_mappings.add_mapping(
+            "orders",
+            HashMap::from([("total".to_string(), "amount".to_string())]),
+        );
+
+        let filter = UnmappedTableFilter::new(TransformationMetadata {
+            entities,
+            field_mappings,
+            foreign_fields: HashMap::new(),
+            plugin_columns: Vec::new(),
+            migrated_tables: HashSet::new(),
+            has_projection: false,
+        });
+
+        let row = |t: &str| Record::from_fields(t, vec![], OpType::default());
+        assert!(filter.should_keep(&row("users")), "entity target kept");
+        assert!(
+            filter.should_keep(&row("orders")),
+            "field-renamed table kept"
+        );
+        assert!(
+            !filter.should_keep(&row("audit_log")),
+            "unmapped table dropped"
+        );
+    }
 
     #[test]
     fn test_empty_row_filter() {

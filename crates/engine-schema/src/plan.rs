@@ -18,9 +18,34 @@ use model::{
     core::types::Type, execution::expr::CompiledExpression,
     transform::mapping::TransformationMetadata,
 };
-use query_builder::dialect::{self, Dialect};
-use std::collections::{HashMap, HashSet};
+use query_builder::dialect::{self, QueryDialect};
+use std::collections::{HashMap, HashSet, hash_map::Entry};
 use tracing::warn;
+
+/// Which schema objects to skip when creating destination tables.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SchemaObjectFlags {
+    pub skip_pk: bool,
+    pub skip_fk: bool,
+    pub skip_idx: bool,
+    pub skip_seq: bool,
+    pub skip_unique: bool,
+    pub skip_check: bool,
+}
+
+impl SchemaObjectFlags {
+    /// Read every skip flag from a pipeline's raw settings map.
+    pub fn from_pipeline(pipeline: &model::execution::pipeline::Pipeline) -> Self {
+        Self {
+            skip_pk: pipeline.setting_flag("skip_pk"),
+            skip_fk: pipeline.setting_flag("skip_fk"),
+            skip_idx: pipeline.setting_flag("skip_idx"),
+            skip_seq: pipeline.setting_flag("skip_seq"),
+            skip_unique: pipeline.setting_flag("skip_unique"),
+            skip_check: pipeline.setting_flag("skip_check"),
+        }
+    }
+}
 
 /// Represents the schema migration plan from source to target, including type conversion,
 /// name mapping, and metadata relationships.
@@ -32,16 +57,28 @@ pub struct SchemaPlan {
     type_engine: TypeEngine,
 
     /// Target dialect for DDL rendering.
-    target_dialect: Box<dyn Dialect + Send + Sync>,
+    target_dialect: &'static (dyn QueryDialect + Send + Sync),
 
     /// Create destination tables without a primary key (and never add one).
-    skip_primary_keys: bool,
+    skip_pk: bool,
+
+    /// Defer PRIMARY KEY creation to the post phase.
+    defer_pk: bool,
 
     /// Don't create foreign-key constraints on the destination.
-    skip_foreign_keys: bool,
+    skip_fk: bool,
 
     /// Don't create secondary (non-constraint) indexes on the destination.
-    skip_indexes: bool,
+    skip_idx: bool,
+
+    /// Don't create sequences (identity / auto-increment) on the destination.
+    skip_seq: bool,
+
+    /// Don't create UNIQUE constraints on the destination.
+    skip_unique: bool,
+
+    /// Don't create CHECK constraints on the destination.
+    skip_check: bool,
 
     /// Indicates whether to create columns in the target table that are present in the mapping block only.
     mapped_columns_only: bool,
@@ -108,18 +145,20 @@ pub enum FkCreationStrategy {
 impl SchemaPlan {
     pub fn new(
         type_engine: TypeEngine,
-        skip_primary_keys: bool,
-        skip_foreign_keys: bool,
-        skip_indexes: bool,
+        flags: SchemaObjectFlags,
         mapped_columns_only: bool,
         mapping: TransformationMetadata,
     ) -> Self {
         Self {
             type_engine,
-            target_dialect: Box::new(dialect::Postgres),
-            skip_primary_keys,
-            skip_foreign_keys,
-            skip_indexes,
+            target_dialect: &dialect::Postgres,
+            skip_pk: flags.skip_pk,
+            defer_pk: false,
+            skip_fk: flags.skip_fk,
+            skip_idx: flags.skip_idx,
+            skip_seq: flags.skip_seq,
+            skip_unique: flags.skip_unique,
+            skip_check: flags.skip_check,
             mapped_columns_only,
             drop_constraints: false,
             index_creation: IndexCreationStrategy::default(),
@@ -136,7 +175,7 @@ impl SchemaPlan {
         }
     }
 
-    pub fn set_target_dialect(&mut self, dialect: Box<dyn Dialect + Send + Sync>) {
+    pub fn set_target_dialect(&mut self, dialect: &'static (dyn QueryDialect + Send + Sync)) {
         self.target_dialect = dialect;
     }
 
@@ -150,6 +189,10 @@ impl SchemaPlan {
 
     pub fn set_drop_constraints(&mut self, drop: bool) {
         self.drop_constraints = drop;
+    }
+
+    pub fn defer_pk(&mut self, defer: bool) {
+        self.defer_pk = defer;
     }
 
     pub fn type_engine(&self) -> &TypeEngine {
@@ -273,18 +316,24 @@ impl SchemaPlan {
         // Sequences must come after tables because OWNED BY references the table column.
         pre.extend(self.enum_ops());
         pre.extend(self.table_ops());
-        pre.extend(self.sequence_ops());
+
+        if !self.skip_seq {
+            pre.extend(self.sequence_ops());
+        }
 
         // When requested: drop existing FK constraints before data migration so that
         // a cascade run succeeds even if a prior schema_only run already created them.
         // FKs are re-added in the post phase as usual.
-        if self.drop_constraints && !self.skip_foreign_keys {
+        if self.drop_constraints && !self.skip_fk {
             pre.extend(self.drop_fk_ops());
         }
 
+        // Deferred primary keys: post-data, before indexes and FKs.
+        post.extend(self.pk_ops());
+
         // Indexes: post-data by default, pre-data if configured. Skipped entirely
-        // when `skip_indexes` is set.
-        if !self.skip_indexes {
+        // when `skip_idx` is set.
+        if !self.skip_idx {
             match self.index_creation {
                 IndexCreationStrategy::AfterData => post.extend(self.index_ops()),
                 IndexCreationStrategy::BeforeData => pre.extend(self.index_ops()),
@@ -318,7 +367,7 @@ impl SchemaPlan {
             return Vec::new();
         }
 
-        let qgen = QueryGenerator::new(self.target_dialect.as_ref());
+        let qgen = QueryGenerator::new(self.target_dialect);
         let mut ops = Vec::new();
 
         for (table, column) in &self.enum_definitions {
@@ -359,12 +408,78 @@ impl SchemaPlan {
         ops
     }
 
-    /// Generate CREATE SEQUENCE ops.
+    /// For each destination table, the set of column names that will actually
+    /// exist after projection (`mapped_columns_only`) and renames.
+    fn dest_column_index(&self) -> HashMap<String, HashSet<String>> {
+        let mut index = HashMap::new();
+        for (table, columns) in &self.column_definitions {
+            let resolved_table = self.mapping.entities.resolve(table);
+            let mut resolved = self.resolve_column_defs(table, columns);
+
+            if self.mapped_columns_only {
+                resolved = self.filter_to_mapped_columns(&resolved_table, resolved);
+            }
+
+            index.insert(
+                resolved_table,
+                resolved.into_iter().map(|c| c.name).collect::<HashSet<_>>(),
+            );
+        }
+        index
+    }
+
+    /// Resolved (destination table, sorted columns) keys for every UNIQUE constraint.
+    fn unique_keys(&self) -> HashSet<(String, Vec<String>)> {
+        let mut keys = HashSet::new();
+        for (table, constraints) in &self.unique_constraint_definitions {
+            let resolved_table = self.mapping.entities.resolve(table);
+            for uc in constraints {
+                let mut cols: Vec<String> = uc
+                    .columns
+                    .iter()
+                    .map(|c| self.mapping.field_mappings.resolve(&resolved_table, c))
+                    .collect();
+                cols.sort_unstable();
+                keys.insert((resolved_table.clone(), cols));
+            }
+        }
+        keys
+    }
+
+    /// True when `table` is copied whole with no column renames.
+    fn is_verbatim(&self, table: &str) -> bool {
+        if self.mapped_columns_only {
+            return false;
+        }
+
+        match self.column_definitions.get(table) {
+            Some(columns) => {
+                let resolved_table = self.mapping.entities.resolve(table);
+                columns.iter().all(|c| {
+                    self.mapping
+                        .field_mappings
+                        .resolve(&resolved_table, &c.name)
+                        == c.name
+                })
+            }
+            None => false,
+        }
+    }
+
+    /// Generate CREATE SEQUENCE ops, skipping sequences whose owning column was
+    /// dropped by projection.
     fn sequence_ops(&self) -> Vec<SchemaOp> {
-        let qgen = QueryGenerator::new(self.target_dialect.as_ref());
+        let qgen = QueryGenerator::new(self.target_dialect);
+        let dest_cols = self.dest_column_index();
 
         self.sequence_definitions
             .iter()
+            .filter(|seq| match &seq.owned_by {
+                Some((table, column)) => dest_cols
+                    .get(table)
+                    .is_some_and(|cols| cols.contains(column)),
+                None => true,
+            })
             .map(|seq| {
                 let (sql, _) = qgen.create_sequence(seq);
                 SchemaOp {
@@ -377,43 +492,60 @@ impl SchemaPlan {
             .collect()
     }
 
+    /// Collapse columns that share a name, keeping the later definition (a
+    /// computed or plugin output shadows the source column it overrides).
+    fn dedupe_columns(columns: Vec<ColumnDef>) -> Vec<ColumnDef> {
+        let mut out: Vec<ColumnDef> = Vec::with_capacity(columns.len());
+        let mut positions: HashMap<String, usize> = HashMap::new();
+
+        for col in columns {
+            match positions.entry(col.name.clone()) {
+                Entry::Occupied(e) => {
+                    out[*e.get()] = col;
+                }
+                Entry::Vacant(e) => {
+                    e.insert(out.len());
+                    out.push(col);
+                }
+            }
+        }
+        out
+    }
+
     /// Generate CREATE TABLE ops (topologically sorted, no FKs inline).
     fn table_ops(&self) -> Vec<SchemaOp> {
-        let qgen = QueryGenerator::new(self.target_dialect.as_ref());
+        let qgen = QueryGenerator::new(self.target_dialect);
         let dep_graph = self.build_dependency_graph();
 
         // Get topological order; fall back to deterministic partial order on cycle
-        // (partial_topological_order sorts acyclic tables first, then cycle members
+        // (partial_topo_order sorts acyclic tables first, then cycle members
         // alphabetically - always deterministic, avoids random HashMap iteration order).
-        let table_order = dep_graph
-            .without_self_references()
-            .partial_topological_order();
+        let table_order = dep_graph.without_self_refs().partial_topo_order();
 
         let mut ops = Vec::new();
 
         for table in &table_order {
-            let columns = match self.column_definitions.get(table) {
-                Some(cols) => cols,
-                None => continue,
+            let Some(columns) = self.column_definitions.get(table) else {
+                continue;
             };
 
             let resolved_table = self.mapping.entities.resolve(table);
-            let mut resolved_columns = self.resolve_column_definitions(table, columns);
+            let mut resolved_columns = self.resolve_column_defs(table, columns);
 
             if self.mapped_columns_only {
                 resolved_columns = self.filter_to_mapped_columns(&resolved_table, resolved_columns);
             }
 
-            // Computed columns are async - we handle them synchronously for build_ops
-            // by using the pre-collected column defs. Callers should ensure computed
-            // columns are already added via add_column_defs if needed.
+            // A computed column can share a source column's name (e.g.
+            // `amount = amount / 0`); plan_schema appends it alongside the
+            // original, so collapse duplicates, letting the later (computed)
+            // definition shadow the source one.
+            resolved_columns = Self::dedupe_columns(resolved_columns);
 
-            let (sql, _) = qgen.create_table(
-                &resolved_table,
-                &resolved_columns,
-                self.skip_primary_keys,
-                false,
-            );
+            // `skip_pk` drops the PK permanently; `defer_pk`
+            // omits it here so `pk_ops()` can rebuild it in the post phase.
+            let omit_pk = self.skip_pk || self.defer_pk;
+            let (sql, _) = qgen.create_table(&resolved_table, &resolved_columns, omit_pk, false);
 
             ops.push(SchemaOp {
                 sql,
@@ -426,17 +558,90 @@ impl SchemaPlan {
         ops
     }
 
+    /// Generate ALTER TABLE ADD PRIMARY KEY ops for tables whose primary key was
+    /// deferred (`defer_pk`). Empty otherwise.
+    fn pk_ops(&self) -> Vec<SchemaOp> {
+        if self.skip_pk || !self.defer_pk {
+            return Vec::new();
+        }
+
+        let qgen = QueryGenerator::new(self.target_dialect);
+        let dep_graph = self.build_dependency_graph();
+        let table_order = dep_graph.without_self_refs().partial_topo_order();
+
+        let mut ops = Vec::new();
+        for table in &table_order {
+            let Some(columns) = self.column_definitions.get(table) else {
+                continue;
+            };
+
+            let resolved_table = self.mapping.entities.resolve(table);
+            let mut resolved_columns = self.resolve_column_defs(table, columns);
+
+            if self.mapped_columns_only {
+                resolved_columns = self.filter_to_mapped_columns(&resolved_table, resolved_columns);
+            }
+
+            let pk_cols: Vec<String> = resolved_columns
+                .iter()
+                .filter(|c| c.is_primary_key)
+                .map(|c| c.name.clone())
+                .collect();
+
+            if pk_cols.is_empty() {
+                continue;
+            }
+
+            let (sql, _) = qgen.add_primary_key(&resolved_table, &pk_cols);
+
+            ops.push(SchemaOp {
+                sql,
+                description: format!("Add primary key on '{}'", resolved_table),
+                idempotent: false,
+                skip_if_missing_ref: false,
+            });
+        }
+
+        ops
+    }
+
     /// Generate CREATE INDEX ops.
     fn index_ops(&self) -> Vec<SchemaOp> {
-        let qgen = QueryGenerator::new(self.target_dialect.as_ref());
+        let qgen = QueryGenerator::new(self.target_dialect);
         let mut ops = Vec::new();
 
-        // Non-unique indexes first, then unique (unique may depend on data)
+        // Non-unique indexes first, then unique (unique may depend on data).
+        // Skip an index when it references a column the destination table doesn't
+        // have (dropped by projection), or when it duplicates a UNIQUE constraint
+        // that `constraint_ops` already emits (same object on MySQL - emitting
+        // both collides on a duplicate key name).
+        let dest_cols = self.dest_column_index();
+        let unique_keys = self.unique_keys();
+
         let mut all_indexes: Vec<&IndexDef> = self
             .index_definitions
             .values()
             .flat_map(|idxs| idxs.iter())
+            .filter(|idx| {
+                let columns_exist = dest_cols
+                    .get(&idx.table)
+                    .is_some_and(|cols| idx.columns.iter().all(|c| cols.contains(&c.name)));
+
+                if !columns_exist {
+                    return false;
+                }
+
+                if idx.unique {
+                    let mut cols: Vec<String> =
+                        idx.columns.iter().map(|c| c.name.clone()).collect();
+                    cols.sort_unstable();
+                    !unique_keys.contains(&(idx.table.clone(), cols))
+                } else {
+                    true
+                }
+            })
             .collect();
+
         all_indexes.sort_by_key(|idx| idx.unique);
 
         for index in all_indexes {
@@ -454,16 +659,13 @@ impl SchemaPlan {
 
     /// Generate ALTER TABLE ADD CONSTRAINT ops (FKs, CHECK, UNIQUE).
     fn constraint_ops(&self) -> Vec<SchemaOp> {
-        let qgen = QueryGenerator::new(self.target_dialect.as_ref());
+        let qgen = QueryGenerator::new(self.target_dialect);
+        let dest_cols = self.dest_column_index();
         let mut ops = Vec::new();
 
-        // Foreign keys are skipped when `skip_foreign_keys` is set; UNIQUE/CHECK
+        // Foreign keys are skipped when `skip_fk` is set; UNIQUE/CHECK
         // constraints below are unaffected.
-        for (table, fks) in self
-            .fk_definitions
-            .iter()
-            .filter(|_| !self.skip_foreign_keys)
-        {
+        for (table, fks) in self.fk_definitions.iter().filter(|_| !self.skip_fk) {
             let resolved_table = self.mapping.entities.resolve(table);
 
             for fk in fks {
@@ -473,11 +675,20 @@ impl SchemaPlan {
                     .iter()
                     .map(|col| self.mapping.field_mappings.resolve(&ref_table, col))
                     .collect();
+
                 let columns: Vec<String> = fk
                     .columns
                     .iter()
                     .map(|col| self.mapping.field_mappings.resolve(&resolved_table, col))
                     .collect();
+
+                // Skip FKs whose local column was dropped by projection.
+                if !dest_cols
+                    .get(&resolved_table)
+                    .is_some_and(|c| columns.iter().all(|col| c.contains(col)))
+                {
+                    continue;
+                }
 
                 let resolved_fk = ForeignKeyDef {
                     constraint_name: fk.constraint_name.clone(),
@@ -490,6 +701,7 @@ impl SchemaPlan {
 
                 let (sql, _) = qgen.add_foreign_key(&resolved_table, &resolved_fk);
                 let desc = fk.constraint_name.as_deref().unwrap_or("FK");
+
                 ops.push(SchemaOp {
                     sql,
                     description: format!("Add foreign key '{}' on '{}'", desc, resolved_table),
@@ -500,55 +712,72 @@ impl SchemaPlan {
         }
 
         // UNIQUE constraints
-        for (table, constraints) in &self.unique_constraint_definitions {
-            let resolved_table = self.mapping.entities.resolve(table);
+        if !self.skip_unique {
+            for (table, constraints) in &self.unique_constraint_definitions {
+                let resolved_table = self.mapping.entities.resolve(table);
 
-            for uc in constraints {
-                let columns: Vec<String> = uc
-                    .columns
-                    .iter()
-                    .map(|col| self.mapping.field_mappings.resolve(&resolved_table, col))
-                    .collect();
+                for uc in constraints {
+                    let columns: Vec<String> = uc
+                        .columns
+                        .iter()
+                        .map(|col| self.mapping.field_mappings.resolve(&resolved_table, col))
+                        .collect();
 
-                let resolved_uc = UniqueConstraintDef {
-                    constraint_name: uc.constraint_name.clone(),
-                    table: resolved_table.clone(),
-                    columns,
-                };
+                    // Skip UNIQUE constraints whose column was dropped by projection.
+                    if !dest_cols
+                        .get(&resolved_table)
+                        .is_some_and(|c| columns.iter().all(|col| c.contains(col)))
+                    {
+                        continue;
+                    }
 
-                let (sql, _) = qgen.add_unique_constraint(&resolved_table, &resolved_uc);
-                let desc = uc.constraint_name.as_deref().unwrap_or("UNIQUE");
-                ops.push(SchemaOp {
-                    sql,
-                    description: format!(
-                        "Add unique constraint '{}' on '{}'",
-                        desc, resolved_table
-                    ),
-                    idempotent: true,
-                    skip_if_missing_ref: false,
-                });
+                    let resolved_uc = UniqueConstraintDef {
+                        constraint_name: uc.constraint_name.clone(),
+                        table: resolved_table.clone(),
+                        columns,
+                    };
+
+                    let (sql, _) = qgen.add_unique_constraint(&resolved_table, &resolved_uc);
+                    let desc = uc.constraint_name.as_deref().unwrap_or("UNIQUE");
+
+                    ops.push(SchemaOp {
+                        sql,
+                        description: format!(
+                            "Add unique constraint '{desc}' on '{resolved_table}'"
+                        ),
+                        idempotent: true,
+                        skip_if_missing_ref: false,
+                    });
+                }
             }
         }
 
-        // CHECK constraints
-        for (table, constraints) in &self.check_constraint_definitions {
-            let resolved_table = self.mapping.entities.resolve(table);
+        // CHECK constraints. The expression is opaque SQL we can't rewrite, so
+        // only reproduce it when the table is copied whole with no renames.
+        if !self.skip_check {
+            for (table, constraints) in &self.check_constraint_definitions {
+                if !self.is_verbatim(table) {
+                    continue;
+                }
+                let resolved_table = self.mapping.entities.resolve(table);
 
-            for cc in constraints {
-                let resolved_cc = CheckConstraintDef {
-                    constraint_name: cc.constraint_name.clone(),
-                    table: resolved_table.clone(),
-                    expression: cc.expression.clone(),
-                };
+                for cc in constraints {
+                    let resolved_cc = CheckConstraintDef {
+                        constraint_name: cc.constraint_name.clone(),
+                        table: resolved_table.clone(),
+                        expression: cc.expression.clone(),
+                    };
 
-                let (sql, _) = qgen.add_check_constraint(&resolved_table, &resolved_cc);
-                let desc = cc.constraint_name.as_deref().unwrap_or("CHECK");
-                ops.push(SchemaOp {
-                    sql,
-                    description: format!("Add check constraint '{}' on '{}'", desc, resolved_table),
-                    idempotent: true,
-                    skip_if_missing_ref: false,
-                });
+                    let (sql, _) = qgen.add_check_constraint(&resolved_table, &resolved_cc);
+                    let desc = cc.constraint_name.as_deref().unwrap_or("CHECK");
+
+                    ops.push(SchemaOp {
+                        sql,
+                        description: format!("Add check constraint '{desc}' on '{resolved_table}'"),
+                        idempotent: true,
+                        skip_if_missing_ref: false,
+                    });
+                }
             }
         }
 
@@ -558,21 +787,21 @@ impl SchemaPlan {
     /// Generate ALTER TABLE DROP CONSTRAINT IF EXISTS ops for all named FK constraints.
     /// Emitted in pre-migration so data is written without active FK constraints.
     fn drop_fk_ops(&self) -> Vec<SchemaOp> {
+        let qgen = QueryGenerator::new(self.target_dialect);
         let mut ops = Vec::new();
 
         for (table, fks) in &self.fk_definitions {
             let resolved_table = self.mapping.entities.resolve(table);
-            let quoted_table = self.target_dialect.quote_identifier(&resolved_table);
 
             for fk in fks {
                 let Some(name) = &fk.constraint_name else {
                     continue; // can't reference anonymous constraints by name
                 };
-                let quoted_name = self.target_dialect.quote_identifier(name);
+
+                let sql = qgen.drop_foreign_key(&resolved_table, name);
+
                 ops.push(SchemaOp {
-                    sql: format!(
-                        "ALTER TABLE {quoted_table} DROP CONSTRAINT IF EXISTS {quoted_name};"
-                    ),
+                    sql,
                     description: format!(
                         "Drop foreign key '{}' on '{}' before data migration",
                         name, resolved_table
@@ -584,177 +813,6 @@ impl SchemaPlan {
         }
 
         ops
-    }
-
-    pub async fn table_queries(&self) -> HashSet<(String, String)> {
-        self.build_table_queries(true).await
-    }
-
-    pub async fn table_queries_no_pk(&self) -> HashSet<(String, String)> {
-        self.build_table_queries(false).await
-    }
-
-    async fn build_table_queries(&self, include_pk: bool) -> HashSet<(String, String)> {
-        let mut queries = HashSet::new();
-
-        for (table, columns) in &self.column_definitions {
-            let resolved_table = self.mapping.entities.resolve(table);
-            let mut resolved_columns = self.resolve_column_definitions(table, columns);
-
-            if self.mapped_columns_only {
-                resolved_columns =
-                    self.filter_to_mapped_columns(&resolved_table, resolved_columns.clone());
-            }
-
-            // Computed columns may already be in resolved_columns if plan_schema() pre-added
-            // them via extend_column_defs(). Only append those not already present.
-            let existing_names: HashSet<String> =
-                resolved_columns.iter().map(|c| c.name.clone()).collect();
-            let new_computed: Vec<_> = self
-                .computed_column_defs(table)
-                .await
-                .into_iter()
-                .filter(|col| !existing_names.contains(&col.name))
-                .collect();
-            resolved_columns.extend(new_computed);
-
-            // `skip_primary_keys` already drops the PK; `!include_pk` additionally
-            // defers it so it can be rebuilt in bulk after the load.
-            let omit_pk = self.skip_primary_keys || !include_pk;
-            let (sql, _) = QueryGenerator::new(self.target_dialect.as_ref()).create_table(
-                &resolved_table,
-                &resolved_columns,
-                omit_pk,
-                false,
-            );
-
-            queries.insert((sql, resolved_table));
-        }
-
-        queries
-    }
-
-    pub fn pk_queries(&self) -> HashSet<(String, String)> {
-        let mut queries = HashSet::new();
-
-        for (table, columns) in &self.column_definitions {
-            let resolved_table = self.mapping.entities.resolve(table);
-            let mut resolved_columns = self.resolve_column_definitions(table, columns);
-
-            if self.mapped_columns_only {
-                resolved_columns =
-                    self.filter_to_mapped_columns(&resolved_table, resolved_columns.clone());
-            }
-
-            let pk_cols: Vec<String> = resolved_columns
-                .iter()
-                .filter(|c| c.is_primary_key)
-                .map(|c| c.name.clone())
-                .collect();
-            if pk_cols.is_empty() {
-                continue;
-            }
-
-            let (sql, _) = QueryGenerator::new(self.target_dialect.as_ref())
-                .add_primary_key(&resolved_table, &pk_cols);
-            queries.insert((sql, resolved_table));
-        }
-
-        queries
-    }
-
-    pub fn fk_queries(&self) -> HashSet<(String, String)> {
-        if self.skip_foreign_keys {
-            return HashSet::new();
-        }
-
-        self.fk_definitions
-            .iter()
-            .flat_map(|(table, fks)| {
-                let resolved_table = self.mapping.entities.resolve(table);
-                fks.iter().map(move |fk| {
-                    let ref_table = self.mapping.entities.resolve(&fk.referenced_table);
-                    let ref_columns: Vec<String> = fk
-                        .referenced_columns
-                        .iter()
-                        .map(|col| self.mapping.field_mappings.resolve(&ref_table, col))
-                        .collect();
-                    let columns: Vec<String> = fk
-                        .columns
-                        .iter()
-                        .map(|col| self.mapping.field_mappings.resolve(&resolved_table, col))
-                        .collect();
-
-                    let resolved_fk = ForeignKeyDef {
-                        constraint_name: fk.constraint_name.clone(),
-                        referenced_table: ref_table,
-                        referenced_columns: ref_columns,
-                        columns: columns.clone(),
-                        on_delete: fk.on_delete.clone(),
-                        on_update: fk.on_update.clone(),
-                    };
-
-                    let (sql, _) = QueryGenerator::new(self.target_dialect.as_ref())
-                        .add_foreign_key(&resolved_table, &resolved_fk);
-                    let key = fk.columns.first().cloned().unwrap_or_default();
-                    (sql, key)
-                })
-            })
-            .collect()
-    }
-
-    pub fn enum_queries(&self) -> HashSet<(String, String)> {
-        let mut queries = HashSet::new();
-
-        if !self.target_dialect.supports_enums() {
-            return queries;
-        }
-
-        for (table, column) in &self.enum_definitions {
-            // Prefer full_column_type (e.g. "enum('G','PG','PG-13','R','NC-17')")
-            // over data_type (which is just "enum" from MySQL INFORMATION_SCHEMA.DATA_TYPE).
-            let enum_type = self
-                .metadata_graph
-                .get(table)
-                .and_then(|meta| meta.columns.get(column))
-                .and_then(|col| {
-                    col.full_column_type.clone().or_else(|| {
-                        if col.data_type.contains('(') {
-                            Some(col.data_type.clone())
-                        } else {
-                            None
-                        }
-                    })
-                })
-                .unwrap_or_default();
-
-            if enum_type.is_empty() {
-                warn!(column = %column, table = %table, "could not find enum type for column");
-                continue;
-            }
-
-            let variants = Self::parse_enum(&enum_type);
-            let type_name = self.enum_type_name(table, column);
-            let (sql, _) = QueryGenerator::new(self.target_dialect.as_ref())
-                .create_enum(&type_name, &variants);
-
-            queries.insert((sql, column.clone()));
-        }
-
-        queries
-    }
-
-    pub fn index_queries(&self) -> Vec<(String, String)> {
-        let qgen = QueryGenerator::new(self.target_dialect.as_ref());
-
-        self.index_definitions
-            .values()
-            .flat_map(|idxs| idxs.iter())
-            .map(|index| {
-                let (sql, _) = qgen.create_index(index);
-                (sql, index.name.clone())
-            })
-            .collect()
     }
 
     /// Merge another SchemaPlan into this one, deduplicating enums and sequences.
@@ -788,6 +846,7 @@ impl SchemaPlan {
             .iter()
             .map(|s| s.name.clone())
             .collect();
+
         for seq in other.sequence_definitions {
             if !existing_names.contains(&seq.name) {
                 self.sequence_definitions.push(seq);
@@ -835,7 +894,8 @@ impl SchemaPlan {
     /// Build a vector of ColumnDef from TableMetadata, sorted by ordinal.
     pub fn column_defs(&self, meta: &TableMetadata) -> Vec<ColumnDef> {
         let mut columns = meta.columns.values().cloned().collect::<Vec<_>>();
-        columns.sort_by_key(|col| col.ordinal);
+        columns.sort_unstable_by_key(|col| col.ordinal);
+
         columns
             .into_iter()
             .map(|col| {
@@ -843,7 +903,8 @@ impl SchemaPlan {
                 let generated_expression = col
                     .generated_expression
                     .as_deref()
-                    .map(|e| self.type_engine.normalize_generated_expression(e));
+                    .map(|e| self.type_engine.normalize_generated_expr(e));
+
                 ColumnDef {
                     name: col.name.clone(),
                     data_type,
@@ -852,7 +913,7 @@ impl SchemaPlan {
                     default: col
                         .default_value
                         .as_deref()
-                        .map(|d| self.type_engine.normalize_default_expression(d)),
+                        .map(|d| self.type_engine.normalize_default_expr(d)),
                     char_max_length,
                     generated_expression,
                     is_stored: col.is_stored,
@@ -864,26 +925,22 @@ impl SchemaPlan {
 
     pub async fn computed_column_defs(&self, table: &str) -> Vec<ColumnDef> {
         let mut defs = Vec::new();
-
         let resolved_table = self.mapping.entities.resolve(table);
+
         // Try by destination name first; fall back to source table name (cascade pipelines
         // key computed fields by source table since destination.table is empty).
-        let computed_fields = self
+        let Some(computed_fields) = self
             .mapping
             .field_mappings
             .get_computed(&resolved_table)
-            .or_else(|| self.mapping.field_mappings.get_computed(table));
-        let computed_fields = match computed_fields {
-            Some(fields) => fields,
-            None => return defs,
+            .or_else(|| self.mapping.field_mappings.get_computed(table))
+        else {
+            return defs;
         };
 
-        let metadata = match self.metadata_graph.get(table) {
-            Some(m) => m,
-            None => {
-                warn!(table = %table, resolved = %resolved_table, "missing metadata for source table");
-                return defs;
-            }
+        let Some(metadata) = self.metadata_graph.get(table) else {
+            warn!(table = %table, resolved = %resolved_table, "missing metadata for source table");
+            return defs;
         };
 
         // Computed columns are inferred in declaration order; each resolved type
@@ -907,9 +964,8 @@ impl SchemaPlan {
                     && let CompiledExpression::DotPath(segments) = &computed.expression
                     && segments.len() == 2
                 {
-                    let field = &segments[1];
                     data_type = Type::Enum {
-                        name: field.clone(),
+                        name: segments[1].clone(),
                         values: values.clone(),
                     };
                 }
@@ -945,9 +1001,10 @@ impl SchemaPlan {
 
     pub async fn resolved_column_defs(&self) -> Vec<ColumnDef> {
         let mut resolved_defs = Vec::new();
+
         for (table, columns) in &self.column_definitions {
             let resolved_table = self.mapping.entities.resolve(table);
-            let mut resolved_columns = self.resolve_column_definitions(table, columns);
+            let mut resolved_columns = self.resolve_column_defs(table, columns);
 
             if self.mapped_columns_only {
                 resolved_columns =
@@ -964,6 +1021,7 @@ impl SchemaPlan {
                 .into_iter()
                 .filter(|col| !existing_names.contains(&col.name))
                 .collect();
+
             resolved_columns.extend(new_computed);
             resolved_defs.extend(resolved_columns);
         }
@@ -1001,9 +1059,10 @@ impl SchemaPlan {
         }
     }
 
-    fn resolve_column_definitions(&self, table: &str, columns: &[ColumnDef]) -> Vec<ColumnDef> {
+    fn resolve_column_defs(&self, table: &str, columns: &[ColumnDef]) -> Vec<ColumnDef> {
         let resolved_table = self.mapping.entities.resolve(table);
         let resolver = self.mapping.field_mappings.get_entity(&resolved_table);
+
         columns
             .iter()
             .map(|col| {
@@ -1011,6 +1070,7 @@ impl SchemaPlan {
                     .mapping
                     .field_mappings
                     .resolve(&resolved_table, &col.name);
+
                 // Rewrite column name references inside generated expressions so they
                 // match the (potentially renamed) destination column names.
                 let generated_expression = col.generated_expression.as_deref().map(|expr| {
@@ -1049,11 +1109,24 @@ impl SchemaPlan {
             warn!(table = %table, "no field mapping found for table, returning all columns unchanged");
             return columns;
         };
+
+        // Computed-field targets (e.g. `full_name = concat(...)`) are projected
+        // outputs too, but they live in `computed_fields`, not `field_renames`.
+        let computed_targets: HashSet<&str> = self
+            .mapping
+            .field_mappings
+            .get_computed(table)
+            .into_iter()
+            .flatten()
+            .map(|c| c.name.as_str())
+            .collect();
+
         columns
             .into_iter()
             .filter(|col| {
-                // Keep mapped targets and plugin-transform outputs.
+                // Keep mapped targets, computed outputs, and plugin-transform outputs.
                 mapping.contains_target(&col.name)
+                    || computed_targets.contains(col.name.as_str())
                     || self
                         .mapping
                         .plugin_columns
@@ -1066,10 +1139,7 @@ impl SchemaPlan {
 
 /// Rewrite column name references inside a SQL expression (e.g. a generated column body).
 /// Performs whole-word replacement so `rental_rate` is not matched inside `original_rental_rate`.
-fn rewrite_column_refs(
-    expr: &str,
-    source_to_target: &std::collections::HashMap<String, String>,
-) -> String {
+fn rewrite_column_refs(expr: &str, source_to_target: &HashMap<String, String>) -> String {
     let mut result = expr.to_owned();
     for (src, dst) in source_to_target {
         result = replace_word(&result, src, dst);
@@ -1080,25 +1150,571 @@ fn rewrite_column_refs(
 fn replace_word(haystack: &str, needle: &str, replacement: &str) -> String {
     let mut out = String::with_capacity(haystack.len());
     let mut rest = haystack;
+
     while let Some(pos) = rest.find(needle) {
         let before = &rest[..pos];
         let after = &rest[pos + needle.len()..];
+
         let left_ok = before
             .as_bytes()
             .last()
             .is_none_or(|&c| !c.is_ascii_alphanumeric() && c != b'_');
+
         let right_ok = after
             .as_bytes()
             .first()
             .is_none_or(|&c| !c.is_ascii_alphanumeric() && c != b'_');
+
         out.push_str(before);
+
         if left_ok && right_ok {
             out.push_str(replacement);
         } else {
             out.push_str(needle);
         }
+
         rest = after;
     }
+
     out.push_str(rest);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{type_registry::TypeRegistry, types::TypeEngine};
+    use connectors::sql::metadata::fk::ForeignKeyAction;
+    use connectors::sql::metadata::index::{NullsOrder, SortOrder};
+    use connectors::sql::query::{
+        constraint::{CheckConstraintDef, UniqueConstraintDef},
+        index::{IndexColumnDef, IndexDef},
+        sequence::SequenceDef,
+    };
+    use connectors::{
+        error::DriverError,
+        sql::metadata::{
+            capabilities::Capabilities, fk::ForeignKeyMetadata, index::IndexMetadata,
+            table::TableMetadata,
+        },
+        sql::query::fk::ForeignKeyDef,
+        traits::{
+            driver::{Driver, DriverInfo},
+            introspector::SchemaIntrospector,
+        },
+    };
+    use model::core::types::{IntSize, Type};
+    use model::transform::mapping::{FieldTransformations, NameResolver, TransformationMetadata};
+    use std::sync::Arc;
+
+    /// build_ops() never introspects (definitions are collected up front), so a
+    /// stub that answers nothing is enough to construct the TypeEngine.
+    struct StubIntrospector;
+
+    impl Driver for StubIntrospector {
+        fn info(&self) -> &DriverInfo {
+            static INFO: DriverInfo = DriverInfo {
+                id: "stub",
+                name: "Stub",
+                schemes: &[],
+            };
+            &INFO
+        }
+        fn version(&self) -> &str {
+            "0.0.0"
+        }
+        fn capabilities(&self) -> &Capabilities {
+            use std::sync::LazyLock;
+            static CAPS: LazyLock<Capabilities> = LazyLock::new(Capabilities::default);
+            &CAPS
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl SchemaIntrospector for StubIntrospector {
+        async fn table_exists(&self, _t: &str) -> Result<bool, DriverError> {
+            Ok(false)
+        }
+        async fn list_tables(&self, _s: Option<&str>) -> Result<Vec<String>, DriverError> {
+            Ok(vec![])
+        }
+        async fn table_metadata(&self, _t: &str) -> Result<TableMetadata, DriverError> {
+            Err(DriverError::QueryError("stub".into()))
+        }
+        async fn index_metadata(&self, _t: &str) -> Result<Vec<IndexMetadata>, DriverError> {
+            Ok(vec![])
+        }
+        async fn fk_metadata(&self, _t: &str) -> Result<Vec<ForeignKeyMetadata>, DriverError> {
+            Ok(vec![])
+        }
+        async fn referencing_tables(&self, _t: &str) -> Result<Vec<String>, DriverError> {
+            Ok(vec![])
+        }
+        async fn table_size_bytes(&self, _t: &str) -> Result<u64, DriverError> {
+            Ok(0)
+        }
+    }
+
+    fn identity_mapping() -> TransformationMetadata {
+        TransformationMetadata {
+            entities: NameResolver::new(HashMap::new()),
+            field_mappings: FieldTransformations::new(),
+            foreign_fields: HashMap::new(),
+            plugin_columns: Vec::new(),
+            migrated_tables: HashSet::new(),
+            has_projection: false,
+        }
+    }
+
+    fn plan_with_flags(flags: SchemaObjectFlags) -> SchemaPlan {
+        let introspector: Arc<dyn SchemaIntrospector> = Arc::new(StubIntrospector);
+        let type_registry = Arc::new(TypeRegistry::new(
+            crate::type_registry::Dialect::MySql,
+            crate::type_registry::Dialect::Postgres,
+        ));
+        let type_engine = TypeEngine::new(
+            introspector,
+            type_registry,
+            crate::type_registry::Dialect::MySql,
+        );
+        // Target dialect defaults to Postgres.
+        SchemaPlan::new(type_engine, flags, false, identity_mapping())
+    }
+
+    fn empty_plan() -> SchemaPlan {
+        plan_with_flags(SchemaObjectFlags::default())
+    }
+
+    /// Populate a table with a sequence, a UNIQUE + CHECK constraint, and an index
+    /// so each skip flag has something to suppress.
+    fn with_secondary_objects(plan: &mut SchemaPlan) {
+        register(plan, "t", vec![int_col("id", true), int_col("a", false)]);
+        plan.add_sequence(SequenceDef {
+            name: "t_id_seq".into(),
+            start: Some(1),
+            increment: Some(1),
+            min_value: None,
+            max_value: None,
+            owned_by: Some(("t".into(), "id".into())),
+        });
+        plan.add_unique_constraint_defs(
+            "t",
+            vec![UniqueConstraintDef {
+                constraint_name: Some("uq_a".into()),
+                table: "t".into(),
+                columns: vec!["a".into()],
+            }],
+        );
+        plan.add_check_constraint_defs(
+            "t",
+            vec![CheckConstraintDef {
+                constraint_name: Some("ck_a".into()),
+                table: "t".into(),
+                expression: "a > 0".into(),
+            }],
+        );
+        plan.add_index_defs(
+            "t",
+            vec![IndexDef {
+                name: "idx_a".into(),
+                table: "t".into(),
+                columns: vec![index_col("a")],
+                unique: false,
+                index_type: None,
+                condition: None,
+            }],
+        );
+    }
+
+    fn all_sql(plan: &SchemaPlan) -> String {
+        let ops = plan.build_ops();
+        ops.pre
+            .iter()
+            .chain(&ops.post)
+            .map(|o| o.sql.to_uppercase())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn int_col(name: &str, pk: bool) -> ColumnDef {
+        ColumnDef {
+            name: name.into(),
+            data_type: Type::Int {
+                bits: IntSize::I32,
+                unsigned: false,
+                auto_increment: false,
+            },
+            is_nullable: !pk,
+            is_primary_key: pk,
+            default: None,
+            char_max_length: None,
+            generated_expression: None,
+            is_stored: false,
+            is_generated: false,
+        }
+    }
+
+    /// Register a table's columns *and* metadata, mirroring `plan_schema`: the
+    /// dependency graph (which drives table/pk ordering) is built from
+    /// `metadata_graph`, so a table absent there emits no ops.
+    fn register(plan: &mut SchemaPlan, table: &str, cols: Vec<ColumnDef>) {
+        plan.add_column_defs(table, cols);
+        plan.add_metadata(
+            table,
+            TableMetadata {
+                name: table.into(),
+                schema: None,
+                columns: HashMap::new(),
+                primary_keys: Vec::new(),
+                foreign_keys: Vec::new(),
+                referenced_tables: HashMap::new(),
+                referencing_tables: HashMap::new(),
+            },
+        );
+    }
+
+    #[test]
+    fn build_ops_inlines_primary_key_by_default() {
+        let mut plan = empty_plan();
+        register(
+            &mut plan,
+            "users",
+            vec![int_col("id", true), int_col("age", false)],
+        );
+
+        let ops = plan.build_ops();
+
+        assert_eq!(ops.pre.len(), 1, "one CREATE TABLE in pre");
+        let create = &ops.pre[0].sql;
+        assert!(create.contains("CREATE TABLE"), "got: {create}");
+        assert!(
+            create.to_uppercase().contains("PRIMARY KEY"),
+            "PK must be inline by default: {create}"
+        );
+        assert!(ops.post.is_empty(), "nothing deferred: {:?}", ops.post);
+    }
+
+    #[test]
+    fn build_ops_defers_primary_key_when_requested() {
+        let mut plan = empty_plan();
+        register(
+            &mut plan,
+            "users",
+            vec![int_col("id", true), int_col("age", false)],
+        );
+        plan.defer_pk(true);
+
+        let ops = plan.build_ops();
+
+        let create = &ops.pre[0].sql;
+        assert!(
+            !create.to_uppercase().contains("PRIMARY KEY"),
+            "deferred PK must not be inline in CREATE TABLE: {create}"
+        );
+        let pk_ops: Vec<_> = ops
+            .post
+            .iter()
+            .filter(|o| o.sql.to_uppercase().contains("PRIMARY KEY"))
+            .collect();
+        assert_eq!(
+            pk_ops.len(),
+            1,
+            "one ADD PRIMARY KEY in post: {:?}",
+            ops.post
+        );
+        assert!(pk_ops[0].sql.contains("id"), "PK on id: {}", pk_ops[0].sql);
+    }
+
+    #[test]
+    fn skip_pk_wins_over_defer() {
+        // skip_pk is the first bool arg to SchemaPlan::new.
+        let introspector: Arc<dyn SchemaIntrospector> = Arc::new(StubIntrospector);
+        let type_registry = Arc::new(TypeRegistry::new(
+            crate::type_registry::Dialect::MySql,
+            crate::type_registry::Dialect::Postgres,
+        ));
+        let type_engine = TypeEngine::new(
+            introspector,
+            type_registry,
+            crate::type_registry::Dialect::MySql,
+        );
+        let mut plan = SchemaPlan::new(
+            type_engine,
+            SchemaObjectFlags {
+                skip_pk: true,
+                ..Default::default()
+            },
+            false,
+            identity_mapping(),
+        );
+        register(&mut plan, "users", vec![int_col("id", true)]);
+        plan.defer_pk(true);
+
+        let ops = plan.build_ops();
+        assert!(
+            !ops.pre[0].sql.to_uppercase().contains("PRIMARY KEY"),
+            "no inline PK when skipped"
+        );
+        assert!(
+            ops.post
+                .iter()
+                .all(|o| !o.sql.to_uppercase().contains("PRIMARY KEY")),
+            "skip_pk suppresses the deferred ADD PRIMARY KEY too"
+        );
+    }
+
+    #[test]
+    fn deferred_primary_keys_precede_foreign_keys_in_post() {
+        let mut plan = empty_plan();
+        register(&mut plan, "users", vec![int_col("id", true)]);
+        register(
+            &mut plan,
+            "orders",
+            vec![int_col("id", true), int_col("user_id", false)],
+        );
+        plan.add_fk_def(
+            "orders",
+            ForeignKeyDef {
+                constraint_name: None,
+                columns: vec!["user_id".into()],
+                referenced_table: "users".into(),
+                referenced_columns: vec!["id".into()],
+                on_delete: ForeignKeyAction::NoAction,
+                on_update: ForeignKeyAction::NoAction,
+            },
+        );
+        plan.defer_pk(true);
+
+        let ops = plan.build_ops();
+
+        // FKs are post-data (default) and must not leak into pre.
+        assert!(
+            ops.pre
+                .iter()
+                .all(|o| !o.sql.to_uppercase().contains("FOREIGN KEY")),
+            "FKs belong in post: {:?}",
+            ops.pre
+        );
+        let first_fk = ops
+            .post
+            .iter()
+            .position(|o| o.sql.to_uppercase().contains("FOREIGN KEY"))
+            .expect("an FK op in post");
+        let last_pk = ops
+            .post
+            .iter()
+            .rposition(|o| o.sql.to_uppercase().contains("PRIMARY KEY"))
+            .expect("deferred PK ops in post");
+        assert!(
+            last_pk < first_fk,
+            "deferred PKs must be added before FKs that may reference them: {:?}",
+            ops.post
+        );
+    }
+
+    #[test]
+    fn drop_fk_ops_are_dialect_specific() {
+        let mut plan = empty_plan();
+        register(&mut plan, "users", vec![int_col("id", true)]);
+        register(
+            &mut plan,
+            "orders",
+            vec![int_col("id", true), int_col("user_id", false)],
+        );
+        plan.add_fk_def(
+            "orders",
+            ForeignKeyDef {
+                constraint_name: Some("fk_orders_users".into()),
+                columns: vec!["user_id".into()],
+                referenced_table: "users".into(),
+                referenced_columns: vec!["id".into()],
+                on_delete: ForeignKeyAction::NoAction,
+                on_update: ForeignKeyAction::NoAction,
+            },
+        );
+        plan.set_drop_constraints(true);
+
+        // Postgres (default target): `DROP CONSTRAINT IF EXISTS`.
+        let pg_drop = plan
+            .build_ops()
+            .pre
+            .into_iter()
+            .find(|o| o.sql.to_uppercase().contains("DROP CONSTRAINT"))
+            .expect("a pre DROP op on Postgres");
+        assert_eq!(
+            pg_drop.sql,
+            r#"ALTER TABLE "orders" DROP CONSTRAINT IF EXISTS "fk_orders_users";"#
+        );
+
+        // MySQL: `DROP FOREIGN KEY`, no `IF EXISTS` (unsupported there).
+        plan.set_target_dialect(&dialect::MySql);
+        let my_drop = plan
+            .build_ops()
+            .pre
+            .into_iter()
+            .find(|o| o.sql.to_uppercase().contains("DROP FOREIGN KEY"))
+            .expect("a pre DROP op on MySQL");
+        assert_eq!(
+            my_drop.sql,
+            "ALTER TABLE `orders` DROP FOREIGN KEY `fk_orders_users`;"
+        );
+        assert!(
+            !my_drop.sql.to_uppercase().contains("IF EXISTS"),
+            "MySQL has no IF EXISTS for constraint drops: {}",
+            my_drop.sql
+        );
+    }
+
+    fn index_col(name: &str) -> IndexColumnDef {
+        IndexColumnDef {
+            name: name.into(),
+            sort_order: SortOrder::Asc,
+            nulls_order: NullsOrder::Default,
+            prefix_length: None,
+        }
+    }
+
+    #[test]
+    fn computed_column_shadowing_source_is_deduped() {
+        // A computed field can reuse a source column's name (e.g. `amount =
+        // amount / 0`); plan_schema appends it, so column_definitions holds two
+        // "amount" entries. build_ops must emit the column once.
+        let mut plan = empty_plan();
+        register(
+            &mut plan,
+            "t",
+            vec![
+                int_col("id", true),
+                int_col("amount", false),
+                int_col("amount", false),
+            ],
+        );
+
+        let create = &plan.build_ops().pre[0].sql;
+        assert_eq!(
+            create.matches("\"amount\"").count(),
+            1,
+            "amount must appear exactly once: {create}"
+        );
+    }
+
+    #[test]
+    fn index_on_dropped_column_is_skipped_but_valid_one_kept() {
+        let mut plan = empty_plan();
+        register(&mut plan, "t", vec![int_col("id", true)]);
+        plan.add_index_defs(
+            "t",
+            vec![
+                IndexDef {
+                    name: "idx_id".into(),
+                    table: "t".into(),
+                    columns: vec![index_col("id")],
+                    unique: false,
+                    index_type: None,
+                    condition: None,
+                },
+                IndexDef {
+                    name: "idx_ghost".into(),
+                    table: "t".into(),
+                    columns: vec![index_col("ghost")],
+                    unique: false,
+                    index_type: None,
+                    condition: None,
+                },
+            ],
+        );
+
+        let ops = plan.build_ops();
+        let all_sql: String = ops
+            .pre
+            .iter()
+            .chain(&ops.post)
+            .map(|o| o.sql.clone())
+            .collect();
+        assert!(all_sql.contains("idx_id"), "valid index kept: {all_sql}");
+        assert!(
+            !all_sql.contains("idx_ghost"),
+            "index on a dropped column must be skipped: {all_sql}"
+        );
+    }
+
+    #[test]
+    fn unique_index_duplicating_constraint_is_skipped() {
+        // MySQL reports a UNIQUE as both an index and a constraint. Emitting both
+        // collides on a duplicate key name, so the index form is dropped.
+        let mut plan = empty_plan();
+        register(
+            &mut plan,
+            "t",
+            vec![int_col("id", true), int_col("a", false)],
+        );
+        plan.add_index_defs(
+            "t",
+            vec![IndexDef {
+                name: "uq_a".into(),
+                table: "t".into(),
+                columns: vec![index_col("a")],
+                unique: true,
+                index_type: None,
+                condition: None,
+            }],
+        );
+        plan.add_unique_constraint_defs(
+            "t",
+            vec![UniqueConstraintDef {
+                constraint_name: Some("uq_a".into()),
+                table: "t".into(),
+                columns: vec!["a".into()],
+            }],
+        );
+
+        let ops = plan.build_ops();
+        let unique_ops: Vec<&str> = ops
+            .pre
+            .iter()
+            .chain(&ops.post)
+            .filter(|o| o.sql.to_uppercase().contains("UNIQUE"))
+            .map(|o| o.sql.as_str())
+            .collect();
+        assert_eq!(
+            unique_ops.len(),
+            1,
+            "exactly one UNIQUE op (the constraint, not the index): {unique_ops:?}"
+        );
+        assert!(
+            unique_ops[0].to_uppercase().contains("ADD CONSTRAINT"),
+            "the surviving UNIQUE is the constraint form: {}",
+            unique_ops[0]
+        );
+    }
+
+    #[test]
+    fn secondary_objects_emitted_by_default() {
+        let mut plan = empty_plan();
+        with_secondary_objects(&mut plan);
+        let sql = all_sql(&plan);
+        assert!(sql.contains("SEQUENCE"), "sequence emitted: {sql}");
+        assert!(sql.contains("UNIQUE"), "unique emitted: {sql}");
+        assert!(sql.contains("CHECK"), "check emitted: {sql}");
+        assert!(sql.contains("IDX_A"), "index emitted: {sql}");
+    }
+
+    #[test]
+    fn skip_flags_suppress_their_objects() {
+        let mut plan = plan_with_flags(SchemaObjectFlags {
+            skip_idx: true,
+            skip_seq: true,
+            skip_unique: true,
+            skip_check: true,
+            ..Default::default()
+        });
+        with_secondary_objects(&mut plan);
+        let sql = all_sql(&plan);
+        assert!(!sql.contains("SEQUENCE"), "skip_seq: {sql}");
+        assert!(!sql.contains("UNIQUE"), "skip_unique: {sql}");
+        assert!(!sql.contains("CHECK"), "skip_check: {sql}");
+        assert!(!sql.contains("IDX_A"), "skip_idx: {sql}");
+        // The table itself is still created.
+        assert!(sql.contains("CREATE TABLE"), "table still created: {sql}");
+    }
 }

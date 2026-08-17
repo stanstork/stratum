@@ -59,8 +59,8 @@ pipeline "migrate_film" {
 
     settings {
         create_missing_tables = true
-        skip_primary_keys = true
-        skip_foreign_keys = true   // original_language_id FK skipped
+        skip_pk               = true
+        skip_fk               = true   // original_language_id FK skipped
         batch_size            = 200
     }
 }
@@ -90,8 +90,8 @@ pipeline "migrate_film_actor" {
 
     settings {
         create_missing_tables = true
-        skip_primary_keys = true
-        skip_foreign_keys = true   // FKs to film/actor skipped
+        skip_pk               = true
+        skip_fk               = true   // FKs to film/actor skipped
         batch_size            = 500
     }
 }

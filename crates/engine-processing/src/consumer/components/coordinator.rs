@@ -2,7 +2,8 @@ use crate::{
     channel::BatchEnvelope, consumer::components::writer::BatchWriter, error::ConsumerError,
     profile, state_manager::StateManager,
 };
-use engine_core::{metrics::Metrics, state::models::Checkpoint};
+use engine_infra::metrics::Metrics;
+use engine_state::models::Checkpoint;
 use engine_state::models::CheckpointStage;
 use model::records::batch::Batch;
 use tokio::sync::mpsc;
@@ -42,25 +43,6 @@ impl BatchCoordinator {
     /// Await the next batch envelope.
     pub async fn recv(&mut self) -> Option<BatchEnvelope> {
         self.batch_rx.recv().await
-    }
-
-    /// Try to receive and process one batch.
-    pub async fn try_process_one(&mut self) -> Result<bool, ConsumerError> {
-        match self.batch_rx.try_recv() {
-            Ok(envelope) => {
-                self.process_batch(&envelope.batch).await?;
-                Ok(true)
-            }
-            Err(mpsc::error::TryRecvError::Empty) => Ok(false),
-            Err(mpsc::error::TryRecvError::Disconnected) => {
-                debug!("batch channel disconnected");
-                Ok(false)
-            }
-        }
-    }
-
-    pub fn is_channel_closed(&self) -> bool {
-        self.batch_rx.is_closed()
     }
 
     /// Process a single batch: write + checkpoint + metrics.

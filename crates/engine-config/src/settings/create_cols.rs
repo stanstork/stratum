@@ -7,12 +7,12 @@ use connectors::sql::{
     metadata::{column::ColumnMetadata, table::TableMetadata},
     query::{column::ColumnDef, generator::QueryGenerator},
 };
-use engine_core::schema::{
+use engine_processing::context::PipelineContext;
+use engine_schema::{
     schema_ops::{SchemaOp, SchemaOps},
     types::{ComputedTypes, ExpressionWrapper, TypeInferencer},
     utils::create_column_def,
 };
-use engine_processing::context::PipelineContext;
 use model::{core::types::Type, execution::expr::CompiledExpression};
 use std::sync::Arc;
 
@@ -32,7 +32,7 @@ impl<D: SchemaDriver> MigrationSetting for CreateMissingColumnsSetting<D> {
 }
 
 impl<D: SchemaDriver> CreateMissingColumnsSetting<D> {
-    pub async fn new(ctx: SchemaSettingContext<D>) -> Self {
+    pub fn new(ctx: SchemaSettingContext<D>) -> Self {
         Self { context: ctx }
     }
 
@@ -78,7 +78,7 @@ impl<D: SchemaDriver> CreateMissingColumnsSetting<D> {
             };
 
             let query_dialect = self.context.destination.dialect.as_query_dialect();
-            let generator = QueryGenerator::new(query_dialect.as_ref());
+            let generator = QueryGenerator::new(query_dialect);
 
             for (src_col, dst_col) in columns.forward_map() {
                 if dest_meta.get_column(&dst_col).is_none() {
@@ -109,7 +109,7 @@ impl<D: SchemaDriver> CreateMissingColumnsSetting<D> {
         let source = self.context.source.introspector.clone();
         if let Some(computed) = self.context.mapping.field_mappings.get_computed(table) {
             let query_dialect = self.context.destination.dialect.as_query_dialect();
-            let generator = QueryGenerator::new(query_dialect.as_ref());
+            let generator = QueryGenerator::new(query_dialect);
 
             // Resolved computed-column types, so a later computed column can
             // reference an earlier one in the same select.

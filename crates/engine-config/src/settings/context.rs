@@ -4,8 +4,12 @@ use super::{
     error::SettingsError,
 };
 use crate::settings::validated::ValidatedSettings;
-use engine_core::schema::planner::SchemaPlanner;
-use engine_core::schema::{plan::SchemaPlan, type_registry::TypeRegistry, types::TypeEngine};
+use engine_schema::planner::SchemaPlanner;
+use engine_schema::{
+    plan::{SchemaObjectFlags, SchemaPlan},
+    type_registry::TypeRegistry,
+    types::TypeEngine,
+};
 use model::transform::mapping::TransformationMetadata;
 use std::sync::Arc;
 
@@ -44,6 +48,17 @@ impl<D: SchemaDriver> SchemaSettingContext<D> {
         TypeRegistry::new(self.source.dialect, self.destination.dialect)
     }
 
+    fn schema_object_flags(&self) -> SchemaObjectFlags {
+        SchemaObjectFlags {
+            skip_pk: self.settings.skip_pk(),
+            skip_fk: self.settings.skip_fk(),
+            skip_idx: self.settings.skip_idx(),
+            skip_seq: self.settings.skip_seq(),
+            skip_unique: self.settings.skip_unique(),
+            skip_check: self.settings.skip_check(),
+        }
+    }
+
     pub async fn init_schema_planner(&self) -> Result<SchemaPlanner, SettingsError> {
         let mapped_columns_only = self.mapping.has_projection;
         let introspector = self.source.introspector.clone();
@@ -52,9 +67,7 @@ impl<D: SchemaDriver> SchemaSettingContext<D> {
             introspector,
             self.source.dialect,
             self.mapping.clone(),
-            self.settings.skip_primary_keys(),
-            self.settings.skip_foreign_keys(),
-            self.settings.skip_indexes(),
+            self.schema_object_flags(),
             mapped_columns_only,
             self.type_registry(),
         ))
@@ -71,9 +84,7 @@ impl<D: SchemaDriver> SchemaSettingContext<D> {
 
         Ok(SchemaPlan::new(
             type_engine,
-            self.settings.skip_primary_keys(),
-            self.settings.skip_foreign_keys(),
-            self.settings.skip_indexes(),
+            self.schema_object_flags(),
             mapped_columns_only,
             self.mapping.clone(),
         ))
