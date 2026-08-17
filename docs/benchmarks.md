@@ -252,11 +252,11 @@ tables out into independent pipelines run concurrently (`execution { parallel }`
 
 | scenario | wall (s, median) | rows/s | peak RSS | scope |
 |---|---|---|---|---|
-| stratum | 0.4 | 119k | 0.14 GB | tables + data + secondary indexes (no FKs) |
-| stratum `--integrity` | 0.4 | 113k | 0.16 GB | + Merkle receipts |
+| stratum | 0.5 | 96k | 0.14 GB | tables + data + secondary indexes (no FKs) |
+| stratum `--integrity` | 0.5 | 93k | 0.16 GB | + Merkle receipts |
 | pgloader v4 | 3.2 | 14.4k | 0.69 GB | tables + data **+ 37 indexes + 18 FKs** |
 
-Stratum finishes in ~0.4 s; pgloader in ~3.2 s. The two do **different work**
+Stratum finishes in ~0.5 s; pgloader in ~3.2 s. The two do **different work**
 here, though, so the numbers aren't directly comparable: Stratum builds the
 tables, primary keys, and secondary indexes, but a fanned-out `tables = [...]`
 run does not recreate foreign keys (its independent per-table pipelines have no
