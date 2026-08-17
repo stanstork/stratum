@@ -1,4 +1,4 @@
-use super::pipeline::{Transform, for_each_table};
+use super::pipeline::{Transform, for_each_table_mut};
 use crate::transform::error::TransformError;
 use model::{
     records::{Record, RecordSchema},
@@ -79,7 +79,7 @@ impl Transform for FieldMapper {
 
     fn apply_batch(&self, rows: &mut [Record], _failures: &mut Vec<(usize, TransformError)>) {
         // A graph/cascade batch mixes tables; rename each per-table run on its own.
-        for_each_table(rows, |_offset, run| {
+        for_each_table_mut(rows, |_offset, run| {
             let Some(first) = run.first() else {
                 return;
             };
@@ -112,7 +112,7 @@ impl Transform for TableMapper {
 
     fn apply_batch(&self, rows: &mut [Record], _failures: &mut Vec<(usize, TransformError)>) {
         // A graph/cascade batch mixes source tables; re-table each per-table run.
-        for_each_table(rows, |_offset, run| {
+        for_each_table_mut(rows, |_offset, run| {
             let Some(first) = run.first() else {
                 return;
             };

@@ -226,7 +226,7 @@ impl<'a> BinaryOpEvaluator<'a> {
         match self.op {
             BinaryOp::Equal => Some(Value::Boolean(true)),
             BinaryOp::NotEqual => Some(Value::Boolean(false)),
-            _ => None,
+            _ => Some(Value::Null),
         }
     }
 
@@ -234,7 +234,7 @@ impl<'a> BinaryOpEvaluator<'a> {
         match self.op {
             BinaryOp::Equal => Some(Value::Boolean(false)),
             BinaryOp::NotEqual => Some(Value::Boolean(true)),
-            _ => None,
+            _ => Some(Value::Null),
         }
     }
 }
@@ -297,6 +297,42 @@ mod tests {
                 right
             );
         }
+    }
+
+    #[test]
+    fn null_propagates_through_arithmetic_and_ordering() {
+        // Any non-(in)equality op with a NULL operand yields NULL (SQL null
+        // propagation), rather than `None` which would DLQ the row.
+        for op in [
+            BinaryOp::Add,
+            BinaryOp::Subtract,
+            BinaryOp::Multiply,
+            BinaryOp::Divide,
+            BinaryOp::GreaterThan,
+            BinaryOp::LessThan,
+        ] {
+            for (l, r) in [
+                (Value::Null, Value::Int(3)),
+                (Value::Float(2.5), Value::Null),
+                (Value::Null, Value::Null),
+            ] {
+                assert_eq!(
+                    BinaryOpEvaluator::new(&l, &r, &op).evaluate(),
+                    Some(Value::Null),
+                    "{l:?} {op:?} {r:?} should propagate NULL"
+                );
+            }
+        }
+
+        // Equality keeps its concrete-boolean semantics (unchanged).
+        assert_eq!(
+            BinaryOpEvaluator::new(&Value::Null, &Value::Null, &BinaryOp::Equal).evaluate(),
+            Some(Value::Boolean(true))
+        );
+        assert_eq!(
+            BinaryOpEvaluator::new(&Value::Null, &Value::Int(1), &BinaryOp::Equal).evaluate(),
+            Some(Value::Boolean(false))
+        );
     }
 
     #[test]

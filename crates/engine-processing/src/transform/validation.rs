@@ -1,11 +1,14 @@
-use crate::transform::{error::TransformError, pipeline::Validator};
+use crate::transform::{
+    error::TransformError,
+    pipeline::{Validator, for_each_table},
+};
 use engine_core::context::env::EnvContext;
 use engine_wasm::{
     exchange::types::{FilterDecision, PluginInput},
     registry::PluginRegistry,
     runtime::instance::PluginInstance,
 };
-use expression_engine::eval::runtime::Evaluator;
+use expression_engine::{EvalContext, Evaluator, Program, TreeExpr};
 use model::{
     core::value::Value,
     execution::{
@@ -44,6 +47,24 @@ enum RuleExecutor {
         plugin_name: String,
         input_mapping: HashMap<String, String>,
     },
+}
+
+/// An assert expression compiled for one table run.
+enum Compiled {
+    Vm(Program),
+    Tree(TreeExpr),
+}
+
+/// Interpret an assert expression's result.
+fn interpret_assert(result: Option<Value>, rule_label: &str) -> Result<bool, TransformError> {
+    match result {
+        Some(Value::Boolean(b)) => Ok(b),
+        Some(Value::Null) => Ok(false),
+        Some(_) => Err(TransformError::Transformation(format!(
+            "Validation rule '{rule_label}' returned non-boolean value"
+        ))),
+        None => Ok(false),
+    }
 }
 
 /// A pre-compiled validation rule: its metadata plus its executable state.
@@ -132,14 +153,7 @@ impl PipelineValidator {
         row: &Record,
     ) -> Result<bool, TransformError> {
         let env_getter = |key: &str| self.env.get(key);
-
-        match check.evaluate(row, &self.metadata, &env_getter) {
-            Some(Value::Boolean(b)) => Ok(b),
-            Some(_) => Err(TransformError::Transformation(format!(
-                "Validation rule '{rule_label}' returned non-boolean value"
-            ))),
-            None => Ok(false),
-        }
+        interpret_assert(check.evaluate(row, &self.metadata, &env_getter), rule_label)
     }
 
     fn evaluate_wasm(
@@ -221,16 +235,55 @@ impl Validator for PipelineValidator {
         for rule in &self.rules {
             match &rule.executor {
                 RuleExecutor::Assert(check) => {
-                    for (i, row) in rows.iter().enumerate() {
-                        if decided[i].is_some() {
-                            continue;
+                    let env_getter = |key: &str| self.env.get(key);
+
+                    for_each_table(rows, |offset, run| {
+                        let Some(first) = run.first() else {
+                            return;
+                        };
+                        let schema = first.schema();
+                        let table = schema.table();
+
+                        // Idiomatic fallback if VM compilation fails
+                        let compiled = Program::compile(check, schema, &self.metadata, table)
+                            .map(Compiled::Vm)
+                            .unwrap_or_else(|| {
+                                Compiled::Tree(TreeExpr::compile(
+                                    check,
+                                    schema,
+                                    &self.metadata,
+                                    table,
+                                ))
+                            });
+
+                        for (i, row) in run.iter().enumerate() {
+                            let slot = &mut decided[offset + i];
+
+                            // Skip if this row has already failed a prior rule
+                            if slot.is_some() {
+                                continue;
+                            }
+
+                            let value = match &compiled {
+                                Compiled::Vm(p) => {
+                                    let ctx = EvalContext::Runtime {
+                                        row_data: row,
+                                        mapping: &self.metadata,
+                                        env_getter: &env_getter,
+                                    };
+                                    p.eval(row, &ctx)
+                                }
+                                Compiled::Tree(e) => e.eval(row, &self.metadata, &env_getter),
+                            }
+                            .map(|c| c.into_owned());
+
+                            match interpret_assert(value, &rule.label) {
+                                Ok(true) => {} // Still passing
+                                Ok(false) => *slot = Some(Ok(rule.failed(None))),
+                                Err(e) => *slot = Some(Err(e)),
+                            }
                         }
-                        match self.evaluate_assert(check, &rule.label, row) {
-                            Ok(true) => {}
-                            Ok(false) => decided[i] = Some(Ok(rule.failed(None))),
-                            Err(e) => decided[i] = Some(Err(e)),
-                        }
-                    }
+                    });
                 }
                 RuleExecutor::WasmFilter {
                     plugin,
@@ -239,12 +292,11 @@ impl Validator for PipelineValidator {
                 } => {
                     match Self::evaluate_wasm_batch(plugin, plugin_name, input_mapping, rows) {
                         Ok(decisions) => {
-                            for (i, decision) in decisions.into_iter().enumerate() {
-                                if decided[i].is_some() {
-                                    continue;
-                                }
-                                if let FilterDecision::Reject { reason } = decision {
-                                    decided[i] = Some(Ok(rule.failed(Some(reason))));
+                            for (slot, decision) in decided.iter_mut().zip(decisions) {
+                                if slot.is_none() {
+                                    if let FilterDecision::Reject { reason } = decision {
+                                        *slot = Some(Ok(rule.failed(Some(reason))));
+                                    }
                                 }
                             }
                         }

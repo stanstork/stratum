@@ -1,4 +1,4 @@
-use super::pipeline::{Transform, for_each_table};
+use super::pipeline::{Transform, for_each_table_mut};
 use crate::transform::error::TransformError;
 use model::{
     records::{Record, RecordSchema, SchemaColumn},
@@ -113,7 +113,7 @@ impl Transform for FieldPruner {
     fn apply_batch(&self, rows: &mut [Record], _failures: &mut Vec<(usize, TransformError)>) {
         // A graph/cascade batch mixes tables; prune each per-table run only if
         // that table declares a projection.
-        for_each_table(rows, |_offset, run| {
+        for_each_table_mut(rows, |_offset, run| {
             let Some(first) = run.first() else {
                 return;
             };

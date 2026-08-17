@@ -37,7 +37,9 @@ impl Evaluator for CompiledExpression {
         env_getter: &dyn Fn(&str) -> Option<String>,
     ) -> Option<Value> {
         match self {
-            CompiledExpression::Identifier(identifier) => row.value(identifier).cloned(),
+            CompiledExpression::Identifier(identifier) => {
+                row.eval_value(identifier).map(|v| v.into_owned())
+            }
 
             CompiledExpression::Literal(value) => Some(value.clone()),
 
@@ -67,23 +69,23 @@ impl Evaluator for CompiledExpression {
                     // Given the CrossEntityReference, find the matching column in the current row
                     .and_then(|lk| {
                         if let Some(target) = &lk.target {
-                            row.value(target).cloned()
+                            row.eval_value(target).map(|v| v.into_owned())
                         } else {
                             // Lookup target is not specified. Used in function arguments.
                             None
                         }
                     });
 
-                // For source table references, the column may be renamed in the row data.
-                // We need to resolve the source column name to the target column name.
-                let resolved_key = mapping.field_mappings.resolve_cow(row.table(), key);
-
-                let raw = row.value(&resolved_key).cloned();
-
-                // If a mapped value is found, return it. Otherwise, return the raw value.
-                // Note: When the mapping contains lookups from joined tables, it generates a select with the mapped name.
-                // However, if there is no join, no additional fields are included in the select.
-                let result = mapped.or(raw);
+                // If a mapped value is found, return it. Otherwise fall back
+                // to the raw column - computed lazily so we don't clone it
+                // on every row when `mapped` already hit.
+                //
+                // For source table references the column may be renamed in the row
+                // data, so resolve the source name to the target name first.
+                let result = mapped.or_else(|| {
+                    let resolved_key = mapping.field_mappings.resolve_cow(row.table(), key);
+                    row.eval_value(&resolved_key).map(|v| v.into_owned())
+                });
                 if result.is_none() {
                     warn!(entity = %entity, key = %key, "cross-entity reference failed");
                 }

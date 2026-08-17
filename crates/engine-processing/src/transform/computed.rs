@@ -1,9 +1,9 @@
-use super::pipeline::{Transform, for_each_table};
+use super::pipeline::{Transform, for_each_table_mut};
 use crate::transform::error::TransformError;
 use engine_core::context::env::EnvContext;
-use expression_engine::{EvalContext, Evaluator, Program, TreeExpr};
+use expression_engine::{EvalContext, Evaluator, Program, TreeExpr, infer_expression_type};
 use model::{
-    core::value::Value,
+    core::{types::Type, value::Value},
     records::{Record, RecordSchema, SchemaColumn},
     transform::{computed_field::ComputedField, mapping::TransformationMetadata},
 };
@@ -80,7 +80,7 @@ impl Transform for ComputedTransform {
     }
 
     fn apply_batch(&self, rows: &mut [Record], failures: &mut Vec<(usize, TransformError)>) {
-        for_each_table(rows, |offset, run| {
+        for_each_table_mut(rows, |offset, run| {
             let Some(first) = run.first() else {
                 return;
             };
@@ -185,13 +185,23 @@ fn build_plan(
     let mut slots = Vec::with_capacity(computed_fields.len());
     let mut output = Arc::clone(input);
 
+    // Resolve a column name to its type from the input schema, for static
+    // inference of appended columns.
+    let column_lookup = |name: &str| -> Option<Type> {
+        input
+            .index_of(name)
+            .and_then(|i| input.column(i))
+            .map(|c| c.data_type.clone())
+    };
+
     for (field, val) in computed_fields.iter().zip(values) {
         match input.index_of(&field.name) {
             Some(i) => slots.push(Slot::Overwrite(i)),
             None => {
                 slots.push(Slot::Append);
-                output =
-                    output.with_appended(SchemaColumn::new(field.name.as_str(), val.data_type()));
+                let data_type = infer_expression_type(&field.expression, &column_lookup)
+                    .unwrap_or_else(|| val.data_type());
+                output = output.with_appended(SchemaColumn::new(field.name.as_str(), data_type));
             }
         }
     }

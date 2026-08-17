@@ -22,7 +22,8 @@ use model::{
 };
 use query_builder::offsets::{OffsetStrategy, OffsetStrategyFactory};
 use std::{
-    collections::{HashMap, HashSet},
+    cmp::Reverse,
+    collections::{BinaryHeap, HashMap, HashSet},
     sync::{Arc, Mutex},
     time::Instant,
 };
@@ -361,15 +362,11 @@ impl DbSourceReader {
     /// store's address_id values can be included in the IN-clause for address.
     fn topo_sort_ready<'a>(&'a self, ready: &[&'a str]) -> Vec<&'a str> {
         let ready_set: HashSet<&str> = ready.iter().copied().collect();
-
-        // In-degree = number of ready tables that THIS table is referenced by (FK parents have
-        // higher in-degree because FK children point to them).
         let mut in_degree: HashMap<&str, usize> = ready.iter().map(|&t| (t, 0usize)).collect();
 
         for &table in ready {
             if let Some(meta) = self.related_meta.get(table) {
                 for fk in &meta.foreign_keys {
-                    // table -> fk.referenced_table: referenced_table is a FK parent inside ready
                     if ready_set.contains(fk.referenced_table.as_str()) {
                         *in_degree.entry(fk.referenced_table.as_str()).or_default() += 1;
                     }
@@ -377,40 +374,40 @@ impl DbSourceReader {
             }
         }
 
-        // Kahn's: start with in-degree 0 (FK children - nobody inside the ready set points to
-        // them as a parent). This gives FK-child-first order, which is what we want.
-        let mut queue: Vec<&str> = in_degree
+        let mut queue: BinaryHeap<Reverse<&str>> = in_degree
             .iter()
             .filter(|&(_, &d)| d == 0)
-            .map(|(&t, _)| t)
+            .map(|(&t, _)| Reverse(t))
             .collect();
-        queue.sort(); // deterministic within a level
 
         let mut result: Vec<&str> = Vec::with_capacity(ready.len());
-        while !queue.is_empty() {
-            queue.sort(); // keep deterministic
-            let t = queue.remove(0);
+
+        while let Some(Reverse(t)) = queue.pop() {
             result.push(t);
+
             if let Some(meta) = self.related_meta.get(t) {
                 for fk in &meta.foreign_keys {
                     let ref_table = fk.referenced_table.as_str();
+
                     if ready_set.contains(ref_table) {
                         let deg = in_degree.entry(ref_table).or_default();
                         *deg = deg.saturating_sub(1);
+
                         if *deg == 0 {
-                            queue.push(ref_table);
+                            queue.push(Reverse(ref_table));
                         }
                     }
                 }
             }
         }
 
-        // Append any tables not reached by Kahn's (cycles, shouldn't happen)
+        let mut seen: HashSet<&str> = result.iter().copied().collect();
         for &t in ready {
-            if !result.contains(&t) {
+            if seen.insert(t) {
                 result.push(t);
             }
         }
+
         result
     }
 
