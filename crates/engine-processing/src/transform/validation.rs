@@ -293,10 +293,10 @@ impl Validator for PipelineValidator {
                     match Self::evaluate_wasm_batch(plugin, plugin_name, input_mapping, rows) {
                         Ok(decisions) => {
                             for (slot, decision) in decided.iter_mut().zip(decisions) {
-                                if slot.is_none() {
-                                    if let FilterDecision::Reject { reason } = decision {
-                                        *slot = Some(Ok(rule.failed(Some(reason))));
-                                    }
+                                if slot.is_none()
+                                    && let FilterDecision::Reject { reason } = decision
+                                {
+                                    *slot = Some(Ok(rule.failed(Some(reason))));
                                 }
                             }
                         }
