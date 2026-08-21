@@ -199,7 +199,7 @@ The row-hash log's own footprint is flat as well - see [Row hashes](#row-hashes)
   ║                       └─────────┬──────────┘                      ║
   ║                                 ▼                                 ║
   ║                        VerificationResult                         ║
-  ║                Match | Mismatch | NoPriorRun                      ║
+  ║          Match | Mismatch | NoPriorRun | LogUnavailable           ║
   ╚═══════════════════════════════════════════════════════════════════╝
 ```
 
@@ -232,8 +232,8 @@ time. Introspecting the destination again would let a schema change between appl
 and verify silently alter the encoding, which would look like a data mismatch.
 
 The per-row `(key, hash)` set the root commits to is **not** in the receipt - it
-lives beside it under the `rowhash:` prefix. The receipt stays a fixed ~200 bytes
-whatever the table size.
+lives beside it in the row-hash log (`rowhash/apply/…`). The receipt stays a fixed
+~200 bytes whatever the table size.
 
 ## Reading a Result
 
@@ -247,6 +247,12 @@ whatever the table size.
   and actual row counts.
 - **NoPriorRun** - no receipt for this pipeline and table; the migration ran
   without `--integrity`. Not an error.
+- **LogUnavailable** - a receipt exists, but the row-hash log it commits to is
+  missing or truncated (cleared by hand, or `verify` run against a different
+  state directory than the one `apply` wrote to). The destination cannot be
+  diffed against the committed set, so the result is **inconclusive** - `verify`
+  exits non-zero rather than reporting every intact row as `extra`. Re-run
+  `apply --integrity` to rebuild the log.
 
 A mismatch also lists individual diverging rows by key (`actor_id=42`), each
 tagged missing / extra / changed. The **counts are always complete**; only that
@@ -474,14 +480,14 @@ never goes through the migration machinery.
 
 ### Staging the destination
 
-Verify reads the whole destination table with a keyset scan over its primary key (falling back to `OFFSET` when there is none), hashes and keys each row with the receipt's `column_order` / `key_columns`, and writes the pairs under the `verifyhash:` scope. Nothing about the migration's shape is replayed - not batch sizes, not lane splits, not read order.
+Verify reads the whole destination table with a keyset scan over its primary key (falling back to `OFFSET` when there is none), hashes and keys each row with the receipt's `column_order` / `key_columns`, and writes the pairs under the verify scope (`rowhash/verify/…`). Nothing about the migration's shape is replayed - not batch sizes, not lane splits, not read order.
 
 ### The diff
 
 Both sides now live in the same store, sorted by the same canonical key encoding, so one merge-join pass produces everything:
 
 ```
-walk expected (rowhash:) and actual (verifyhash:) in lockstep by key:
+walk expected (apply scope) and actual (verify scope) in lockstep by key:
     key only in expected            -> missing
     key only in actual              -> extra,   fold into actual_root
     key in both, hashes differ      -> changed, fold into actual_root
@@ -565,6 +571,7 @@ finished set rather than as rows stream past.
 | Rows deleted after migration | Reported as `missing`, named by key. |
 | Row modified after migration | Reported as `changed`, named by key, with both hashes. |
 | `NoPriorRun` | Pipeline ran without `--integrity`. Not an error. |
+| Receipt present, row-hash log missing/truncated | `LogUnavailable` - inconclusive, `verify` exits non-zero rather than reporting a false mismatch. Re-run `apply --integrity`. |
 | Destination table with no primary key | Rows key by their own hash; a warning is logged. Duplicate identical rows are indistinguishable. |
 | Multiple pipelines (DAG) | Each pipeline verifies independently. Results are collected in execution order. |
 | Many null columns | Null-heavy rows serialize compactly (`0x00` per null column). |

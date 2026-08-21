@@ -292,6 +292,7 @@ impl PipelineOrchestrator {
                 self.ctx.exec_ctx.hash_log(),
                 &receipts,
                 &self.pipeline.name,
+                &self.pipeline.destination.table,
                 &self.ctx.run_id,
                 metrics.snapshot().rows_skipped,
             )

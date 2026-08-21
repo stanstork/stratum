@@ -2,13 +2,14 @@ use super::{open_state_store, state_dir};
 use crate::{config, error::CliError};
 use engine_processing::EnvContext;
 use engine_state::{
-    StateStore,
+    MerkleStore, RowHashLog, StateStore,
     models::{PipelineStatus, RunStatus},
 };
 use std::{
     io::{self, Write},
     sync::Arc,
 };
+use tracing::warn;
 
 /// Clears all state for a migration - checkpoints, WAL, run state, PID file.
 pub async fn execute(
@@ -47,8 +48,19 @@ pub async fn execute(
         .await
         .map_err(|e| CliError::Unknown(format!("Failed to delete run state: {}", e)))?;
 
-    // Remove pause sentinel file if present
+    // Clear integrity artifacts too.
     if let Ok(dir) = state_dir() {
+        let hash_log = RowHashLog::in_state_dir(&dir);
+        for pipeline in &plan.pipelines {
+            if let Err(e) = hash_log.clear_pipeline(&pipeline.name) {
+                warn!(pipeline = %pipeline.name, error = %e, "failed to clear row-hash log");
+            }
+            if let Err(e) = state.delete_receipts(&pipeline.name).await {
+                warn!(pipeline = %pipeline.name, error = %e, "failed to delete integrity receipts");
+            }
+        }
+
+        // Remove pause sentinel file if present
         let _ = std::fs::remove_file(dir.join(format!("{run_id}.pause")));
     }
 

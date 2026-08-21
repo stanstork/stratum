@@ -20,6 +20,16 @@ pub enum VerificationResult {
     },
     /// No receipt found in Sled - pipeline was run without --integrity.
     NoPriorRun { pipeline: String },
+    /// A receipt exists, but the row-hash log it must be diffed against is
+    /// missing or truncated.
+    LogUnavailable {
+        pipeline: String,
+        table: String,
+        /// Rows the receipt says were committed.
+        expected_rows: u64,
+        /// Rows actually found in the row-hash log.
+        found_rows: u64,
+    },
 }
 
 /// Complete counts for a mismatch, independent of the truncated detail list.

@@ -46,12 +46,20 @@ pub async fn execute(
         );
     }
 
-    let has_mismatch = results
+    if results
         .iter()
-        .any(|r| matches!(r, VerificationResult::Mismatch { .. }));
-
-    if has_mismatch {
+        .any(|r| matches!(r, VerificationResult::Mismatch { .. }))
+    {
         return Err(CliError::Verification(VerifyError::Mismatch));
+    }
+
+    // A receipt with no diffable log can't confirm the destination; surface it
+    // as a non-zero exit rather than a silent pass.
+    if results
+        .iter()
+        .any(|r| matches!(r, VerificationResult::LogUnavailable { .. }))
+    {
+        return Err(CliError::Verification(VerifyError::Inconclusive));
     }
 
     Ok(())
@@ -130,6 +138,18 @@ pub fn format_result(result: &VerificationResult) -> String {
             pipeline: pipeline_name,
         } => {
             format!("? {pipeline_name} - no integrity receipt (run `apply --integrity` first)")
+        }
+        VerificationResult::LogUnavailable {
+            pipeline,
+            table,
+            expected_rows,
+            found_rows,
+        } => {
+            format!(
+                "? {pipeline}/{table} - INCONCLUSIVE: row-hash log is missing or truncated \
+                 ({found_rows} of {expected_rows} committed rows on disk); re-run \
+                 `apply --integrity` before verifying"
+            )
         }
     }
 }

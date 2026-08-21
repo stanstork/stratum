@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 mod merge;
@@ -41,7 +41,7 @@ const SORTED_TMP: &str = "sorted.tmp";
 /// Append-only row-hash storage rooted at one directory.
 pub struct RowHashLog {
     root: PathBuf,
-    seq: AtomicU32,
+    seq: AtomicU64,
     writers: Mutex<HashMap<PathBuf, Arc<Mutex<BufWriter<File>>>>>,
 }
 
@@ -54,7 +54,7 @@ impl RowHashLog {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self {
             root: root.into(),
-            seq: AtomicU32::new(0),
+            seq: AtomicU64::new(0),
             writers: Mutex::new(HashMap::new()),
         }
     }
@@ -71,11 +71,11 @@ impl RowHashLog {
             return Ok(());
         }
 
-        let base = self.seq.fetch_add(entries.len() as u32, Ordering::Relaxed);
+        let base = self.seq.fetch_add(entries.len() as u64, Ordering::Relaxed);
         let mut buf = Vec::with_capacity(entries.len() * 64);
 
         for (i, entry) in entries.iter().enumerate() {
-            encode(entry, base.wrapping_add(i as u32) as u64, &mut buf)?;
+            encode(entry, base.wrapping_add(i as u64), &mut buf)?;
         }
 
         let writer = self.appender(scope, pipeline, table)?;
@@ -163,6 +163,24 @@ impl RowHashLog {
         }
     }
 
+    /// Delete every stored set for `pipeline`, across both scopes and all its tables.
+    pub fn clear_pipeline(&self, pipeline: &str) -> Result<(), StateStoreError> {
+        let sanitized = sanitize(pipeline);
+
+        for scope in [RowHashScope::Apply, RowHashScope::Verify] {
+            let dir = self.root.join(scope.dir_name()).join(&sanitized);
+            self.close_appenders_under(&dir)?;
+
+            match fs::remove_dir_all(&dir) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(storage(e)),
+            }
+        }
+
+        Ok(())
+    }
+
     fn dir(&self, scope: RowHashScope, pipeline: &str, table: &str) -> PathBuf {
         self.root
             .join(scope.dir_name())
@@ -204,6 +222,30 @@ impl RowHashLog {
         if let Some(writer) = writer {
             let mut guard = writer.lock().map_err(|_| poisoned())?;
             guard.flush().map_err(storage)?;
+        }
+
+        Ok(())
+    }
+
+    /// Flush and drop every appender whose directory sits under `prefix`, so a
+    /// whole pipeline subtree can be removed safely.
+    fn close_appenders_under(&self, prefix: &Path) -> Result<(), StateStoreError> {
+        let mut writers = self.writers.lock().map_err(|_| poisoned())?;
+
+        let matching: Vec<PathBuf> = writers
+            .keys()
+            .filter(|dir| dir.starts_with(prefix))
+            .cloned()
+            .collect();
+
+        for dir in matching {
+            if let Some(writer) = writers.remove(&dir) {
+                writer
+                    .lock()
+                    .map_err(|_| poisoned())?
+                    .flush()
+                    .map_err(storage)?;
+            }
         }
 
         Ok(())
@@ -349,6 +391,47 @@ mod tests {
             sealed(&log, RowHashScope::Apply).len(),
             1,
             "apply scope survives"
+        );
+    }
+
+    /// `reset` clears a pipeline's whole subtree - every table, both scopes -
+    /// while leaving other pipelines' sets intact.
+    #[test]
+    fn clear_pipeline_removes_every_scope_and_table() {
+        let dir = tempdir().unwrap();
+        let log = log(dir.path());
+
+        log.append(RowHashScope::Apply, "p", "t1", &[entry(b"a", 1)])
+            .unwrap();
+        log.append(RowHashScope::Apply, "p", "t2", &[entry(b"b", 2)])
+            .unwrap();
+        log.append(RowHashScope::Verify, "p", "t1", &[entry(b"a", 1)])
+            .unwrap();
+        log.append(RowHashScope::Apply, "other", "t1", &[entry(b"c", 3)])
+            .unwrap();
+
+        log.clear_pipeline("p").unwrap();
+
+        for (scope, table) in [
+            (RowHashScope::Apply, "t1"),
+            (RowHashScope::Apply, "t2"),
+            (RowHashScope::Verify, "t1"),
+        ] {
+            log.seal(scope, "p", table).unwrap();
+            assert_eq!(
+                log.stream(scope, "p", table).unwrap().count(),
+                0,
+                "{scope:?}/{table} should be gone"
+            );
+        }
+
+        log.seal(RowHashScope::Apply, "other", "t1").unwrap();
+        assert_eq!(
+            log.stream(RowHashScope::Apply, "other", "t1")
+                .unwrap()
+                .count(),
+            1,
+            "an unrelated pipeline must survive"
         );
     }
 

@@ -20,6 +20,10 @@ pub trait MerkleStore: Send + Sync {
 
     /// List all receipts across all pipelines and tables.
     async fn list_receipts(&self) -> Result<Vec<VerificationReceipt>, StateStoreError>;
+
+    /// Remove every receipt belonging to `pipeline_name`,
+    /// returning the count of deleted receipts.
+    async fn delete_receipts(&self, pipeline_name: &str) -> Result<usize, StateStoreError>;
 }
 
 #[async_trait]
@@ -53,5 +57,24 @@ impl MerkleStore for SledStateStore {
                 serde_json::from_slice(&value).map_err(to_ser)
             })
             .collect()
+    }
+
+    async fn delete_receipts(&self, pipeline_name: &str) -> Result<usize, StateStoreError> {
+        let prefix = format!("receipt:{pipeline_name}:");
+        let mut batch = sled::Batch::default();
+        let mut removed = 0usize;
+
+        for item in self.db.scan_prefix(prefix.as_bytes()) {
+            let (key, _) = item.map_err(to_storage)?;
+            batch.remove(key);
+            removed += 1;
+        }
+
+        if removed > 0 {
+            self.db.apply_batch(batch).map_err(to_storage)?;
+            self.db.flush().map_err(to_storage)?;
+        }
+
+        Ok(removed)
     }
 }

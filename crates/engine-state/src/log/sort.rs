@@ -22,7 +22,7 @@ const ITEM_OVERHEAD: usize = std::mem::size_of::<Item>();
 /// Combine an input's rank with a record's stored order.
 #[inline]
 fn effective_order(rank: u32, stored: u64) -> u64 {
-    ((rank as u64) << 32) | (stored & 0xffff_ffff)
+    ((rank as u64) << 63) | (stored & 0x7fff_ffff_ffff_ffff)
 }
 
 /// One buffered record.
@@ -30,7 +30,7 @@ fn effective_order(rank: u32, stored: u64) -> u64 {
 struct Item {
     key_off: u32,
     key_len: u16,
-    /// `(rank << 32) | seq` - later writes sort last within a key.
+    /// `(rank << 63) | seq` - later writes sort last within a key.
     order: u64,
     hash: [u8; HASH_LEN],
 }

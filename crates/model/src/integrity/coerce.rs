@@ -25,12 +25,3 @@ pub fn coerce_array_value(value: &Value) -> Cow<'_, Value> {
 
     Cow::Owned(Value::Array(elements))
 }
-
-/// Coerce a single value to match what the destination stores, before hashing.
-pub fn coerce_value_for_hash<'a>(value: &'a Value, col_type: &str) -> Cow<'a, Value> {
-    if is_array_like(col_type) {
-        coerce_array_value(value)
-    } else {
-        Cow::Borrowed(value)
-    }
-}

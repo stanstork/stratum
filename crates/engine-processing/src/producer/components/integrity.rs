@@ -94,7 +94,13 @@ impl IntegrityState {
         let mut untracked = 0usize;
 
         for row in rows {
-            match self.table_indices.get(row.table()).copied() {
+            let idx = self
+                .table_indices
+                .get(row.table())
+                .copied()
+                .or_else(|| self.match_table_ci(row.table()));
+
+            match idx {
                 Some(idx) => groups[idx].push(row),
                 None if single_table => groups[0].push(row),
                 None => untracked += 1,
@@ -131,6 +137,13 @@ impl IntegrityState {
 
         out
     }
+
+    /// Case-insensitive fallback lookup for a destination table.
+    fn match_table_ci(&self, table: &str) -> Option<usize> {
+        self.table_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(table))
+    }
 }
 
 /// Drop any row hashes left over from a previous run of this pipeline.
@@ -151,6 +164,7 @@ pub async fn finalize_receipts(
     hash_log: &RowHashLog,
     receipts: &Arc<dyn MerkleStore>,
     pipeline_name: &str,
+    primary_table: &str,
     run_id: &str,
     skipped_rows: u64,
 ) -> Result<(), ProducerError> {
@@ -174,6 +188,13 @@ pub async fn finalize_receipts(
         if total_rows == 0 {
             continue;
         }
+
+        // `skipped_rows` is a pipeline-wide DLQ count, it belongs to the primary destination table.
+        let skipped_rows = if table.eq_ignore_ascii_case(primary_table) {
+            skipped_rows
+        } else {
+            0
+        };
 
         let receipt = VerificationReceipt {
             run_id: run_id.to_string(),
@@ -284,6 +305,67 @@ fn hex8(root: &[u8; 32]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use model::core::value::{FieldValue, Value};
+    use model::records::OpType;
+
+    fn row(table: &str, id: i64) -> Record {
+        Record::from_fields(
+            table,
+            vec![FieldValue {
+                name: "id".to_string(),
+                value: Some(Value::Int(id)),
+                data_type: Value::Int(id).data_type(),
+            }],
+            OpType::Insert,
+        )
+    }
+
+    /// A cascade row whose table name differs only in case from the tracked
+    /// destination must still land in that table's group - not get dropped as
+    /// untracked, which would surface as a false `extra` at verify time.
+    #[test]
+    fn rows_route_to_a_case_insensitively_matching_table() {
+        let mut tables = HashMap::new();
+        tables.insert("Actor".to_string(), vec!["id".to_string()]);
+        tables.insert("Film".to_string(), vec!["id".to_string()]);
+        let config = IntegrityConfig::new(HashAlgorithm::Sha256, tables);
+
+        // hash_grouped performs no IO, so the log root is never touched.
+        let hash_log = Arc::new(RowHashLog::new("unused"));
+        let mut state = IntegrityState::new(config, hash_log, "p");
+
+        let grouped = state.hash_grouped(&[row("actor", 1)]);
+
+        assert_eq!(grouped.len(), 1, "the row must be grouped, not dropped");
+        let (idx, entries) = &grouped[0];
+        assert_eq!(entries.len(), 1);
+        assert!(
+            state.table_names[*idx].eq_ignore_ascii_case("actor"),
+            "routed to the case-insensitively matching table"
+        );
+        assert!(
+            !state.warned_untracked,
+            "a case-only difference is not an untracked table"
+        );
+    }
+
+    /// A row for a table that is genuinely not tracked is still dropped and
+    /// flagged, in a multi-table (cascade) config.
+    #[test]
+    fn genuinely_unknown_table_is_reported_untracked() {
+        let mut tables = HashMap::new();
+        tables.insert("actor".to_string(), vec!["id".to_string()]);
+        tables.insert("film".to_string(), vec!["id".to_string()]);
+        let config = IntegrityConfig::new(HashAlgorithm::Sha256, tables);
+
+        let hash_log = Arc::new(RowHashLog::new("unused"));
+        let mut state = IntegrityState::new(config, hash_log, "p");
+
+        let grouped = state.hash_grouped(&[row("category", 1)]);
+
+        assert!(grouped.is_empty(), "no group for an unknown table");
+        assert!(state.warned_untracked);
+    }
 
     /// Folding in parallel must produce exactly the tree a single pass builds.
     #[test]

@@ -51,6 +51,14 @@ const READ_BATCH_ROWS: usize = 1000;
 /// Rows between clock reads in the per-row diff loop.
 const DIFF_CLOCK_SAMPLE: u64 = 1 << 16;
 
+/// Outcome of merge-joining the receipt's committed set against the destination.
+struct DiffOutcome {
+    actual_root: [u8; 32],
+    summary: DivergenceSummary,
+    divergences: Vec<Divergence>,
+    expected_seen: u64,
+}
+
 pub async fn verify(
     plan: ExecutionPlan,
     env: Arc<EnvContext>,
@@ -153,8 +161,22 @@ async fn verify_table(
         warn!(table, error = %e, "failed to clear verify scratch row hashes");
     }
 
-    let (actual_root, summary, divergences) = outcome?;
+    let DiffOutcome {
+        actual_root,
+        summary,
+        divergences,
+        expected_seen,
+    } = outcome?;
     let duration_ms = start.elapsed().as_millis() as u64;
+
+    if expected_seen != receipt.total_rows {
+        return Ok(VerificationResult::LogUnavailable {
+            pipeline: pipeline_name.to_string(),
+            table: table.to_string(),
+            expected_rows: receipt.total_rows,
+            found_rows: expected_seen,
+        });
+    }
 
     let is_match = summary.is_clean() && actual_root == receipt.table_root;
 
@@ -181,7 +203,7 @@ async fn stage_and_diff(
     col_types: &HashMap<String, String>,
     pipeline_name: &str,
     hash_log: &RowHashLog,
-) -> Result<([u8; 32], DivergenceSummary, Vec<Divergence>), VerifyError> {
+) -> Result<DiffOutcome, VerifyError> {
     let dest_rows = stage_destination(reader, receipt, col_types, pipeline_name, hash_log).await?;
 
     // Both sides have to be walked in the same order; sealing is what puts the
@@ -261,8 +283,9 @@ fn diff_keyed_sets(
     actual: RowHashIter,
     receipt: &VerificationReceipt,
     dest_rows_read: u64,
-) -> Result<([u8; 32], DivergenceSummary, Vec<Divergence>), VerifyError> {
+) -> Result<DiffOutcome, VerifyError> {
     let mut compared = 0u64;
+    let mut expected_seen = 0u64;
     let mut ticker = Ticker::new(PROGRESS_INTERVAL).sampling(DIFF_CLOCK_SAMPLE);
 
     let mut acc = MerkleAccumulator::new(receipt.algorithm);
@@ -301,6 +324,7 @@ fn diff_keyed_sets(
         match (expected.current(), actual.current()) {
             (None, None) => break,
             (Some(exp), None) => {
+                expected_seen += 1;
                 summary.missing += 1;
                 record(
                     DivergenceKind::Missing {
@@ -325,6 +349,7 @@ fn diff_keyed_sets(
             }
             (Some(exp), Some(act)) => match exp.key.cmp(&act.key) {
                 std::cmp::Ordering::Less => {
+                    expected_seen += 1;
                     summary.missing += 1;
                     record(
                         DivergenceKind::Missing {
@@ -348,6 +373,7 @@ fn diff_keyed_sets(
                     actual.advance()?;
                 }
                 std::cmp::Ordering::Equal => {
+                    expected_seen += 1;
                     summary.actual_rows += 1;
                     acc.push_row(&act.key, &act.hash);
 
@@ -377,7 +403,12 @@ fn diff_keyed_sets(
         );
     }
 
-    Ok((acc.finish(), summary, divergences))
+    Ok(DiffOutcome {
+        actual_root: acc.finish(),
+        summary,
+        divergences,
+        expected_seen,
+    })
 }
 
 fn percent_of(done: u64, total: u64) -> String {
@@ -535,7 +566,11 @@ mod tests {
     ) -> ([u8; 32], DivergenceSummary, Vec<Divergence>) {
         let r = receipt(expected);
         let rows = actual.len() as u64;
-        diff_keyed_sets(iter(expected), iter(actual), &r, rows).expect("diff")
+        let out = diff_keyed_sets(iter(expected), iter(actual), &r, rows).expect("diff");
+        // Every committed row is streamed off the (in-memory) apply set here, so
+        // the log-consistency invariant verify relies on must hold.
+        assert_eq!(out.expected_seen, expected.len() as u64);
+        (out.actual_root, out.summary, out.divergences)
     }
 
     #[test]
@@ -629,6 +664,18 @@ mod tests {
         let (_, summary, _) = diff(&[(b"a", 1), (b"b", 2)], &[]);
         assert_eq!(summary.missing, 2);
         assert_eq!(summary.actual_rows, 0);
+    }
+
+    /// An empty committed set with a populated destination flags every row as
+    /// `extra`, and `expected_seen` is 0. That zero (against a receipt that
+    /// expected rows) is what `verify_table` turns into `LogUnavailable` instead
+    /// of a false mismatch when the apply row-hash log is missing.
+    #[test]
+    fn no_committed_rows_yields_all_extra_and_zero_expected_seen() {
+        // `diff` asserts expected_seen == 0 for an empty committed set.
+        let (_, summary, _) = diff(&[], &[(b"a", 1), (b"b", 2)]);
+        assert_eq!(summary.extra, 2);
+        assert_eq!(summary.actual_rows, 2);
     }
 
     #[test]

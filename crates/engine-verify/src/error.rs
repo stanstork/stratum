@@ -19,4 +19,9 @@ pub enum VerifyError {
 
     #[error("Verification failed: one or more tables have mismatched hashes")]
     Mismatch,
+
+    #[error(
+        "Verification inconclusive: one or more tables have a receipt but no matching row-hash log"
+    )]
+    Inconclusive,
 }
