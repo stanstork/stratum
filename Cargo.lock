@@ -1414,6 +1414,7 @@ dependencies = [
 name = "engine-verify"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "connectors",
  "dirs",
  "engine-core",
@@ -1422,6 +1423,7 @@ dependencies = [
  "model",
  "query-builder",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
 ]
 

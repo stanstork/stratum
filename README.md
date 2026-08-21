@@ -6,7 +6,7 @@
 
 Stratum is a declarative data pipeline engine written in Rust. It migrates data and schema between databases safely, with crash recovery, parallel execution, rich transformation capabilities, and cryptographic post-migration verification.
 
-On a 10M-row MySQL->PostgreSQL copy it sustains ~570K rows/s on a single lane and up to ~1.2M rows/s with parallel lanes ([benchmarks](docs/benchmarks.md)).
+On a 10M-row MySQL->PostgreSQL copy it sustains ~580K rows/s on a single lane and up to ~1.3M rows/s with parallel lanes ([benchmarks](docs/benchmarks.md)).
 
 ```smql
 connection "source" {
@@ -44,8 +44,9 @@ platforms. Stratum sits in between - one declarative tool that:
   migration: source, destination, filters, transforms, schema, and dependencies.
 - **Is safe to re-run.** Crash-safe checkpoints mean an interrupted migration
   resumes exactly where it stopped - no half-applied state, no re-processed rows.
-- **Proves it worked.** Cryptographic (Merkle-tree) verification re-reads the
-  destination and proves it matches what was written, down to the offending row.
+- **Checks it worked.** Cryptographic (Merkle-tree) verification re-reads the
+  destination and detects any difference from what was written, down to the
+  offending row.
 - **Migrates schema, not just rows.** Tables, indexes, foreign keys, ENUMs, and
   sequences - with FK-aware ordering and dependency-graph discovery.
 - **Extends without forking.** Transforms, filters, sources, and sinks can be
@@ -70,7 +71,7 @@ ordering, resumability, or verification.
 - **Pagination strategies** - primary key, numeric, timestamp cursor
 - **Lifecycle hooks** - `before` / `after` SQL blocks per pipeline
 - **WASM plugins** - sandboxed transform / filter / source / sink plugins in native Rust or JavaScript
-- **Cryptographic verification** - Merkle tree receipts prove destination matches what was written
+- **Cryptographic verification** - Merkle tree receipts detect any difference between the destination and what was written
 
 ## Supported Connectors
 
@@ -212,11 +213,8 @@ stratum apply -c migration.smql --tui
 # Execute with colored output
 stratum apply -c migration.smql --pretty
 
-# Execute and store Merkle integrity receipt
+# Execute and commit a keyed Merkle integrity receipt
 stratum apply -c migration.smql --integrity
-
-# Execute and store per-row hashes for row-level mismatch reporting
-stratum apply -c migration.smql --full-integrity
 
 # Verify destination matches stored receipt
 stratum verify -c migration.smql
@@ -410,19 +408,22 @@ capabilities, and resource limits. Runnable examples: [`examples/plugins/`](exam
 # 1. Migrate with integrity receipts
 stratum apply -c migration.smql --integrity
 
-# 2. Later, prove destination matches what was written
+# 2. Later, check the destination against what was written
 stratum verify -c migration.smql
 
-# ✓ migrate_customers/customers - match (14 batches, 13,842 rows, 312ms)
-# ✓ migrate_orders/orders       - match (128 batches, 127,491 rows, 2,841ms)
+# ✓ migrate_customers/customers - match (13,842 rows, root a3f1b2c49d8c7b6a, 312ms)
+# ✓ migrate_orders/orders       - match (127,491 rows, root 5e2d8a1c04b93f77, 2,841ms)
 
-# With --full-integrity, mismatches are pinpointed to the exact row:
-# ✗ migrate_orders/orders - MISMATCH (1 divergent batches, 2,841ms)
-#   batch 4 (rows 3000-4000): expected a3f1b2c4... actual 9d8c7b6a...
-#     row 3412: expected a3f1... actual 9d8c...
+# Mismatches are pinpointed to the exact row, by primary key:
+# ✗ migrate_orders/orders - MISMATCH (0 missing, 1 changed, 0 extra; 127,491 rows expected, 127,491 found; 2,841ms)
+#   expected root 5e2d8a1c04b93f77
+#   actual   root 9d8c7b6a1f2e3d4c
+#   order_id=3412 - changed: expected a3f1b2c49d8c7b6a actual 9d8c7b6a1f2e3d4c
 ```
 
-Verification re-reads the destination and compares Merkle tree roots - it detects modified, deleted, and inserted rows, not just count differences. See [docs/verification.md](docs/verification.md) for the full design.
+Every row hash is keyed by its primary key, so verification is independent of batch size, lane count, and read order - it detects modified, deleted, and inserted rows by key, not just count differences.
+
+Integrity costs ~0.3-0.5 µs per row, and the hashes stream to disk rather than memory: about 51 bytes per row, so a 10M-row table with an integer key leaves ~510 MB under `~/.stratum/state/` until that pipeline runs again. See [docs/verification.md](docs/verification.md) for the full design and [benchmarks](docs/benchmarks.md#the-cost-of---integrity) for the measured overhead.
 
 ## State & Resume
 

@@ -1,6 +1,9 @@
 use crate::integrity::receipt::VerificationReceipt;
 use serde::{Deserialize, Serialize};
 
+/// Maximum number of individual divergences carried in a result.
+pub const MAX_REPORTED_DIVERGENCES: usize = 100;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum VerificationResult {
     Match {
@@ -9,36 +12,55 @@ pub enum VerificationResult {
     },
     Mismatch {
         receipt: VerificationReceipt,
+        /// Root recomputed from the destination's current contents.
         actual_root: [u8; 32],
-        divergent_batches: Vec<DivergentBatch>,
+        summary: DivergenceSummary,
+        divergences: Vec<Divergence>,
         duration_ms: u64,
     },
     /// No receipt found in Sled - pipeline was run without --integrity.
-    NoPriorRun { pipeline_name: String },
+    NoPriorRun { pipeline: String },
 }
 
-/// A batch whose recomputed root does not match the stored root.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DivergentBatch {
-    pub batch_index: u64,
-    pub expected_root: [u8; 32],
-    pub actual_root: [u8; 32],
-    /// Inclusive start row index of this batch (batch_index * batch_size).
-    pub row_start: u64,
-    /// Exclusive end row index (row_start + batch row_count).
-    pub row_end: u64,
-    /// Row-level detail, populated only when the receipt was written with `--full-integrity`.
-    #[serde(default)]
-    pub divergent_rows: Vec<DivergentRow>,
+/// Complete counts for a mismatch, independent of the truncated detail list.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DivergenceSummary {
+    /// Rows in the receipt with no matching key in the destination - data loss.
+    pub missing: u64,
+    /// Rows in the destination with no matching key in the receipt.
+    pub extra: u64,
+    /// Keys present on both sides whose row contents differ.
+    pub changed: u64,
+    /// Row keys committed by the receipt.
+    pub expected_rows: u64,
+    /// Distinct row keys currently in the destination.
+    pub actual_rows: u64,
 }
 
-/// A single row whose hash differs between the receipt and the destination.
+impl DivergenceSummary {
+    pub fn is_clean(&self) -> bool {
+        self.missing == 0 && self.extra == 0 && self.changed == 0
+    }
+}
+
+/// A single row whose state differs between the receipt and the destination,
+/// identified by its primary key.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DivergentRow {
-    /// Zero-based row index across the whole table (not within the batch).
-    pub row_index: u64,
-    /// Hash stored in the receipt at migration time.
-    pub expected_hash: [u8; 32],
-    /// Hash recomputed from the current destination row.
-    pub actual_hash: [u8; 32],
+pub struct Divergence {
+    /// Human-readable row key, e.g. `actor_id=42`.
+    pub key: String,
+    pub kind: DivergenceKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DivergenceKind {
+    /// Migrated, but absent from the destination now.
+    Missing { expected_hash: [u8; 32] },
+    /// Present in the destination, but never migrated.
+    Extra { actual_hash: [u8; 32] },
+    /// Present on both sides with different contents.
+    Changed {
+        expected_hash: [u8; 32],
+        actual_hash: [u8; 32],
+    },
 }

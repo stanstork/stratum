@@ -36,13 +36,22 @@ graph TB
         DEP_GRAPH --> GRAPH_EXP
     end
 
+    subgraph WASM["Plugin Host (crates/engine-wasm)"]
+        REGISTRY["PluginRegistry<br/>load + validate metadata"]
+        INSTANCE["PluginInstance (wasmtime)<br/>transform | filter<br/>ResourceLimits: memory, fuel, timeout"]
+        WIRE["columnar_v1 wire<br/>one batch per crossing"]
+
+        REGISTRY --> INSTANCE
+        INSTANCE --> WIRE
+    end
+
     subgraph PROCESSING["Processing Pipeline (crates/engine-processing)"]
         CTX["PipelineContext<br/>exec_ctx, source, destination<br/>mapping, cursor, offset_strategy"]
 
         subgraph PROD_SIDE["PRODUCER SIDE"]
             SNAPSHOT["SnapshotReader<br/>pagination (pk/numeric/timestamp)"]
-            TRANSFORM["TransformService<br/>field mapping, computed columns<br/>type coercion"]
-            BATCH_COORD["BatchCoordinator<br/>group records into batches"]
+            TRANSFORM["TransformService<br/>field mapping, computed columns<br/>type coercion, plugin stages"]
+            BATCH_COORD["BatchCoordinator<br/>group records into batches<br/>hash + key rows when --integrity"]
 
             SNAPSHOT --> TRANSFORM
             TRANSFORM --> BATCH_COORD
@@ -95,14 +104,14 @@ graph TB
     end
 
     subgraph CORE["Core Services (crates/engine-core)"]
-        EXEC_CTX["ExecutionContext<br/>connection_pool, run_id<br/>SledStateStore, EnvContext"]
+        EXEC_CTX["ExecutionContext<br/>connection_pool, run_id<br/>SledStateStore, RowHashLog<br/>EnvContext"]
         PIPELINE_CTX["PipelineContext<br/>per-pipeline context<br/>builder pattern"]
 
         NOTE["re-exports:<br/>engine_state as state<br/>engine_schema as schema<br/>engine_infra::{event_bus,metrics,progress,retry}"]
     end
 
     subgraph INFRA["Infrastructure"]
-        STATE["engine-state<br/>SledStateStore<br/>~/.stratum/state/<br/>WAL + ACID checkpoints"]
+        STATE["engine-state<br/>SledStateStore: checkpoints, WAL, receipts<br/>RowHashLog: per-row integrity hashes<br/>~/.stratum/state/"]
         EVENTBUS["engine-infra / EventBus<br/>MigrationStarted<br/>BatchProcessed<br/>MigrationCompleted"]
         METRICS["engine-infra / Metrics<br/>records_processed<br/>bytes_transferred<br/>batches_processed"]
         RETRY["engine-infra / Retry<br/>exponential backoff"]
@@ -126,6 +135,7 @@ graph TB
     PLANNING --> RUNTIME
     RUNTIME --> SCHEMA
     RUNTIME --> PROCESSING
+    PROCESSING --> WASM
     PROCESSING --> IO
     IO --> CONNECTORS
     SCHEMA --> CONNECTORS
@@ -142,12 +152,14 @@ graph TB
     STATE -.-> FS
     RUNTIME -.-> TOKIO
     PROCESSING -.-> TOKIO
+    WASM -.-> WASMTIME["wasmtime<br/>Cranelift JIT + module cache"]
 
     style CLI fill:#e1f5ff
     style PLANNING fill:#fff4e1
     style RUNTIME fill:#f0e1ff
     style SCHEMA fill:#e8ffe1
     style PROCESSING fill:#ffe1e8
+    style WASM fill:#f5e1ff
     style IO fill:#ffeedd
     style CONNECTORS fill:#fff9e1
     style CORE fill:#e8e1ff

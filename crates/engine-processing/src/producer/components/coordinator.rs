@@ -1,19 +1,17 @@
 use crate::{
     channel::{BatchEnvelope, ByteBudget},
     error::ProducerError,
-    producer::components::{
-        integrity::{IntegrityState, LaneHashSink},
-        transformer::TransformResult,
-    },
+    producer::components::{integrity::IntegrityState, transformer::TransformResult},
+    profile,
     state_manager::StateManager,
 };
-use engine_state::MerkleStore;
+use engine_state::RowHashLog;
 use model::{
     integrity::config::IntegrityConfig,
     pagination::cursor::Cursor,
     records::{Record, batch::Batch},
 };
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use tokio::sync::mpsc;
 
 /// Coordinates batch creation and delivery to consumers.
@@ -50,14 +48,10 @@ impl BatchCoordinator {
     pub fn enable_integrity(
         mut self,
         config: IntegrityConfig,
-        merkle_store: Arc<dyn MerkleStore>,
-        lane_sink: Option<LaneHashSink>,
+        hash_log: Arc<RowHashLog>,
+        pipeline: &str,
     ) -> Self {
-        let mut state = IntegrityState::new(config, merkle_store);
-        if let Some(sink) = lane_sink {
-            state = state.with_lane_sink(sink);
-        }
-        self.integrity = Some(state);
+        self.integrity = Some(IntegrityState::new(config, hash_log, pipeline));
         self
     }
 
@@ -78,7 +72,9 @@ impl BatchCoordinator {
         let rows_count = rows.len();
 
         if let Some(ref mut state) = self.integrity {
-            tokio::task::block_in_place(|| state.hash_batch(&rows));
+            let t_hash = Instant::now();
+            state.hash_batch(&rows)?;
+            profile::record(&profile::INTEGRITY, t_hash.elapsed());
         }
 
         // Send to consumer (which checkpoints after a successful write).
@@ -92,18 +88,6 @@ impl BatchCoordinator {
         self.rows_failed += transform_result.rows_failed;
 
         Ok(())
-    }
-
-    /// Build per-table Merkle receipts and persist to sled. Call once after the last batch.
-    pub async fn finalize_integrity(&mut self, pipeline_name: &str) -> Result<(), ProducerError> {
-        let run_id = self.state_manager.ids().run_id();
-        let rows_skipped = self.rows_skipped;
-        let Some(ref mut state) = self.integrity else {
-            return Ok(());
-        };
-        state
-            .save_receipts(pipeline_name, &run_id, rows_skipped)
-            .await
     }
 
     pub fn state_manager(&self) -> &StateManager {

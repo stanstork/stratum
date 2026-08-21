@@ -11,6 +11,7 @@ mod tests {
     use model::integrity::canonical::serialize_value;
     use model::integrity::hasher::RowHasher;
     use model::records::Record;
+    use std::collections::HashMap;
     use std::io::Write;
     use std::str::FromStr;
 
@@ -117,12 +118,13 @@ mod tests {
         let column_order: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
         let record = Record::from_fields("chaos", fields, Default::default());
 
+        let no_types = HashMap::new();
         for algo in [HashAlgorithm::Sha256, HashAlgorithm::Blake3] {
             let mut h1 = RowHasher::new(column_order.clone(), algo);
             let mut h2 = RowHasher::new(column_order.clone(), algo);
             assert_eq!(
-                h1.hash_row(&record),
-                h2.hash_row(&record),
+                h1.hash_rows(&[&record], &no_types, &[]),
+                h2.hash_rows(&[&record], &no_types, &[]),
                 "row hashing must be deterministic for {algo:?}"
             );
         }

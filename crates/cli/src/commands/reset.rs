@@ -2,8 +2,8 @@ use super::{open_state_store, state_dir};
 use crate::{config, error::CliError};
 use engine_processing::EnvContext;
 use engine_state::{
+    StateStore,
     models::{PipelineStatus, RunStatus},
-    store::StateStore,
 };
 use std::{
     io::{self, Write},

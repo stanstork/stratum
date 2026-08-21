@@ -26,6 +26,11 @@ pub const TAG_CIDR: u8 = 0x81;
 pub const TAG_MACADDR: u8 = 0x82;
 pub const TAG_COMPOSITE: u8 = 0x90;
 
+/// Encoding form for a decimal, so the compact and textual forms can never be
+/// read as one another.
+const DECIMAL_COMPACT: u8 = 0x00;
+const DECIMAL_TEXT: u8 = 0x01;
+
 pub fn serialize_value(val: &Value, buf: &mut Vec<u8>) {
     match val {
         Value::Null => buf.push(TAG_NULL),
@@ -65,9 +70,8 @@ pub fn serialize_value(val: &Value, buf: &mut Vec<u8>) {
         }
 
         Value::Decimal(d) => {
-            // normalized() strips trailing zeros: 1.50 -> 1.5
             buf.push(TAG_DECIMAL);
-            write_bytes(d.normalized().to_string().as_bytes(), buf);
+            write_decimal(d, buf);
         }
 
         Value::Float(f) => {
@@ -249,6 +253,182 @@ pub fn serialize_value(val: &Value, buf: &mut Vec<u8>) {
     }
 }
 
+/// Render canonically-encoded key bytes back into `col=value` text.
+pub fn describe_key(bytes: &[u8], col_names: &[String]) -> String {
+    let mut cursor = 0usize;
+    let mut parts = Vec::new();
+    let mut i = 0;
+
+    while cursor < bytes.len() {
+        let Some(text) = read_value(bytes, &mut cursor) else {
+            // Undecodable tail: fall back to hex of the whole key rather than
+            // reporting a half-decoded value that could mislead.
+            return format!("0x{}", hex(bytes));
+        };
+
+        match col_names.get(i) {
+            Some(name) => parts.push(format!("{name}={text}")),
+            None => parts.push(text),
+        }
+        i += 1;
+    }
+
+    if parts.is_empty() {
+        format!("0x{}", hex(bytes))
+    } else {
+        parts.join(",")
+    }
+}
+
+/// Decode one canonical value, advancing `cursor`. `None` on malformed input.
+fn read_value(b: &[u8], cursor: &mut usize) -> Option<String> {
+    let tag = *b.get(*cursor)?;
+    *cursor += 1;
+
+    match tag {
+        TAG_NULL => Some("NULL".to_string()),
+        TAG_INT => Some(i64::from_le_bytes(take_array::<8>(b, cursor)?).to_string()),
+        TAG_UINT => Some(u64::from_le_bytes(take_array::<8>(b, cursor)?).to_string()),
+        TAG_BOOL => Some((*take(b, cursor, 1)?.first()? != 0).to_string()),
+        TAG_FLOAT => Some(f64::from_be_bytes(take_array::<8>(b, cursor)?).to_string()),
+
+        TAG_STRING | TAG_DECIMAL | TAG_JSON => {
+            let raw = take_prefixed(b, cursor)?;
+            Some(String::from_utf8_lossy(raw).into_owned())
+        }
+
+        TAG_BINARY | TAG_GEOMETRY => Some(format!("0x{}", hex(take_prefixed(b, cursor)?))),
+
+        TAG_DATE => {
+            let days = i32::from_le_bytes(take_array::<4>(b, cursor)?);
+            let epoch = NaiveDate::from_ymd_opt(1970, 1, 1)?;
+            let date = epoch.checked_add_signed(chrono::Duration::days(days as i64))?;
+            Some(date.to_string())
+        }
+
+        TAG_TIMESTAMP => {
+            let micros = i64::from_le_bytes(take_array::<8>(b, cursor)?);
+            chrono::DateTime::from_timestamp_micros(micros)
+                .map(|dt| dt.naive_utc().to_string())
+                .or_else(|| Some(format!("{micros}us")))
+        }
+
+        TAG_TIME => {
+            let micros = i64::from_le_bytes(take_array::<8>(b, cursor)?);
+            Some(format!("{micros}us"))
+        }
+
+        TAG_INTERVAL => {
+            let months = i32::from_le_bytes(take_array::<4>(b, cursor)?);
+            let days = i32::from_le_bytes(take_array::<4>(b, cursor)?);
+            let micros = i64::from_le_bytes(take_array::<8>(b, cursor)?);
+            Some(format!("{months}mon {days}d {micros}us"))
+        }
+
+        TAG_UUID => {
+            let raw = take_array::<16>(b, cursor)?;
+            Some(uuid::Uuid::from_bytes(raw).to_string())
+        }
+
+        TAG_BITS => {
+            let bit_count = u32::from_le_bytes(take_array(b, cursor)?) as usize;
+            let bytes = take(b, cursor, bit_count.div_ceil(8))?;
+            Some(format!("0x{}", hex(bytes)))
+        }
+
+        TAG_ARRAY | TAG_SET => {
+            let count = u32::from_le_bytes(take_array(b, cursor)?) as usize;
+            let items: Vec<String> = (0..count)
+                .map(|_| read_value(b, cursor))
+                .collect::<Option<_>>()?;
+            Some(format!("[{}]", items.join(",")))
+        }
+
+        TAG_INET | TAG_CIDR => {
+            let version = take_array::<1>(b, cursor)?[0];
+            let octets = if version == 4 { 4 } else { 16 };
+            let addr = hex(take(b, cursor, octets)?);
+
+            if tag == TAG_CIDR {
+                let prefix = take_array::<1>(b, cursor)?[0];
+                Some(format!("0x{addr}/{prefix}"))
+            } else {
+                Some(format!("0x{addr}"))
+            }
+        }
+
+        TAG_MACADDR => Some(format!("0x{}", hex(take(b, cursor, 6)?))),
+
+        TAG_COMPOSITE => {
+            let count = u32::from_le_bytes(take_array(b, cursor)?) as usize;
+            let fields: Vec<String> = (0..count)
+                .map(|_| {
+                    let name = String::from_utf8_lossy(take_prefixed(b, cursor)?).into_owned();
+                    let val = read_value(b, cursor)?;
+                    Some(format!("{name}:{val}"))
+                })
+                .collect::<Option<_>>()?;
+            Some(format!("({})", fields.join(",")))
+        }
+        _ => None,
+    }
+}
+
+#[inline]
+fn take<'a>(b: &'a [u8], cursor: &mut usize, len: usize) -> Option<&'a [u8]> {
+    let slice = b.get(*cursor..cursor.checked_add(len)?)?;
+    *cursor += len;
+    Some(slice)
+}
+
+#[inline]
+fn take_array<const N: usize>(b: &[u8], cursor: &mut usize) -> Option<[u8; N]> {
+    take(b, cursor, N)?.try_into().ok()
+}
+
+#[inline]
+fn take_prefixed<'a>(b: &'a [u8], cursor: &mut usize) -> Option<&'a [u8]> {
+    let len = u32::from_le_bytes(take_array(b, cursor)?) as usize;
+    take(b, cursor, len)
+}
+
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut out, byte| {
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
+}
+
+/// Canonically encode a decimal.
+fn write_decimal(d: &bigdecimal::BigDecimal, buf: &mut Vec<u8>) {
+    let (mantissa, exponent) = d.as_bigint_and_exponent();
+
+    let Ok(mut mantissa) = i128::try_from(&mantissa) else {
+        buf.push(DECIMAL_TEXT);
+        write_bytes(d.normalized().to_string().as_bytes(), buf);
+        return;
+    };
+
+    let mut exponent = exponent;
+    while mantissa != 0 && mantissa % 10 == 0 {
+        mantissa /= 10;
+        exponent -= 1;
+    }
+
+    // Zero has no significant digits, so its exponent carries no meaning:
+    // pin it, or 0.00 and 0 would encode differently.
+    if mantissa == 0 {
+        exponent = 0;
+    }
+
+    buf.push(DECIMAL_COMPACT);
+    buf.extend_from_slice(&mantissa.to_le_bytes());
+    buf.extend_from_slice(&exponent.to_le_bytes());
+}
+
 /// Write a length-prefixed byte slice: 4-byte LE length + raw bytes.
 #[inline]
 fn write_bytes(bytes: &[u8], buf: &mut Vec<u8>) {
@@ -315,6 +495,70 @@ mod tests {
         let a = encode(&Value::Decimal(BigDecimal::from_str("1.50").unwrap()));
         let b = encode(&Value::Decimal(BigDecimal::from_str("1.5").unwrap()));
         assert_eq!(a, b);
+    }
+
+    /// Equal numeric values must encode identically however they are written,
+    /// including across the compact/textual boundary conditions.
+    #[test]
+    fn decimal_equal_values_encode_identically() {
+        use bigdecimal::BigDecimal;
+        use std::str::FromStr;
+
+        let cases = [
+            ("0", "0.00"),
+            ("0.0", "-0.0"),
+            ("100", "1.00E2"),
+            ("-2.500", "-2.5"),
+            ("12345.67", "12345.6700"),
+        ];
+        for (a, b) in cases {
+            assert_eq!(
+                encode(&Value::Decimal(BigDecimal::from_str(a).expect("a"))),
+                encode(&Value::Decimal(BigDecimal::from_str(b).expect("b"))),
+                "{a} and {b} are the same number"
+            );
+        }
+    }
+
+    #[test]
+    fn decimal_distinct_values_encode_differently() {
+        use bigdecimal::BigDecimal;
+        use std::str::FromStr;
+
+        let distinct = ["0", "1", "-1", "0.1", "10", "1.01", "123456789.123456789"];
+        for (i, a) in distinct.iter().enumerate() {
+            for b in &distinct[i + 1..] {
+                assert_ne!(
+                    encode(&Value::Decimal(BigDecimal::from_str(a).expect("a"))),
+                    encode(&Value::Decimal(BigDecimal::from_str(b).expect("b"))),
+                    "{a} and {b} are different numbers"
+                );
+            }
+        }
+    }
+
+    /// A mantissa too large for the compact form falls back to text, and must
+    /// still normalize and stay distinct from its neighbours.
+    #[test]
+    fn decimal_oversized_mantissa_falls_back_to_text() {
+        use bigdecimal::BigDecimal;
+        use std::str::FromStr;
+
+        let huge = "1".repeat(45);
+        let with_zeros = format!("{huge}.500");
+        let without = format!("{huge}.5");
+
+        assert_eq!(
+            encode(&Value::Decimal(
+                BigDecimal::from_str(&with_zeros).expect("a")
+            )),
+            encode(&Value::Decimal(BigDecimal::from_str(&without).expect("b"))),
+            "the textual path normalizes too"
+        );
+        assert_ne!(
+            encode(&Value::Decimal(BigDecimal::from_str(&without).expect("a"))),
+            encode(&Value::Decimal(BigDecimal::from_str("1.5").expect("b"))),
+        );
     }
 
     #[test]

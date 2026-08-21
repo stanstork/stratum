@@ -2,14 +2,17 @@ use wasmtime::{StoreLimits, StoreLimitsBuilder};
 
 #[derive(Debug, Clone)]
 pub struct ResourceLimits {
-    /// Maximum guest memory in bytes. Default: 64MB for transform/filter, 128MB for source/sink.
+    /// Maximum guest memory in bytes. 128 MB for both row and IO plugins.
     pub max_memory_bytes: usize,
-    /// Wasmtime fuel units per call. Default: 1_000_000.
-    /// Each WASM instruction consumes ~1 fuel unit.
+    /// Wasmtime fuel units, ~1 per WASM instruction. For row plugins this is a
+    /// per-row rate scaled by the batch size, not a flat per-call budget:
+    /// 1_000_000 per row. IO plugins get a flat 100_000_000 per call.
     pub max_execution_fuel: u64,
-    /// Maximum output size in bytes. Default: 1MB for transform/filter, 16MB for source/sink.
+    /// Maximum output size in bytes: a 1 MB per-row rate for row plugins,
+    /// a flat 16 MB for IO plugins.
     pub max_output_bytes: usize,
-    /// Wall-clock timeout per call in ms. Default: 1000 for transform/filter, 30000 for source/sink.
+    /// Wall-clock budget in ms: a 1000 per-row rate for row plugins, a flat
+    /// 30000 for IO plugins.
     pub timeout_ms: u64,
 }
 

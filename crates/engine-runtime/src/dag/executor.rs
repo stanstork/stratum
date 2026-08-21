@@ -19,7 +19,7 @@ use engine_processing::{
     io::{destination::Destination, source::Source},
 };
 use engine_state::models::{PauseReason, PipelineRunState, PipelineStatus, RunState, RunStatus};
-use engine_state::{StateStore, models::WalEntry, sled_store::SledStateStore};
+use engine_state::{RowHashLog, SledStateStore, StateStore, models::WalEntry};
 use engine_wasm::registry::{PluginRegistry, load_registry, plugin_columns};
 use futures::stream::{self, StreamExt};
 use model::{
@@ -87,12 +87,12 @@ impl DagExecutor {
             MigrationError::InitializationError("Could not determine home directory".to_string())
         })?;
 
-        let state = Arc::new(
-            SledStateStore::open(home_dir.join(".stratum/state")).map_err(|e| {
-                MigrationError::InitializationError(format!("Failed to open state store: {e}"))
-            })?,
-        );
-        let exec_ctx = ExecutionContext::new(&plan, state, env);
+        let state_dir = home_dir.join(".stratum/state");
+        let state = Arc::new(SledStateStore::open(&state_dir).map_err(|e| {
+            MigrationError::InitializationError(format!("Failed to open state store: {e}"))
+        })?);
+        let hash_log = Arc::new(RowHashLog::in_state_dir(&state_dir));
+        let exec_ctx = ExecutionContext::new(&plan, state, hash_log, env);
         let exec_config = plan.execution_config.clone();
         let plugin_registry = load_registry(&plan.plugins)?;
 

@@ -15,12 +15,12 @@ use engine_processing::{
     io::{destination::Destination, source::Source},
     producer::{
         Producer,
-        components::integrity::{LaneHashSink, finalize_lane_sink},
+        components::integrity::{finalize_receipts, reset_row_hashes},
         config::ProducerConfig,
     },
 };
 use engine_schema::schema_ops::{SchemaOp, SchemaOps};
-use engine_state::MerkleStore;
+use engine_state::{MerkleStore, StateStore};
 use model::integrity::{algorithm::HashAlgorithm, config::IntegrityConfig};
 use model::{
     events::migration::MigrationEvent,
@@ -222,23 +222,41 @@ impl PipelineOrchestrator {
         info!("starting data migration");
 
         self.publish_started().await;
+
         let start_time = std::time::Instant::now();
-
         let metrics = Metrics::new();
+
         let dest_metas = self.fetch_destination_metadata().await?;
-
         let lanes = self.plan_lanes().await?;
-        let lanes_num = lanes.len();
 
+        let single_lane = lanes.len() == 1;
         let integrity = self.build_integrity_config(&dest_metas);
-        let lane_sink: Option<LaneHashSink> = (lanes_num > 1 && integrity.is_some())
-            .then(|| Arc::new(std::sync::Mutex::new(HashMap::new())));
 
-        let mut coordinators = Vec::with_capacity(lanes_num);
+        if let Some(config) = &integrity {
+            let resuming = self
+                .ctx
+                .state
+                .total_rows_done(&self.ctx.run_id, &self.ctx.item_id)
+                .await
+                .unwrap_or_default()
+                > 0;
+
+            if resuming {
+                info!("resuming: keeping row hashes recorded before the interruption");
+            } else {
+                reset_row_hashes(config, self.ctx.exec_ctx.hash_log(), &self.pipeline.name)
+                    .map_err(|e| {
+                        MigrationError::PipelineFailed(format!("integrity reset failed: {e}"))
+                    })?;
+            }
+        }
+
+        let mut coordinators = Vec::with_capacity(lanes.len());
+
         for (source, part_id) in lanes {
             // Each lane writes on its own connection so their COPYs actually run
             // in parallel. A single lane reuses the shared destination handle.
-            let destination = if lanes_num == 1 {
+            let destination = if single_lane {
                 self.ctx.destination.clone()
             } else {
                 self.dest_ep
@@ -246,7 +264,7 @@ impl PipelineOrchestrator {
                     .await?
             };
 
-            let config = self.build_producer_config(integrity.clone(), lane_sink.clone());
+            let config = self.build_producer_config(integrity.clone());
             let coord = self
                 .build_lane_coordinator(
                     source,
@@ -257,25 +275,29 @@ impl PipelineOrchestrator {
                     &metrics,
                 )
                 .await?;
+
             coordinators.push((coord, part_id));
         }
 
         self.run_coordinators(coordinators, &metrics, start_time)
             .await?;
 
-        // Combine every lane's hashes into one receipt per table.
-        if let (Some(sink), Some(config)) = (&lane_sink, &integrity) {
-            let merkle_store = self.ctx.state.clone() as Arc<dyn MerkleStore>;
-            finalize_lane_sink(
-                sink,
+        // One receipt per table, written once every lane has finished: the root
+        // commits to the complete row set, so no lane can finalize on its own.
+        if let Some(config) = &integrity {
+            let receipts = self.ctx.state.clone() as Arc<dyn MerkleStore>;
+
+            finalize_receipts(
                 config,
-                &merkle_store,
+                self.ctx.exec_ctx.hash_log(),
+                &receipts,
                 &self.pipeline.name,
                 &self.ctx.run_id,
+                metrics.snapshot().rows_skipped,
             )
             .await
             .map_err(|e| {
-                MigrationError::PipelineFailed(format!("integrity lane finalize failed: {e}"))
+                MigrationError::PipelineFailed(format!("integrity finalize failed: {e}"))
             })?;
         }
 
@@ -340,11 +362,6 @@ impl PipelineOrchestrator {
     /// full-table lane (run through a bounded pool sized by `lanes`).
     async fn plan_graph_table_lanes(&self) -> Result<Vec<(Source, String)>, MigrationError> {
         let single = || vec![(self.ctx.source.clone(), "part-0".to_string())];
-
-        if self.settings.integrity().is_enabled() {
-            info!("integrity enabled; migrating graph tables sequentially");
-            return Ok(single());
-        }
 
         // Source table names: the root plus every discovered table. `cascade_tables`
         // are destination names, so map them back to source names for reading.
@@ -482,16 +499,11 @@ impl PipelineOrchestrator {
             .await
     }
 
-    fn build_producer_config(
-        &self,
-        integrity: Option<IntegrityConfig>,
-        lane_sink: Option<LaneHashSink>,
-    ) -> ProducerConfig {
+    fn build_producer_config(&self, integrity: Option<IntegrityConfig>) -> ProducerConfig {
         let mut config = ProducerConfig::default().with_batch_size(self.settings.batch_size);
         if let Some(integrity) = integrity {
             config = config.with_integrity(integrity);
         }
-        config.lane_sink = lane_sink;
         config
     }
 
@@ -500,34 +512,41 @@ impl PipelineOrchestrator {
         if !self.settings.integrity().is_enabled() {
             return None;
         }
-        if self.pipeline.source.pagination.is_none() {
-            warn!(
-                "integrity is enabled but no `paginate` block is set; without explicit \
-                 pagination the row order is non-deterministic, which may cause `verify` \
-                 to report false mismatches. Add a `paginate` block for reliable verification."
-            );
+
+        let capacity = dest_metas.len();
+        let mut tables = HashMap::with_capacity(capacity);
+        let mut column_types = HashMap::with_capacity(capacity);
+        let mut key_columns = HashMap::with_capacity(capacity);
+
+        for m in dest_metas {
+            let table_name = &m.name;
+
+            // Map columns
+            tables.insert(table_name.clone(), m.columns.keys().cloned().collect());
+
+            // Map column types
+            let col_types = m
+                .columns
+                .values()
+                .map(|c| (c.name.clone(), c.data_type.clone()))
+                .collect();
+            column_types.insert(table_name.clone(), col_types);
+
+            // Map primary keys and check for unkeyed tables
+            if m.primary_keys.is_empty() {
+                warn!(
+                    table = %table_name,
+                    "integrity: destination table has no primary key; rows are keyed by their \
+                     own hash, so duplicate identical rows cannot be distinguished"
+                );
+            }
+            key_columns.insert(table_name.clone(), m.primary_keys.clone());
         }
 
-        let tables = dest_metas
-            .iter()
-            .map(|m| (m.name.clone(), m.columns.keys().cloned().collect()))
-            .collect();
-        let column_types = dest_metas
-            .iter()
-            .map(|m| {
-                let col_types = m
-                    .columns
-                    .values()
-                    .map(|c| (c.name.clone(), c.data_type.clone()))
-                    .collect();
-                (m.name.clone(), col_types)
-            })
-            .collect();
-
         Some(
-            IntegrityConfig::new(HashAlgorithm::Sha256, tables, &self.ctx.destination.name)
+            IntegrityConfig::new(HashAlgorithm::Sha256, tables)
                 .with_column_types(column_types)
-                .with_store_row_hashes(self.settings.integrity().store_row_hashes()),
+                .with_key_columns(key_columns),
         )
     }
 

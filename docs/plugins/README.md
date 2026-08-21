@@ -186,9 +186,9 @@ against how the pipelines use it, without touching a database.
 
 The batch-native ABI plus the `columnar_v1` wire format put native plugins close
 to built-in expressions. On a 10M-row MySQL -> PostgreSQL benchmark: a native
-Rust transform plugin sustains ~486k rows/s and a native Rust filter ~704k
+Rust transform plugin sustains ~513k rows/s and a native Rust filter ~728k
 rows/s (columnar wire, near-native). The equivalent JavaScript plugin/filter
-runs at ~120-127k rows/s - that floor is the QuickJS interpreter itself, not the
+runs at ~119-126k rows/s - that floor is the QuickJS interpreter itself, not the
 plugin boundary. Pick native Rust for hot paths; reach for JS when the logic is
 light and you'd rather skip the Rust toolchain.
 
