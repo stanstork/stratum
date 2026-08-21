@@ -2,7 +2,7 @@ use crate::{Cli, error::CliError};
 use clap::{Subcommand, ValueEnum};
 use engine_infra::shutdown::ShutdownSignal;
 use engine_processing::EnvContext;
-use engine_state::sled_store::SledStateStore;
+use engine_state::SledStateStore;
 use model::execution::flags::IntegrityMode;
 use std::{path::PathBuf, sync::Arc};
 
@@ -170,14 +170,6 @@ pub enum Commands {
 
         #[arg(long, help = "Compute integrity hashes and receipts during migration")]
         integrity: bool,
-
-        #[arg(
-            long,
-            help = "Store individual row hashes in the receipt (implies --integrity). \
-                    Enables row-level mismatch reporting during `verify` at the cost of \
-                    ~32 bytes per row of additional storage."
-        )]
-        full_integrity: bool,
     },
     /// Verify migrated data matches source data
     Verify {
@@ -235,12 +227,6 @@ pub enum Commands {
 
         #[arg(long, help = "Compute integrity hashes and receipts during migration")]
         integrity: bool,
-
-        #[arg(
-            long,
-            help = "Store individual row hashes in the receipt (implies --integrity)"
-        )]
-        full_integrity: bool,
     },
     /// Clear all state for a migration (checkpoints, WAL, run state)
     Reset {
@@ -282,9 +268,8 @@ pub async fn execute_command(
             pretty,
             exact_filter,
             integrity,
-            full_integrity,
         } => {
-            let integrity_mode = IntegrityMode::new(*integrity, *full_integrity);
+            let integrity_mode = IntegrityMode::new(*integrity);
             apply::execute(
                 config.clone(),
                 *tui,
@@ -310,9 +295,8 @@ pub async fn execute_command(
             tui,
             pretty,
             integrity,
-            full_integrity,
         } => {
-            let integrity_mode = IntegrityMode::new(*integrity, *full_integrity);
+            let integrity_mode = IntegrityMode::new(*integrity);
             resume::execute(config.clone(), *tui, *pretty, integrity_mode, shutdown, env).await
         }
         Commands::Reset { config, force } => reset::execute(config.clone(), *force, env).await,

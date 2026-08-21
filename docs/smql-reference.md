@@ -66,7 +66,18 @@ connection "customers_csv" {
 }
 ```
 
-**Supported drivers:** `"mysql"`, `"postgres"`, `"csv"` (source only)
+**Supported drivers:** `"mysql"`, `"postgres"`, `"csv"` (source only), and
+`"wasm"` - a plugin endpoint, where `plugin = "<name>"` names a declared
+[`plugin`](#plugin) block and the plugin acts as the source or the sink:
+
+```smql
+connection "feed" { driver = "wasm"  plugin = "counter_source" }
+connection "out"  { driver = "wasm"  plugin = "log_sink" }
+```
+
+This is distinct from transform and filter plugins, which are called inside
+`select` / `validate` as `plugin.<name>(...)`. See
+[docs/plugins/](plugins/README.md).
 
 **`schema`** (Postgres only, optional): scopes the connection to a schema.
 Unqualified reads, writes, and created tables target it (via `search_path`), and
@@ -147,14 +158,28 @@ loaded as-is. Capabilities are denied by default (only logging is on).
 plugin "normalize" {
   path = "plugins/normalize.js"   // required
 
-  // Optional capabilities / limits:
-  allow_http         = false
-  allow_log          = true
+  // Capabilities - all denied by default except allow_log:
+  allow_http     = false
+  allow_kv       = false
+  allow_log      = true
+  allow_metrics  = false
+  allow_fs_read  = ["data/lookups"]   // list of paths
+  allow_fs_write = []
+  allow_env      = ["TZ"]             // list of variable names
+
+  // Resource limits (host defaults apply when omitted):
   memory_limit_bytes = 134217728   // 128 MB
   fuel_limit         = 100000000
   timeout_ms         = 30000
+
+  // Optional: arbitrary config handed to the plugin at initialization
+  config {
+    mode = "strict"
+  }
 }
 ```
+
+Unknown attributes are ignored; only `path` is required.
 
 Use it in `select` (`col = plugin.name({ field: source.col })`) or as a
 `validate` check (see [validate](#validate)). Full authoring guide, roles,

@@ -139,21 +139,24 @@ index-parity fuzz). This is the clean head-to-head.
 
 | scenario | streams | wall (s) | rows/s | peak RSS |
 |---|---|---|---|---|
-| stratum, 1 lane (default) | 1 | 17.6 | 567k | 0.49 GB |
-| stratum, 1 lane `--integrity` | 1 | 19.2 | 521k | 0.33 GB |
-| stratum, 4 lanes (tuned) | 4 | 8.3 | 1.20M | 1.49 GB |
+| stratum, 1 lane (default) | 1 | 17.3 | 579k | 0.49 GB |
+| stratum, 1 lane `--integrity` | 1 | 20.4 | 490k | 0.50 GB |
+| stratum, 4 lanes (tuned) | 4 | 7.8 | 1.29M | 1.50 GB |
 | pgloader v4 (default) | 1 | 38.6 | 259k | 0.83 GB |
 
-- **1 lane (default):** 567k rows/s, 0.49 GB (17.6 s) - the identical
+- **1 lane (default):** 579k rows/s, 0.49 GB (17.3 s) - the identical
   table-create-plus-copy that pgloader ran (its row above: 259k rows/s, 0.83 GB,
   38.6 s).
-- **4 lanes (`lanes = 4`, a tuned setting):** 1.20M rows/s, 1.49 GB - roughly 2x
-  the single-lane rate (8.3 s vs 17.6 s). Scaling is sublinear: past ~2 lanes the
+- **4 lanes (`lanes = 4`, a tuned setting):** 1.29M rows/s, 1.50 GB - roughly 2x
+  the single-lane rate (7.8 s vs 17.3 s). Scaling is sublinear: past ~2 lanes the
   shared PostgreSQL ingest ceiling (~1.2M rows/s on this box) bounds the total, so
   lanes trade connections and memory for total throughput (each lane runs
   concurrently with its own in-flight window, hence the ~1.5 GB).
-- **`--integrity`:** 521k rows/s - about 9% over the plain 1-lane run - while
-  hashing every row and building Merkle receipts.
+- **`--integrity`:** 490k rows/s, about 15% below the plain 1-lane run, while
+  hashing and keying every row, sorting the keyed set, and folding a Merkle root.
+  See [the integrity cost](#the-cost-of---integrity) - it is a roughly fixed
+  per-row cost, so the percentage says as much about how fast the baseline is as
+  about the hashing.
 - **pgloader v4 (default tuning):** 259k rows/s, 0.83 GB.
 
 ### Synthetic-heavy - `orders` -> `orders_heavy` with ~19 mixed columns (Stratum only)
@@ -174,14 +177,16 @@ how much computation each row carries (here ~19 mixed columns).
 
 | scenario | streams | wall (s) | rows/s | peak RSS |
 |---|---|---|---|---|
-| stratum, 1 lane | 1 | 32.3 | 310k | 0.77 GB |
-| stratum, 1 lane `--integrity` | 1 | 36.6 | 273k | 0.39 GB |
+| stratum, 1 lane | 1 | 32.2 | 310k | 0.79 GB |
+| stratum, 1 lane `--integrity` | 1 | 31.5 | 318k | 0.39 GB |
 
-For reference, the plain copy of the same table (no computed columns) ran 567k
+For reference, the plain copy of the same table (no computed columns) ran 579k
 rows/s at 1 lane - so evaluating the ~19 computed columns per row roughly halves
 the throughput (310k rows/s), the pure per-row expression cost layered onto the
-same streaming pass. `--integrity` on top of the transforms lands at 273k rows/s
-(+~13% wall, hashing the projected output rows as they pass).
+same streaming pass. `--integrity` on top of the transforms costs nothing
+measurable here (318k vs 310k, inside the ~3% run-to-run spread): the pipeline is
+already expression-bound, so the hashing overlaps with work the destination is
+waiting on anyway.
 
 ### Plugin transforms - Rust WASM vs JS (QuickJS) WASM (Stratum only)
 
@@ -191,15 +196,15 @@ copied-through columns for a realistic write width).
 
 | scenario | streams | wall (s) | rows/s | peak RSS |
 |---|---|---|---|---|
-| stratum, rust plugin | 1 | 20.6 | 486k | 0.80 GB |
-| stratum, rust plugin `--integrity` | 1 | 25.5 | 392k | 0.78 GB |
-| stratum, js plugin | 1 | 78.7 | 127k | 0.70 GB |
-| stratum, js plugin `--integrity` | 1 | 85.4 | 117k | 0.74 GB |
+| stratum, rust plugin | 1 | 19.5 | 513k | 0.77 GB |
+| stratum, rust plugin `--integrity` | 1 | 24.9 | 403k | 0.75 GB |
+| stratum, js plugin | 1 | 79.3 | 126k | 0.72 GB |
+| stratum, js plugin `--integrity` | 1 | 83.8 | 119k | 0.75 GB |
 
-- **Rust plugins are near-native.** At 486k rows/s the native-Rust transform runs
+- **Rust plugins are near-native.** At 513k rows/s the native-Rust transform runs
   within ~15-30% of the no-plugin throughput despite three boundary crossings per row.
 - **JS plugins are interpreter-bound.** The same three calls through the QuickJS
-  runtime run at 127k rows/s - a ~4x gap that is the interpreter itself executing
+  runtime run at 126k rows/s - a ~4x gap that is the interpreter itself executing
   the guest code, not the boundary crossing or marshalling.
 
 > **The boundary is batched.** Plugins are invoked **once per batch**, not
@@ -218,14 +223,14 @@ Rust-vs-JS comparison, exercising the filter path instead of the transform path.
 
 | scenario | streams | wall (s) | rows/s | peak RSS |
 |---|---|---|---|---|
-| stratum, rust filter | 1 | 14.2 | 704k | 0.80 GB |
-| stratum, rust filter `--integrity` | 1 | 18.2 | 549k | 0.75 GB |
-| stratum, js filter | 1 | 83.9 | 119k | 0.64 GB |
-| stratum, js filter `--integrity` | 1 | 88.4 | 113k | 0.73 GB |
+| stratum, rust filter | 1 | 13.8 | 728k | 0.76 GB |
+| stratum, rust filter `--integrity` | 1 | 17.9 | 558k | 0.74 GB |
+| stratum, js filter | 1 | 83.8 | 119k | 0.64 GB |
+| stratum, js filter `--integrity` | 1 | 87.3 | 115k | 0.73 GB |
 
-- **Rust filter: 704k rows/s** - near-native again (the higher rate than the
+- **Rust filter: 728k rows/s** - near-native again (the higher rate than the
   transform run reflects the narrower 8-column projection being written).
-- **JS filter: 119k rows/s** - essentially the same as the JS *transform* (127k).
+- **JS filter: 119k rows/s** - essentially the same as the JS *transform* (126k).
   The QuickJS runtime lands at ~120-127k regardless of whether it filters or
   transforms, which is the tell: this is the interpreter's floor, not a cost of
   the stage or the boundary.
@@ -237,12 +242,58 @@ pgloader loads into PostgreSQL, so this is Stratum's MySQL write path alone (the
 
 | scenario | streams | wall (s) | rows/s | peak RSS |
 |---|---|---|---|---|
-| stratum, 1 lane | 1 | 37.2 | 269k | 0.59 GB |
+| stratum, 1 lane | 1 | 36.4 | 275k | 0.62 GB |
 
-A single stream sustains ~269k rows/s into InnoDB end-to-end - about half
+A single stream sustains ~275k rows/s into InnoDB end-to-end - about half
 Stratum's own PostgreSQL COPY rate, reflecting InnoDB's always-clustered-index
 writes (the destination engine's ceiling). Lanes apply here too (`orders` has an
 integer PK).
+
+### The cost of `--integrity`
+
+Every scenario above was run twice, with and without `--integrity`. Read as
+percentages the results look inconsistent - anywhere from no measurable cost to
+-23%. Read as a per-row cost they are not:
+
+| workload | baseline | `--integrity` | delta | added per row |
+|---|---|---|---|---|
+| synthetic_filter_rust | 728k | 558k | -23% | +0.42 µs |
+| synthetic_plugin_rust | 513k | 403k | -21% | +0.53 µs |
+| synthetic | 579k | 490k | -15% | +0.31 µs |
+| synthetic_plugin_js | 126k | 119k | -5% | +0.45 µs |
+| synthetic_filter_js | 119k | 115k | -4% | +0.36 µs |
+| sakila | 95k | 92k | -4% | +0.41 µs |
+| synthetic_heavy | 310k | 318k | +2% | none measurable |
+
+Hashing costs roughly **0.3-0.5 µs per row**, near enough constant across
+workloads. The percentage is therefore a statement about the *baseline*: on the
+fastest workload (a narrow projection through a Rust filter, 728k rows/s) a fixed
+0.4 µs is a quarter of the budget; on the JS plugin runs, where each row already
+costs ~8 µs in the interpreter, the same 0.4 µs disappears into the noise.
+
+`synthetic_heavy` is the instructive case: integrity measured *faster* than the
+baseline (318k vs 310k), which is not a real speed-up - it is inside the ~3%
+run-to-run spread. That workload is expression-bound, so the hashing overlaps
+with work the destination is already waiting on, and the extra cost never reaches
+the wall clock.
+
+Two components make up that per-row figure: hashing and keying each row as it
+passes (overlapped with the pipeline, so often invisible), and a finalize step
+after the last row - sorting the keyed set and folding the Merkle root - which is
+serial and therefore always on the clock. On a 10M-row table the finalize step is
+a few seconds.
+
+`verify` is the other half of the cost, and it is a separate command run later:
+re-reading the 10M-row destination, hashing every row and diffing it against the
+receipt takes **18.6 s** (~540k rows/s) - roughly what the migration itself cost,
+since it is a sequential read plus a hash per row.
+
+Peak RSS shows no consistent integrity cost: some runs are higher, some lower
+(`synthetic_heavy` measured 0.39 GB with integrity against 0.79 GB without), all
+within run-to-run variance. The row hashes are streamed to disk rather than
+buffered, so they do not scale memory - they cost **disk**, roughly 51 bytes per
+row, or ~510 MB for a 10M-row table with an integer primary key. See
+[verification.md](verification.md#storage-footprint).
 
 ### Sakila (many small tables) - directional only
 
@@ -252,8 +303,8 @@ tables out into independent pipelines run concurrently (`execution { parallel }`
 
 | scenario | wall (s, median) | rows/s | peak RSS | scope |
 |---|---|---|---|---|
-| stratum | 0.5 | 96k | 0.14 GB | tables + data + secondary indexes (no FKs) |
-| stratum `--integrity` | 0.5 | 93k | 0.16 GB | + Merkle receipts |
+| stratum | 0.5 | 95k | 0.15 GB | tables + data + secondary indexes (no FKs) |
+| stratum `--integrity` | 0.5 | 92k | 0.20 GB | + Merkle receipts |
 | pgloader v4 | 3.2 | 14.4k | 0.69 GB | tables + data **+ 37 indexes + 18 FKs** |
 
 Stratum finishes in ~0.5 s; pgloader in ~3.2 s. The two do **different work**

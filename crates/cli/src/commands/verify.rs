@@ -1,13 +1,13 @@
+use crate::{config, error::CliError};
+use engine_processing::EnvContext;
+use engine_verify::{error::VerifyError, verifier::verify};
+use model::integrity::result::{DivergenceKind, VerificationResult};
 use std::{
+    fmt::Write as _,
     fs::File,
     io::{BufWriter, Write},
     sync::Arc,
 };
-
-use crate::{config, error::CliError};
-use engine_processing::EnvContext;
-use engine_verify::{error::VerifyError, verifier::verify};
-use model::integrity::result::VerificationResult;
 use tracing::info;
 
 /// Executes the verify command (post-migration verification)
@@ -22,36 +22,44 @@ pub async fn execute(
     let plan = config::load_plan(&config_path, false, env.clone()).await?;
     let results = verify(plan, env).await?;
 
-    let mut writer: Option<BufWriter<File>> = if let Some(ref path) = output {
-        let file = File::create(path).map_err(CliError::ConfigFileRead)?;
-        Some(BufWriter::new(file))
-    } else {
-        None
-    };
+    let mut writer = output
+        .as_ref()
+        .map(|path| File::create(path).map(BufWriter::new))
+        .transpose()
+        .map_err(CliError::ConfigFileRead)?;
 
-    let mut all_match = true;
     for result in &results {
-        println!("{}", format_result(result));
+        let formatted = format_result(result);
 
-        if let Some(ref mut w) = writer {
-            writeln!(w, "{}", format_result(result)).map_err(CliError::ConfigFileRead)?;
-        }
+        println!("{formatted}");
 
-        if matches!(result, VerificationResult::Mismatch { .. }) {
-            all_match = false;
+        if let Some(w) = writer.as_mut() {
+            writeln!(w, "{formatted}").map_err(CliError::ConfigFileRead)?;
         }
     }
 
-    if let Some(ref mut w) = writer {
+    if let Some(mut w) = writer {
         w.flush().map_err(CliError::ConfigFileRead)?;
         info!(
-            path = output.as_deref().unwrap_or(""),
+            path = output.as_deref().unwrap_or_default(),
             "verification report written"
         );
     }
 
-    if !all_match {
+    if results
+        .iter()
+        .any(|r| matches!(r, VerificationResult::Mismatch { .. }))
+    {
         return Err(CliError::Verification(VerifyError::Mismatch));
+    }
+
+    // A receipt with no diffable log can't confirm the destination; surface it
+    // as a non-zero exit rather than a silent pass.
+    if results
+        .iter()
+        .any(|r| matches!(r, VerificationResult::LogUnavailable { .. }))
+    {
+        return Err(CliError::Verification(VerifyError::Inconclusive));
     }
 
     Ok(())
@@ -64,49 +72,94 @@ pub fn format_result(result: &VerificationResult) -> String {
             receipt,
             duration_ms,
         } => format!(
-            "✓ {}/{} - match ({} batches, {} rows, {}ms)",
+            "✓ {}/{} - match ({} rows, root {}, {}ms)",
             receipt.pipeline_name,
             receipt.table_name,
-            receipt.batch_roots.len(),
             receipt.total_rows,
+            short_root(&receipt.table_root),
             duration_ms,
         ),
         VerificationResult::Mismatch {
             receipt,
-            divergent_batches,
+            actual_root,
+            summary,
+            divergences,
             duration_ms,
-            ..
         } => {
             let mut out = format!(
-                "✗ {}/{} - MISMATCH ({} divergent batches, {}ms)",
+                "✗ {}/{} - MISMATCH ({} missing, {} changed, {} extra; \
+                 {} rows expected, {} found; {}ms)\n  expected root {}\n  actual   root {}",
                 receipt.pipeline_name,
                 receipt.table_name,
-                divergent_batches.len(),
+                summary.missing,
+                summary.changed,
+                summary.extra,
+                summary.expected_rows,
+                summary.actual_rows,
                 duration_ms,
+                short_root(&receipt.table_root),
+                short_root(actual_root),
             );
-            for b in divergent_batches {
-                out.push_str(&format!(
-                    "\n  batch {} (rows {}-{}): expected {:02x?}... actual {:02x?}...",
-                    b.batch_index,
-                    b.row_start,
-                    b.row_end,
-                    &b.expected_root[..4],
-                    &b.actual_root[..4],
-                ));
-                for r in &b.divergent_rows {
-                    out.push_str(&format!(
-                        "\n    row {}: expected {:02x?}... actual {:02x?}...",
-                        r.row_index,
-                        &r.expected_hash[..4],
-                        &r.actual_hash[..4],
-                    ));
+
+            for d in divergences {
+                match &d.kind {
+                    DivergenceKind::Missing { .. } => {
+                        write!(out, "\n  {} - missing from destination", d.key).unwrap();
+                    }
+                    DivergenceKind::Extra { .. } => {
+                        write!(out, "\n  {} - not in the migration", d.key).unwrap();
+                    }
+                    DivergenceKind::Changed {
+                        expected_hash,
+                        actual_hash,
+                    } => {
+                        write!(
+                            out,
+                            "\n  {} - changed: expected {} actual {}",
+                            d.key,
+                            short_root(expected_hash),
+                            short_root(actual_hash)
+                        )
+                        .unwrap();
+                    }
                 }
             }
+
+            let reported = divergences.len() as u64;
+            let total = summary.missing + summary.changed + summary.extra;
+
+            if total > reported {
+                out.push_str(&format!("\n  ... and {} more", total - reported));
+            }
+
             out
         }
-        VerificationResult::NoPriorRun { pipeline_name } => format!(
-            "? {} - no integrity receipt (run `apply --integrity` first)",
-            pipeline_name
-        ),
+        VerificationResult::NoPriorRun {
+            pipeline: pipeline_name,
+        } => {
+            format!("? {pipeline_name} - no integrity receipt (run `apply --integrity` first)")
+        }
+        VerificationResult::LogUnavailable {
+            pipeline,
+            table,
+            expected_rows,
+            found_rows,
+        } => {
+            format!(
+                "? {pipeline}/{table} - INCONCLUSIVE: row-hash log is missing or truncated \
+                 ({found_rows} of {expected_rows} committed rows on disk); re-run \
+                 `apply --integrity` before verifying"
+            )
+        }
     }
+}
+
+/// First 8 bytes of a 32-byte root - enough to compare by eye.
+fn short_root(root: &[u8; 32]) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(16);
+    for byte in root.iter().take(8) {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
 }

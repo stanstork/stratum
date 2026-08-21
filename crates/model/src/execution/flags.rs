@@ -1,33 +1,24 @@
-/// Controls whether integrity hashing runs during `apply` and at what depth.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+use serde::{Deserialize, Serialize};
+
+/// Controls whether integrity hashing runs during `apply`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IntegrityMode {
     #[default]
     Off,
-    /// Compute a Merkle root per batch and write a `VerificationReceipt` to sled.
-    BatchHashes,
-    /// `BatchHashes` plus individual row hashes stored in the receipt.
-    /// Enables row-level divergence reporting during verify (exact row index).
-    /// Uses ~32 bytes per migrated row of additional sled storage.
-    FullHashes,
+    On,
 }
 
 impl IntegrityMode {
-    pub fn new(integrity: bool, full_integrity: bool) -> Self {
-        if full_integrity {
-            IntegrityMode::FullHashes
-        } else if integrity {
-            IntegrityMode::BatchHashes
+    pub fn new(integrity: bool) -> Self {
+        if integrity {
+            IntegrityMode::On
         } else {
             IntegrityMode::Off
         }
     }
 
     pub fn is_enabled(self) -> bool {
-        !matches!(self, Self::Off)
-    }
-
-    pub fn store_row_hashes(self) -> bool {
-        matches!(self, Self::FullHashes)
+        matches!(self, Self::On)
     }
 }
 

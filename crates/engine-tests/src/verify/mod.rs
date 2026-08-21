@@ -1,11 +1,15 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        harness::runner::{
-            DbType, get_row_count, run_smql, run_smql_full_integrity, run_verify_smql,
-        },
+        harness::runner::{DbType, execute, get_row_count, run_smql, run_verify_smql},
         reset_postgres_schema,
     };
+    use engine_core::plan::execution::ExecutionPlan;
+    use engine_processing::EnvContext;
+    use engine_verify::verify;
+    use model::integrity::result::{DivergenceKind, VerificationResult};
+    use smql_syntax::builder::parse;
+    use std::sync::Arc;
     use tracing_test::traced_test;
 
     /// Render a verify config for the MySQL -> PostgreSQL direction.
@@ -295,7 +299,7 @@ mod tests {
     /// mid-run, exercising the composite cursor on every page.
     ///
     /// Verify must handle:
-    ///   - cascade receipts with sorted_hashes=true (FK-dependent row order varies)
+    ///   - cascade receipts (rows arrive in FK order, verify reads in PK order)
     ///   - non-PK cursor on the root table
     ///   - variable cascade row counts per batch (customer/staff/rental counts
     ///     differ between the staff_id=1 and staff_id=2 halves)
@@ -395,7 +399,7 @@ mod tests {
     /// Verify detects tampering in a cascade leaf table.
     ///
     /// The cascade migration writes payment, customer, staff, and rental rows.
-    /// Each cascade table has its own receipt with sorted_hashes=true.
+    /// Each cascade table has its own keyed receipt.
     /// Modifying a row in a leaf table (customer) must change its receipt hash
     /// and cause verify to report a mismatch.
     // Config: crates/engine-tests/configs/verify/payment_cascade.smql
@@ -549,52 +553,168 @@ mod tests {
         run_verify_smql(&smql).await.expect("dag verify failed");
     }
 
-    /// `--full-integrity` stores individual row hashes; verify still passes when
-    /// the destination is untouched.
+    /// Verify names the tampered row by primary key.
+    ///
+    /// Row-level detail is no longer a mode: every row is keyed, so a mismatch
+    /// always reports which row diverged and how, not just a batch range.
     // Config: crates/engine-tests/configs/verify/actor.smql
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
-    async fn verify_full_integrity_matches() {
+    async fn verify_reports_the_tampered_row_by_key() {
         reset_postgres_schema().await;
         let smql = verify_config!("actor.smql");
-        run_smql_full_integrity(&smql).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
-    }
+        run_smql(&smql, true).await.expect("apply failed");
 
-    /// `--full-integrity` enables row-level detection: verify reports the exact
-    /// row index that was tampered, not just the batch range.
-    // Config: crates/engine-tests/configs/verify/actor.smql
-    #[traced_test]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn verify_full_integrity_detects_modified_row_at_index() {
-        use crate::harness::runner::execute;
-        use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan};
-        use engine_verify::verifier::verify as run_verify;
-        use smql_syntax::builder::parse;
-        use std::sync::Arc;
-
-        reset_postgres_schema().await;
-        let smql = verify_config!("actor.smql");
-        run_smql_full_integrity(&smql).await.expect("apply failed");
-
-        // Tamper with actor_id = 5 (the 5th row, index 4).
         execute("UPDATE actor SET last_name = 'HACKED' WHERE actor_id = 5").await;
 
-        // Run verify and check that it returns a Mismatch with row-level detail.
-        let doc = parse(&smql).expect("parse");
-        let env = Arc::new(EnvContext::empty());
-        let plan = ExecutionPlan::build(&doc, env.clone()).expect("build plan");
-        let results = run_verify(plan, env).await.expect("verify call failed");
+        let results = verify_results(&smql).await;
+        let mismatch = results
+            .iter()
+            .find_map(|r| match r {
+                VerificationResult::Mismatch {
+                    summary,
+                    divergences,
+                    ..
+                } => Some((summary, divergences)),
+                _ => None,
+            })
+            .expect("verify should report a mismatch");
+        let (summary, divergences) = mismatch;
 
-        let has_mismatch = results.iter().any(|r| {
+        assert_eq!(summary.changed, 1, "exactly one row changed");
+        assert_eq!(summary.missing, 0);
+        assert_eq!(summary.extra, 0);
+        assert!(
+            divergences.iter().any(|d| d.key.contains("actor_id=5")
+                && matches!(d.kind, DivergenceKind::Changed { .. })),
+            "divergence should name actor_id=5, got {:?}",
+            divergences.iter().map(|d| &d.key).collect::<Vec<_>>()
+        );
+    }
+
+    /// A deleted row is reported as missing *by key*, and an inserted one as
+    /// extra - the two are distinguishable, which positional receipts could not
+    /// do (both simply shifted every following row).
+    // Config: crates/engine-tests/configs/verify/actor.smql
+    #[traced_test]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn verify_distinguishes_missing_from_extra_rows() {
+        reset_postgres_schema().await;
+        let smql = verify_config!("actor.smql");
+        run_smql(&smql, true).await.expect("apply failed");
+
+        execute("DELETE FROM actor WHERE actor_id = 3").await;
+        execute(
+            "INSERT INTO actor (actor_id, first_name, last_name, last_update) \
+             VALUES (9999, 'GHOST', 'ROW', NOW())",
+        )
+        .await;
+
+        let results = verify_results(&smql).await;
+        let summary = results
+            .iter()
+            .find_map(|r| match r {
+                VerificationResult::Mismatch { summary, .. } => Some(summary),
+                _ => None,
+            })
+            .expect("verify should report a mismatch");
+
+        assert_eq!(summary.missing, 1, "actor_id=3 was deleted");
+        assert_eq!(summary.extra, 1, "actor_id=9999 was inserted");
+        assert_eq!(summary.changed, 0);
+    }
+
+    /// Cascade tables now localize divergence too.
+    ///
+    /// Their rows arrive in FK-join order, which used to force a single sorted
+    /// root with no row-level detail. Keyed by primary key, a tampered leaf row
+    /// is named exactly like one in the root table.
+    // Config: crates/engine-tests/configs/verify/payment_cascade.smql
+    #[traced_test]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn verify_cascade_names_the_tampered_leaf_row() {
+        reset_postgres_schema().await;
+        let smql = verify_config!("payment_cascade.smql");
+        run_smql(&smql, true).await.expect("cascade apply failed");
+
+        execute("UPDATE customer SET first_name = 'TAMPERED' WHERE customer_id = 3").await;
+
+        let results = verify_results(&smql).await;
+        let named = results.iter().any(|r| match r {
+            VerificationResult::Mismatch {
+                receipt,
+                divergences,
+                ..
+            } => {
+                receipt.table_name == "customer"
+                    && divergences.iter().any(|d| d.key.contains("customer_id=3"))
+            }
+            _ => false,
+        });
+
+        assert!(named, "cascade mismatch should name customer_id=3");
+    }
+
+    /// A multi-lane migration verifies, and still names the tampered row.
+    ///
+    /// Four range lanes write interleaved and out of key order. Because each row
+    /// carries its key, lane layout has no bearing on the root or on row-level
+    /// localization - which per-batch receipts lost entirely for parallel runs.
+    // Config: crates/engine-tests/configs/verify/payment_lanes.smql
+    #[traced_test]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn verify_multi_lane_migration() {
+        reset_postgres_schema().await;
+        let smql = verify_config!("payment_lanes.smql");
+        run_smql(&smql, true).await.expect("lane apply failed");
+        run_verify_smql(&smql).await.expect("lane verify failed");
+
+        execute(
+            "UPDATE payment SET amount = amount + 1.00 \
+             WHERE payment_id = (SELECT MAX(payment_id) FROM payment)",
+        )
+        .await;
+
+        let results = verify_results(&smql).await;
+        let changed_one = results.iter().any(|r| {
             matches!(
                 r,
-                model::integrity::result::VerificationResult::Mismatch { .. }
+                VerificationResult::Mismatch { summary, divergences, .. }
+                    if summary.changed == 1 && summary.missing == 0 && summary.extra == 0
+                        && divergences.len() == 1
             )
         });
         assert!(
-            has_mismatch,
-            "verify should detect the tampered row with full-integrity"
+            changed_one,
+            "multi-lane verify should pinpoint the one changed row"
         );
+    }
+
+    /// A cascade migration verifies when its tables migrate in parallel lanes.
+    ///
+    /// Graph pipelines used to be forced back to sequential migration whenever
+    /// integrity was on, because the receipt needed one ordered accumulator.
+    /// Keyed hashes removed that constraint, so this exercises the combination
+    /// that was previously unreachable.
+    // Config: crates/engine-tests/configs/verify/payment_cascade_lanes.smql
+    #[traced_test]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn verify_cascade_with_parallel_table_lanes() {
+        reset_postgres_schema().await;
+        let smql = verify_config!("payment_cascade_lanes.smql");
+        run_smql(&smql, true)
+            .await
+            .expect("cascade lane apply failed");
+        run_verify_smql(&smql)
+            .await
+            .expect("cascade lane verify failed");
+    }
+
+    /// Run verify and hand back the raw results for assertions on detail.
+    async fn verify_results(smql: &str) -> Vec<VerificationResult> {
+        let doc = parse(smql).expect("parse");
+        let env = Arc::new(EnvContext::empty());
+        let plan = ExecutionPlan::build(&doc, env.clone()).expect("build plan");
+        verify(plan, env).await.expect("verify call failed")
     }
 }

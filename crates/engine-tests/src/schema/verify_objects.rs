@@ -16,8 +16,9 @@ mod tests {
     /// Verify works on a cascade migration: payment + FK depth-1 tables
     /// (customer, staff, rental).
     ///
-    /// Cascade receipts use sorted_hashes=true because FK-scoped fetches
-    /// deliver related-table rows in non-PK order with duplicates across batches.
+    /// FK-scoped fetches deliver related-table rows in non-PK order, with the
+    /// same row repeated across batches. Keyed hashes absorb both: each row
+    /// lands under its primary key, and a repeat overwrites itself.
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_cascade_payment() {

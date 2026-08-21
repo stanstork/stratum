@@ -35,6 +35,7 @@ pub static FETCH: Bucket = Bucket::new(); // reading a page from the source
 pub static TRANSFORM: Bucket = Bucket::new(); // field mapping / computed columns / plugin
 pub static SEND: Bucket = Bucket::new(); // handing the batch to the channel (blocks under backpressure)
 pub static PLUGIN_CALL: Bucket = Bucket::new(); // subset of TRANSFORM: the WASM plugin boundary itself
+pub static INTEGRITY: Bucket = Bucket::new(); // subset of SEND: hashing, keying, and storing row hashes
 
 /// Consumer-side stages.
 pub static WRITE: Bucket = Bucket::new(); // writing a batch to the destination
@@ -79,6 +80,7 @@ pub fn dump() {
         ("producer: transform (total)", TRANSFORM.read()),
         ("  of which: plugin WASM boundary", PLUGIN_CALL.read()),
         ("producer: send (backpressure)", SEND.read()),
+        ("  of which: integrity", INTEGRITY.read()),
         ("consumer: write (dest)", WRITE.read()),
         ("consumer: checkpoint (state)", CHECKPOINT.read()),
     ];
@@ -94,11 +96,18 @@ pub fn dump() {
     let checkpoint = CHECKPOINT.read().0;
 
     eprintln!("  ----");
+    let integrity = INTEGRITY.read().0;
     eprintln!(
         "  producer busy (fetch+transform)   : {:>12.3?}",
         fetch + transform
     );
-    eprintln!("  producer send-blocked             : {send:>12.3?}   (high => writer-bound)");
+    eprintln!(
+        "  producer send-blocked             : {:>12.3?}   (high => writer-bound)",
+        send.saturating_sub(integrity)
+    );
+    if !integrity.is_zero() {
+        eprintln!("  integrity (hash+key+store)        : {integrity:>12.3?}");
+    }
     eprintln!(
         "  consumer busy (write+checkpoint)  : {:>12.3?}",
         write + checkpoint
@@ -107,7 +116,7 @@ pub fn dump() {
     if let Ok(map) = STAGES.lock()
         && !map.is_empty()
     {
-        eprintln!("\n  transform stage breakdown (subset of transform total):");
+        eprintln!("\n  stage breakdown (transform stages, plus integrity sub-stages):");
         let mut rows: Vec<_> = map.iter().collect();
 
         // Sort in descending order of duration

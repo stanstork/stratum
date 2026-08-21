@@ -4,9 +4,9 @@
 // Cascade depth 1 discovers: customer, staff, rental
 //
 // Each source batch (payment rows) is accompanied by rows for the FK-referenced
-// tables. The receipt stores `rows_per_batch` per destination table, capturing
-// how many customer/staff/rental rows were produced alongside each payment batch.
-// Verify uses those exact counts to reproduce identical batch boundaries.
+// tables, in FK-join order and repeated across batches. Every row is hashed under
+// its own primary key, so batch composition never has to be reproduced: verify
+// reads each destination table in PK order and compares the two keyed sets.
 //
 // Interesting aspects:
 //   - payment.amount     DECIMAL(5,2)
@@ -32,6 +32,6 @@ pipeline "migrate_payment" {
 
     settings {
         create_missing_tables = true
-        batchz_size            = 100
+        batch_size            = 100
     }
 }

@@ -1,324 +1,421 @@
-use crate::error::ProducerError;
-use engine_state::MerkleStore;
+use crate::{error::ProducerError, profile};
+use engine_state::{MerkleStore, RowHashIter, RowHashLog, RowHashScope, error::StateStoreError};
 use model::{
     integrity::{
-        config::IntegrityConfig, hasher::RowHasher, merkle::MerkleTree,
-        receipt::VerificationReceipt,
+        algorithm::HashAlgorithm, config::IntegrityConfig, hasher::RowHasher,
+        merkle::MerkleAccumulator, receipt::VerificationReceipt, row_key::KeyedRowHash,
     },
     records::Record,
 };
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::{collections::HashMap, time::Instant};
+use tracing::{debug, warn};
 
-/// Cross-lane accumulator of unique row hashes per table.
-pub type LaneHashSink = Arc<Mutex<HashMap<String, HashSet<[u8; 32]>>>>;
+/// Leaves per parallel fold block.
+const FOLD_BLOCK_LEAVES: usize = 65_536;
 
+/// Upper bound on fold workers.
+const MAX_FOLD_WORKERS: usize = 8;
+
+/// Hashes migrated rows and streams the `(row key, row hash)` pairs to the
+/// row-hash store as each batch is produced.
 pub struct IntegrityState {
     /// One hasher per destination table, keyed by table name.
     hashers: HashMap<String, RowHasher>,
-    merkle_store: Arc<dyn MerkleStore>,
-    /// Subtree roots per batch in insertion order - primary table only.
-    batch_roots: HashMap<String, Vec<[u8; 32]>>,
-    /// Row counts per batch - primary table only.
-    rows_per_batch: HashMap<String, Vec<u64>>,
-    /// Individual row hashes - primary table only, populated when `store_row_hashes`.
-    row_hashes: HashMap<String, Vec<[u8; 32]>>,
-    /// Accumulated unique row hashes for cascade (non-primary) tables.
-    cascade_hashes: HashMap<String, HashSet<[u8; 32]>>,
-    /// When set, this lane accumulates ALL tables (including the primary) as sorted hashes.
-    lane_sink: Option<LaneHashSink>,
+    hash_log: Arc<RowHashLog>,
+    pipeline: String,
     config: IntegrityConfig,
-
-    // Fast-path index lookups to avoid HashMaps and String allocations per batch
+    /// Fast-path index lookups to avoid String allocations per batch.
     table_names: Vec<String>,
     table_indices: HashMap<String, usize>,
+    /// Latch so untracked rows are reported once, not once per batch.
+    warned_untracked: bool,
 }
 
 impl IntegrityState {
-    pub fn new(config: IntegrityConfig, merkle_store: Arc<dyn MerkleStore>) -> Self {
-        let mut hashers = HashMap::with_capacity(config.tables.len());
-        let mut batch_roots = HashMap::with_capacity(config.tables.len());
-        let mut rows_per_batch = HashMap::with_capacity(config.tables.len());
-        let mut row_hashes = HashMap::with_capacity(config.tables.len());
-        let mut cascade_hashes = HashMap::with_capacity(config.tables.len());
-        let mut table_names = Vec::with_capacity(config.tables.len());
-        let mut table_indices = HashMap::with_capacity(config.tables.len());
+    pub fn new(
+        config: IntegrityConfig,
+        hash_log: Arc<RowHashLog>,
+        pipeline: impl Into<String>,
+    ) -> Self {
+        let capacity = config.tables.len();
+        let mut hashers = HashMap::with_capacity(capacity);
+        let mut table_names = Vec::with_capacity(capacity);
+        let mut table_indices = HashMap::with_capacity(capacity);
 
         for (i, (table, cols)) in config.tables.iter().enumerate() {
             hashers.insert(
                 table.clone(),
                 RowHasher::new(cols.clone(), config.algorithm),
             );
-            batch_roots.insert(table.clone(), Vec::new());
-            rows_per_batch.insert(table.clone(), Vec::new());
-            if config.store_row_hashes {
-                row_hashes.insert(table.clone(), Vec::new());
-            }
-            cascade_hashes.insert(table.clone(), HashSet::new());
-
             table_names.push(table.clone());
             table_indices.insert(table.clone(), i);
         }
 
         Self {
             hashers,
-            merkle_store,
-            batch_roots,
-            rows_per_batch,
-            row_hashes,
-            cascade_hashes,
-            lane_sink: None,
+            hash_log,
+            pipeline: pipeline.into(),
             config,
             table_names,
             table_indices,
+            warned_untracked: false,
         }
     }
 
-    /// Run in lane mode: accumulate every table as sorted hashes and merge into
-    /// `sink` at finalization instead of writing per-lane receipts.
-    pub fn with_lane_sink(mut self, sink: LaneHashSink) -> Self {
-        self.lane_sink = Some(sink);
-        self
-    }
-
-    /// Hash all rows in `rows`, grouped by destination table.
-    /// Primary table rows are batched (insertion order); cascade table rows are
-    /// deduplicated and accumulated for a single sorted Merkle root at finalization.
-    pub fn hash_batch(&mut self, rows: &[Record]) {
+    /// Hash every row in `rows` and persist the results, grouped by destination table.
+    pub fn hash_batch(&mut self, rows: &[Record]) -> Result<(), StateStoreError> {
         if rows.is_empty() {
-            return;
+            return Ok(());
         }
 
-        // Group rows by destination table name.
-        let mut groups: Vec<Vec<&Record>> = vec![Vec::new(); self.table_names.len()];
+        let t_hash = Instant::now();
+        let hashed = tokio::task::block_in_place(|| self.hash_grouped(rows));
+        profile::record_stage("integrity: hash+key", t_hash.elapsed());
+
+        let t_store = Instant::now();
+        for (table_idx, entries) in hashed {
+            self.hash_log.append(
+                RowHashScope::Apply,
+                &self.pipeline,
+                &self.table_names[table_idx],
+                &entries,
+            )?;
+        }
+        profile::record_stage("integrity: append", t_store.elapsed());
+
+        Ok(())
+    }
+
+    /// Group the batch by destination table and hash each group.
+    fn hash_grouped(&mut self, rows: &[Record]) -> Vec<(usize, Vec<KeyedRowHash>)> {
+        let mut groups = vec![Vec::new(); self.table_names.len()];
+        let single_table = self.table_names.len() == 1;
+        let mut untracked = 0usize;
 
         for row in rows {
-            let idx = self.table_indices.get(row.table()).copied().unwrap_or(0);
-            groups[idx].push(row);
+            let idx = self
+                .table_indices
+                .get(row.table())
+                .copied()
+                .or_else(|| self.match_table_ci(row.table()));
+
+            match idx {
+                Some(idx) => groups[idx].push(row),
+                None if single_table => groups[0].push(row),
+                None => untracked += 1,
+            }
         }
+
+        if untracked > 0 && !self.warned_untracked {
+            self.warned_untracked = true;
+            warn!(
+                rows = untracked,
+                "integrity: rows belong to a table with no destination metadata; \
+                 they are excluded from the verification receipt"
+            );
+        }
+
+        let mut out = Vec::with_capacity(groups.len());
 
         for (idx, table_rows) in groups.into_iter().enumerate() {
             if table_rows.is_empty() {
                 continue;
             }
 
-            // Clone the (small) table name so it doesn't hold an immutable borrow
-            // of `self` across the `&mut self` `process_*` calls. This is once per
-            // group (a handful per batch), not per row.
-            let key = self.table_names[idx].clone();
-            let is_primary = key == self.config.primary_table && self.lane_sink.is_none();
+            let table = &self.table_names[idx];
+            let hasher = self.hashers.get_mut(table).expect("hasher pre-populated");
 
-            if is_primary {
-                self.process_primary_table(&key, &table_rows);
-            } else {
-                self.process_cascade_table(&key, &table_rows);
-            }
+            let entries = hasher.hash_rows(
+                &table_rows,
+                self.config.types(table),
+                self.config.keys(table),
+            );
+
+            out.push((idx, entries));
         }
+
+        out
     }
 
-    /// Build per-table Merkle receipts and persist them to the store.
-    /// `skipped_rows` is the coordinator-level skip counter for the primary receipt.
-    pub async fn save_receipts(
-        &mut self,
-        pipeline_name: &str,
-        run_id: &str,
-        skipped_rows: u64,
-    ) -> Result<(), ProducerError> {
-        if let Some(sink) = &self.lane_sink {
-            let mut guard = sink.lock().expect("lane hash sink poisoned");
-
-            // ZERO-COPY MERGE: Use `.drain()` to move the hashes into the shared sink
-            // without cloning thousands of 32-byte arrays in memory.
-            for (table, hashes) in self.cascade_hashes.drain() {
-                guard.entry(table).or_default().extend(hashes);
-            }
-            return Ok(());
-        }
-
-        self.save_primary_tables(pipeline_name, run_id, skipped_rows)
-            .await?;
-        self.save_cascade_tables(pipeline_name, run_id).await?;
-
-        Ok(())
-    }
-
-    /// Primary table: batch-based hashing (rows arrive in order
-    /// from the offset strategy, so batches align with verify's reads).
-    fn process_primary_table(&mut self, key: &str, rows: &[&Record]) {
-        let empty_map = HashMap::new();
-        let col_types = self.config.column_types.get(key).unwrap_or(&empty_map);
-        let hasher = self.hashers.get_mut(key).expect("hasher pre-populated");
-
-        let row_hashes = hasher.hash_rows(rows, col_types);
-
-        let subtree_root = MerkleTree::root_from_hashes(&row_hashes, self.config.algorithm);
-
-        // Maps are pre-populated per key in `new()`, so we avoid `.entry().or_default()`
-        // String allocations. A missing key is an internal invariant break; panic
-        // loudly rather than silently drop hashes and corrupt the receipt.
-        self.batch_roots
-            .get_mut(key)
-            .expect("integrity maps pre-populated per key in new()")
-            .push(subtree_root);
-        self.rows_per_batch
-            .get_mut(key)
-            .expect("integrity maps pre-populated per key in new()")
-            .push(rows.len() as u64);
-
-        if self.config.store_row_hashes {
-            self.row_hashes
-                .get_mut(key)
-                .expect("integrity maps pre-populated per key in new()")
-                .extend_from_slice(&row_hashes);
-        }
-    }
-
-    /// Cascade table: accumulate unique row hashes. The same row may be
-    /// referenced by multiple source batches.
-    fn process_cascade_table(&mut self, key: &str, rows: &[&Record]) {
-        let empty_map = HashMap::new();
-        let col_types = self.config.column_types.get(key).unwrap_or(&empty_map);
-        let hasher = self.hashers.get_mut(key).expect("hasher pre-populated");
-        let set = self
-            .cascade_hashes
-            .get_mut(key)
-            .expect("integrity maps pre-populated per key in new()");
-
-        for hash in hasher.hash_rows(rows, col_types) {
-            set.insert(hash);
-        }
-    }
-
-    async fn save_primary_tables(
-        &self,
-        pipeline_name: &str,
-        run_id: &str,
-        skipped_rows: u64,
-    ) -> Result<(), ProducerError> {
-        for (table_name, batch_roots) in &self.batch_roots {
-            if batch_roots.is_empty() {
-                continue;
-            }
-
-            let table_root = MerkleTree::root_from_hashes(batch_roots, self.config.algorithm);
-            let column_order = self
-                .config
-                .tables
-                .get(table_name)
-                .cloned()
-                .unwrap_or_default();
-            let rows_per_batch = self
-                .rows_per_batch
-                .get(table_name)
-                .cloned()
-                .unwrap_or_default();
-            let total_rows: u64 = rows_per_batch.iter().sum();
-            let stored_row_hashes = if self.config.store_row_hashes {
-                self.row_hashes.get(table_name).cloned()
-            } else {
-                None
-            };
-
-            let receipt = VerificationReceipt {
-                run_id: run_id.to_string(),
-                pipeline_name: pipeline_name.to_string(),
-                table_name: table_name.clone(),
-                table_root,
-                batch_roots: batch_roots.clone(),
-                column_order,
-                total_rows,
-                skipped_rows,
-                rows_per_batch,
-                sorted_hashes: false,
-                algorithm: self.config.algorithm,
-                created_at: chrono::Utc::now(),
-                row_hashes: stored_row_hashes,
-            };
-            self.merkle_store.save_receipt(&receipt).await?;
-        }
-        Ok(())
-    }
-
-    async fn save_cascade_tables(
-        &self,
-        pipeline_name: &str,
-        run_id: &str,
-    ) -> Result<(), ProducerError> {
-        for (table_name, hash_set) in &self.cascade_hashes {
-            if hash_set.is_empty() {
-                continue;
-            }
-
-            save_sorted_receipt(
-                &self.merkle_store,
-                &self.config,
-                pipeline_name,
-                run_id,
-                table_name,
-                hash_set,
-            )
-            .await?;
-        }
-        Ok(())
+    /// Case-insensitive fallback lookup for a destination table.
+    fn match_table_ci(&self, table: &str) -> Option<usize> {
+        self.table_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(table))
     }
 }
 
-/// Build and persist one order-independent (sorted) Merkle receipt for `table`
-/// from a set of unique row hashes.
-async fn save_sorted_receipt(
-    merkle_store: &Arc<dyn MerkleStore>,
+/// Drop any row hashes left over from a previous run of this pipeline.
+pub fn reset_row_hashes(
     config: &IntegrityConfig,
-    pipeline_name: &str,
-    run_id: &str,
-    table_name: &str,
-    hash_set: &HashSet<[u8; 32]>,
-) -> Result<(), ProducerError> {
-    let mut sorted_hashes: Vec<[u8; 32]> = hash_set.iter().copied().collect();
-    sorted_hashes.sort_unstable();
-
-    let total_rows = sorted_hashes.len() as u64;
-    let table_root = MerkleTree::root_from_hashes(&sorted_hashes, config.algorithm);
-    let column_order = config.tables.get(table_name).cloned().unwrap_or_default();
-
-    let receipt = VerificationReceipt {
-        run_id: run_id.to_string(),
-        pipeline_name: pipeline_name.to_string(),
-        table_name: table_name.to_string(),
-        table_root,
-        batch_roots: vec![table_root],
-        column_order,
-        total_rows,
-        skipped_rows: 0,
-        rows_per_batch: vec![total_rows],
-        sorted_hashes: true,
-        algorithm: config.algorithm,
-        created_at: chrono::Utc::now(),
-        row_hashes: None,
-    };
-    merkle_store.save_receipt(&receipt).await?;
+    hash_log: &RowHashLog,
+    pipeline: &str,
+) -> Result<(), StateStoreError> {
+    for table in config.tables.keys() {
+        hash_log.clear(RowHashScope::Apply, pipeline, table)?;
+    }
     Ok(())
 }
 
-/// Write the combined per-table receipts after every lane has merged its hashes into `sink`.
-pub async fn finalize_lane_sink(
-    sink: &LaneHashSink,
+/// Fold each table's stored row hashes into a Merkle root and write its receipt.
+pub async fn finalize_receipts(
     config: &IntegrityConfig,
-    merkle_store: &Arc<dyn MerkleStore>,
+    hash_log: &RowHashLog,
+    receipts: &Arc<dyn MerkleStore>,
     pipeline_name: &str,
+    primary_table: &str,
     run_id: &str,
+    skipped_rows: u64,
 ) -> Result<(), ProducerError> {
-    let tables = std::mem::take(&mut *sink.lock().expect("lane hash sink poisoned"));
+    for table in config.tables.keys() {
+        let algorithm = config.algorithm;
 
-    for (table_name, hash_set) in tables {
-        save_sorted_receipt(
-            merkle_store,
-            config,
-            pipeline_name,
-            run_id,
-            &table_name,
-            &hash_set,
+        let (total_rows, table_root) = tokio::task::block_in_place(|| {
+            let t_seal = Instant::now();
+            hash_log.seal(RowHashScope::Apply, pipeline_name, table)?;
+            profile::record_stage("integrity: seal (sort)", t_seal.elapsed());
+
+            let t_fold = Instant::now();
+            let iter = hash_log.stream(RowHashScope::Apply, pipeline_name, table)?;
+            let folded = fold_root(iter, algorithm)?;
+            profile::record_stage("integrity: merkle fold", t_fold.elapsed());
+
+            Ok::<_, StateStoreError>(folded)
+        })?;
+
+        // A table with no rows produced no receipt before.
+        if total_rows == 0 {
+            continue;
+        }
+
+        // `skipped_rows` is a pipeline-wide DLQ count, it belongs to the primary destination table.
+        let skipped_rows = if table.eq_ignore_ascii_case(primary_table) {
+            skipped_rows
+        } else {
+            0
+        };
+
+        let receipt = VerificationReceipt {
+            run_id: run_id.to_string(),
+            pipeline_name: pipeline_name.to_string(),
+            table_name: table.clone(),
+            table_root,
+            column_order: config.columns(table).to_vec(),
+            key_columns: config.keys(table).to_vec(),
+            total_rows,
+            skipped_rows,
+            algorithm,
+            created_at: chrono::Utc::now(),
+        };
+
+        debug!(
+            table,
+            rows = total_rows,
+            root = %hex8(&table_root),
+            "integrity receipt written"
+        );
+        receipts.save_receipt(&receipt).await?;
+    }
+    Ok(())
+}
+
+/// Fold a sorted row-hash stream into `(leaf count, root)`.
+fn fold_root(
+    mut iter: RowHashIter,
+    algorithm: HashAlgorithm,
+) -> Result<(u64, [u8; 32]), StateStoreError> {
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(MAX_FOLD_WORKERS);
+
+    let mut root = MerkleAccumulator::new(algorithm);
+    let mut drained = false;
+
+    // Pre-allocate blocks to avoid massive allocations in the while loop.
+    let mut idle_blocks = vec![Vec::with_capacity(FOLD_BLOCK_LEAVES); workers];
+
+    while !drained {
+        let mut active_blocks = Vec::with_capacity(workers);
+
+        // Fill up to `workers` blocks from the idle pool
+        while let Some(mut block) = idle_blocks.pop() {
+            block.clear();
+            for entry in iter.by_ref().take(FOLD_BLOCK_LEAVES) {
+                block.push(entry?);
+            }
+
+            let partial = block.len() < FOLD_BLOCK_LEAVES;
+            if !block.is_empty() {
+                active_blocks.push(block);
+            }
+            if partial {
+                drained = true;
+                break;
+            }
+        }
+
+        if active_blocks.is_empty() {
+            break;
+        }
+
+        let partial_results: Vec<(MerkleAccumulator, Vec<KeyedRowHash>)> =
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = active_blocks
+                    .into_iter()
+                    .map(|block| {
+                        scope.spawn(move || {
+                            let mut acc = MerkleAccumulator::new(algorithm);
+                            for entry in &block {
+                                acc.push_row(&entry.key, &entry.hash);
+                            }
+                            (acc, block) // Return the buffer so we can recycle it
+                        })
+                    })
+                    .collect();
+
+                handles
+                    .into_iter()
+                    .map(|handle| handle.join())
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .map_err(|_| StateStoreError::Storage("integrity fold worker panicked".into()))?;
+
+        // Merge results and push recycled blocks back into the idle pool
+        for (partial_acc, recycled_block) in partial_results {
+            root.merge(partial_acc);
+            idle_blocks.push(recycled_block);
+        }
+    }
+
+    Ok((root.leaf_count(), root.finish()))
+}
+
+/// First 8 bytes of a root, for logs.
+fn hex8(root: &[u8; 32]) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(16);
+    for byte in root.iter().take(8) {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use model::core::value::{FieldValue, Value};
+    use model::records::OpType;
+
+    fn row(table: &str, id: i64) -> Record {
+        Record::from_fields(
+            table,
+            vec![FieldValue {
+                name: "id".to_string(),
+                value: Some(Value::Int(id)),
+                data_type: Value::Int(id).data_type(),
+            }],
+            OpType::Insert,
         )
-        .await?;
     }
-    Ok(())
+
+    /// A cascade row whose table name differs only in case from the tracked
+    /// destination must still land in that table's group - not get dropped as
+    /// untracked, which would surface as a false `extra` at verify time.
+    #[test]
+    fn rows_route_to_a_case_insensitively_matching_table() {
+        let mut tables = HashMap::new();
+        tables.insert("Actor".to_string(), vec!["id".to_string()]);
+        tables.insert("Film".to_string(), vec!["id".to_string()]);
+        let config = IntegrityConfig::new(HashAlgorithm::Sha256, tables);
+
+        // hash_grouped performs no IO, so the log root is never touched.
+        let hash_log = Arc::new(RowHashLog::new("unused"));
+        let mut state = IntegrityState::new(config, hash_log, "p");
+
+        let grouped = state.hash_grouped(&[row("actor", 1)]);
+
+        assert_eq!(grouped.len(), 1, "the row must be grouped, not dropped");
+        let (idx, entries) = &grouped[0];
+        assert_eq!(entries.len(), 1);
+        assert!(
+            state.table_names[*idx].eq_ignore_ascii_case("actor"),
+            "routed to the case-insensitively matching table"
+        );
+        assert!(
+            !state.warned_untracked,
+            "a case-only difference is not an untracked table"
+        );
+    }
+
+    /// A row for a table that is genuinely not tracked is still dropped and
+    /// flagged, in a multi-table (cascade) config.
+    #[test]
+    fn genuinely_unknown_table_is_reported_untracked() {
+        let mut tables = HashMap::new();
+        tables.insert("actor".to_string(), vec!["id".to_string()]);
+        tables.insert("film".to_string(), vec!["id".to_string()]);
+        let config = IntegrityConfig::new(HashAlgorithm::Sha256, tables);
+
+        let hash_log = Arc::new(RowHashLog::new("unused"));
+        let mut state = IntegrityState::new(config, hash_log, "p");
+
+        let grouped = state.hash_grouped(&[row("category", 1)]);
+
+        assert!(grouped.is_empty(), "no group for an unknown table");
+        assert!(state.warned_untracked);
+    }
+
+    /// Folding in parallel must produce exactly the tree a single pass builds.
+    #[test]
+    fn parallel_fold_matches_a_single_pass() {
+        let algorithm = HashAlgorithm::Sha256;
+
+        // Several full blocks plus a partial one, so both paths are exercised.
+        let rows: Vec<KeyedRowHash> = (0..FOLD_BLOCK_LEAVES * 3 + 7)
+            .map(|i| KeyedRowHash {
+                key: (i as u64).to_be_bytes().to_vec(),
+                hash: [(i % 251) as u8; 32],
+            })
+            .collect();
+
+        let mut sequential = MerkleAccumulator::new(algorithm);
+        for row in &rows {
+            sequential.push_row(&row.key, &row.hash);
+        }
+        let expected = (sequential.leaf_count(), sequential.finish());
+
+        let iter: RowHashIter = Box::new(rows.into_iter().map(Ok));
+        let actual = fold_root(iter, algorithm).expect("fold");
+
+        assert_eq!(actual, expected);
+    }
+
+    /// The leaf count and root of an empty table must still be well defined.
+    #[test]
+    fn parallel_fold_handles_an_empty_stream() {
+        let algorithm = HashAlgorithm::Sha256;
+        let expected = (0, MerkleAccumulator::new(algorithm).finish());
+
+        let iter: RowHashIter = Box::new(std::iter::empty());
+        assert_eq!(fold_root(iter, algorithm).expect("fold"), expected);
+    }
+
+    /// A read failure mid-stream must surface, not truncate the tree.
+    #[test]
+    fn parallel_fold_propagates_a_read_error() {
+        let rows = (0..10).map(|i| {
+            Ok(KeyedRowHash {
+                key: vec![i],
+                hash: [i; 32],
+            })
+        });
+        let failing = rows.chain(std::iter::once(Err(StateStoreError::Storage(
+            "boom".to_string(),
+        ))));
+
+        let iter: RowHashIter = Box::new(failing);
+        assert!(fold_root(iter, HashAlgorithm::Sha256).is_err());
+    }
 }

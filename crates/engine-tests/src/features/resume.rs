@@ -2,7 +2,10 @@
 mod tests {
     use crate::harness::smql::feature_smql;
     use crate::{
-        harness::runner::{DbType, get_row_count, run_smql, run_smql_with_pause},
+        harness::runner::{
+            DbType, get_row_count, run_smql, run_smql_with_pause, run_smql_with_pause_mode,
+            run_verify_smql,
+        },
         reset_postgres_schema,
     };
     use tracing_test::traced_test;
@@ -118,5 +121,34 @@ mod tests {
             total,
             "no duplicates"
         );
+    }
+
+    /// An interrupted integrity run still produces a receipt for the *whole*
+    /// table once resumed.
+    #[traced_test]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn integrity_receipt_survives_pause_and_resume() {
+        reset_postgres_schema().await;
+        let smql = smql("film_integrity_resume");
+        let total = get_row_count("film", "sakila", DbType::MySql).await;
+
+        // Run 1: hash part of the table, then stop gracefully.
+        run_smql_with_pause_mode(&smql, "film_integrity_resume", 100, true).await;
+        let partial = get_row_count("film_integrity_resume", "testdb", DbType::Postgres).await;
+        assert!(
+            partial > 0 && partial < total,
+            "expected partial progress after pause, got {partial} of {total}"
+        );
+
+        // Run 2: resume with integrity still on, then verify.
+        run_smql(&smql, true).await.expect("resume run failed");
+        assert_eq!(
+            get_row_count("film_integrity_resume", "testdb", DbType::Postgres).await,
+            total
+        );
+
+        run_verify_smql(&smql)
+            .await
+            .expect("verify should match after a resumed integrity run");
     }
 }

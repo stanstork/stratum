@@ -2,7 +2,7 @@ flowchart TD
     START([User: stratum apply -c config.smql]) --> PARSE[smql-syntax<br/>Parse SMQL -> AST]
     PARSE --> BUILD_PLAN[engine-config<br/>AST -> ExecutionPlan<br/>resolve env vars, validate settings]
     BUILD_PLAN --> HASH["Deterministic plan hash<br/>run_id = run-&lt;hash16&gt;"]
-    HASH --> INIT[Initialize ExecutionContext<br/>connection pool + SledStateStore<br/>EnvContext]
+    HASH --> INIT[Initialize ExecutionContext<br/>connection pool + SledStateStore<br/>RowHashLog + EnvContext]
 
     INIT --> DAG_BUILD[Build DAG<br/>from after= declarations<br/>topological sort -> levels]
 

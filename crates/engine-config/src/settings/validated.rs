@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn test_builder() {
-        let settings = ValidatedSettingsBuilder::new(true, IntegrityMode::BatchHashes)
+        let settings = ValidatedSettingsBuilder::new(true, IntegrityMode::On)
             .batch_size(500)
             .create_missing_tables(true)
             .build();

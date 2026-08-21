@@ -182,7 +182,7 @@ fn stage_from_checkpoint(stage: &CheckpointStage) -> ProgressStage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use engine_state::sled_store::SledStateStore;
+    use engine_state::SledStateStore;
     use model::pagination::cursor::Cursor;
     use tempfile::tempdir;
 

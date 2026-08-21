@@ -3,11 +3,14 @@
 
 pub mod calibration;
 pub mod error;
-pub mod merkle_store;
+pub mod log;
 pub mod models;
-pub mod sled_store;
 pub mod store;
+pub mod ticker;
 
 pub use calibration::{CalibrationData, WriteClass};
-pub use merkle_store::MerkleStore;
-pub use store::StateStore;
+pub use log::{RowHashIter, RowHashLog, RowHashScope};
+pub use store::SledStateStore;
+pub use store::merkle::MerkleStore;
+pub use store::state::StateStore;
+pub use ticker::{PROGRESS_INTERVAL, Ticker};

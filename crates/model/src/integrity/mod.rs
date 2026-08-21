@@ -6,3 +6,4 @@ pub mod hasher;
 pub mod merkle;
 pub mod receipt;
 pub mod result;
+pub mod row_key;

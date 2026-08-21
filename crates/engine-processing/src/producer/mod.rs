@@ -23,7 +23,6 @@ use crate::{
 };
 use engine_core::context::env::EnvContext;
 use engine_infra::retry::RetryPolicy;
-use engine_state::MerkleStore;
 use engine_wasm::registry::PluginRegistry;
 use model::{
     execution::pipeline::Pipeline, pagination::cursor::Cursor,
@@ -121,7 +120,6 @@ pub struct Producer {
     coordinator: BatchCoordinator,
 
     // State
-    pipeline_name: String,
     cursor: Cursor,
     mode: ProducerMode,
     ids: ItemId,
@@ -172,9 +170,11 @@ impl Producer {
         let mut coordinator = BatchCoordinator::new(batch_tx, byte_budget, state_manager);
 
         if let Some(integrity) = config.integrity.take() {
-            let merkle_store = ctx.state.clone() as Arc<dyn MerkleStore>;
-            coordinator =
-                coordinator.enable_integrity(integrity, merkle_store, config.lane_sink.clone());
+            coordinator = coordinator.enable_integrity(
+                integrity,
+                ctx.exec_ctx.hash_log().clone(),
+                &ctx.pipeline.name,
+            );
         }
 
         Ok(Self {
@@ -184,7 +184,6 @@ impl Producer {
             cursor: ctx.cursor.clone(),
             mode: ProducerMode::Idle,
             ids,
-            pipeline_name: ctx.pipeline.name.clone(),
             config,
         })
     }
@@ -221,15 +220,7 @@ impl Producer {
         match self.mode {
             ProducerMode::Idle => Ok(ProducerStatus::Idle),
             ProducerMode::Finished => Ok(ProducerStatus::Finished),
-            ProducerMode::Snapshot => {
-                let status = self.process_snapshot_batch().await?;
-                if status == ProducerStatus::Finished {
-                    self.coordinator
-                        .finalize_integrity(&self.pipeline_name)
-                        .await?;
-                }
-                Ok(status)
-            }
+            ProducerMode::Snapshot => self.process_snapshot_batch().await,
             ProducerMode::Cdc => {
                 // CDC logic here
                 tokio::time::sleep(self.config.idle_poll_interval).await;

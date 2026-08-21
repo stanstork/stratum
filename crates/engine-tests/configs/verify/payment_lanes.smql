@@ -1,0 +1,20 @@
+// Verify: multi-lane migration
+//
+// Four parallel range lanes over payment.payment_id. Each lane reads a disjoint
+// key range, so rows reach the destination interleaved and out of key order -
+// the case positional receipts could not localize (they collapsed every lane
+// into one sorted root with no per-row detail).
+//
+// Keyed receipts make lane layout irrelevant: every lane writes into the same
+// per-table keyed set, and the root is folded from it once all lanes finish.
+
+pipeline "migrate_payment_lanes" {
+    from { connection = connection.src  table = "payment" }
+    to   { connection = connection.dst  table = "payment" }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 500
+        lanes                 = 4
+    }
+}

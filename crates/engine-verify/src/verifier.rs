@@ -14,17 +14,23 @@ use engine_schema::{
     plan::SchemaObjectFlags,
     type_registry::{Dialect, TypeRegistry},
 };
-use engine_state::{MerkleStore, sled_store::SledStateStore};
+use engine_state::{
+    MerkleStore, PROGRESS_INTERVAL, RowHashIter, RowHashLog, RowHashScope, SledStateStore, Ticker,
+};
 use model::{
     execution::{
-        pipeline::{Pagination, Pipeline},
+        pipeline::Pipeline,
         references::{DataMode, GraphReferences},
     },
     integrity::{
         hasher::RowHasher,
-        merkle::MerkleTree,
+        merkle::MerkleAccumulator,
         receipt::VerificationReceipt,
-        result::{DivergentBatch, DivergentRow, VerificationResult},
+        result::{
+            Divergence, DivergenceKind, DivergenceSummary, MAX_REPORTED_DIVERGENCES,
+            VerificationResult,
+        },
+        row_key::{KeyedRowHash, describe},
     },
     pagination::cursor::Cursor,
     records::Record,
@@ -34,106 +40,102 @@ use query_builder::offsets::{OffsetStrategy, OffsetStrategyFactory};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
+    time::Instant,
 };
-use tracing::warn;
+use tracing::{debug, info, warn};
+
+/// Rows fetched per destination read while re-hashing.
+/// Independent of the migration's batch size.
+const READ_BATCH_ROWS: usize = 1000;
+
+/// Rows between clock reads in the per-row diff loop.
+const DIFF_CLOCK_SAMPLE: u64 = 1 << 16;
+
+/// Outcome of merge-joining the receipt's committed set against the destination.
+struct DiffOutcome {
+    actual_root: [u8; 32],
+    summary: DivergenceSummary,
+    divergences: Vec<Divergence>,
+    expected_seen: u64,
+}
 
 pub async fn verify(
     plan: ExecutionPlan,
     env: Arc<EnvContext>,
 ) -> Result<Vec<VerificationResult>, VerifyError> {
-    let state = init_state()?;
-    let exec_ctx = ExecutionContext::new(&plan, state.clone(), env);
+    let (state, hash_log) = init_state()?;
+    let exec_ctx = ExecutionContext::new(&plan, state.clone(), hash_log.clone(), env);
     let mut results: Vec<VerificationResult> = Vec::new();
 
     for pipeline in &plan.pipelines {
-        verify_pipeline(pipeline, &exec_ctx, &state, &mut results).await?;
+        verify_pipeline(pipeline, &exec_ctx, &state, &hash_log, &mut results).await?;
     }
 
     Ok(results)
 }
 
-fn init_state() -> Result<Arc<SledStateStore>, VerifyError> {
-    let home_dir = dirs::home_dir().ok_or_else(|| {
-        VerifyError::InitializationError("Failed to determine home directory".to_string())
-    })?;
-    let path = home_dir.join(".stratum/state");
+fn init_state() -> Result<(Arc<SledStateStore>, Arc<RowHashLog>), VerifyError> {
+    let state_dir = dirs::home_dir()
+        .ok_or_else(|| {
+            VerifyError::InitializationError("Failed to determine home directory".to_string())
+        })?
+        .join(".stratum/state");
 
-    SledStateStore::open(path)
+    let state = SledStateStore::open(&state_dir)
         .map(Arc::new)
-        .map_err(|e| VerifyError::InitializationError(e.to_string()))
+        .map_err(|e| VerifyError::InitializationError(e.to_string()))?;
+
+    Ok((state, Arc::new(RowHashLog::in_state_dir(&state_dir))))
 }
 
 async fn verify_pipeline(
     pipeline: &Pipeline,
     exec_ctx: &ExecutionContext,
     state: &Arc<SledStateStore>,
+    hash_log: &RowHashLog,
     results: &mut Vec<VerificationResult>,
 ) -> Result<(), VerifyError> {
     let driver = exec_ctx
         .resolve_driver(&pipeline.destination.connection)
         .await?;
     let mapping = TransformationMetadata::new(pipeline);
-    let resolved_pagination = resolve_pagination(&pipeline.source.pagination, &mapping);
-
-    if resolved_pagination.is_none() {
-        warn!(
-            pipeline = %pipeline.name,
-            "pipeline has no `paginate` block; verification requires deterministic row \
-             ordering to reproduce batch boundaries, so results may show false mismatches. \
-             Add a `paginate` block for reliable verification."
-        );
-    }
-
-    let offset_strategy = OffsetStrategyFactory::from_pagination(&resolved_pagination)
-        .map_err(|e| VerifyError::InitializationError(e.to_string()))?;
 
     let cascade_meta = get_graph_expansion(pipeline, &driver, &mapping).await?;
     let cascade_tables = resolve_cascade_tables(pipeline, &mapping, &cascade_meta);
 
     // Filter empty names and deduplicate so each table is verified exactly once.
     let mut seen = HashSet::new();
-    let mut all_tables = Vec::new();
-
-    let mut add_table = |t: &str| {
-        if !t.is_empty() && seen.insert(t.to_string()) {
-            all_tables.push(t.to_string());
-        }
-    };
-
-    add_table(&pipeline.destination.table);
-    for t in cascade_tables {
-        add_table(&t);
-    }
+    let all_tables = std::iter::once(pipeline.destination.table.as_str())
+        .chain(cascade_tables.iter().map(|s| s.as_str()))
+        .filter(|t| !t.is_empty() && seen.insert(*t))
+        .map(String::from)
+        .collect::<Vec<_>>();
 
     for table in all_tables {
         // Load the receipt written by the most recent `apply --integrity`.
-        match state.load_receipt(&pipeline.name, &table).await? {
-            Some(receipt) => {
-                let result =
-                    verify_table(&driver, &table, &receipt, offset_strategy.clone()).await?;
-                results.push(result);
-            }
-            None => {
-                results.push(VerificationResult::NoPriorRun {
-                    pipeline_name: pipeline.name.clone(),
-                });
-            }
-        }
+        let Some(receipt) = state.load_receipt(&pipeline.name, &table).await? else {
+            results.push(VerificationResult::NoPriorRun {
+                pipeline: pipeline.name.clone(),
+            });
+            continue;
+        };
+
+        results.push(verify_table(&driver, &pipeline.name, &table, &receipt, hash_log).await?);
     }
 
     Ok(())
 }
 
-/// Re-read all rows of `table` from the destination, hash them in batches of
-/// `receipt.rows_per_batch` using the `column_order` and `algorithm` from the receipt,
-/// and compare the resulting subtree roots against `receipt.batch_roots`.
+/// Re-read every row of `table` from the destination, key and hash each one,
+/// then diff that keyed set against the set the migration committed.
 async fn verify_table(
     driver: &DriverRef,
+    pipeline_name: &str,
     table: &str,
     receipt: &VerificationReceipt,
-    offset_strategy: Arc<dyn OffsetStrategy>,
+    hash_log: &RowHashLog,
 ) -> Result<VerificationResult, VerifyError> {
-    let start = std::time::Instant::now();
+    let start = Instant::now();
 
     let meta = fetch_table_metadata(driver, table).await?;
     let col_types: HashMap<String, String> = meta
@@ -142,161 +144,43 @@ async fn verify_table(
         .map(|c| (c.name.clone(), c.data_type.clone()))
         .collect();
 
-    // Pick the read strategy to reproduce the migration's read of this table.
-    let offset_strategy = if receipt.sorted_hashes {
-        OffsetStrategyFactory::keyset_over_pk(
-            OffsetStrategyFactory::default_strategy(),
-            table,
-            &meta.primary_keys,
-        )
-    } else {
-        OffsetStrategyFactory::keyset_over_pk(offset_strategy, table, &meta.primary_keys)
-    };
+    let offset_strategy = OffsetStrategyFactory::keyset_over_pk(
+        OffsetStrategyFactory::default_strategy(),
+        table,
+        &meta.primary_keys,
+    );
     let table_reader = create_table_reader(driver, meta, offset_strategy)?;
-    let (actual_batch_roots, actual_row_hashes_by_batch) =
-        read_and_hash(&table_reader, receipt, &col_types).await?;
 
+    // Stage the destination's keyed hashes so both sides can be walked in the
+    // same sorted key order without holding either set in memory.
+    hash_log.clear(RowHashScope::Verify, pipeline_name, table)?;
+
+    let outcome = stage_and_diff(&table_reader, receipt, &col_types, pipeline_name, hash_log).await;
+
+    if let Err(e) = hash_log.clear(RowHashScope::Verify, pipeline_name, table) {
+        warn!(table, error = %e, "failed to clear verify scratch row hashes");
+    }
+
+    let DiffOutcome {
+        actual_root,
+        summary,
+        divergences,
+        expected_seen,
+    } = outcome?;
     let duration_ms = start.elapsed().as_millis() as u64;
-    Ok(build_result(
-        receipt,
-        actual_batch_roots,
-        actual_row_hashes_by_batch,
-        duration_ms,
-    ))
-}
 
-/// Delegates to the appropriate hashing strategy based on whether it is a
-/// cascade table (`sorted_hashes = true`) or a primary table.
-async fn read_and_hash(
-    reader: &TableReader,
-    receipt: &VerificationReceipt,
-    col_types: &HashMap<String, String>,
-) -> Result<(Vec<[u8; 32]>, Vec<Vec<[u8; 32]>>), VerifyError> {
-    if receipt.sorted_hashes {
-        read_and_hash_sorted(reader, receipt, col_types).await
-    } else {
-        read_and_hash_batched(reader, receipt, col_types).await
-    }
-}
-
-/// Cascade table: read all rows, sort hashes, build single Merkle root.
-/// This matches the migration path which accumulates unique row hashes,
-/// sorts them, and stores a single root - making the result order-independent.
-async fn read_and_hash_sorted(
-    reader: &TableReader,
-    receipt: &VerificationReceipt,
-    col_types: &HashMap<String, String>,
-) -> Result<(Vec<[u8; 32]>, Vec<Vec<[u8; 32]>>), VerifyError> {
-    let mut hasher = RowHasher::new(receipt.column_order.clone(), receipt.algorithm);
-    let mut all_hashes = Vec::new();
-    let mut cursor = Cursor::None;
-    let limit = 1000usize;
-
-    loop {
-        let (rows, next_cursor) = reader.next_batch(cursor, limit).await?;
-        all_hashes.extend(
-            rows.iter()
-                .map(|r| hash_row_coerced(&mut hasher, r, col_types)),
-        );
-
-        match next_cursor {
-            None => break,
-            Some(c) => cursor = c,
-        }
+    if expected_seen != receipt.total_rows {
+        return Ok(VerificationResult::LogUnavailable {
+            pipeline: pipeline_name.to_string(),
+            table: table.to_string(),
+            expected_rows: receipt.total_rows,
+            found_rows: expected_seen,
+        });
     }
 
-    all_hashes.sort_unstable();
-    let root = MerkleTree::root_from_hashes(&all_hashes, receipt.algorithm);
+    let is_match = summary.is_clean() && actual_root == receipt.table_root;
 
-    // No per-batch row hashes for cascade (sorted mode); row-level verify N/A.
-    Ok((vec![root], vec![all_hashes]))
-}
-
-/// Primary table: batch-based verification.
-/// Uses `receipt.rows_per_batch` as the limit for each fetch so that batch
-/// boundaries match exactly what the apply path produced.
-/// Row hashes are only collected when the receipt carries them (`--full-integrity`).
-async fn read_and_hash_batched(
-    reader: &TableReader,
-    receipt: &VerificationReceipt,
-    col_types: &HashMap<String, String>,
-) -> Result<(Vec<[u8; 32]>, Vec<Vec<[u8; 32]>>), VerifyError> {
-    let need_row_hashes = receipt.row_hashes.is_some();
-    let mut hasher = RowHasher::new(receipt.column_order.clone(), receipt.algorithm);
-    let mut actual_roots = Vec::with_capacity(receipt.rows_per_batch.len());
-    let mut actual_row_hashes_by_batch: Vec<Vec<[u8; 32]>> = if need_row_hashes {
-        Vec::with_capacity(receipt.rows_per_batch.len())
-    } else {
-        Vec::new()
-    };
-    let mut cursor = Cursor::None;
-
-    for &expected_rows in &receipt.rows_per_batch {
-        let limit = expected_rows as usize;
-        let (rows, next_cursor) = reader.next_batch(cursor.clone(), limit).await?;
-
-        if !rows.is_empty() {
-            let row_hashes: Vec<[u8; 32]> = rows
-                .iter()
-                .map(|r| hash_row_coerced(&mut hasher, r, col_types))
-                .collect();
-            let subtree_root = MerkleTree::root_from_hashes(&row_hashes, receipt.algorithm);
-            actual_roots.push(subtree_root);
-            if need_row_hashes {
-                actual_row_hashes_by_batch.push(row_hashes);
-            }
-        }
-
-        match next_cursor {
-            None => break,
-            Some(c) => cursor = c,
-        }
-    }
-
-    // Sentinel check: fetch one row past the last receipt boundary.
-    // A non-empty sentinel result means the destination has more data than recorded.
-    let (sentinel_rows, _) = reader.next_batch(cursor, 1).await?;
-    if !sentinel_rows.is_empty() {
-        actual_roots.push([0xffu8; 32]);
-    }
-
-    Ok((actual_roots, actual_row_hashes_by_batch))
-}
-
-/// Compare per-batch roots and build the final `VerificationResult`.
-/// Row-level detail is filled into `DivergentBatch.divergent_rows` only when
-/// both the receipt and `actual_row_hashes_by_batch` carry per-row hashes
-/// (i.e. the run used `--full-integrity`).
-fn build_result(
-    receipt: &VerificationReceipt,
-    actual_batch_roots: Vec<[u8; 32]>,
-    actual_row_hashes_by_batch: Vec<Vec<[u8; 32]>>,
-    duration_ms: u64,
-) -> VerificationResult {
-    let actual_root = MerkleTree::root_from_hashes(&actual_batch_roots, receipt.algorithm);
-
-    // Batch count mismatch means the destination has a different number of rows.
-    // Report as a single divergent span covering the whole table.
-    if actual_batch_roots.len() != receipt.batch_roots.len() {
-        return VerificationResult::Mismatch {
-            receipt: receipt.clone(),
-            actual_root,
-            divergent_batches: vec![DivergentBatch {
-                batch_index: 0,
-                expected_root: receipt.table_root,
-                actual_root,
-                row_start: 0,
-                row_end: receipt.total_rows,
-                divergent_rows: vec![],
-            }],
-            duration_ms,
-        };
-    }
-
-    let divergent_batches =
-        find_divergent_batches(receipt, &actual_batch_roots, &actual_row_hashes_by_batch);
-
-    if divergent_batches.is_empty() {
+    Ok(if is_match {
         VerificationResult::Match {
             receipt: receipt.clone(),
             duration_ms,
@@ -305,79 +189,267 @@ fn build_result(
         VerificationResult::Mismatch {
             receipt: receipt.clone(),
             actual_root,
-            divergent_batches,
+            summary,
+            divergences,
             duration_ms,
         }
-    }
+    })
 }
 
-fn find_divergent_batches(
+/// Stage the destination's rows, then diff them against the receipt's set.
+async fn stage_and_diff(
+    reader: &TableReader,
     receipt: &VerificationReceipt,
-    actual_batch_roots: &[[u8; 32]],
-    actual_row_hashes_by_batch: &[Vec<[u8; 32]>],
-) -> Vec<DivergentBatch> {
-    receipt
-        .batch_roots
-        .iter()
-        .zip(actual_batch_roots.iter())
-        .enumerate()
-        .filter(|(_, (expected, actual))| expected != actual)
-        .map(|(i, (expected, actual))| {
-            let row_start: u64 = receipt.rows_per_batch[..i].iter().sum();
-            let row_end = (row_start + receipt.rows_per_batch[i]).min(receipt.total_rows);
+    col_types: &HashMap<String, String>,
+    pipeline_name: &str,
+    hash_log: &RowHashLog,
+) -> Result<DiffOutcome, VerifyError> {
+    let dest_rows = stage_destination(reader, receipt, col_types, pipeline_name, hash_log).await?;
 
-            let divergent_rows = match &receipt.row_hashes {
-                Some(receipt_row_hashes) => {
-                    let batch_actual = actual_row_hashes_by_batch
-                        .get(i)
-                        .map(|v| v.as_slice())
-                        .unwrap_or(&[]);
-                    find_divergent_rows(row_start, row_end, receipt_row_hashes, batch_actual)
-                }
-                None => vec![],
-            };
+    // Both sides have to be walked in the same order; sealing is what puts the
+    // staged destination into the receipt set's key order.
+    let table = &receipt.table_name;
+    hash_log.seal(RowHashScope::Verify, pipeline_name, table)?;
 
-            DivergentBatch {
-                batch_index: i as u64,
-                expected_root: *expected,
-                actual_root: *actual,
-                row_start,
-                row_end,
-                divergent_rows,
-            }
-        })
-        .collect()
+    let expected = hash_log.stream(RowHashScope::Apply, pipeline_name, table)?;
+    let actual = hash_log.stream(RowHashScope::Verify, pipeline_name, table)?;
+
+    // The merge-join walks the whole table off disk.
+    let receipt = receipt.clone();
+    tokio::task::spawn_blocking(move || diff_keyed_sets(expected, actual, &receipt, dest_rows))
+        .await
+        .map_err(|e| VerifyError::InitializationError(format!("verification task failed: {e}")))?
 }
 
-fn find_divergent_rows(
-    row_start: u64,
-    row_end: u64,
-    receipt_row_hashes: &[[u8; 32]],
-    actual_row_hashes: &[[u8; 32]],
-) -> Vec<DivergentRow> {
-    let batch_receipt = &receipt_row_hashes[row_start as usize..row_end as usize];
-    batch_receipt
-        .iter()
-        .zip(actual_row_hashes.iter())
-        .enumerate()
-        .filter(|(_, (e, a))| e != a)
-        .map(|(j, (e, a))| DivergentRow {
-            row_index: row_start + j as u64,
-            expected_hash: *e,
-            actual_hash: *a,
-        })
-        .collect()
+/// Read the destination table start to finish, hashing and keying each row with
+/// the receipt's own column order, and write the pairs to the verify scratch space.
+async fn stage_destination(
+    reader: &TableReader,
+    receipt: &VerificationReceipt,
+    col_types: &HashMap<String, String>,
+    pipeline_name: &str,
+    hash_log: &RowHashLog,
+) -> Result<u64, VerifyError> {
+    let mut hasher = RowHasher::new(receipt.column_order.clone(), receipt.algorithm);
+    let mut cursor = Some(Cursor::None);
+    let mut rows_read = 0u64;
+
+    let started = Instant::now();
+    let mut ticker = Ticker::new(PROGRESS_INTERVAL);
+
+    while let Some(c) = cursor {
+        let (rows, next_cursor) = reader.next_batch(c, READ_BATCH_ROWS).await?;
+        rows_read += rows.len() as u64;
+
+        if ticker.report(rows_read) {
+            info!(
+                table = %receipt.table_name,
+                rows = rows_read,
+                expected = receipt.total_rows,
+                "reading destination{}",
+                percent_of(rows_read, receipt.total_rows)
+            );
+        }
+
+        if !rows.is_empty() {
+            let refs: Vec<&Record> = rows.iter().collect();
+            let entries = hasher.hash_rows(&refs, col_types, &receipt.key_columns);
+
+            hash_log.append(
+                RowHashScope::Verify,
+                pipeline_name,
+                &receipt.table_name,
+                &entries,
+            )?;
+        }
+
+        cursor = next_cursor;
+    }
+
+    if started.elapsed() >= PROGRESS_INTERVAL {
+        info!(
+            table = %receipt.table_name,
+            rows = rows_read,
+            "destination read; sorting"
+        );
+    }
+
+    Ok(rows_read)
+}
+
+/// Merge-join two key-sorted row-hash streams.
+fn diff_keyed_sets(
+    expected: RowHashIter,
+    actual: RowHashIter,
+    receipt: &VerificationReceipt,
+    dest_rows_read: u64,
+) -> Result<DiffOutcome, VerifyError> {
+    let mut compared = 0u64;
+    let mut expected_seen = 0u64;
+    let mut ticker = Ticker::new(PROGRESS_INTERVAL).sampling(DIFF_CLOCK_SAMPLE);
+
+    let mut acc = MerkleAccumulator::new(receipt.algorithm);
+    let mut summary = DivergenceSummary {
+        expected_rows: receipt.total_rows,
+        ..Default::default()
+    };
+
+    let mut divergences: Vec<Divergence> = Vec::new();
+    let key_columns = &receipt.key_columns;
+
+    let mut record = |kind: DivergenceKind, key: &[u8]| {
+        if divergences.len() < MAX_REPORTED_DIVERGENCES {
+            divergences.push(Divergence {
+                key: describe(key, key_columns),
+                kind,
+            });
+        }
+    };
+
+    let mut expected = PeekPairs::new(expected)?;
+    let mut actual = PeekPairs::new(actual)?;
+
+    loop {
+        compared += 1;
+        if ticker.report(compared) {
+            info!(
+                table = %receipt.table_name,
+                rows = summary.actual_rows,
+                expected = receipt.total_rows,
+                "comparing{}",
+                percent_of(summary.actual_rows, receipt.total_rows)
+            );
+        }
+
+        match (expected.current(), actual.current()) {
+            (None, None) => break,
+            (Some(exp), None) => {
+                expected_seen += 1;
+                summary.missing += 1;
+                record(
+                    DivergenceKind::Missing {
+                        expected_hash: exp.hash,
+                    },
+                    &exp.key,
+                );
+                expected.advance()?;
+            }
+            (None, Some(act)) => {
+                summary.extra += 1;
+                summary.actual_rows += 1;
+                acc.push_row(&act.key, &act.hash);
+
+                record(
+                    DivergenceKind::Extra {
+                        actual_hash: act.hash,
+                    },
+                    &act.key,
+                );
+                actual.advance()?;
+            }
+            (Some(exp), Some(act)) => match exp.key.cmp(&act.key) {
+                std::cmp::Ordering::Less => {
+                    expected_seen += 1;
+                    summary.missing += 1;
+                    record(
+                        DivergenceKind::Missing {
+                            expected_hash: exp.hash,
+                        },
+                        &exp.key,
+                    );
+                    expected.advance()?;
+                }
+                std::cmp::Ordering::Greater => {
+                    summary.extra += 1;
+                    summary.actual_rows += 1;
+                    acc.push_row(&act.key, &act.hash);
+
+                    record(
+                        DivergenceKind::Extra {
+                            actual_hash: act.hash,
+                        },
+                        &act.key,
+                    );
+                    actual.advance()?;
+                }
+                std::cmp::Ordering::Equal => {
+                    expected_seen += 1;
+                    summary.actual_rows += 1;
+                    acc.push_row(&act.key, &act.hash);
+
+                    if exp.hash != act.hash {
+                        summary.changed += 1;
+                        record(
+                            DivergenceKind::Changed {
+                                expected_hash: exp.hash,
+                                actual_hash: act.hash,
+                            },
+                            &act.key,
+                        );
+                    }
+                    expected.advance()?;
+                    actual.advance()?;
+                }
+            },
+        }
+    }
+
+    if dest_rows_read > summary.actual_rows {
+        debug!(
+            table = %receipt.table_name,
+            rows_read = dest_rows_read,
+            distinct_keys = summary.actual_rows,
+            "destination has rows that share a verification key"
+        );
+    }
+
+    Ok(DiffOutcome {
+        actual_root: acc.finish(),
+        summary,
+        divergences,
+        expected_seen,
+    })
+}
+
+fn percent_of(done: u64, total: u64) -> String {
+    if total == 0 {
+        return String::new();
+    }
+    format!(" ({}%)", (done.min(total) * 100) / total)
+}
+
+/// One-item lookahead over a fallible row-hash iterator, so the merge-join can
+/// compare heads without buffering either side.
+struct PeekPairs {
+    iter: RowHashIter,
+    head: Option<KeyedRowHash>,
+}
+
+impl PeekPairs {
+    fn new(mut iter: RowHashIter) -> Result<Self, VerifyError> {
+        let head = iter.next().transpose()?;
+        Ok(Self { iter, head })
+    }
+
+    fn current(&self) -> Option<&KeyedRowHash> {
+        self.head.as_ref()
+    }
+
+    fn advance(&mut self) -> Result<(), VerifyError> {
+        self.head = self.iter.next().transpose()?;
+        Ok(())
+    }
 }
 
 async fn fetch_table_metadata(
     driver: &DriverRef,
     table: &str,
 ) -> Result<TableMetadata, VerifyError> {
-    let meta = dispatch_driver!(driver, |d| {
+    dispatch_driver!(driver, |d| {
         let introspector: Arc<dyn SchemaIntrospector> = d.clone() as _;
-        introspector.table_metadata(table).await?
-    });
-    Ok(meta)
+        introspector.table_metadata(table).await
+    })
+    .map_err(Into::into)
 }
 
 fn create_table_reader(
@@ -385,11 +457,14 @@ fn create_table_reader(
     meta: TableMetadata,
     offset_strategy: Arc<dyn OffsetStrategy>,
 ) -> Result<TableReader, VerifyError> {
-    let reader = dispatch_driver!(driver, |d| {
+    dispatch_driver!(driver, |d| {
         let data_reader: Arc<dyn DataReader> = d.clone() as _;
-        TableReader::new(data_reader, meta.clone(), offset_strategy.clone())
-    });
-    Ok(reader)
+        Ok(TableReader::new(
+            data_reader,
+            meta.clone(),
+            offset_strategy.clone(),
+        ))
+    })
 }
 
 async fn get_graph_expansion(
@@ -397,24 +472,25 @@ async fn get_graph_expansion(
     src_driver: &DriverRef,
     mapping: &TransformationMetadata,
 ) -> Result<Option<HashMap<String, TableMetadata>>, VerifyError> {
-    if let Some(refs) = &pipeline.source.graph_references {
-        let dest_driver = &pipeline.destination.connection.driver;
-        let dest_dialect = Dialect::parse(dest_driver).ok_or_else(|| {
-            VerifyError::InitializationError(format!(
-                "graph verification requires a SQL destination dialect, but destination driver '{dest_driver}' is not a SQL dialect"
-            ))
-        })?;
-        expand_graph_references(
-            &pipeline.source.table,
-            src_driver,
-            mapping,
-            refs,
-            dest_dialect,
-        )
-        .await
-    } else {
-        Ok(None)
-    }
+    let Some(refs) = &pipeline.source.graph_references else {
+        return Ok(None);
+    };
+
+    let dest_driver = &pipeline.destination.connection.driver;
+    let dest_dialect = Dialect::parse(dest_driver).ok_or_else(|| {
+        VerifyError::InitializationError(format!(
+            "graph verification requires a SQL destination dialect, but destination driver '{dest_driver}' is not a SQL dialect"
+        ))
+    })?;
+
+    expand_graph_references(
+        &pipeline.source.table,
+        src_driver,
+        mapping,
+        refs,
+        dest_dialect,
+    )
+    .await
 }
 
 async fn expand_graph_references(
@@ -430,8 +506,7 @@ async fn expand_graph_references(
         let introspector: Arc<dyn SchemaIntrospector> = d.clone() as _;
         let type_registry = Arc::new(TypeRegistry::new(source_dialect, dest_dialect));
         let expander = GraphExpander::new(introspector, type_registry, source_dialect);
-        // Verify only consumes the discovered-table set below, never the schema
-        // ops, so the skip_* flags are irrelevant here.
+
         expander
             .expand(
                 root_table,
@@ -444,54 +519,173 @@ async fn expand_graph_references(
             .map_err(|e| VerifyError::InitializationError(e.to_string()))?
     });
 
-    let cascade_meta = if matches!(refs.data_mode, DataMode::Cascade) {
-        Some(result.discovered_tables)
-    } else {
-        None
-    };
-
-    Ok(cascade_meta)
+    Ok(matches!(refs.data_mode, DataMode::Cascade).then_some(result.discovered_tables))
 }
 
-/// Resolve pagination column references from source names to destination names.
-fn resolve_pagination(
-    pagination: &Option<Pagination>,
-    mapping: &TransformationMetadata,
-) -> Option<Pagination> {
-    let pag = pagination.as_ref()?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use model::integrity::{algorithm::HashAlgorithm, merkle::MerkleAccumulator};
 
-    Some(Pagination {
-        strategy: pag.strategy.clone(),
-        column: resolve_qualified_column(&pag.column, mapping),
-        tiebreaker: pag
-            .tiebreaker
-            .as_ref()
-            .map(|tb| resolve_qualified_column(tb, mapping)),
-        timezone: pag.timezone.clone(),
-    })
-}
-
-/// Resolve a `table.column` reference to destination names via the mapping.
-fn resolve_qualified_column(qual_col: &str, mapping: &TransformationMetadata) -> String {
-    let parts: Vec<&str> = qual_col.split('.').collect();
-    if parts.len() == 2 {
-        let src_table = parts[0];
-        let src_col = parts[1];
-        let dst_table = mapping.entities.resolve(src_table);
-        let dst_col = mapping.field_mappings.resolve(&dst_table, src_col);
-        format!("{}.{}", dst_table, dst_col)
-    } else {
-        qual_col.to_string()
+    fn receipt(rows: &[(&[u8], u8)]) -> VerificationReceipt {
+        let mut acc = MerkleAccumulator::new(HashAlgorithm::Sha256);
+        for (key, hash) in rows {
+            acc.push_row(key, &[*hash; 32]);
+        }
+        VerificationReceipt {
+            run_id: "run".into(),
+            pipeline_name: "p".into(),
+            table_name: "t".into(),
+            table_root: acc.finish(),
+            column_order: vec!["id".into()],
+            key_columns: vec!["id".into()],
+            total_rows: rows.len() as u64,
+            skipped_rows: 0,
+            algorithm: HashAlgorithm::Sha256,
+            created_at: chrono::Utc::now(),
+        }
     }
-}
 
-/// Hash a row, applying column-type coercions when needed.
-/// Mirrors the same function in `engine-processing` so that verify
-/// produces identical hashes to the write path.
-fn hash_row_coerced(
-    hasher: &mut RowHasher,
-    row: &Record,
-    col_types: &HashMap<String, String>,
-) -> [u8; 32] {
-    hasher.hash_row_coerced(row, col_types)
+    /// Build a store-shaped iterator: entries must be in ascending key order,
+    /// exactly as sled yields them.
+    fn iter(rows: &[(&[u8], u8)]) -> RowHashIter {
+        let mut owned: Vec<KeyedRowHash> = rows
+            .iter()
+            .map(|(key, hash)| KeyedRowHash {
+                key: key.to_vec(),
+                hash: [*hash; 32],
+            })
+            .collect();
+        owned.sort_by(|a, b| a.key.cmp(&b.key));
+        Box::new(owned.into_iter().map(Ok))
+    }
+
+    fn diff(
+        expected: &[(&[u8], u8)],
+        actual: &[(&[u8], u8)],
+    ) -> ([u8; 32], DivergenceSummary, Vec<Divergence>) {
+        let r = receipt(expected);
+        let rows = actual.len() as u64;
+        let out = diff_keyed_sets(iter(expected), iter(actual), &r, rows).expect("diff");
+        // Every committed row is streamed off the (in-memory) apply set here, so
+        // the log-consistency invariant verify relies on must hold.
+        assert_eq!(out.expected_seen, expected.len() as u64);
+        (out.actual_root, out.summary, out.divergences)
+    }
+
+    #[test]
+    fn identical_sets_match_and_reproduce_the_root() {
+        let rows: &[(&[u8], u8)] = &[(b"a", 1), (b"b", 2), (b"c", 3)];
+        let (root, summary, divergences) = diff(rows, rows);
+
+        assert!(summary.is_clean());
+        assert!(divergences.is_empty());
+        assert_eq!(root, receipt(rows).table_root);
+        assert_eq!(summary.actual_rows, 3);
+    }
+
+    /// The point of the whole change: the destination is read in one order and
+    /// the receipt was written in another, and it still matches.
+    #[test]
+    fn arrival_order_does_not_affect_the_root() {
+        let forward: &[(&[u8], u8)] = &[(b"a", 1), (b"b", 2), (b"c", 3)];
+        let shuffled: &[(&[u8], u8)] = &[(b"c", 3), (b"a", 1), (b"b", 2)];
+
+        let (root, summary, _) = diff(forward, shuffled);
+        assert!(summary.is_clean());
+        assert_eq!(root, receipt(forward).table_root);
+    }
+
+    #[test]
+    fn deleted_row_is_reported_as_missing_by_key() {
+        let (root, summary, divergences) = diff(&[(b"a", 1), (b"b", 2)], &[(b"a", 1)]);
+
+        assert_eq!(summary.missing, 1);
+        assert_eq!(summary.changed, 0);
+        assert_eq!(summary.extra, 0);
+        assert_ne!(root, receipt(&[(b"a", 1), (b"b", 2)]).table_root);
+        assert!(matches!(
+            divergences.as_slice(),
+            [Divergence {
+                kind: DivergenceKind::Missing { .. },
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn inserted_row_is_reported_as_extra() {
+        let (_, summary, divergences) = diff(&[(b"a", 1)], &[(b"a", 1), (b"z", 9)]);
+
+        assert_eq!(summary.extra, 1);
+        assert_eq!(summary.missing, 0);
+        assert_eq!(summary.actual_rows, 2);
+        assert!(matches!(
+            divergences.as_slice(),
+            [Divergence {
+                kind: DivergenceKind::Extra { .. },
+                ..
+            }]
+        ));
+    }
+
+    /// A tampered row keeps its key, so it is one `changed` - not a missing row
+    /// plus an unrelated extra one.
+    #[test]
+    fn tampered_row_is_reported_as_changed() {
+        let (_, summary, divergences) = diff(&[(b"a", 1), (b"b", 2)], &[(b"a", 1), (b"b", 7)]);
+
+        assert_eq!(summary.changed, 1);
+        assert_eq!(summary.missing, 0);
+        assert_eq!(summary.extra, 0);
+        assert!(matches!(
+            divergences.as_slice(),
+            [Divergence {
+                kind: DivergenceKind::Changed { .. },
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn every_difference_kind_is_caught_in_one_pass() {
+        let (_, summary, _) = diff(
+            &[(b"a", 1), (b"b", 2), (b"c", 3)],
+            &[(b"a", 1), (b"c", 9), (b"d", 4)],
+        );
+
+        assert_eq!(summary.missing, 1, "b");
+        assert_eq!(summary.changed, 1, "c");
+        assert_eq!(summary.extra, 1, "d");
+    }
+
+    #[test]
+    fn empty_destination_reports_every_row_missing() {
+        let (_, summary, _) = diff(&[(b"a", 1), (b"b", 2)], &[]);
+        assert_eq!(summary.missing, 2);
+        assert_eq!(summary.actual_rows, 0);
+    }
+
+    /// An empty committed set with a populated destination flags every row as
+    /// `extra`, and `expected_seen` is 0. That zero (against a receipt that
+    /// expected rows) is what `verify_table` turns into `LogUnavailable` instead
+    /// of a false mismatch when the apply row-hash log is missing.
+    #[test]
+    fn no_committed_rows_yields_all_extra_and_zero_expected_seen() {
+        // `diff` asserts expected_seen == 0 for an empty committed set.
+        let (_, summary, _) = diff(&[], &[(b"a", 1), (b"b", 2)]);
+        assert_eq!(summary.extra, 2);
+        assert_eq!(summary.actual_rows, 2);
+    }
+
+    #[test]
+    fn divergence_detail_is_capped_but_counts_are_not() {
+        let expected: Vec<(&[u8], u8)> = (0..255u8)
+            .map(|i| (Box::leak(vec![i].into_boxed_slice()) as &[u8], i))
+            .collect();
+        let (_, summary, divergences) = diff(&expected, &[]);
+
+        assert_eq!(summary.missing, 255);
+        assert_eq!(divergences.len(), MAX_REPORTED_DIVERGENCES);
+    }
 }

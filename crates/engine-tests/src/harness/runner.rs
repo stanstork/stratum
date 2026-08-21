@@ -95,27 +95,11 @@ pub async fn run_smql(smql: &str, integrity: bool) -> Result<(), MigrationError>
     let plan = ExecutionPlan::build(&doc, env.clone()).expect("build execution plan");
     let shutdown = ShutdownSignal::new();
     let mode = if integrity {
-        IntegrityMode::BatchHashes
+        IntegrityMode::On
     } else {
         IntegrityMode::Off
     };
     run(plan, ExecutionFlags::new(false, mode), shutdown, env).await
-}
-
-/// Like `run_smql` but also stores individual row hashes in the receipt
-/// (`--full-integrity` mode). Enables row-level mismatch reporting in verify.
-pub async fn run_smql_full_integrity(smql: &str) -> Result<(), MigrationError> {
-    let doc = parse(smql).expect("parse smql");
-    let env = Arc::new(EnvContext::empty());
-    let plan = ExecutionPlan::build(&doc, env.clone()).expect("build execution plan");
-    let shutdown = ShutdownSignal::new();
-    run(
-        plan,
-        ExecutionFlags::new(false, IntegrityMode::FullHashes),
-        shutdown,
-        env,
-    )
-    .await
 }
 
 /// Run a migration in a background task and trigger a graceful pause (the Ctrl-C
@@ -123,6 +107,17 @@ pub async fn run_smql_full_integrity(smql: &str) -> Result<(), MigrationError> {
 /// has at least `min_rows` rows. Returns after the run exits, leaving a
 /// resumable checkpoint. Re-run the same SMQL with `run_smql` to resume.
 pub async fn run_smql_with_pause(smql: &str, dest_table: &str, min_rows: i64) {
+    run_smql_with_pause_mode(smql, dest_table, min_rows, false).await
+}
+
+/// Like [`run_smql_with_pause`] but lets the caller enable integrity hashing,
+/// so an interrupted run can be resumed and then verified.
+pub async fn run_smql_with_pause_mode(
+    smql: &str,
+    dest_table: &str,
+    min_rows: i64,
+    integrity: bool,
+) {
     let doc = parse(smql).expect("parse smql");
     let env = Arc::new(EnvContext::empty());
     let plan = ExecutionPlan::build(&doc, env.clone()).expect("build execution plan");
@@ -131,7 +126,7 @@ pub async fn run_smql_with_pause(smql: &str, dest_table: &str, min_rows: i64) {
     let signal = shutdown.clone();
     let handle = tokio::spawn(run(
         plan,
-        ExecutionFlags::new(false, IntegrityMode::Off),
+        ExecutionFlags::new(false, IntegrityMode::new(integrity)),
         shutdown,
         env,
     ));

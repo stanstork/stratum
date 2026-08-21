@@ -1,6 +1,6 @@
 # Cryptographic Migration Verification
 
-Merkle Tree-Based Post-Migration Integrity Verification
+Keyed Merkle receipts for post-migration integrity verification
 
 ---
 
@@ -8,14 +8,18 @@ Merkle Tree-Based Post-Migration Integrity Verification
 
 - [What Verification Proves](#what-verification-proves)
 - [What Verification Does Not Prove](#what-verification-does-not-prove)
+  - [Trust boundary](#trust-boundary)
 - [Architecture](#architecture)
-- [Core Data Structures](#core-data-structures)
+- [The Receipt](#the-receipt)
+- [Reading a Result](#reading-a-result)
 - [Canonical Row Serialization](#canonical-row-serialization)
+- [Row Keys](#row-keys)
 - [Merkle Tree Construction](#merkle-tree-construction)
 - [State Persistence](#state-persistence)
+  - [Storage footprint](#storage-footprint)
 - [Verification Process](#verification-process)
 - [CLI Usage](#cli-usage)
-- [Cascade Pipelines](#cascade-pipelines)
+- [Cascade, Lanes, and Retries](#cascade-lanes-and-retries)
 - [Edge Cases](#edge-cases)
 - [Performance](#performance)
 - [Future Extensions](#future-extensions)
@@ -28,14 +32,18 @@ Merkle Tree-Based Post-Migration Integrity Verification
 
 Conventional migration verification relies on row count comparison. Matching counts do not guarantee matching data: silent corruption, partial writes, network-level bit flips, and OOM kills mid-batch can all produce a destination with the correct row count but incorrect data.
 
-Stratum's cryptographic verification hashes each post-transform row, organizes hashes into a Merkle tree per batch, and persists the batch roots to sled on pipeline completion. The `verify` command re-reads the destination, recomputes the same structure, and compares. When roots differ, batch-level comparison isolates the failing batch - then row-level comparison (when available) identifies the exact divergent rows.
+Stratum hashes each post-transform row, keys that hash by the row's primary key, and commits the whole keyed set to a single Merkle root stored in a `VerificationReceipt`. The `verify` command re-reads the destination, rebuilds the same keyed set, and compares - reporting each difference by primary key.
 
 This detects:
 
-- Rows deleted from the destination after migration
-- Rows modified in the destination after migration
-- Rows inserted into the destination after migration (via sentinel fetch)
+- Rows deleted from the destination after migration (**missing**)
+- Rows inserted into the destination after migration (**extra**)
+- Rows modified in the destination after migration (**changed**)
 - Rows silently dropped or corrupted during the write phase
+
+Because rows are keyed rather than positioned, the comparison is **order-independent**: nothing about how the migration ran - batch size, lane count, FK traversal order, retries - has to be replayed for verification to work.
+
+The receipt's `table_root` is the portable half of the artifact: 32 bytes that commit to the entire table. It survives after the per-row hashes are deleted, and can be logged, recorded, or handed to an auditor. Retained somewhere outside the state directory, it also makes later tampering with the row-hash store detectable rather than silent - see [Trust boundary](#trust-boundary) for why that step is what makes the difference.
 
 ## What Verification Does Not Prove
 
@@ -45,7 +53,22 @@ The hash is computed over post-transform output. Whether `lower(trim(email))` do
 
 Verification also does not prove that the correct rows were selected from the source. If a `where` filter was wrong and selected the wrong rows, the destination hash will still match the stored receipt - because the receipt was computed from whatever was written.
 
-**Source-to-destination comparison** (proving "destination rows match source rows through the transform") is out of scope and deferred as a future extension.
+**Self-attestation.** Both halves of the comparison are produced by Stratum: the receipt records what the producer computed, and verify re-reads what the destination holds. This is strong evidence against data loss, corruption, partial writes, and after-the-fact modification. It is not an end-to-end proof that source and destination agree - that needs a second commitment taken on the source side, which is out of scope here (see [Future Extensions](#future-extensions)).
+
+### Trust boundary
+
+The construction is cryptographic - collision-resistant hashing and a binding Merkle commitment - but what that buys you depends on where the root ends up.
+
+Against **accident** the guarantee is unconditional. Silent truncation, partial writes, bit flips, a batch lost to an OOM kill: none of these can produce a row set that still folds to the recorded root, so verification catches them with no further precautions.
+
+Against a **deliberate** local modification it is conditional. The receipt is unsigned and lives in the same state directory as the row hashes it commits to. Anyone able to rewrite the destination can also rewrite the row-hash store *and* the receipt, then recompute a root consistent with the result. Nothing in the file layout prevents that.
+
+What closes the gap is retaining the root somewhere the modification cannot reach - a build log, a ticket, a commit, an append-only store. Verification prints `table_root` in its output and `apply` logs it at debug level; comparing a later run's root against a copy you kept is what turns "the data is self-consistent" into "the data is unchanged since the migration".
+
+Two related limits, for completeness:
+
+- **No authorship.** The root commits to content, not to who produced it. Anyone can compute a valid root for any data, so a receipt cannot distinguish one Stratum run from a forged file. Signing the root would be the fix; nothing here does that today.
+- **No secret.** There is no keyed MAC, so the commitment is verifiable by anyone - which is what makes it auditable, and also why it proves nothing about provenance.
 
 ### Non-deterministic destination columns
 
@@ -82,226 +105,165 @@ Hashing runs inside `BatchCoordinator` (`IntegrityState`), after `TransformServi
 ```
 Source (SnapshotReader)
   -> TransformService (field mapping, computed columns, coercions)
-  -> IntegrityState::hash_batch()        ← hash rows, accumulate batch roots
+  -> integrity: hash + key each row, stream the pairs to the store
   -> BatchCoordinator (send batch to consumer)
   ↓ MPSC channel
 Sink (BatchWriter)
   -> StateManager (checkpoint)
 ```
 
-On pipeline completion, `IntegrityState::save_receipts()` builds the final `VerificationReceipt` per table and persists it to sled.
+The engine holds no row hashes of its own: each batch's `(row key, row hash)` pairs are appended to the table's row-hash log and the batch is dropped. Appends are unordered - lanes write into the same log, in whatever order rows arrive. When every lane has finished, the log is sealed: sorted by key and deduplicated by external merge sort, then folded into one Merkle root per table, and the receipts are written.
+
+The row-hash log's own footprint is flat as well - see [Row hashes](#row-hashes) for how, and [Performance](#performance) for the measurements.
 
 ### Crate Responsibilities
 
-| Crate                 | Components                                                                                                                                | Responsibility                                                                           |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `model`             | `HashAlgorithm`, `RowHasher`, `MerkleTree`, `VerificationReceipt`, `VerificationResult`, `IntegrityConfig`, `IntegrityMode` | Core data structures and hashing logic. No I/O.                                          |
-| `engine-processing` | `IntegrityState`, `BatchCoordinator`                                                                                                  | Hash rows per batch, accumulate roots, persist receipt at completion.                    |
-| `engine-state`      | `MerkleStore` trait, `SledStateStore`                                                                                                 | Persist and load `VerificationReceipt` from sled. Key: `receipt:{pipeline}:{table}`. |
-| `engine-verify`     | `verify()`, `read_and_hash_batched()`, `find_divergent_batches()`, `find_divergent_rows()`                                        | Re-read destination, compare against receipt, build `VerificationResult`.              |
-| `cli`               | `apply --integrity`, `apply --full-integrity`, `verify`                                                                             | Map CLI flags to `IntegrityMode`, invoke `engine-verify`, print or write results.    |
+| Crate | Responsibility |
+| --- | --- |
+| `model` | Canonical encoding, keyed row hashing, streaming Merkle. No I/O. |
+| `engine-processing` | Hash and key rows per batch, stream them to the store; fold roots and write receipts once the pipeline finishes. |
+| `engine-state` | Persist receipts and keyed row hashes; provide sorted iteration over them. |
+| `engine-verify` | Re-read the destination, stage its keyed hashes, merge-join against the receipt's set. |
+| `cli` | Map `--integrity` to the run mode, invoke verification, print or write the report. |
 
 ### Data Flow: Migration (Write Path)
 
-1. Producer reads a page of rows from source.
-2. `TransformService` applies transforms (field mapping, computed columns, coercions).
-3. `IntegrityState::hash_batch()` groups rows by destination table, hashes each row canonically, and accumulates:
-   - **Primary table**: one subtree root per batch (hash of row hashes), plus row count.
-   - **Cascade tables**: a deduplicated `HashSet` of row hashes (order-independent).
-   - If `--full-integrity`: individual row hashes stored flat for later row-level diff.
-4. Batch is sent through the MPSC channel to the consumer.
-5. Consumer writes to destination.
-6. After all batches: `IntegrityState::save_receipts()` finalizes and persists one `VerificationReceipt` per table.
+1. The orchestrator clears the pipeline's row hashes from the previous run.
+2. Producer reads a page of rows from the source.
+3. `TransformService` applies transforms (field mapping, computed columns, coercions).
+4. The integrity stage groups rows by destination table and, per row, computes the canonical row hash and the canonical row key.
+5. The batch's `(key, hash)` pairs are written to the row-hash store; the batch continues to the consumer.
+6. Consumer writes to the destination.
+7. After every lane finishes, the orchestrator streams each table's stored pairs in key order, folds them into a Merkle root, and writes one receipt per table.
 
 ### Data Flow: Verification (Read-Back Path)
 
-1. Load `VerificationReceipt` from sled for each pipeline/table pair.
-2. Re-read destination rows using the same offset strategy as the original migration.
-3. For each batch: recompute subtree root; compare against `receipt.batch_roots[i]`.
-4. After all batches: sentinel fetch detects rows inserted beyond the receipt boundary.
-5. For divergent batches: compare row-by-row if receipt carries `row_hashes`.
+1. Load the `VerificationReceipt` for each pipeline/table pair.
+2. Re-read every destination row (keyset over the primary key, any deterministic full scan will do).
+3. Hash and key each row with the receipt's own `column_order` and `key_columns`, staging the pairs under the verify scope.
+4. Merge-join the two key-sorted streams: fold the destination side into `actual_root` and record every `missing` / `extra` / `changed` key in one pass.
+5. Drop the staged verify-side hashes.
 6. Return `Vec<VerificationResult>` - one result per table.
 
 ### Diagram
 
 ```
                           apply --integrity
-  ╔══════════════════════════════════════════════════════════════════╗
-  ║  SOURCE          TRANSFORM         HASH              WRITE       ║
-  ║                                                                  ║
-  ║  ┌──────┐   ┌─────────────────┐                   ┌────────────┐ ║
-  ║  │MySQL │─▶│ TransformService│                   │ BatchWriter│ ║
-  ║  └──────┘   └────────┬────────┘                   └────────────┘ ║
-  ║                      │  rows[]                         ▲         ║
-  ║             ┌────────▼─────────┐    Batch{}            │         ║
-  ║             │  IntegrityState  │─────────────────────▶│         ║
-  ║             │  hash_batch()    │                                 ║
-  ║             └─────────┬────────┘                                 ║
-  ║  Batch 0              │  h0  h1  h2  ... hN                      ║
-  ║                       │  └────────────────▶ root0  ────┐        ║
-  ║  Batch 1              │  h0  h1  h2  ... hN             │        ║
-  ║                       │  └────────────────▶ root1  ────┤        ║
-  ║  Batch 2              │  h0  h1  h2  ... hN             │        ║
-  ║                       │  └────────────────▶ root2  ────┤        ║
-  ║                       │                                 ▼        ║
-  ║                       │                    MerkleTree::root      ║
-  ║                       │                    ┌──────────────────┐  ║
-  ║                       └──────────────────▶│ VerifReceipt     │  ║
-  ║                                            │  table_root      │  ║
-  ║                                            │  batch_roots[]   │  ║
-  ║                                            │  rows_per_batch[]│  ║
-  ║                                            │  column_order[]  │  ║
-  ║                                            │  row_hashes[]?   │  ║
-  ║                                            └────────┬─────────┘  ║
-  ║                                                     │            ║
-  ╚═════════════════════════════════════════════════════╪════════════╝
-                                                        │ sled
-  ╔═════════════════════════════════════════════════════╪════════════╗
-  ║  verify                                             │            ║
-  ║                                                     ▼            ║
-  ║  ┌────────────┐   rows[]  ┌────────────────┐  VerifReceipt       ║
-  ║  │ Destination│─────────▶│ read_and_hash  │◀───────────────────║
-  ║  │  (re-read) │           │   _batched()   │                     ║
-  ║  └────────────┘           └───────┬────────┘                     ║
-  ║       ▲                           │                              ║
-  ║  sentinel                         │ actual_roots[]               ║
-  ║  (extra row                       ▼                              ║
-  ║   past boundary)    ┌──────────────────────────┐                 ║
-  ║                     │  find_divergent_batches()│                 ║
-  ║                     │  receipt.batch_roots[i]  │                 ║
-  ║                     │  vs actual_roots[i]      │                 ║
-  ║                     └────────────┬─────────────┘                 ║
-  ║                                  │ divergent batches             ║
-  ║                                  ▼                               ║
-  ║                     ┌─────────────────────────┐                  ║
-  ║                     │  find_divergent_rows()  │◀── row_hashes[] ║
-  ║                     │  (--full-integrity only)│    from receipt  ║
-  ║                     └────────────┬────────────┘                  ║
-  ║                                  │                               ║
-  ║                                  ▼                               ║
-  ║                          VerificationResult                      ║
-  ║                     Match | Mismatch | NoPriorRun                ║
-  ╚══════════════════════════════════════════════════════════════════╝
+  ╔═══════════════════════════════════════════════════════════════════╗
+  ║  SOURCE          TRANSFORM          HASH + KEY          WRITE     ║
+  ║                                                                   ║
+  ║  ┌──────┐   ┌─────────────────┐                    ┌────────────┐ ║
+  ║  │MySQL │─▶ │ TransformService│                    │ BatchWriter│ ║
+  ║  └──────┘   └────────┬────────┘                    └────────────┘ ║
+  ║                      │  rows[]                          ▲         ║
+  ║             ┌────────▼─────────┐    Batch{}             │         ║
+  ║             │  IntegrityState  │───────────────────────▶│         ║
+  ║             │  hash + key rows │                                  ║
+  ║             └─────────┬────────┘                                  ║
+  ║   (any batch,         │  (key,hash) (key,hash) ...                ║
+  ║    any lane,          ▼                                           ║
+  ║    any order)   ┌──────────────────────────┐                      ║
+  ║                 │  rowhash log (appended)  │  sorted at seal      ║
+  ║                 └────────────┬─────────────┘                      ║
+  ║                              │ streamed in key order              ║
+  ║        all lanes done        ▼                                    ║
+  ║                 ┌──────────────────────────┐                      ║
+  ║                 │   MerkleAccumulator      │  O(log n) memory     ║
+  ║                 └────────────┬─────────────┘                      ║
+  ║                              ▼                                    ║
+  ║                     ┌──────────────────┐                          ║
+  ║                     │ VerifReceipt     │                          ║
+  ║                     │  table_root      │                          ║
+  ║                     │  column_order[]  │                          ║
+  ║                     │  key_columns[]   │                          ║
+  ║                     │  total_rows      │                          ║
+  ║                     └────────┬─────────┘                          ║
+  ╚══════════════════════════════╪════════════════════════════════════╝
+                                 │ state dir
+  ╔══════════════════════════════╪════════════════════════════════════╗
+  ║  verify                      ▼                                    ║
+  ║  ┌────────────┐  rows[]  ┌──────────────────┐                     ║
+  ║  │ Destination│─────────▶│ stage_destination│                     ║
+  ║  │  (re-read) │          │  hash + key      │                     ║
+  ║  └────────────┘          └────────┬─────────┘                     ║
+  ║                                   ▼                               ║
+  ║                 ┌──────────────────────────┐                      ║
+  ║                 │ verifyhash log (staged)  │  sorted at seal      ║
+  ║                 └────────────┬─────────────┘                      ║
+  ║                              ▼                                    ║
+  ║      rowhash  ──────▶ ┌────────────────────┐                      ║
+  ║                       │   keyed set diff   │  one merge-join pass ║
+  ║      verifyhash ────▶ │  → actual_root     │  O(1) memory         ║
+  ║                       │  → missing/extra/  │                      ║
+  ║                       │    changed by key  │                      ║
+  ║                       └─────────┬──────────┘                      ║
+  ║                                 ▼                                 ║
+  ║                        VerificationResult                         ║
+  ║          Match | Mismatch | NoPriorRun | LogUnavailable           ║
+  ╚═══════════════════════════════════════════════════════════════════╝
 ```
 
 ---
 
-## Core Data Structures
+## The Receipt
 
-### `IntegrityMode`
+One receipt per destination table per pipeline, written to the state store at
+`receipt:{pipeline_name}:{table_name}` - a key that is stable across runs, so each
+`apply --integrity` overwrites the previous one and `verify` always compares
+against the most recent migration.
 
-```rust
-pub enum IntegrityMode {
-    /// No hashing. Zero overhead. No receipt written.
-    Off,
-    /// Compute Merkle batch roots and write a VerificationReceipt.
-    /// Corresponds to `apply --integrity`.
-    BatchHashes,
-    /// BatchHashes plus individual row hashes stored in the receipt.
-    /// Enables row-level divergence reporting. ~32 bytes/row additional storage.
-    /// Corresponds to `apply --full-integrity`.
-    FullHashes,
-}
-```
+It records:
 
-### `VerificationReceipt`
+- **`table_root`** - the Merkle root over every row leaf, taken in ascending
+  row-key order. This is the commitment; everything else exists to make it
+  reproducible.
+- **`column_order`** - the destination columns, lexicographically sorted, that
+  were fed to the hasher.
+- **`key_columns`** - the destination key columns, in table order. Empty means the
+  table had no primary key and each row hash served as its own key.
+- **`total_rows`** - distinct row keys committed to the root, i.e. the tree's leaf
+  count. **`skipped_rows`** - rows sent to the DLQ, so an expected absence is not
+  read as data loss.
+- **`algorithm`**, **`run_id`**, **`created_at`** - which hash function produced
+  the root, and which run.
 
-Written to sled at pipeline completion. Key: `receipt:{pipeline_name}:{table_name}` - stable across runs so each new `apply --integrity` overwrites the previous receipt.
+The column order and key columns are embedded rather than re-derived at verify
+time. Introspecting the destination again would let a schema change between apply
+and verify silently alter the encoding, which would look like a data mismatch.
 
-```rust
-pub struct VerificationReceipt {
-    pub run_id: String,
-    pub pipeline_name: String,
-    pub table_name: String,
-    /// Root of the Merkle tree over all batch roots.
-    pub table_root: [u8; 32],
-    /// One subtree root per batch, in write order.
-    pub batch_roots: Vec<[u8; 32]>,
-    /// Lexicographically sorted destination column names.
-    /// Embedded in the receipt so verify is self-contained.
-    pub column_order: Vec<String>,
-    /// Rows hashed and written (excludes DLQ skips).
-    pub total_rows: u64,
-    /// Rows sent to DLQ - not present in destination.
-    pub skipped_rows: u64,
-    /// Rows written per batch. Used by verify to reproduce exact batch boundaries.
-    pub rows_per_batch: Vec<u64>,
-    /// When true: row hashes were sorted before building the tree.
-    /// Set for cascade tables (rows arrive out of PK order during migration).
-    pub sorted_hashes: bool,
-    pub algorithm: HashAlgorithm,
-    pub created_at: DateTime<Utc>,
-    /// Individual row hashes for row-level diff. Present only with `--full-integrity`.
-    pub row_hashes: Option<Vec<[u8; 32]>>,
-}
-```
+The per-row `(key, hash)` set the root commits to is **not** in the receipt - it
+lives beside it in the row-hash log (`rowhash/apply/…`). The receipt stays a fixed
+~200 bytes whatever the table size.
 
-`column_order` is embedded so that verify can reproduce the canonical encoding without re-introspecting the destination schema.
+## Reading a Result
 
-`rows_per_batch` is critical: verify uses it to re-read the destination in exactly the same batch sizes as the migration used, ensuring batch boundaries align perfectly.
+`verify` returns one result per (pipeline, table):
 
-### `VerificationResult`
+- **Match** - every key present on both sides with identical contents, and the
+  recomputed root equals the receipt's.
+- **Mismatch** - carries the recomputed root plus complete counts of `missing`
+  (in the receipt, gone from the destination), `extra` (in the destination, never
+  migrated), and `changed` (same key, different contents), alongside the expected
+  and actual row counts.
+- **NoPriorRun** - no receipt for this pipeline and table; the migration ran
+  without `--integrity`. Not an error.
+- **LogUnavailable** - a receipt exists, but the row-hash log it commits to is
+  missing or truncated (cleared by hand, or `verify` run against a different
+  state directory than the one `apply` wrote to). The destination cannot be
+  diffed against the committed set, so the result is **inconclusive** - `verify`
+  exits non-zero rather than reporting every intact row as `extra`. Re-run
+  `apply --integrity` to rebuild the log.
 
-```rust
-pub enum VerificationResult {
-    Match {
-        receipt: VerificationReceipt,
-        duration_ms: u64,
-    },
-    Mismatch {
-        receipt: VerificationReceipt,
-        actual_root: [u8; 32],
-        divergent_batches: Vec<DivergentBatch>,
-        duration_ms: u64,
-    },
-    /// Receipt not found - pipeline was run without --integrity.
-    NoPriorRun { pipeline_name: String },
-}
-
-pub struct DivergentBatch {
-    pub batch_index: u64,
-    pub expected_root: [u8; 32],
-    pub actual_root: [u8; 32],
-    pub row_start: u64,  // inclusive
-    pub row_end: u64,    // exclusive
-    /// Populated only when receipt was written with --full-integrity.
-    pub divergent_rows: Vec<DivergentRow>,
-}
-
-pub struct DivergentRow {
-    /// Zero-based index across the whole table (not within the batch).
-    pub row_index: u64,
-    pub expected_hash: [u8; 32],
-    pub actual_hash: [u8; 32],
-}
-```
-
-### `IntegrityConfig`
-
-Constructed from `IntegrityMode` in the pipeline orchestrator and passed to `BatchCoordinator`.
-
-```rust
-pub struct IntegrityConfig {
-    pub algorithm: HashAlgorithm,
-    /// table_name -> sorted destination column names.
-    pub tables: HashMap<String, Vec<String>>,
-    /// The primary (root) destination table.
-    /// Primary table rows are hashed in insertion order.
-    /// All other tables are treated as cascade tables.
-    pub primary_table: String,
-    /// When true, store individual row hashes in the receipt.
-    pub store_row_hashes: bool,
-    /// Destination column types for coercion at hash time.
-    /// table_name -> column_name -> pg_type_string.
-    pub column_types: HashMap<String, HashMap<String, String>>,
-}
-```
+A mismatch also lists individual diverging rows by key (`actor_id=42`), each
+tagged missing / extra / changed. The **counts are always complete**; only that
+detail list is capped, at 100 rows, so a fully-diverged table cannot produce an
+unbounded report.
 
 ---
 
 ## Canonical Row Serialization
 
-The same row must always produce the same byte sequence regardless of whether it is read from the producer transform output or from a destination `SELECT`. `RowHasher` in `model` implements this.
+The same row must always produce the same byte sequence regardless of whether it is read from the producer transform output or from a destination `SELECT`. `RowHasher` in `model` implements it, behind a single entry point shared by the apply and verify paths - there is deliberately no second encoder that could drift out of sync with the first.
 
 ### Encoding Protocol
 
@@ -315,22 +277,24 @@ for each column_name in column_order (lexicographic order):
     write 1-byte type tag + value bytes
 ```
 
-| Type               | Tag      | Encoding                                                |
-| ------------------ | -------- | ------------------------------------------------------- |
-| `Null` / missing | `0x00` | no body                                                 |
-| `Int(i)`         | `0x01` | 8-byte little-endian i64                                |
-| `UInt(u)`        | `0x02` | 8-byte little-endian u64                                |
-| `Boolean(b)`     | `0x03` | 1 byte:`0x00` = false, `0x01` = true                |
-| `String(s)`      | `0x10` | 4-byte LE length + UTF-8 bytes                          |
-| `Decimal(d)`     | `0x11` | `"{mantissa}:{scale}"` ASCII, 4-byte LE length prefix |
-| `Float(f)`       | `0x12` | 8-byte big-endian IEEE 754 (NaN ->`0x00` Null tag)    |
-| `Date(d)`        | `0x20` | 4-byte LE signed days since Unix epoch                  |
-| `Timestamp(ts)`  | `0x21` | 8-byte LE microseconds since Unix epoch, UTC            |
-| `Uuid(u)`        | `0x30` | 16 bytes big-endian                                     |
-| `Binary(b)`      | `0x40` | 4-byte LE length + raw bytes                            |
-| `Json(j)`        | `0x50` | canonical JSON (sorted keys), 4-byte LE length prefix   |
-| `Array(a)`       | `0x60` | 4-byte LE element count + recursively encoded elements  |
-| `Enum { value }` | `0x70` | string value only - no type name                       |
+| Type | Tag | Encoding |
+| --- | --- | --- |
+| `Null` / missing | `0x00` | no body |
+| `Int(i)` | `0x01` | 8-byte little-endian i64 |
+| `UInt(u)` | `0x02` | 8-byte little-endian u64 (values ≤ i64::MAX normalize to `0x01`) |
+| `Boolean(b)` | `0x03` | normalized to `0x01` Int(0/1) for cross-engine parity |
+| `String(s)` | `0x10` | 4-byte LE length + UTF-8 bytes |
+| `Decimal(d)` | `0x11` | normalized decimal text, 4-byte LE length prefix |
+| `Float(f)` | `0x12` | 8-byte big-endian IEEE 754 (NaN -> `0x00` Null tag) |
+| `Date(d)` | `0x20` | 4-byte LE signed days since Unix epoch |
+| `Timestamp(ts)` | `0x21` | 8-byte LE microseconds since Unix epoch, UTC |
+| `Uuid(u)` | `0x30` | 16 bytes big-endian |
+| `Binary(b)` | `0x40` | 4-byte LE length + raw bytes (valid UTF-8 normalizes to `0x10`) |
+| `Json(j)` | `0x50` | canonical JSON (sorted keys), 4-byte LE length prefix |
+| `Array(a)` | `0x60` | 4-byte LE element count + recursively encoded elements |
+| `Enum { value }` | `0x70` | string value only - no type name |
+
+Every encoding is self-delimiting, so a stored key can be decoded back into readable text (`actor_id=42`) when a divergence is reported - nothing human-readable has to be stored per row.
 
 ### Column Order
 
@@ -338,11 +302,13 @@ for each column_name in column_order (lexicographic order):
 
 ### Value Coercions
 
-Some values must be coerced at hash time to match what the COPY writer actually writes. The coercion lives in `IntegrityState::hash_batch()` via `coerce_row_for_hash`:
+A value can be stored by the destination in a different shape than it was handed over in, and verify re-reads the stored shape. Where that happens, the hash has to be taken over what the destination will store, not over what the pipeline produced:
 
-- **String written to an array column** (`TEXT[]`, `SET`): split on comma into `Value::Array`. This mirrors the `parse_array_string` fallback in the COPY writer.
+- **A comma-joined string written to an array-like column** - a PostgreSQL array (`TEXT[]`) or a MySQL `SET` - is split into `Value::Array` before hashing. Both destinations store it as a collection and read it back as one (`Value::Array` from PostgreSQL, `Value::Set` from MySQL, which canonicalize identically), so hashing the string as written would never match the read-back.
 
-Column types are passed in `IntegrityConfig.column_types` and used on both the write path (migration) and the read path (verify re-hashes destination rows with the same coercions applied in `TableReader`).
+This is a property of the destination column type, not of any one write path: it applies equally to PostgreSQL `COPY`, MySQL `LOAD DATA`, and plain `INSERT`.
+
+Column types come from `IntegrityConfig.column_types` on the write path and from destination introspection on the verify path, and are applied identically on both.
 
 ### Special Cases
 
@@ -354,230 +320,344 @@ Column types are passed in `IntegrityConfig.column_types` and used on both the w
 
 ---
 
+## Row Keys
+
+A row's key is the canonical encoding of its destination primary-key columns, in table order, using the same encoder and the same coercions as the row hash. That matters: a key computed from a transformed output row and a key computed from the same row read back out of the destination must be byte-identical even when the database normalizes the stored representation.
+
+Two properties follow, and the rest of the design rests on them:
+
+- **The key is independent of the payload.** A tampered row keeps its key, so it is reported as one `changed` row rather than as a missing row plus an unrelated extra one.
+- **The key is independent of position.** Sorting by key gives a canonical order that has nothing to do with arrival order, which is what makes the Merkle root order-independent.
+
+### Tables with no primary key
+
+If the destination table has no primary key there is no meaningful key, so the row hash stands in as its own key and a warning is logged at apply time. Verification still works, with one documented limitation: byte-identical rows collapse into a single leaf, so such a table cannot distinguish "three identical rows" from "one". Tables with a primary key are unaffected.
+
+---
+
 ## Merkle Tree Construction
 
-### Batch-Level Tree (Write Path)
-
-For each batch of N post-transform rows, `MerkleTree::root_from_hashes()` computes a subtree root from the row hashes. Only the root is kept - no intermediate nodes are retained. Memory is O(N) for the leaf hashes during root computation, then discarded.
+### Leaves
 
 ```
-Row hashes: h0  h1  h2  h3  h4
-              \  /    \  /    ↑ promoted (odd node)
-               b0      b1    h4
-                 \    /    /
-                  c0      c1
-                    \    /
-                     Root
+leaf = H(0x00 || u32_le(len(key)) || key || row_hash)
+node = H(0x01 || left || right)
 ```
 
-Odd last node is **promoted without hashing** to avoid second-preimage vulnerabilities from duplicate-leaf strategies.
+Leaves and internal nodes are hashed in **separate domains** (RFC 6962 style), so a chosen row hash can never be substituted for an interior node - the general Merkle second-preimage attack. The key is bound into the leaf and length-prefixed, so moving a row to a different key changes the root and adjacent key/hash pairs cannot be re-cut to collide.
 
-### Table-Level Root
+### Streaming fold
 
-After all batches, `MerkleTree::root_from_hashes()` combines all batch subtree roots (in order) into the table-level root stored in `receipt.table_root`.
+`MerkleAccumulator` combines two subtrees as soon as they have equal height, keeping at most one partial subtree per level:
 
-### Cascade Tables
+```
+Row leaves (ascending key order): l0  l1  l2  l3  l4
+                                   \  /    \  /    ↑ promoted (odd node)
+                                    b0      b1    l4
+                                      \    /    /
+                                       c0      c1
+                                         \    /
+                                          Root
+```
 
-Cascade tables (FK-referenced tables pulled in via `with references { data = cascade }`) receive rows from multiple source batches in non-PK order. A `HashSet` deduplicates row hashes across all batches. At finalization, the set is sorted and a single Merkle root is computed. `receipt.sorted_hashes = true` tells verify to apply the same sort before building its tree - making the comparison order-independent.
+Memory is O(log n) - a 10M-row table holds ~24 pending hashes, not 10M. The resulting tree shape is identical to a level-by-level build that promotes an odd trailing node unchanged; a unit test asserts the two agree for every leaf count from 0 to 65.
+
+### Order independence
+
+There is exactly one tree per table, built over the store's key order. No batch subtrees, no per-lane roots, no sorted/unsorted variants - the root is a pure function of the set of `(key, row_hash)` pairs.
 
 ---
 
 ## State Persistence
 
-### Receipt Key
+### Receipt key
 
 ```
 receipt:{pipeline_name}:{table_name}
 ```
 
-Stored in a dedicated sled tree (`MerkleStore`), separate from the main checkpoint tree. Each `apply --integrity` run overwrites the previous receipt for the same pipeline/table pair. The key is stable across run IDs so that `verify` always compares against the most recent migration.
+Each `apply --integrity` overwrites the previous receipt for the same pipeline/table pair, so `verify` always compares against the most recent migration.
 
-### What Is Stored
+### Row hashes
 
-One `VerificationReceipt` per destination table per pipeline. For a cascade pipeline touching 5 tables, 5 receipts are written. Cascade table receipts always have `row_hashes: None` (sorted-hash mode; row-level diff is not meaningful for out-of-order rows).
+Row hashes are bulk data with a narrow access pattern: append one record per
+migrated row, read the whole set back once in key order, delete it. Nothing ever
+looks a single row up. They are therefore not kept in the key-value store, which
+would charge per-record index memory for an index no one queries. They live in an
+append-and-sort log:
 
-### `MerkleStore` Trait
-
-```rust
-pub trait MerkleStore: Send + Sync {
-    async fn save_receipt(&self, receipt: &VerificationReceipt) -> Result<(), StateStoreError>;
-    async fn load_receipt(&self, pipeline_name: &str, table_name: &str)
-        -> Result<Option<VerificationReceipt>, StateStoreError>;
-    async fn list_receipts(&self) -> Result<Vec<VerificationReceipt>, StateStoreError>;
-}
 ```
+~/.stratum/state/rowhash/{scope}/{pipeline}/{table}/
+    pending.log     appended during the run, unsorted
+    run-000.tmp     sorted chunks, only while sealing a set too large to sort in memory
+    sorted.log      the sealed set: sorted by key, one record per key
+
+scope = "apply"    committed by a migration, kept until that pipeline runs again
+      = "verify"   staged by verify, cleared when it finishes
+```
+
+A record is `key_len | order | hash | key`. See
+[Storage footprint](#storage-footprint) for what that costs in practice.
+
+The lifecycle has three steps:
+
+- **Append.** Every lane writes into one log per table. Writes are unordered and
+  never read back during the run, so appends are a buffered sequential write and
+  nothing accumulates in memory.
+- **Seal.** Once the pipeline finishes, the log is sorted by key and deduplicated
+  by external merge sort: chunks are sorted in memory and spilled as sorted runs,
+  then merged through a small heap. Chunks are independent, so they are sorted
+  across threads; the sort budget is the total across the chunks held at once, so
+  concurrency costs run count rather than memory. A set small enough for one
+  chunk - most tables - is sorted in memory and written straight out, with no
+  runs and no merge. Peak memory is the budget (64 MiB), whatever the table size.
+- **Stream.** The sealed file is read in key order, once, by the Merkle fold and
+  again by the verify diff. Leaf hashing dominates the fold and is independent
+  per row, so it too is spread across threads - in blocks of a power-of-two
+  number of leaves, because the tree pairs leaves by absolute position and a
+  misaligned split would build a different tree.
+
+`order` is what makes a repeated key deterministic. Records carry a monotonic
+counter, and the merge keeps the highest for each key, so the value written last
+wins. An interrupted run leaves a sealed file behind; the resumed run's seal folds
+it back in as one more sorted input, ranked below anything written since, so the
+two runs' rows combine into one complete set.
+
+Apply-scope hashes are cleared at the start of a fresh run - the receipt overwrites
+in place, so a key left over from a larger earlier run would otherwise read as a
+missing row forever. Clearing is a directory removal, independent of row count.
+
+### Storage footprint
+
+Row hashes are streamed to disk rather than held in memory, so their cost is disk,
+not RAM. Measured through the real log, 1M rows per key shape:
+
+| Destination primary key | Bytes per row | 10M rows | 100M rows |
+| --- | --- | --- | --- |
+| Integer (`BIGINT`) | 51 | 510 MB | 5.1 GB |
+| `UUID` | 59 | 590 MB | 5.9 GB |
+| Composite `(INT, INT)` | 60 | 600 MB | 6.0 GB |
+
+A record is a 2-byte key length, an 8-byte order, the 32-byte hash, and the
+canonically encoded key - so the fixed 42 bytes dominate, and even a UUID key adds
+under 20%.
+
+Three things are worth knowing before running a large migration with `--integrity`:
+
+- **The sealed set is retained**, not deleted at the end of the run. `verify` reads
+  it, so it has to outlive `apply`. It is replaced the next time the same pipeline
+  runs, and removed by `stratum reset`. A 10M-row table with an integer key leaves
+  ~510 MB on disk under `~/.stratum/state/rowhash/apply/`.
+- **Sealing needs headroom.** The pending log, the sorted runs, and the merged
+  output all exist at once for part of the seal, so peak disk during finalize is up
+  to ~3x the sealed size - about **1.5 GB** for that 10M-row table, falling back to
+  510 MB once the runs are deleted.
+- **Verify doubles it, briefly.** Verify stages the destination's own keyed set
+  under `verify/` to compare against, so both sets exist while it runs - another
+  ~510 MB for the table above, cleared when it finishes.
+
+Per pipeline and per table: a cascade migration touching four tables keeps four
+sets, sized by each table's row count.
+
+### What storage has to provide
+
+Receipts need a key-value store: small, updated in place, read by key.
+
+Row hashes need almost nothing - sequential append, sequential read, delete - and
+in particular no index and no random access. Keeping the two apart is what lets a
+ten-million-row integrity run hold a flat ~30 MB rather than growing with the
+table.
 
 ---
 
 ## Verification Process
 
-### `verify()` Function
+### Entry point
 
-Lives in `engine-verify`. Takes an `ExecutionPlan` and returns `Vec<VerificationResult>` - one result per (pipeline, table) pair. Has no dependency on `engine-runtime`.
+`engine-verify` takes an execution plan and returns one result per
+(pipeline, table) pair. It has no dependency on `engine-runtime` - verification
+never goes through the migration machinery.
 
-```rust
-pub async fn verify(
-    plan: ExecutionPlan,
-    env: Arc<EnvContext>,
-) -> Result<Vec<VerificationResult>, VerifyError>
+### Staging the destination
+
+Verify reads the whole destination table with a keyset scan over its primary key (falling back to `OFFSET` when there is none), hashes and keys each row with the receipt's `column_order` / `key_columns`, and writes the pairs under the verify scope (`rowhash/verify/…`). Nothing about the migration's shape is replayed - not batch sizes, not lane splits, not read order.
+
+### The diff
+
+Both sides now live in the same store, sorted by the same canonical key encoding, so one merge-join pass produces everything:
+
+```
+walk expected (apply scope) and actual (verify scope) in lockstep by key:
+    key only in expected            -> missing
+    key only in actual              -> extra,   fold into actual_root
+    key in both, hashes differ      -> changed, fold into actual_root
+    key in both, hashes equal       ->          fold into actual_root
 ```
 
-### Batch Comparison
-
-For each table, verify reads the destination using the same offset strategy as the original migration. The fetch size for each batch is taken from `receipt.rows_per_batch[i]` so boundaries align exactly.
-
-```
-for i in 0..receipt.batch_roots.len():
-    rows = reader.next_batch(cursor, receipt.rows_per_batch[i])
-    actual_root = MerkleTree::root_from_hashes(row_hashes, receipt.algorithm)
-    if actual_root != receipt.batch_roots[i]:
-        divergent_batches.push(DivergentBatch { ... })
-```
-
-### Sentinel Fetch
-
-After the batch loop, one extra row is fetched past the last receipt cursor position. A non-empty result means rows were inserted into the destination after `apply` completed. The sentinel pushes a dummy `[0xff; 32]` root that causes a batch count mismatch, which is reported as a `Mismatch`.
-
-### Row-Level Diff
-
-When a batch is divergent and the receipt was written with `--full-integrity` (i.e., `receipt.row_hashes` is `Some`), `find_divergent_rows()` compares the stored per-row hashes against the recomputed ones:
-
-```rust
-fn find_divergent_rows(
-    row_start: u64,
-    row_end: u64,
-    receipt_row_hashes: &[[u8; 32]],
-    actual_row_hashes: &[[u8; 32]],
-) -> Vec<DivergentRow>
-```
-
-Each `DivergentRow` carries the zero-based row index and both hashes. Without `--full-integrity`, `divergent_rows` is empty and only the batch range (`row_start`–`row_end`) is reported.
-
-### Batch Count Mismatch
-
-If `actual_batch_roots.len() != receipt.batch_roots.len()` (different number of rows than expected), the result is immediately a `Mismatch` with a single `DivergentBatch` covering the whole table. Row-level diff is not attempted.
+`actual_root` is folded from the destination side as the walk proceeds, so equal roots and clean counts are two views of the same fact. The pass runs on a blocking thread and uses O(1) memory regardless of table size.
 
 ### Output
 
-Results are printed via `print_result()` / `format_result()` in `engine-verify`. The CLI also supports writing the report to a file via `--output`.
-
 ```
-✓ migrate_actor/actor - match (2 batches, 200 rows, 45ms)
-✗ migrate_payment/payment - MISMATCH (1 divergent batches, 312ms)
-  batch 3 (rows 3000-4000): expected a3f1b2c4... actual 9d8c7b6a...
-    row 3412: expected a3f1... actual 9d8c...
+✓ migrate_actor/actor - match (200 rows, root a3f1b2c49d8c7b6a, 45ms)
+✗ migrate_payment/payment - MISMATCH (1 missing, 1 changed, 0 extra; 16049 rows expected, 16048 found; 312ms)
+  expected root a3f1b2c49d8c7b6a
+  actual   root 9d8c7b6a1f2e3d4c
+  payment_id=3412 - changed: expected a3f1b2c49d8c7b6a actual 9d8c7b6a1f2e3d4c
+  payment_id=9001 - missing from destination
 ? migrate_film/film - no integrity receipt (run `apply --integrity` first)
 ```
+
+The CLI also supports writing the report to a file via `--output`.
 
 ---
 
 ## CLI Usage
 
 ```bash
-# Run migration and store batch-level Merkle roots
+# Run migration and commit a keyed Merkle receipt per destination table
 stratum apply -c migration.smql --integrity
 
-# Run migration and store per-row hashes (enables row-level mismatch reporting)
-stratum apply -c migration.smql --full-integrity
-
-# Verify destination matches stored receipt
+# Verify the destination against the stored receipt
 stratum verify -c migration.smql
 
-# Write verification report to file
+# Write the verification report to a file
 stratum verify -c migration.smql --output report.txt
 ```
 
-`--full-integrity` implies `--integrity`. Without either flag, hashing is disabled and zero overhead is incurred.
+Without `--integrity`, hashing is disabled and zero overhead is incurred. There is
+no shallower mode: the keyed row set is what the root is folded from, so storing it
+is not optional.
+
+### Pagination is not required
+
+Verification does not depend on reproducing the migration's read order, so a `paginate` block is not needed for correct results. It is a good idea for large tables (keyset pagination avoids deep `OFFSET` scans), but its absence can't cause a false mismatch.
 
 ---
 
-## Pagination Requirement
+## Cascade, Lanes, and Retries
 
-**Verification requires a `paginate` block for reliable results.**
+Three situations produce rows that arrive out of key order, from more than one
+writer, or more than once. None of them needs special handling: a row's identity
+is its key, re-writing the same row is idempotent, and the root is folded from the
+finished set rather than as rows stream past.
 
-Both the write path (`apply --integrity`) and the verify path (`verify`) must read rows in the same order to produce matching batch-level Merkle roots. Without an explicit `paginate` block, the default strategy uses `OFFSET/LIMIT` without `ORDER BY` -- the database is free to return rows in any order, which can change between runs (e.g. after `VACUUM`, concurrent writes, or heap reorganization). This produces false mismatches.
+- **Cascade tables** (`with references { data = cascade }`) are populated in
+  FK-join order, and a given row may be pulled in alongside many different source
+  batches. Each row is stored under its own key, so a repeat write lands on the
+  same entry - the set converges on one leaf per distinct row however many times
+  it was seen, and each row remains individually identifiable in a report.
 
-Add a `paginate` block to every pipeline that uses integrity verification:
+- **Parallel lanes** all write into the same per-table set. Lanes need no
+  coordination and nothing has to be merged when they finish, because two lanes
+  writing different rows touch different keys, and the root is only folded once
+  every lane has stopped.
 
-```smql
-paginate {
-    strategy = "pk"
-    cursor   = "orders.id"
-}
-```
-
-When `paginate` references source-side column names (e.g. `orders.id`), Stratum automatically resolves them to destination-side names through the pipeline's field mappings before verifying. For example, if the pipeline renames `customer.customer_id` to `id` and the destination table is `users`, the verify path reads from `users` ordered by `id`.
-
-If a pipeline runs with `--integrity` but no `paginate` block, a warning is logged at both `apply` and `verify` time:
-
-```
-WARN: Pipeline 'migrate_customer' has no `paginate` block. Verification requires
-deterministic row ordering to reproduce batch boundaries. Results may show false
-mismatches. Add a `paginate` block for reliable verification.
-```
-
----
-
-## Cascade Pipelines
-
-For pipelines using `with references { data = cascade }`, each FK-referenced table is independently verified:
-
-- Each table gets its own `VerificationReceipt` with `sorted_hashes = true`.
-- `IntegrityState` accumulates row hashes in a `HashSet` per cascade table, deduplicating rows referenced by multiple source batches.
-- At finalization, hashes are sorted and a single Merkle root is stored.
-- Verify reads all rows from each cascade destination table, sorts their hashes, and compares to `receipt.table_root`.
-- `row_hashes` is always `None` for cascade receipts - row-level diff is not supported for out-of-order tables.
+- **Batch retries** re-hash rows that are already stored. Both the key and the
+  hash are derived from the row's content, so the entry is rewritten byte for byte
+  as it was: a retry cannot duplicate a row or move the root.
 
 ---
 
 ## Edge Cases
 
-| Scenario                        | Behavior                                                                                                                                                                     |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Empty table                     | `root_from_hashes(&[])` returns a fixed sentinel. Verify re-reads zero rows, computes the same sentinel. Match.                                                            |
-| Single row                      | Treated as a single-leaf tree. Root equals the row hash directly.                                                                                                            |
-| Pipeline with `where` filter  | Receipt covers only the filtered rows. Verify re-reads destination (already contains only filtered rows) and compares - no re-application of the filter on the verify path. |
-| `action = skip` validation    | Skipped rows are not written and not hashed. Receipt reflects only written rows.`skipped_rows` counter records the count.                                                  |
-| Rows inserted after migration   | Detected by the sentinel fetch. Reported as a batch count mismatch.                                                                                                          |
-| `NoPriorRun`                  | Pipeline ran without `--integrity`. Verify returns `NoPriorRun` (not an error).                                                                                          |
-| Multiple pipelines (DAG)        | Each pipeline is verified independently. Results are collected in execution order.                                                                                           |
-| Many null columns               | Null-heavy rows serialize compactly (`0x00` per null column). No special handling required.                                                                                |
-| Cascade table row deduplication | A row referenced by 100 source batches contributes one hash to the set. The stored root reflects unique destination rows only.                                               |
-| No `paginate` block           | Row order is non-deterministic. Batch boundaries may not align between write and verify, causing false mismatches. A warning is logged. Add a `paginate` block to fix.      |
+| Scenario | Behavior |
+| --- | --- |
+| Empty table | No rows, no receipt. Verify reports `NoPriorRun` rather than comparing against an empty tree. |
+| Single row | Single-leaf tree; the root is that leaf. |
+| Pipeline with `where` filter | Receipt covers only the filtered rows. Verify compares the destination against the receipt - the filter is not re-applied. |
+| `action = skip` validation | Skipped rows are neither written nor hashed. `skipped_rows` records the count. |
+| Rows inserted after migration | Reported as `extra`, named by key. |
+| Rows deleted after migration | Reported as `missing`, named by key. |
+| Row modified after migration | Reported as `changed`, named by key, with both hashes. |
+| `NoPriorRun` | Pipeline ran without `--integrity`. Not an error. |
+| Receipt present, row-hash log missing/truncated | `LogUnavailable` - inconclusive, `verify` exits non-zero rather than reporting a false mismatch. Re-run `apply --integrity`. |
+| Destination table with no primary key | Rows key by their own hash; a warning is logged. Duplicate identical rows are indistinguishable. |
+| Multiple pipelines (DAG) | Each pipeline verifies independently. Results are collected in execution order. |
+| Many null columns | Null-heavy rows serialize compactly (`0x00` per null column). |
+| No `paginate` block | Fine. Read order does not affect the result. |
 
 ---
 
 ## Performance
 
-### Write Path Overhead
+### Write path overhead
 
-| Operation                | Cost                   | Notes                                                  |
-| ------------------------ | ---------------------- | ------------------------------------------------------ |
-| Canonical serialization  | ~200 ns/row            | Buffer reuse via `RowHasher`. No per-row allocation. |
-| SHA-256 hash             | ~300 ns/row            | SHA-NI hardware acceleration. ~3 GB/s.                 |
-| Subtree root computation | ~50 ns/row (amortized) | Single-pass level reduction, O(N) memory.              |
-| Receipt write to sled    | ~10 µs once           | One KV write per table at pipeline completion.         |
+| Operation | Cost | Notes |
+| --- | --- | --- |
+| Canonical serialization | ~200 ns/row | Buffer reuse via `RowHasher`, column positions resolved once per batch. |
+| SHA-256 hash | ~300 ns/row | SHA-NI hardware acceleration, ~3 GB/s. |
+| Row key encoding | ~20 ns/row | A few bytes for a typical integer PK. |
+| Row-hash append | one buffered sequential write per batch per table | ~47 bytes per row, to disk. |
+| Seal (once per table) | one external sort pass, chunks sorted in parallel | ~500 MB read + written at 10M rows. |
+| Merkle fold (once per table) | ~2 hashes per row, leaves hashed in parallel | streams the sealed file. |
+| Merkle fold | ~1 hash/row, once | Streaming, O(log n) memory. |
 
-The per-row costs above are rough, order-of-magnitude figures to show *where*
+End to end, `--integrity` adds roughly **0.3-0.5 µs per row**, near enough
+constant across workloads: 15% on a plain 10M-row copy, up to 23% on the fastest
+workload measured, and nothing measurable on one already bound by expression
+evaluation. Full per-workload numbers are in
+[benchmarks.md](benchmarks.md#the-cost-of---integrity).
+
+The per-row costs below are rough, order-of-magnitude figures to show *where*
 the work goes, not a benchmark. What matters end-to-end: hashing runs
 **in-flight**, overlapped with the destination write rather than added on top of
 it, so it costs a low single-digit percent overall - hashing is not the limiting
 factor. For measured numbers on real hardware see [benchmarks.md](benchmarks.md).
 
-`--full-integrity` adds one `Vec<[u8; 32]>` element per row (~32 bytes) retained in memory for the duration of the pipeline, plus the same 32 bytes persisted in sled. A 1M row table uses ~32 MB of additional sled storage.
+### Memory
 
-### Verification Path Cost
+Two footprints, both flat.
 
-Full destination re-read at the same speed as the original migration. For a 10M row table: ~5–6 minutes. Batch-level early termination means a single corrupted row is detected after scanning only to the divergent batch - potentially seconds for early batches.
+**The engine's:** It holds one batch of `(key, hash)` pairs at a time; the
+Merkle fold keeps one partial subtree per level (~24 hashes at 10M rows); the
+verify diff walks both streams with one entry from each in hand. None of it grows
+with the table.
+
+**The storage layer's,** measured end to end through the real API - append, seal,
+stream, clear:
+
+| Row hashes | Resident during append | Peak (during seal) |
+| --- | --- | --- |
+| 3M | 28 MB | 73 MB |
+| 10M | 28 MB | 73 MB |
+
+The append phase does not grow at all, and the peak is the sort budget rather
+than a function of the row count. Disk is the resource that scales instead - see
+[Storage footprint](#storage-footprint).
+
+### Verification path cost
+
+Verify re-reads the destination in full, hashes and keys every row, stages the
+result, seals it, and merge-joins the two streams. Measured on the same 10M-row
+`orders` table used for the [benchmarks](benchmarks.md):
+
+```
+✓ orders/orders - match (10000000 rows, root 3e00a3e5b1cfedec, 18567ms)
+```
+
+**18.6 s, ~540k rows/s** - about 93% of the rate `apply` sustained writing the
+same table (579k rows/s). That is the shape to expect: verification is a
+sequential read of the destination plus a hash per row, so it costs roughly what
+the migration cost, not a multiple of it.
+
+Memory stays flat - the staging pass and the diff both stream. Disk does not:
+staging writes a second copy of the keyed set, so the footprint in
+[Storage footprint](#storage-footprint) roughly doubles while verify runs, and
+the staged copy is deleted when it finishes.
 
 ---
 
 ## Future Extensions
 
-### Incremental Verification
+### Source-side commitment
 
-For CDC pipelines: maintain Merkle trees incrementally as new rows arrive, recomputing only the affected subtree. Extends the model from batch migrations to continuous replication.
+Take the same keyed commitment on the source as it is read, and the comparison becomes end-to-end: destination set ≡ f(source set) for the declared transform, rather than destination ≡ what the producer says it wrote. This is what would turn a tamper-evident receipt into a proof of migration correctness, and it is the natural home for excluding non-deterministic columns from the comparison.
 
-### Parallel Verification
+### Inclusion proofs
 
-For very large tables: read PK ranges concurrently, build batch subtrees in parallel. The batch-level tree structure supports this naturally - each batch is an independent subtree.
+The tree already supports it: an O(log n) proof that a specific row, with specific contents, was part of the migration - checkable against the published root without access to the rest of the table.
+
+### Incremental verification
+
+For CDC pipelines: update the committed set as rows arrive and re-fold only the affected path, extending the model from batch migrations to continuous replication.
