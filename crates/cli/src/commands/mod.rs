@@ -186,6 +186,9 @@ pub enum Commands {
             help = "If specified, writes the verification report to this file instead of stdout"
         )]
         output: Option<String>,
+
+        #[arg(long, help = "Run with pretty colored output")]
+        pretty: bool,
     },
     /// Test database connectivity
     Ping {
@@ -281,9 +284,11 @@ pub async fn execute_command(
             )
             .await
         }
-        Commands::Verify { config, output } => {
-            verify::execute(config.clone(), output.clone(), env.clone()).await
-        }
+        Commands::Verify {
+            config,
+            output,
+            pretty,
+        } => verify::execute(cli, config.clone(), output.clone(), *pretty, env.clone()).await,
         Commands::Status { config } => status::execute(config.clone(), env).await,
         Commands::Ping { url, format } => ping::execute(cli, url.clone(), format.clone()).await,
         Commands::Version => {

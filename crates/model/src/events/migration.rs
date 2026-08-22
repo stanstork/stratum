@@ -304,6 +304,37 @@ pub enum MigrationEvent {
         error: String,
         timestamp: DateTime<Utc>,
     },
+
+    // === Integrity Finalization (--integrity) ===
+    /// Emitted once, after data migration, when receipt finalization begins.
+    IntegrityStarted {
+        run_id: String,
+        item_id: String,
+        /// Number of destination tables that will be sealed and committed.
+        tables: usize,
+        timestamp: DateTime<Utc>,
+    },
+
+    /// Emitted per table when its row-hash log is being sealed (sorted, merged,
+    /// and deduplicated) ahead of the Merkle fold.
+    IntegritySealing {
+        run_id: String,
+        item_id: String,
+        table: String,
+        timestamp: DateTime<Utc>,
+    },
+
+    /// Emitted per table once its verification receipt has been written.
+    IntegrityReceipt {
+        run_id: String,
+        item_id: String,
+        table: String,
+        /// Distinct row keys committed to the Merkle root.
+        rows: u64,
+        /// First 8 bytes of the table root, hex-encoded, for at-a-glance compare.
+        root: String,
+        timestamp: DateTime<Utc>,
+    },
 }
 
 // === Supporting Enums ===
@@ -919,6 +950,39 @@ impl fmt::Display for MigrationEvent {
                 run_id,
                 item_id
             ),
+
+            MigrationEvent::IntegrityStarted {
+                tables, timestamp, ..
+            } => write!(
+                f,
+                "[{}] Integrity finalization started ({} tables)",
+                timestamp.format("%Y-%m-%d %H:%M:%S"),
+                tables
+            ),
+
+            MigrationEvent::IntegritySealing {
+                table, timestamp, ..
+            } => write!(
+                f,
+                "[{}] Integrity sealing table '{}'",
+                timestamp.format("%Y-%m-%d %H:%M:%S"),
+                table
+            ),
+
+            MigrationEvent::IntegrityReceipt {
+                table,
+                rows,
+                root,
+                timestamp,
+                ..
+            } => write!(
+                f,
+                "[{}] Integrity receipt for '{}': {} rows, root {}",
+                timestamp.format("%Y-%m-%d %H:%M:%S"),
+                table,
+                rows,
+                root
+            ),
         }
     }
 }
@@ -959,6 +1023,9 @@ impl MigrationEvent {
             MigrationEvent::SchemaCreationStarted { .. } => "schema.creation.started",
             MigrationEvent::SchemaCreationCompleted { .. } => "schema.creation.completed",
             MigrationEvent::SchemaCreationFailed { .. } => "schema.creation.failed",
+            MigrationEvent::IntegrityStarted { .. } => "integrity.started",
+            MigrationEvent::IntegritySealing { .. } => "integrity.sealing",
+            MigrationEvent::IntegrityReceipt { .. } => "integrity.receipt",
         }
     }
 
@@ -995,7 +1062,10 @@ impl MigrationEvent {
             | MigrationEvent::ValidationPassed { run_id, .. }
             | MigrationEvent::SchemaCreationStarted { run_id, .. }
             | MigrationEvent::SchemaCreationCompleted { run_id, .. }
-            | MigrationEvent::SchemaCreationFailed { run_id, .. } => Some(run_id),
+            | MigrationEvent::SchemaCreationFailed { run_id, .. }
+            | MigrationEvent::IntegrityStarted { run_id, .. }
+            | MigrationEvent::IntegritySealing { run_id, .. }
+            | MigrationEvent::IntegrityReceipt { run_id, .. } => Some(run_id),
             MigrationEvent::ActorError { run_id, .. } => run_id.as_deref(),
         }
     }
@@ -1033,7 +1103,10 @@ impl MigrationEvent {
             | MigrationEvent::ValidationPassed { item_id, .. }
             | MigrationEvent::SchemaCreationStarted { item_id, .. }
             | MigrationEvent::SchemaCreationCompleted { item_id, .. }
-            | MigrationEvent::SchemaCreationFailed { item_id, .. } => Some(item_id),
+            | MigrationEvent::SchemaCreationFailed { item_id, .. }
+            | MigrationEvent::IntegrityStarted { item_id, .. }
+            | MigrationEvent::IntegritySealing { item_id, .. }
+            | MigrationEvent::IntegrityReceipt { item_id, .. } => Some(item_id),
             MigrationEvent::ActorError { item_id, .. } => item_id.as_deref(),
         }
     }
@@ -1072,7 +1145,10 @@ impl MigrationEvent {
             | MigrationEvent::ValidationPassed { timestamp, .. }
             | MigrationEvent::SchemaCreationStarted { timestamp, .. }
             | MigrationEvent::SchemaCreationCompleted { timestamp, .. }
-            | MigrationEvent::SchemaCreationFailed { timestamp, .. } => timestamp,
+            | MigrationEvent::SchemaCreationFailed { timestamp, .. }
+            | MigrationEvent::IntegrityStarted { timestamp, .. }
+            | MigrationEvent::IntegritySealing { timestamp, .. }
+            | MigrationEvent::IntegrityReceipt { timestamp, .. } => timestamp,
         }
     }
 

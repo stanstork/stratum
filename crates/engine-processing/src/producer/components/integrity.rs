@@ -1,6 +1,8 @@
 use crate::{error::ProducerError, profile};
+use engine_infra::event_bus::bus::EventBus;
 use engine_state::{MerkleStore, RowHashIter, RowHashLog, RowHashScope, error::StateStoreError};
 use model::{
+    events::migration::MigrationEvent,
     integrity::{
         algorithm::HashAlgorithm, config::IntegrityConfig, hasher::RowHasher,
         merkle::MerkleAccumulator, receipt::VerificationReceipt, row_key::KeyedRowHash,
@@ -159,17 +161,39 @@ pub fn reset_row_hashes(
 }
 
 /// Fold each table's stored row hashes into a Merkle root and write its receipt.
+#[allow(clippy::too_many_arguments)]
 pub async fn finalize_receipts(
     config: &IntegrityConfig,
     hash_log: &RowHashLog,
     receipts: &Arc<dyn MerkleStore>,
+    event_bus: &EventBus,
     pipeline_name: &str,
+    item_id: &str,
     primary_table: &str,
     run_id: &str,
     skipped_rows: u64,
 ) -> Result<(), ProducerError> {
+    event_bus
+        .publish(MigrationEvent::IntegrityStarted {
+            run_id: run_id.to_string(),
+            item_id: item_id.to_string(),
+            tables: config.tables.len(),
+            timestamp: chrono::Utc::now(),
+        })
+        .await;
+
     for table in config.tables.keys() {
         let algorithm = config.algorithm;
+
+        // Announce the seal before the heavy sort/merge/fold.
+        event_bus
+            .publish(MigrationEvent::IntegritySealing {
+                run_id: run_id.to_string(),
+                item_id: item_id.to_string(),
+                table: table.clone(),
+                timestamp: chrono::Utc::now(),
+            })
+            .await;
 
         let (total_rows, table_root) = tokio::task::block_in_place(|| {
             let t_seal = Instant::now();
@@ -216,6 +240,17 @@ pub async fn finalize_receipts(
             "integrity receipt written"
         );
         receipts.save_receipt(&receipt).await?;
+
+        event_bus
+            .publish(MigrationEvent::IntegrityReceipt {
+                run_id: run_id.to_string(),
+                item_id: item_id.to_string(),
+                table: table.clone(),
+                rows: total_rows,
+                root: hex8(&table_root),
+                timestamp: chrono::Utc::now(),
+            })
+            .await;
     }
     Ok(())
 }
