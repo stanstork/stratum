@@ -21,25 +21,71 @@ use ratatui::{
 };
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+    let cols = ColumnLayout::for_width(area.width);
     let sorted_names = get_sorted_pipeline_names(app);
-    let header = create_header();
-    let rows = create_rows(&sorted_names, app);
+    let header = cols.header();
+    let rows = create_rows(&sorted_names, app, &cols);
 
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Fill(1),
-            Constraint::Length(STATUS_COLUMN_WIDTH),
-            Constraint::Length(PROGRESS_COLUMN_WIDTH),
-            Constraint::Length(ROWS_COLUMN_WIDTH),
-            Constraint::Length(RATE_COLUMN_WIDTH),
-            Constraint::Length(ETA_COLUMN_WIDTH),
-        ],
-    )
-    .header(header)
-    .column_spacing(2);
+    let table = Table::new(rows, cols.constraints())
+        .header(header)
+        .column_spacing(2);
 
     frame.render_widget(table, area);
+}
+
+/// Which columns the pipeline table shows at a given width.
+struct ColumnLayout {
+    show_progress: bool,
+    show_rate: bool,
+    show_eta: bool,
+}
+
+impl ColumnLayout {
+    fn for_width(width: u16) -> Self {
+        Self {
+            show_progress: width >= 74,
+            show_rate: width >= 86,
+            show_eta: width >= 96,
+        }
+    }
+
+    fn constraints(&self) -> Vec<Constraint> {
+        let mut c = vec![
+            Constraint::Min(14),                     // Pipeline name
+            Constraint::Length(STATUS_COLUMN_WIDTH), // Status
+        ];
+
+        if self.show_progress {
+            c.push(Constraint::Length(PROGRESS_COLUMN_WIDTH));
+        }
+
+        c.push(Constraint::Length(ROWS_COLUMN_WIDTH)); // Rows
+
+        if self.show_rate {
+            c.push(Constraint::Length(RATE_COLUMN_WIDTH));
+        }
+        if self.show_eta {
+            c.push(Constraint::Length(ETA_COLUMN_WIDTH));
+        }
+
+        c
+    }
+
+    fn header(&self) -> Row<'static> {
+        let mut cells = vec!["Pipeline", "Status"];
+        if self.show_progress {
+            cells.push("Progress");
+        }
+        cells.push("Rows");
+        if self.show_rate {
+            cells.push("Rate");
+        }
+        if self.show_eta {
+            cells.push("ETA");
+        }
+
+        Row::new(cells).style(styles::table_header()).height(1)
+    }
 }
 
 fn get_sorted_pipeline_names(app: &App) -> Vec<String> {
@@ -59,15 +105,7 @@ fn get_sorted_pipeline_names(app: &App) -> Vec<String> {
         .collect()
 }
 
-fn create_header() -> Row<'static> {
-    Row::new(vec![
-        "Pipeline", "Status", "Progress", "Rows", "Rate", "ETA",
-    ])
-    .style(styles::table_header())
-    .height(1)
-}
-
-fn create_rows<'a>(sorted_names: &[String], app: &App) -> Vec<Row<'a>> {
+fn create_rows<'a>(sorted_names: &[String], app: &App, cols: &ColumnLayout) -> Vec<Row<'a>> {
     sorted_names
         .iter()
         .enumerate()
@@ -80,43 +118,53 @@ fn create_rows<'a>(sorted_names: &[String], app: &App) -> Vec<Row<'a>> {
                 Style::default()
             };
 
-            let progress_fraction = p.progress_fraction();
             let status_display = get_status_display(&p.status);
 
-            Some(
-                Row::new(vec![
-                    Line::from(format!(
-                        "{}{}",
-                        if is_selected {
-                            SELECTION_INDICATOR
-                        } else {
-                            "  "
-                        },
-                        p.name
-                    )),
-                    Line::from(vec![
-                        ratatui::text::Span::styled(
-                            status_display.symbol,
-                            Style::default().fg(status_display.color),
-                        ),
-                        ratatui::text::Span::raw(format!(" {}", status_display.text)),
-                    ]),
-                    Line::from(format_progress_bar(
-                        progress_fraction,
-                        PROGRESS_BAR_WIDTH_SMALL,
-                    )),
-                    Line::from(if p.status == PipelineStatus::Completed {
-                        // When completed, show just processed rows
-                        format_compact_number(p.processed_rows)
+            // Cells must be built in the same order and count as the constraints.
+            let mut cells = vec![
+                Line::from(format!(
+                    "{}{}",
+                    if is_selected {
+                        SELECTION_INDICATOR
                     } else {
-                        // When running, show processed/total
-                        format_row_counts(p.processed_rows, p.source_rows)
-                    }),
-                    Line::from(format_rate(p.throughput.current_throughput())),
-                    Line::from(p.eta().map(format_duration).unwrap_or_else(|| "--".into())),
-                ])
-                .style(style),
-            )
+                        "  "
+                    },
+                    p.name
+                )),
+                Line::from(vec![
+                    ratatui::text::Span::styled(
+                        status_display.symbol,
+                        Style::default().fg(status_display.color),
+                    ),
+                    ratatui::text::Span::raw(format!(" {}", status_display.text)),
+                ]),
+            ];
+
+            if cols.show_progress {
+                cells.push(Line::from(format_progress_bar(
+                    p.progress_fraction(),
+                    PROGRESS_BAR_WIDTH_SMALL,
+                )));
+            }
+
+            cells.push(Line::from(if p.status == PipelineStatus::Completed {
+                // When completed, show just processed rows
+                format_compact_number(p.processed_rows)
+            } else {
+                // When running, show processed/total
+                format_row_counts(p.processed_rows, p.source_rows)
+            }));
+
+            if cols.show_rate {
+                cells.push(Line::from(format_rate(p.throughput.current_throughput())));
+            }
+            if cols.show_eta {
+                cells.push(Line::from(
+                    p.eta().map(format_duration).unwrap_or_else(|| "--".into()),
+                ));
+            }
+
+            Some(Row::new(cells).style(style))
         })
         .collect()
 }

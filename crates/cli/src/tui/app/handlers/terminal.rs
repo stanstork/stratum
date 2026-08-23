@@ -1,5 +1,4 @@
 use crate::tui::app::{
-    command::MigrationCommand,
     handlers::events::TerminalEvent,
     state::{AppState, View},
 };
@@ -11,7 +10,8 @@ pub enum TerminalAction {
     None,
     Quit,
     QuitConfirm,
-    SendCommand(MigrationCommand),
+    PauseConfirm,
+    CancelConfirm,
 }
 
 /// Handle terminal events
@@ -90,21 +90,9 @@ fn handle_key_event(
             TerminalAction::None
         }
 
-        // Control commands (all pipelines)
-        Char('p') => TerminalAction::SendCommand(MigrationCommand::PauseAll),
-        Char('r') => TerminalAction::SendCommand(MigrationCommand::ResumeAll),
-        Char('C') => TerminalAction::SendCommand(MigrationCommand::CancelAll),
-
-        // Control commands (selected pipeline) - uppercase letters
-        Char('P') => {
-            TerminalAction::SendCommand(MigrationCommand::PausePipeline("selected".to_string()))
-        }
-        Char('R') => {
-            TerminalAction::SendCommand(MigrationCommand::ResumePipeline("selected".to_string()))
-        }
-        Char('c') => {
-            TerminalAction::SendCommand(MigrationCommand::CancelPipeline("selected".to_string()))
-        }
+        // Pause/Cancel
+        Char(' ') => TerminalAction::PauseConfirm,
+        Char('c') | Char('C') => TerminalAction::CancelConfirm,
 
         _ => TerminalAction::None,
     }
@@ -208,6 +196,32 @@ mod tests {
         let mut selected = 4;
         move_selection(&mut selected, 1, 5);
         assert_eq!(selected, 4); // Can't go above max
+    }
+
+    #[test]
+    fn space_requests_pause_confirmation() {
+        let state = AppState::Running;
+        let mut view = View::Overview;
+        let mut selected = 0;
+        let action = handle_key_event(
+            KeyEvent::from(KeyCode::Char(' ')),
+            &state,
+            &mut view,
+            &mut selected,
+            3,
+        );
+        assert_eq!(action, TerminalAction::PauseConfirm);
+    }
+
+    #[test]
+    fn c_requests_cancel_confirmation() {
+        let state = AppState::Running;
+        let mut view = View::Overview;
+        let mut selected = 0;
+        for k in [KeyCode::Char('c'), KeyCode::Char('C')] {
+            let action = handle_key_event(KeyEvent::from(k), &state, &mut view, &mut selected, 3);
+            assert_eq!(action, TerminalAction::CancelConfirm);
+        }
     }
 
     #[test]

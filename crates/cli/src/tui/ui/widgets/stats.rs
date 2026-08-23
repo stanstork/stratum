@@ -34,13 +34,13 @@ pub fn render_dashboard(frame: &mut Frame, area: Rect, app: &App) {
 fn render_progress_panel(frame: &mut Frame, area: Rect, app: &App) {
     let stats = &app.global_stats;
     let progress_pct = if stats.total_source_rows > 0 {
-        (stats.total_processed_rows as f64 / stats.total_source_rows as f64) * 100.0
+        ((stats.total_processed_rows as f64 / stats.total_source_rows as f64) * 100.0).min(100.0)
     } else {
         0.0
     };
 
-    let bar_width = (area.width.saturating_sub(8)) as usize;
-    let filled = ((progress_pct / 100.0) * bar_width as f64).round() as usize;
+    let bar_width = (area.width.saturating_sub(9)) as usize;
+    let filled = (((progress_pct / 100.0) * bar_width as f64).round() as usize).min(bar_width);
     let empty = bar_width.saturating_sub(filled);
     let bar_str = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
 
@@ -117,21 +117,23 @@ fn render_throughput_panel(frame: &mut Frame, area: Rect, app: &App) {
 fn render_timing_panel(frame: &mut Frame, area: Rect, app: &App) {
     let stats = &app.global_stats;
 
+    let end = app.ended_at.unwrap_or_else(chrono::Utc::now);
     let elapsed = app
         .start_time
         .map(|t| {
-            let duration = chrono::Utc::now() - t;
+            let duration = end - t;
             format_duration(duration.to_std().unwrap_or_default())
         })
         .unwrap_or_else(|| "00:00:00".to_string());
 
-    let eta = stats
-        .estimated_completion
-        .map(|t| {
-            let dur = t.duration_since(Instant::now());
-            format_duration(dur)
-        })
-        .unwrap_or_else(|| "--".to_string());
+    let eta = if app.state.is_running() {
+        stats
+            .estimated_completion
+            .map(|t| format_duration(t.duration_since(Instant::now())))
+            .unwrap_or_else(|| "--".to_string())
+    } else {
+        "--".to_string()
+    };
 
     let content = vec![
         Line::from(vec![

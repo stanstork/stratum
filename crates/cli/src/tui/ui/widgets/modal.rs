@@ -1,6 +1,9 @@
-use crate::tui::ui::{
-    constants::{colors, styles},
-    formatters::{format_compact_number, format_duration},
+use crate::tui::{
+    app::{command::MigrationCommand, core::App, state::IntegrityProgress},
+    ui::{
+        constants::{colors, styles},
+        formatters::{format_compact_number, format_duration},
+    },
 };
 use ratatui::{
     Frame,
@@ -16,6 +19,16 @@ pub enum ModalState {
     #[default]
     None,
     QuitConfirmation,
+    ConfirmAction {
+        title: String,
+        message: String,
+        command: MigrationCommand,
+    },
+    IntegrityFinalizing,
+    Notice {
+        title: String,
+        message: String,
+    },
     MigrationCompleted {
         total_rows: u64,
         duration: std::time::Duration,
@@ -31,11 +44,18 @@ pub enum ModalState {
     },
 }
 
-/// Render modal overlay based on state
-pub fn render(frame: &mut Frame, modal_state: &ModalState) {
-    match modal_state {
+/// Render modal overlay based on the app's current modal state.
+pub fn render(frame: &mut Frame, app: &App) {
+    match &app.modal_state {
         ModalState::None => {}
         ModalState::QuitConfirmation => render_quit_confirmation(frame),
+        ModalState::ConfirmAction { title, message, .. } => {
+            render_confirm_action(frame, title, message)
+        }
+        ModalState::IntegrityFinalizing => {
+            render_integrity_finalizing(frame, &app.integrity, app.run_finished)
+        }
+        ModalState::Notice { title, message } => render_notice(frame, title, message),
         ModalState::MigrationCompleted {
             total_rows,
             duration,
@@ -58,6 +78,180 @@ pub fn render(frame: &mut Frame, modal_state: &ModalState) {
             error_count,
         } => render_migration_failed(frame, pipeline_name, error_message, *error_count),
     }
+}
+
+/// A yes/no confirmation dialog for a destructive control.
+fn render_confirm_action(frame: &mut Frame, title: &str, message: &str) {
+    let area = centered_rect(60, 35, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(colors::STATUS_PAUSED))
+        .title(format!(" ⚠ {title} "))
+        .title_alignment(Alignment::Center)
+        .style(Style::default().bg(colors::BACKGROUND));
+
+    frame.render_widget(block, area);
+
+    let inner = area.inner(ratatui::layout::Margin {
+        vertical: 2,
+        horizontal: 2,
+    });
+
+    let mut content = vec![Line::from("")];
+    for line in message.lines() {
+        content.push(Line::from(Span::styled(
+            line.to_string(),
+            styles::value_bold(),
+        )));
+    }
+    content.push(Line::from(""));
+    content.push(Line::from(""));
+    content.push(Line::from(vec![
+        Span::raw("    ["),
+        Span::styled(
+            "y",
+            Style::default()
+                .fg(colors::STATUS_PAUSED)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("] "),
+        Span::styled("Yes", styles::value_bold()),
+        Span::raw("     ["),
+        Span::styled(
+            "n",
+            Style::default()
+                .fg(colors::STATUS_PAUSED)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("] "),
+        Span::styled("No", styles::value_bold()),
+    ]));
+
+    let paragraph = Paragraph::new(content)
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: true });
+
+    frame.render_widget(paragraph, inner);
+}
+
+/// A terminal informational modal (paused / cancelled).
+fn render_notice(frame: &mut Frame, title: &str, message: &str) {
+    let area = centered_rect(60, 30, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(colors::STATUS_PAUSED))
+        .title(format!(" {title} "))
+        .title_alignment(Alignment::Center)
+        .style(Style::default().bg(colors::BACKGROUND));
+
+    frame.render_widget(block, area);
+
+    let inner = area.inner(ratatui::layout::Margin {
+        vertical: 2,
+        horizontal: 2,
+    });
+
+    let mut content = vec![Line::from("")];
+    for line in message.lines() {
+        content.push(Line::from(Span::styled(
+            line.to_string(),
+            styles::value_bold(),
+        )));
+    }
+    content.push(Line::from(""));
+    content.push(Line::from(""));
+    content.push(Line::from(vec![
+        Span::raw("    Press ["),
+        Span::styled(
+            "q",
+            Style::default()
+                .fg(colors::STATUS_PAUSED)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("] to exit"),
+    ]));
+
+    let paragraph = Paragraph::new(content)
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: true });
+
+    frame.render_widget(paragraph, inner);
+}
+
+/// A modal shown while `--integrity` seals and commits receipts.
+fn render_integrity_finalizing(frame: &mut Frame, integrity: &IntegrityProgress, done: bool) {
+    let area = centered_rect(60, 40, frame.area());
+    frame.render_widget(Clear, area);
+
+    let (border, title) = if done {
+        (colors::STATUS_RUNNING, " ✓ INTEGRITY RECEIPTS COMMITTED ")
+    } else {
+        (colors::STATUS_QUEUED, " ⧗ SEALING INTEGRITY RECEIPTS ")
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border))
+        .title(title)
+        .title_alignment(Alignment::Center)
+        .style(Style::default().bg(colors::BACKGROUND));
+
+    frame.render_widget(block, area);
+
+    let inner = area.inner(ratatui::layout::Margin {
+        vertical: 2,
+        horizontal: 2,
+    });
+
+    let activity = if done {
+        "All verification receipts committed.".to_string()
+    } else {
+        match &integrity.current_table {
+            Some(table) => format!("Sealing '{table}'…"),
+            None => "Folding Merkle roots…".to_string(),
+        }
+    };
+
+    let footer = if done {
+        Line::from(vec![
+            Span::raw("            Press ["),
+            Span::styled(
+                "Enter",
+                Style::default()
+                    .fg(colors::STATUS_RUNNING)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("] to continue"),
+        ])
+    } else {
+        Line::from(Span::styled(
+            "Committing verification receipts - please wait.",
+            styles::muted(),
+        ))
+    };
+
+    let content = vec![
+        Line::from(""),
+        Line::from(Span::styled(activity, styles::value_bold())),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Receipts committed:  ", styles::label()),
+            Span::styled(integrity.receipts_done.to_string(), styles::value_bold()),
+        ]),
+        Line::from(""),
+        footer,
+    ];
+
+    let paragraph = Paragraph::new(content)
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: true })
+        .style(styles::value_bold());
+
+    frame.render_widget(paragraph, inner);
 }
 
 fn render_quit_confirmation(frame: &mut Frame) {

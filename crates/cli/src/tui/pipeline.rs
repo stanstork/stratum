@@ -142,6 +142,9 @@ pub struct PipelineState {
     pub skipped_rows: u64,
     pub bytes_transferred: u64,
 
+    /// Rows already migrated in a previous run.
+    pub resume_baseline: u64,
+
     // Batching info
     pub current_batch: u32,
     pub total_batches: u32,
@@ -167,6 +170,7 @@ impl PipelineState {
             failed_rows: 0,
             skipped_rows: 0,
             bytes_transferred: 0,
+            resume_baseline: 0,
             current_batch: 0,
             total_batches: 0,
             throughput: ThroughputTracker::new(Duration::from_secs(30)),

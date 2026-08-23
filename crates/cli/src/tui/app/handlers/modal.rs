@@ -12,6 +12,11 @@ pub fn handle_modal_key(
 ) -> ModalAction {
     match modal_state.clone() {
         ModalState::QuitConfirmation => handle_quit_confirmation(modal_state, key),
+        ModalState::ConfirmAction { command, .. } => {
+            handle_confirm_action(modal_state, key, command)
+        }
+        ModalState::IntegrityFinalizing => handle_integrity_finalizing(modal_state, key),
+        ModalState::Notice { .. } => handle_notice(modal_state, key),
         ModalState::MigrationCompleted { .. } => {
             handle_migration_completed(modal_state, current_view, key)
         }
@@ -19,6 +24,52 @@ pub fn handle_modal_key(
             handle_migration_failed(modal_state, current_view, key, pipeline_name)
         }
         ModalState::None => ModalAction::None,
+    }
+}
+
+/// A destructive-action confirmation: `y` dispatches the command, anything else
+/// (including `n`/Esc) dismisses it.
+fn handle_confirm_action(
+    modal_state: &mut ModalState,
+    key: KeyEvent,
+    command: MigrationCommand,
+) -> ModalAction {
+    use KeyCode::*;
+
+    match key.code {
+        Char('y') | Char('Y') => {
+            *modal_state = ModalState::None;
+            ModalAction::SendCommand(command)
+        }
+        Char('n') | Char('N') | Esc => {
+            *modal_state = ModalState::None;
+            ModalAction::None
+        }
+        _ => ModalAction::None,
+    }
+}
+
+/// A terminal notice (paused / cancelled): `q` quits, Esc dismisses.
+fn handle_notice(modal_state: &mut ModalState, key: KeyEvent) -> ModalAction {
+    match key.code {
+        KeyCode::Char('q') | KeyCode::Char('Q') => ModalAction::Quit,
+        KeyCode::Esc => {
+            *modal_state = ModalState::None;
+            ModalAction::None
+        }
+        _ => ModalAction::None,
+    }
+}
+
+/// The finalization modal is transient - it clears itself once integrity is
+/// done. It can't be dismissed, but the user can still ask to quit.
+fn handle_integrity_finalizing(modal_state: &mut ModalState, key: KeyEvent) -> ModalAction {
+    match key.code {
+        KeyCode::Char('q') | KeyCode::Char('Q') => {
+            *modal_state = ModalState::QuitConfirmation;
+            ModalAction::None
+        }
+        _ => ModalAction::None,
     }
 }
 
@@ -130,6 +181,35 @@ mod tests {
 
         let action = handle_migration_completed(&mut modal, &mut view, key);
         assert_eq!(action, ModalAction::Quit);
+    }
+
+    #[test]
+    fn confirm_action_yes_dispatches_command() {
+        let mut modal = ModalState::ConfirmAction {
+            title: "Cancel Migration".to_string(),
+            message: "Abort?".to_string(),
+            command: MigrationCommand::CancelAll,
+        };
+        let mut view = View::Overview;
+        let action = handle_modal_key(&mut modal, &mut view, KeyEvent::from(KeyCode::Char('y')));
+        assert_eq!(
+            action,
+            ModalAction::SendCommand(MigrationCommand::CancelAll)
+        );
+        assert_eq!(modal, ModalState::None);
+    }
+
+    #[test]
+    fn confirm_action_no_dismisses_without_command() {
+        let mut modal = ModalState::ConfirmAction {
+            title: "Pause Migration".to_string(),
+            message: "Pause?".to_string(),
+            command: MigrationCommand::PauseAll,
+        };
+        let mut view = View::Overview;
+        let action = handle_modal_key(&mut modal, &mut view, KeyEvent::from(KeyCode::Char('n')));
+        assert_eq!(action, ModalAction::None);
+        assert_eq!(modal, ModalState::None);
     }
 
     #[test]

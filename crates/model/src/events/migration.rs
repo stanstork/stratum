@@ -335,6 +335,15 @@ pub enum MigrationEvent {
         root: String,
         timestamp: DateTime<Utc>,
     },
+
+    /// Emitted once a pipeline's integrity finalization has finished.
+    IntegrityCompleted {
+        run_id: String,
+        item_id: String,
+        /// Receipts written for this pipeline.
+        receipts: usize,
+        timestamp: DateTime<Utc>,
+    },
 }
 
 // === Supporting Enums ===
@@ -983,6 +992,17 @@ impl fmt::Display for MigrationEvent {
                 rows,
                 root
             ),
+
+            MigrationEvent::IntegrityCompleted {
+                receipts,
+                timestamp,
+                ..
+            } => write!(
+                f,
+                "[{}] Integrity finalization complete ({} receipts)",
+                timestamp.format("%Y-%m-%d %H:%M:%S"),
+                receipts
+            ),
         }
     }
 }
@@ -1026,6 +1046,7 @@ impl MigrationEvent {
             MigrationEvent::IntegrityStarted { .. } => "integrity.started",
             MigrationEvent::IntegritySealing { .. } => "integrity.sealing",
             MigrationEvent::IntegrityReceipt { .. } => "integrity.receipt",
+            MigrationEvent::IntegrityCompleted { .. } => "integrity.completed",
         }
     }
 
@@ -1065,7 +1086,8 @@ impl MigrationEvent {
             | MigrationEvent::SchemaCreationFailed { run_id, .. }
             | MigrationEvent::IntegrityStarted { run_id, .. }
             | MigrationEvent::IntegritySealing { run_id, .. }
-            | MigrationEvent::IntegrityReceipt { run_id, .. } => Some(run_id),
+            | MigrationEvent::IntegrityReceipt { run_id, .. }
+            | MigrationEvent::IntegrityCompleted { run_id, .. } => Some(run_id),
             MigrationEvent::ActorError { run_id, .. } => run_id.as_deref(),
         }
     }
@@ -1106,7 +1128,8 @@ impl MigrationEvent {
             | MigrationEvent::SchemaCreationFailed { item_id, .. }
             | MigrationEvent::IntegrityStarted { item_id, .. }
             | MigrationEvent::IntegritySealing { item_id, .. }
-            | MigrationEvent::IntegrityReceipt { item_id, .. } => Some(item_id),
+            | MigrationEvent::IntegrityReceipt { item_id, .. }
+            | MigrationEvent::IntegrityCompleted { item_id, .. } => Some(item_id),
             MigrationEvent::ActorError { item_id, .. } => item_id.as_deref(),
         }
     }
@@ -1148,7 +1171,8 @@ impl MigrationEvent {
             | MigrationEvent::SchemaCreationFailed { timestamp, .. }
             | MigrationEvent::IntegrityStarted { timestamp, .. }
             | MigrationEvent::IntegritySealing { timestamp, .. }
-            | MigrationEvent::IntegrityReceipt { timestamp, .. } => timestamp,
+            | MigrationEvent::IntegrityReceipt { timestamp, .. }
+            | MigrationEvent::IntegrityCompleted { timestamp, .. } => timestamp,
         }
     }
 

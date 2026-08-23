@@ -7,6 +7,7 @@ pub enum AppState {
     Initializing,
     Running,
     Paused,
+    Finalizing,
     Completed,
     Failed(String),
 }
@@ -41,6 +42,15 @@ impl View {
             Self::Help => Self::Overview,
         }
     }
+}
+
+/// Progress of the post-migration integrity finalization (`--integrity`).
+#[derive(Debug, Clone, Default)]
+pub struct IntegrityProgress {
+    pub enabled: bool,
+    pub active: bool,
+    pub current_table: Option<String>,
+    pub receipts_done: usize,
 }
 
 /// Error log entry

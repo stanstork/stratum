@@ -1,11 +1,7 @@
-/// Commands sent from TUI to migration engine
+/// Commands sent from the TUI to the migration engine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MigrationCommand {
     PauseAll,
-    ResumeAll,
-    PausePipeline(String),
-    ResumePipeline(String),
-    CancelPipeline(String),
     CancelAll,
     RetryPipeline(String),
 }

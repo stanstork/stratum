@@ -182,6 +182,8 @@ pub async fn finalize_receipts(
         })
         .await;
 
+    let mut receipts_written = 0usize;
+
     for table in config.tables.keys() {
         let algorithm = config.algorithm;
 
@@ -241,6 +243,7 @@ pub async fn finalize_receipts(
         );
         receipts.save_receipt(&receipt).await?;
 
+        receipts_written += 1;
         event_bus
             .publish(MigrationEvent::IntegrityReceipt {
                 run_id: run_id.to_string(),
@@ -252,6 +255,16 @@ pub async fn finalize_receipts(
             })
             .await;
     }
+
+    event_bus
+        .publish(MigrationEvent::IntegrityCompleted {
+            run_id: run_id.to_string(),
+            item_id: item_id.to_string(),
+            receipts: receipts_written,
+            timestamp: chrono::Utc::now(),
+        })
+        .await;
+
     Ok(())
 }
 

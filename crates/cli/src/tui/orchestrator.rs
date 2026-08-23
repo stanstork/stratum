@@ -1,4 +1,5 @@
 use crate::{
+    commands::{open_state_store, run_completed},
     error::CliError,
     tui::{
         app::{
@@ -6,31 +7,28 @@ use crate::{
             core::App,
             handlers::events::{TerminalEvent, spawn_terminal_events},
         },
+        pipeline::{PipelineState, PipelineStatus},
         plan::build_plan_context,
         tasks::{spawn_command_handler, spawn_event_forwarder, spawn_executor},
         terminal::TerminalGuard,
     },
 };
 use engine_core::context::env::EnvContext;
+use engine_core::plan::execution::ExecutionPlan as CoreExecutionPlan;
 use engine_infra::event_bus::bus::EventBus;
 use engine_infra::shutdown::ShutdownSignal;
+use engine_state::StateStore;
 use indicatif::{ProgressBar, ProgressStyle};
 use model::{
     events::migration::MigrationEvent,
     execution::flags::{ExecutionFlags, IntegrityMode},
 };
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc;
 
 /// Orchestrates the TUI lifecycle and background engine tasks
-///
-/// This is the main entry point for the TUI mode. It:
-/// 1. Builds the execution plan from the SMQL configuration
-/// 2. Initializes the terminal in alternate screen mode
-/// 3. Sets up communication channels between components
-/// 4. Spawns background tasks for event forwarding, command handling, and execution
-/// 5. Runs the main TUI application loop
-/// 6. Ensures proper terminal cleanup on exit
 pub async fn run_tui(
     config_path: String,
     exact_filter: bool,
@@ -39,7 +37,16 @@ pub async fn run_tui(
     env: Arc<EnvContext>,
 ) -> Result<(), CliError> {
     // Build Plan (Outside TUI mode so errors/logs show in standard terminal)
-    let plan_context = build_plan(&config_path, exact_filter, env.clone()).await?;
+    let mut plan_context = build_plan(&config_path, exact_filter, env.clone()).await?;
+
+    // If this migration already finished, don't take over the screen with a TUI
+    if run_completed(&plan_context.core_plan.run_id()).await {
+        println!("Migration for '{config_path}' already completed.");
+        return Ok(());
+    }
+
+    // Seed already-migrated rows from the checkpoint
+    seed_resume_progress(&mut plan_context.pipelines, &plan_context.core_plan).await;
 
     // Initialize Terminal Guard (Restores terminal on drop)
     let mut guard = TerminalGuard::init()?;
@@ -48,10 +55,13 @@ pub async fn run_tui(
     let channels = setup_channels();
 
     // Start background tasks
+    let integrity_enabled = integrity.is_enabled();
     let flags = ExecutionFlags::new(false, integrity);
     let event_bus = EventBus::new();
+    let (outcome_tx, outcome_rx) = mpsc::channel(4);
+
     spawn_event_forwarder(event_bus.clone(), channels.event_tx);
-    spawn_command_handler(channels.command_rx, shutdown.cancel.clone());
+    spawn_command_handler(channels.command_rx, shutdown.clone());
     spawn_executor(
         flags,
         event_bus,
@@ -59,6 +69,7 @@ pub async fn run_tui(
         plan_context.dag,
         shutdown,
         env,
+        outcome_tx,
     );
 
     // Run Application
@@ -68,6 +79,8 @@ pub async fn run_tui(
         channels.terminal_rx,
         plan_context.pipelines,
         plan_context.report,
+        outcome_rx,
+        integrity_enabled,
     );
 
     app.run(guard.terminal())
@@ -77,29 +90,57 @@ pub async fn run_tui(
     Ok(())
 }
 
+/// Seed each pipeline's already-migrated row count from its checkpoint, so a
+/// resumed run displays progress from where the previous run stopped.
+async fn seed_resume_progress(
+    pipelines: &mut HashMap<String, PipelineState>,
+    plan: &CoreExecutionPlan,
+) {
+    let Ok(store) = open_state_store() else {
+        return;
+    };
+
+    let run_id = plan.run_id();
+
+    for (item_id, state) in pipelines.iter_mut() {
+        let done = store.total_rows_done(&run_id, item_id).await.unwrap_or(0);
+
+        if done == 0 {
+            continue;
+        }
+
+        state.resume_baseline = done;
+        state.processed_rows = done;
+
+        if state.source_rows > 0 && done >= state.source_rows {
+            state.status = PipelineStatus::Completed;
+            state.completed_at = Some(Instant::now());
+        }
+    }
+}
+
 /// Builds execution plan with animated spinner feedback
 async fn build_plan(
     config_path: &str,
     exact_filter: bool,
     env: Arc<EnvContext>,
 ) -> Result<crate::tui::plan::PlanContext, CliError> {
-    let spinner = ProgressBar::new_spinner();
-    spinner.set_style(
-        ProgressStyle::default_spinner()
-            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
-            .template("{spinner:.cyan} {msg}")
-            .unwrap(),
-    );
-
     let msg = if exact_filter {
         format!(
-            "Building execution plan from {} (using exact COUNT - this may take longer)",
-            config_path
+            "Building execution plan from {config_path} (using exact COUNT - this may take longer)"
         )
     } else {
-        format!("Building execution plan from {}", config_path)
+        format!("Building execution plan from {config_path}")
     };
-    spinner.set_message(msg);
+
+    let spinner = ProgressBar::new_spinner()
+        .with_style(
+            ProgressStyle::with_template("{spinner:.cyan} {msg}")
+                .unwrap()
+                .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
+        )
+        .with_message(msg);
+
     spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
     let plan_context = build_plan_context(config_path, exact_filter, env).await?;

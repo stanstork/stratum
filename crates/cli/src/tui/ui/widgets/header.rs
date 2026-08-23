@@ -45,6 +45,7 @@ fn get_app_status(state: &AppState) -> (&'static str, Color) {
         AppState::Initializing => ("INITIALIZING", Color::Yellow),
         AppState::Running => ("RUNNING", Color::Green),
         AppState::Paused => ("PAUSED", Color::Yellow),
+        AppState::Finalizing => ("FINALIZING", Color::Cyan),
         AppState::Completed => ("COMPLETED", Color::Blue),
         AppState::Failed(_) => ("FAILED", Color::Red),
     }

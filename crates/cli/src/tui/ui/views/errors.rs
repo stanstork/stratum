@@ -27,7 +27,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .collect();
 
     let widget = Paragraph::new(lines)
-        .block(Block::default().title(" Error Log ").borders(Borders::TOP))
+        .block(
+            Block::default()
+                .title(" Error Log ")
+                .borders(Borders::ALL)
+                .border_style(styles::border()),
+        )
         .wrap(ratatui::widgets::Wrap { trim: true });
 
     frame.render_widget(widget, area);

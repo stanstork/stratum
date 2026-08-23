@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 pub fn render(frame: &mut Frame, area: Rect) {
-    let keys = " [Q]uit  [Tab]View  [P]ause  [R]esume  [C]ancel ";
+    let keys = " [Q]uit  [Tab]View  [Space]Pause  [C]ancel ";
     let footer = Paragraph::new(keys)
         .alignment(Alignment::Center)
         .style(Style::default().bg(colors::BACKGROUND).fg(colors::BORDER));
