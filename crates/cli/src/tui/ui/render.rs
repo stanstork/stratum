@@ -93,7 +93,13 @@ mod tests {
     use ratatui::{Terminal, backend::TestBackend};
     use std::collections::HashMap;
 
-    fn pipeline(name: &str, stage: u32, status: PipelineStatus, src: u64, done: u64) -> PipelineState {
+    fn pipeline(
+        name: &str,
+        stage: u32,
+        status: PipelineStatus,
+        src: u64,
+        done: u64,
+    ) -> PipelineState {
         let mut p = PipelineState::new(name.to_string(), stage);
         p.status = status;
         p.source_rows = src;
@@ -125,7 +131,13 @@ mod tests {
             30,
             vec![
                 pipeline("migrate_actor", 0, PipelineStatus::Completed, 200, 200),
-                pipeline("migrate_customers", 1, PipelineStatus::Running, 13_842, 8_000),
+                pipeline(
+                    "migrate_customers",
+                    1,
+                    PipelineStatus::Running,
+                    13_842,
+                    8_000,
+                ),
                 pipeline("migrate_orders", 1, PipelineStatus::Pending, 127_491, 0),
             ],
             |_app| {},
@@ -142,7 +154,13 @@ mod tests {
         let out = dump(
             100,
             30,
-            vec![pipeline("orders", 0, PipelineStatus::Running, 10_000, 11_000)],
+            vec![pipeline(
+                "orders",
+                0,
+                PipelineStatus::Running,
+                10_000,
+                11_000,
+            )],
             |_app| {},
         );
         println!("\n{out}");
@@ -161,7 +179,13 @@ mod tests {
             30,
             vec![
                 pipeline("migrate_actor", 0, PipelineStatus::Completed, 200, 200),
-                pipeline("migrate_customers", 1, PipelineStatus::Running, 13_842, 8_000),
+                pipeline(
+                    "migrate_customers",
+                    1,
+                    PipelineStatus::Running,
+                    13_842,
+                    8_000,
+                ),
             ],
             |app| {
                 app.current_view = View::PipelineDetail;
@@ -219,9 +243,15 @@ mod tests {
         );
         println!("\n{out}");
         assert!(out.contains("FINALIZING"), "status should read FINALIZING");
-        assert!(out.contains("SEALING INTEGRITY RECEIPTS"), "finalizing modal");
+        assert!(
+            out.contains("SEALING INTEGRITY RECEIPTS"),
+            "finalizing modal"
+        );
         assert!(out.contains("Sealing 'orders'"));
-        assert!(out.contains("Receipts committed:  2"), "cumulative receipts");
+        assert!(
+            out.contains("Receipts committed:  2"),
+            "cumulative receipts"
+        );
         // The premature completion modal must not be up while sealing.
         assert!(
             !out.contains("MIGRATION COMPLETED"),
@@ -315,13 +345,25 @@ mod tests {
             24,
             vec![
                 pipeline("migrate_actor", 0, PipelineStatus::Completed, 200, 200),
-                pipeline("migrate_customers", 1, PipelineStatus::Running, 13_842, 8_000),
+                pipeline(
+                    "migrate_customers",
+                    1,
+                    PipelineStatus::Running,
+                    13_842,
+                    8_000,
+                ),
             ],
             |_app| {},
         );
         println!("\n{out}");
         assert!(out.contains("STRATUM"));
-        assert!(out.contains("Pipeline"), "name column header must be present");
-        assert!(out.contains("migrate_actor"), "pipeline name must be visible");
+        assert!(
+            out.contains("Pipeline"),
+            "name column header must be present"
+        );
+        assert!(
+            out.contains("migrate_actor"),
+            "pipeline name must be visible"
+        );
     }
 }
