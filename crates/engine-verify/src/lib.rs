@@ -2,7 +2,9 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 pub mod error;
+pub mod progress;
 pub mod reader;
 pub mod verifier;
 
-pub use verifier::verify;
+pub use progress::{NoopProgress, VerifyProgress};
+pub use verifier::{verify, verify_with_progress};

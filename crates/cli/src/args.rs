@@ -53,7 +53,9 @@ impl Cli {
     pub fn is_pretty_mode(&self) -> bool {
         matches!(
             self.command,
-            Commands::Apply { pretty: true, .. } | Commands::Resume { pretty: true, .. }
+            Commands::Apply { pretty: true, .. }
+                | Commands::Resume { pretty: true, .. }
+                | Commands::Verify { pretty: true, .. }
         )
     }
 

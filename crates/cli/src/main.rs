@@ -91,7 +91,9 @@ fn handle_error(error: CliError) -> i32 {
             1
         }
         _ => {
-            tracing::error!(error = %error, "application error");
+            // Print to stderr so the failure is visible even in --tui/--pretty
+            // modes, where tracing is routed to a log file.
+            eprintln!("Error: {error}");
             1
         }
     }

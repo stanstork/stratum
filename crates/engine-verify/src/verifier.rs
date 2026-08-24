@@ -1,4 +1,8 @@
-use crate::{error::VerifyError, reader::TableReader};
+use crate::{
+    error::VerifyError,
+    progress::{NoopProgress, VerifyProgress},
+    reader::TableReader,
+};
 use connectors::{
     sql::metadata::table::TableMetadata, traits::introspector::SchemaIntrospector,
     traits::reader::DataReader,
@@ -63,12 +67,29 @@ pub async fn verify(
     plan: ExecutionPlan,
     env: Arc<EnvContext>,
 ) -> Result<Vec<VerificationResult>, VerifyError> {
+    verify_with_progress(plan, env, &mut NoopProgress).await
+}
+
+/// Like [`verify`], but reports each table as it starts and finishes.
+pub async fn verify_with_progress(
+    plan: ExecutionPlan,
+    env: Arc<EnvContext>,
+    progress: &mut dyn VerifyProgress,
+) -> Result<Vec<VerificationResult>, VerifyError> {
     let (state, hash_log) = init_state()?;
     let exec_ctx = ExecutionContext::new(&plan, state.clone(), hash_log.clone(), env);
     let mut results: Vec<VerificationResult> = Vec::new();
 
     for pipeline in &plan.pipelines {
-        verify_pipeline(pipeline, &exec_ctx, &state, &hash_log, &mut results).await?;
+        verify_pipeline(
+            pipeline,
+            &exec_ctx,
+            &state,
+            &hash_log,
+            progress,
+            &mut results,
+        )
+        .await?;
     }
 
     Ok(results)
@@ -93,6 +114,7 @@ async fn verify_pipeline(
     exec_ctx: &ExecutionContext,
     state: &Arc<SledStateStore>,
     hash_log: &RowHashLog,
+    progress: &mut dyn VerifyProgress,
     results: &mut Vec<VerificationResult>,
 ) -> Result<(), VerifyError> {
     let driver = exec_ctx
@@ -114,13 +136,26 @@ async fn verify_pipeline(
     for table in all_tables {
         // Load the receipt written by the most recent `apply --integrity`.
         let Some(receipt) = state.load_receipt(&pipeline.name, &table).await? else {
-            results.push(VerificationResult::NoPriorRun {
+            let result = VerificationResult::NoPriorRun {
                 pipeline: pipeline.name.clone(),
-            });
+            };
+            progress.table_finished(&result);
+            results.push(result);
             continue;
         };
 
-        results.push(verify_table(&driver, &pipeline.name, &table, &receipt, hash_log).await?);
+        progress.table_started(&pipeline.name, &table);
+        let result = verify_table(
+            &driver,
+            &pipeline.name,
+            &table,
+            &receipt,
+            hash_log,
+            progress,
+        )
+        .await?;
+        progress.table_finished(&result);
+        results.push(result);
     }
 
     Ok(())
@@ -134,6 +169,7 @@ async fn verify_table(
     table: &str,
     receipt: &VerificationReceipt,
     hash_log: &RowHashLog,
+    progress: &mut dyn VerifyProgress,
 ) -> Result<VerificationResult, VerifyError> {
     let start = Instant::now();
 
@@ -155,7 +191,15 @@ async fn verify_table(
     // same sorted key order without holding either set in memory.
     hash_log.clear(RowHashScope::Verify, pipeline_name, table)?;
 
-    let outcome = stage_and_diff(&table_reader, receipt, &col_types, pipeline_name, hash_log).await;
+    let outcome = stage_and_diff(
+        &table_reader,
+        receipt,
+        &col_types,
+        pipeline_name,
+        hash_log,
+        progress,
+    )
+    .await;
 
     if let Err(e) = hash_log.clear(RowHashScope::Verify, pipeline_name, table) {
         warn!(table, error = %e, "failed to clear verify scratch row hashes");
@@ -203,18 +247,22 @@ async fn stage_and_diff(
     col_types: &HashMap<String, String>,
     pipeline_name: &str,
     hash_log: &RowHashLog,
+    progress: &mut dyn VerifyProgress,
 ) -> Result<DiffOutcome, VerifyError> {
+    progress.table_phase("reading destination");
     let dest_rows = stage_destination(reader, receipt, col_types, pipeline_name, hash_log).await?;
 
     // Both sides have to be walked in the same order; sealing is what puts the
     // staged destination into the receipt set's key order.
     let table = &receipt.table_name;
+    progress.table_phase("sorting row hashes");
     hash_log.seal(RowHashScope::Verify, pipeline_name, table)?;
 
     let expected = hash_log.stream(RowHashScope::Apply, pipeline_name, table)?;
     let actual = hash_log.stream(RowHashScope::Verify, pipeline_name, table)?;
 
     // The merge-join walks the whole table off disk.
+    progress.table_phase("comparing");
     let receipt = receipt.clone();
     tokio::task::spawn_blocking(move || diff_keyed_sets(expected, actual, &receipt, dest_rows))
         .await

@@ -1,3 +1,4 @@
+use crate::tui::ui::constants::styles;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -13,12 +14,16 @@ pub fn render(frame: &mut Frame, area: Rect) {
         Line::from("  1-4   : Quick View Switch"),
         Line::from(""),
         Line::from("Controls:"),
-        Line::from("  p/r   : Pause/Resume All"),
-        Line::from("  P/R   : Pause/Resume Selected"),
-        Line::from("  c/C   : Cancel Selected/All"),
-        Line::from("  q     : Quit Application"),
+        Line::from("  Space : Pause & checkpoint the migration"),
+        Line::from("  c     : Cancel the migration"),
+        Line::from("  q     : Quit application"),
     ];
 
-    let widget = Paragraph::new(help_text).block(Block::default().borders(Borders::TOP));
+    let widget = Paragraph::new(help_text).block(
+        Block::default()
+            .title(" Keyboard Shortcuts ")
+            .borders(Borders::ALL)
+            .border_style(styles::border()),
+    );
     frame.render_widget(widget, area);
 }

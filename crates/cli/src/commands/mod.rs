@@ -2,7 +2,7 @@ use crate::{Cli, error::CliError};
 use clap::{Subcommand, ValueEnum};
 use engine_infra::shutdown::ShutdownSignal;
 use engine_processing::EnvContext;
-use engine_state::SledStateStore;
+use engine_state::{SledStateStore, StateStore, models::RunStatus};
 use model::execution::flags::IntegrityMode;
 use std::{path::PathBuf, sync::Arc};
 
@@ -24,6 +24,17 @@ pub fn state_dir() -> Result<PathBuf, CliError> {
     let home = dirs::home_dir()
         .ok_or_else(|| CliError::Unknown("Could not determine home directory".to_string()))?;
     Ok(home.join(STATE_DIR))
+}
+
+/// Whether the saved run state for `run_id` is already `Completed`.
+pub async fn run_completed(run_id: &str) -> bool {
+    let Ok(store) = open_state_store() else {
+        return false;
+    };
+    matches!(
+        store.load_run_state(run_id).await.ok().flatten(),
+        Some(run) if matches!(run.status, RunStatus::Completed { .. })
+    )
 }
 
 /// Opens the sled state store from the default location.
@@ -186,6 +197,9 @@ pub enum Commands {
             help = "If specified, writes the verification report to this file instead of stdout"
         )]
         output: Option<String>,
+
+        #[arg(long, help = "Run with pretty colored output")]
+        pretty: bool,
     },
     /// Test database connectivity
     Ping {
@@ -281,9 +295,11 @@ pub async fn execute_command(
             )
             .await
         }
-        Commands::Verify { config, output } => {
-            verify::execute(config.clone(), output.clone(), env.clone()).await
-        }
+        Commands::Verify {
+            config,
+            output,
+            pretty,
+        } => verify::execute(cli, config.clone(), output.clone(), *pretty, env.clone()).await,
         Commands::Status { config } => status::execute(config.clone(), env).await,
         Commands::Ping { url, format } => ping::execute(cli, url.clone(), format.clone()).await,
         Commands::Version => {

@@ -131,10 +131,10 @@ fn handle_lifecycle_event(
         } => {
             p.status = PipelineStatus::Completed;
             p.completed_at = Some(Instant::now());
-            p.processed_rows = *rows_processed;
+            p.processed_rows = p.resume_baseline + *rows_processed;
             p.skipped_rows = *rows_skipped;
             p.failed_rows = *rows_failed;
-            p.throughput.record(*rows_processed);
+            p.throughput.record(p.processed_rows);
         }
         MigrationEvent::Failed {
             error,
@@ -177,11 +177,11 @@ fn handle_progress_event(
             bytes_transferred,
             ..
         } => {
-            p.processed_rows = *rows_processed;
+            p.processed_rows = p.resume_baseline + *rows_processed;
             p.skipped_rows = *rows_skipped;
             p.failed_rows = *rows_failed;
             p.bytes_transferred = *bytes_transferred;
-            p.throughput.record(*rows_processed);
+            p.throughput.record(p.processed_rows);
         }
         MigrationEvent::SnapshotStarted {
             estimated_rows: Some(rows),
@@ -285,5 +285,42 @@ fn record_error(errors: &mut Vec<ErrorEntry>, item_id: Option<&str>, message: &s
     // Keep only last 100 errors
     if errors.len() > 100 {
         errors.truncate(100);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn progress(item: &str, rows: u64) -> MigrationEvent {
+        MigrationEvent::Progress {
+            run_id: "r".into(),
+            item_id: item.into(),
+            rows_processed: rows,
+            rows_skipped: 0,
+            rows_failed: 0,
+            bytes_transferred: 0,
+            rows_per_second: 0.0,
+            timestamp: Utc::now(),
+        }
+    }
+
+    /// On resume, per-run event counts are added to the checkpoint baseline so
+    /// the displayed total continues from where it left off.
+    #[test]
+    fn progress_adds_resume_baseline() {
+        let mut pipelines = HashMap::new();
+        let mut p = PipelineState::new("orders".to_string(), 0);
+        p.source_rows = 10_000;
+        p.resume_baseline = 6_000;
+        p.processed_rows = 6_000; // seeded from the checkpoint
+        pipelines.insert("itm-1".to_string(), p);
+        let mut errors = Vec::new();
+
+        handle_migration_event(&mut pipelines, &mut errors, progress("itm-1", 1_500));
+
+        // 6,000 already migrated + 1,500 this run = 7,500 shown.
+        assert_eq!(pipelines["itm-1"].processed_rows, 7_500);
     }
 }

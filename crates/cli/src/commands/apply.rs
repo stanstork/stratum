@@ -1,4 +1,7 @@
-use crate::{config, error::CliError, pretty_printer::PrettyPrinter, tui::orchestrator::run_tui};
+use crate::{
+    commands::run_completed, config, error::CliError, pretty_printer::PrettyPrinter,
+    tui::orchestrator::run_tui,
+};
 use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan, utils::make_item_id};
 use engine_infra::event_bus::bus::EventBus;
 use engine_infra::shutdown::ShutdownSignal;
@@ -63,6 +66,12 @@ async fn run_pretty_mode(
     env: Arc<EnvContext>,
 ) -> Result<(), CliError> {
     let plan = config::load_plan(&config_path, exact_filter, env.clone()).await?;
+
+    if run_completed(&plan.run_id()).await {
+        println!("Migration for '{config_path}' already completed.");
+        return Ok(());
+    }
+
     let event_bus = EventBus::new();
     let pipeline_names = build_pipeline_name_mapping(&plan);
 
@@ -97,6 +106,12 @@ async fn run_headless_mode(
 ) -> Result<(), CliError> {
     info!(config = %config_path, "executing migration");
     let plan = config::load_plan(&config_path, false, env.clone()).await?;
+
+    if run_completed(&plan.run_id()).await {
+        info!(config = %config_path, "migration already completed");
+        return Ok(());
+    }
+
     handle_execution_result(executor::run(plan, flags, shutdown, env).await)
 }
 
