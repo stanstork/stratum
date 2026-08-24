@@ -476,7 +476,7 @@ SIGINT/SIGTERM -> `CancellationToken::cancel()` -> all `tokio::select!` arms wak
 `tracing` crate with configurable level (`--log-level`). Log to stderr or file (`--log-file`). `RUST_LOG` env var also respected.
 
 ### Metrics
-Per-pipeline atomic counters accessible via `EventBus` subscribers. TUI (`--tui`) renders live progress bars. `--pretty` mode prints colored progress to stdout.
+Per-pipeline atomic counters accessible via `EventBus` subscribers. TUI (`--tui`) renders live progress bars. `--pretty` mode prints colored progress to stdout. See [output-modes.md](output-modes.md) for the CLI output modes and the TUI dashboard.
 
 ### Event Bus
 `MigrationEvent` covers the run lifecycle (`Started`, `Completed`, `Failed`,

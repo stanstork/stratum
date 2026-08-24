@@ -246,6 +246,13 @@ stratum plugin --help
 > [docs/plan.md](docs/plan.md#the---json-report) for the shape, and
 > [docs/schema-plan.json](docs/schema-plan.json) for a complete example report.
 
+> **`apply` / `verify` output modes.** `apply` runs in default log mode, `--pretty`
+> (colored, per-event lines), or `--tui` (a live dashboard with pause/cancel
+> controls). `verify` prints stable `✓`/`✗`/`?` result lines by default and adds
+> headers, progress phases, and a summary under `--pretty`. See
+> [docs/output-modes.md](docs/output-modes.md) for annotated examples of each and
+> the TUI keyboard reference.
+
 **Global flags:**
 
 | Flag | Description |

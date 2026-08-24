@@ -53,6 +53,7 @@ SMQL -> ExecutionPlan -> DAG Executor
 | Document | Description |
 |----------|-------------|
 | [plan.md](plan.md) | Reading `stratum plan` - the summary layout, flags, sampling, and the magnitude bar |
+| [output-modes.md](output-modes.md) | `apply` and `verify` output - default logs, `--pretty`, and the `--tui` dashboard with its controls |
 | [architecture.md](architecture.md) | Full crate map, layer breakdown, design decisions |
 | [smql-reference.md](smql-reference.md) | SMQL v2.1 language reference with examples |
 | [verification.md](verification.md) | Cryptographic verification - Merkle trees, proof storage, verify command |
