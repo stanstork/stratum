@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use wasmtime::{StoreLimits, StoreLimitsBuilder};
 
 #[derive(Debug, Clone)]
@@ -48,10 +49,18 @@ pub struct HostCapabilities {
     pub logging: bool,
     /// Allow outbound HTTP requests. Default: false.
     pub http_client: bool,
-    /// Allow persistent key-value store. Default: false.
+    /// Optional host allowlist for HTTP.
+    pub http_allowed_hosts: Vec<String>,
+    /// Allow instance-scoped scratch key-value store. Default: false.
     pub key_value_store: bool,
     /// Allow custom metrics emission. Default: false.
     pub metrics: bool,
+    /// Environment variables (name, value) exposed to the guest via WASI.
+    pub env: Vec<(String, String)>,
+    /// Host directories preopened read-only for the guest (WASI).
+    pub fs_read: Vec<PathBuf>,
+    /// Host directories preopened read-write for the guest (WASI).
+    pub fs_write: Vec<PathBuf>,
 }
 
 impl Default for HostCapabilities {
@@ -59,8 +68,12 @@ impl Default for HostCapabilities {
         Self {
             logging: true,
             http_client: false,
+            http_allowed_hosts: Vec::new(),
             key_value_store: false,
             metrics: false,
+            env: Vec::new(),
+            fs_read: Vec::new(),
+            fs_write: Vec::new(),
         }
     }
 }

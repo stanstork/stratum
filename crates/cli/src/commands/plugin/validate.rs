@@ -21,7 +21,7 @@ pub async fn run(
     env: Arc<EnvContext>,
 ) -> Result<(), CliError> {
     let path = config::resolve_path(config_path)?;
-    let plan = config::load_plan(&path, false, env).await?;
+    let plan = config::load_plan(&path, false, env.clone()).await?;
 
     if plan.plugins.is_empty() {
         return Err(CliError::UserMessage(format!("{path} declares no plugins")));
@@ -34,7 +34,7 @@ pub async fn run(
     let mut all_ok = true;
 
     for decl in &plan.plugins {
-        let (report, meta) = validate_one(&mut engine, decl);
+        let (report, meta) = validate_one(&mut engine, decl, &env);
         if report.error.is_some() {
             all_ok = false;
         }
@@ -98,6 +98,7 @@ struct PluginReport {
 fn validate_one(
     engine: &mut WasmEngine,
     decl: &PluginDecl,
+    env: &EnvContext,
 ) -> (PluginReport, Option<PluginMetadata>) {
     let mut report = PluginReport {
         name: decl.name.clone(),
@@ -108,7 +109,7 @@ fn validate_one(
         error: None,
     };
 
-    match validate_inner(engine, decl, &mut report) {
+    match validate_inner(engine, decl, env, &mut report) {
         Ok(meta) => (report, Some(meta)),
         Err(e) => {
             report.error = Some(e);
@@ -120,6 +121,7 @@ fn validate_one(
 fn validate_inner(
     engine: &mut WasmEngine,
     decl: &PluginDecl,
+    env: &EnvContext,
     report: &mut PluginReport,
 ) -> Result<PluginMetadata, String> {
     if !decl.path.exists() {
@@ -142,7 +144,7 @@ fn validate_inner(
 
     // Full instantiate with runtime-appropriate limits - catches init-time
     // failures (e.g. a JS bundle that throws on load).
-    let caps = caps_from_decl(decl);
+    let caps = caps_from_decl(decl, &|name| env.get(name));
     let limits = limits_for(&meta, Some(decl));
     engine
         .instantiate(

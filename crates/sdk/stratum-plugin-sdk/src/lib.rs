@@ -29,7 +29,9 @@ pub use source::{SourceConfig, SourcePage};
 pub use value::Value;
 
 // Host wrappers.
-pub use host::http::{http_get, http_post, HttpResponse};
+pub use host::env::env_get;
+pub use host::fs::{fs_read, fs_read_to_string, fs_write};
+pub use host::http::{HttpResponse, http_get, http_post};
 pub use host::kv::{kv_get, kv_set};
 pub use host::log::{log_debug, log_error, log_info, log_warn};
 pub use host::metrics::{metric_counter, metric_gauge};

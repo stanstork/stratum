@@ -47,7 +47,9 @@ use engine_config::settings::{
     Settings, validated::ValidatedSettings, validator::SettingsValidator,
 };
 use engine_core::{
-    context::exec::ConnectionPool, dispatch_drivers, drivers::DriverRef,
+    context::{env::EnvContext, exec::ConnectionPool},
+    dispatch_drivers,
+    drivers::DriverRef,
     plan::execution::ExecutionPlan as CoreExecutionPlan,
 };
 use engine_infra::retry::RetryPolicy;
@@ -131,6 +133,9 @@ pub struct ReportBuilderConfig {
 
     /// Verbosity level (0 = quiet, 1 = normal, 2+ = verbose)
     pub verbosity: u8,
+
+    /// Environment for resolving plugin `allow_env` grants during sampling.
+    pub env: Option<Arc<EnvContext>>,
 }
 
 impl Default for ReportBuilderConfig {
@@ -147,6 +152,7 @@ impl Default for ReportBuilderConfig {
             auto_mask_sensitive: true,
             exact_where: false, // Use EXPLAIN by default (faster)
             verbosity: 1,
+            env: None,
         }
     }
 }
@@ -189,7 +195,10 @@ impl ReportBuilder {
 
         // Per-run plugin registry - shared with the executor so plan --sample
         // invokes WASM transforms identically to apply.
-        let plugin_registry = load_registry(&core_plan.plugins)?;
+        let env = self.config.env.clone();
+        let plugin_registry = load_registry(&core_plan.plugins, &|name| {
+            env.as_ref().and_then(|e| e.get(name))
+        })?;
 
         // Pipeline Analysis
         let mut pipelines = self

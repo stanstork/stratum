@@ -35,7 +35,10 @@ alias s='cargo run -p cli --'   # or ./target/debug/cli
 | `counter_source.js` | source | cursor paging | `s plugin test js/counter_source.js --json` -> 3 rows, `has_more=true` |
 | `log_sink.js` | sink | host logging capability | `--mode sink --input '[{"id":1},{"id":2}]'` -> `rows_written=2` |
 | `geo_enrich.js` | transform | **HTTP capability** (needs `allow_http`) | run via `configs/capabilities.smql` |
-| `throws_on_init.js` | — | **negative**: throws at load | `s plugin inspect js/throws_on_init.js` -> clean compile error |
+| `api_source.js` | source | **HTTP capability** - fetches rows from a JSON API | run via `configs/api_source.smql` |
+| `running_total.js` | transform | **KV + metrics** - running sum across rows | run via `configs/stateful_kv.smql` |
+| `weighted_score.js` | transform | **FS + env** - lookup table from disk | run via `configs/file_lookup.smql` |
+| `throws_on_init.js` | - | **negative**: throws at load | `s plugin inspect js/throws_on_init.js` -> clean compile error |
 
 ## Configs (`configs/`)
 
@@ -44,7 +47,10 @@ alias s='cargo run -p cli --'   # or ./target/debug/cli
 | `transforms.smql` | transforms in `select` (clean) | `s plugin validate -c …` ✓ / `s plan -c …` / `s apply -c …` |
 | `filters.smql` | filters in `validate { rule … }` (clean) | `s plugin validate -c …` ✓ |
 | `capabilities.smql` | HTTP grant + resource-limit overrides | toggle `allow_http` to test the gate |
-| `diagnostics.smql` | **deliberately broken** — one fault per pipeline | `s plugin validate -c …` / `s plan -c …` -> expect errors |
+| `api_source.smql` | HTTP-backed **source** + `allow_http_hosts` allowlist | `s apply -c …` (needs network, no DB); narrow the allowlist to test the gate |
+| `stateful_kv.smql` | **KV + metrics** transform (running total) | `s apply -c …` -> `running` climbs 1,3,6,10,… |
+| `file_lookup.smql` | **FS + env** transform (on-disk lookup table) | `s apply -c …`; drop `allow_fs_read` to see scores fall back to 0 |
+| `diagnostics.smql` | **deliberately broken** - one fault per pipeline | `s plugin validate -c …` / `s plan -c …` -> expect errors |
 | `source_endpoint.smql` | WASM plugin as the pipeline **source** (`driver = "wasm"`, cursor paging) | `s apply -c …` -> 7 rows, cursor `None->3->6->None` (no DB) |
 | `sink_endpoint.smql` | WASM plugin as the pipeline **sink** + prepare/finalize lifecycle | `s apply -c …` -> prepare / wrote / finalize logs (no DB) |
 

@@ -132,7 +132,7 @@ impl PluginInstance {
         config_json: Option<&[u8]>,
     ) -> Result<Self, WasmError> {
         // Create store with resource limiter
-        let state = PluginState::new(plugin_name.clone(), capabilities, &limits);
+        let state = PluginState::new(plugin_name.clone(), capabilities, &limits)?;
         let mut store = Store::new(engine, state);
         store.limiter(|state| state);
         store
@@ -446,7 +446,7 @@ impl PluginInstance {
         module: &Module,
     ) -> Result<PluginMetadata, WasmError> {
         let limits = ResourceLimits::for_io_plugins();
-        let state = PluginState::new("<inspect>".into(), HostCapabilities::default(), &limits);
+        let state = PluginState::new("<inspect>".into(), HostCapabilities::default(), &limits)?;
 
         let mut store = Store::new(engine, state);
         store.limiter(|s| s);

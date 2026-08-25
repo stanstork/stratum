@@ -122,28 +122,6 @@ impl TableMetadata {
         self.columns.values().cloned().collect()
     }
 
-    pub fn print_tables_tree(table: &TableMetadata, indent: usize, visited: &mut HashSet<String>) {
-        if visited.contains(&table.name) {
-            println!("{}- {} ", "  ".repeat(indent), table.name);
-            return;
-        }
-
-        visited.insert(table.name.clone());
-
-        println!("{}- {}", "  ".repeat(indent), table.name);
-
-        for ref_table in table.referenced_tables.values() {
-            Self::print_tables_tree(ref_table, indent + 1, visited);
-        }
-
-        if !table.referencing_tables.is_empty() {
-            println!("{}  Referenced by:", "  ".repeat(indent));
-            for ref_table in table.referencing_tables.values() {
-                println!("{}  - {}", "  ".repeat(indent), ref_table.name);
-            }
-        }
-    }
-
     pub fn set_name(&mut self, name: &str) {
         self.name = name.to_owned();
     }

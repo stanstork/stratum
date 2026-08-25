@@ -3,7 +3,10 @@ use crate::{
     tui::{pipeline::PipelineState, planner::initialize_pipelines_from_plan},
 };
 use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan as CoreExecutionPlan};
-use engine_planner::{builder::ReportBuilder, plan::execution::migration_report::MigrationReport};
+use engine_planner::{
+    builder::{ReportBuilder, ReportBuilderConfig},
+    plan::execution::migration_report::MigrationReport,
+};
 use engine_runtime::dag::{Dag, builder::DagBuilder};
 use smql_syntax::builder::parse;
 use std::{collections::HashMap, path::Path, sync::Arc};
@@ -30,15 +33,16 @@ pub async fn build_plan_context(
     let ast = parse(&smql_content)?;
 
     // Build core plan
-    let mut core_plan = CoreExecutionPlan::build(&ast, env)?;
+    let mut core_plan = CoreExecutionPlan::build(&ast, env.clone())?;
     core_plan.config_path = config_path.to_string();
 
     // Build DAG
     let dag = build_dag(&core_plan)?;
 
-    // Build detailed report with exact_filter configuration
-    let report_config = engine_planner::builder::ReportBuilderConfig {
+    // Build detailed report with exact_filter configuration.
+    let report_config = ReportBuilderConfig {
         exact_where: exact_filter,
+        env: Some(env),
         ..Default::default()
     };
     let report = ReportBuilder::new(report_config)

@@ -1,0 +1,47 @@
+// api_source.smql - a WASM plugin wired as an HTTP-backed pipeline SOURCE.
+//
+// `api_source` fetches rows from a JSON HTTP API (JSONPlaceholder /users) using
+// the http capability, and drains them into `log_sink` - so the run needs a
+// network connection but NO database.
+//
+// This config is the showcase for the plugin HTTP host function:
+//   - `allow_http = true` grants outbound HTTP (denied by default).
+//   - `allow_http_hosts` is an allowlist: the plugin may reach ONLY these hosts
+//     (exact match, port ignored). Empty/omitted = any non-link-local host.
+//     Link-local / cloud-metadata addresses (169.254.x, fe80::) are ALWAYS
+//     refused regardless of this list - a built-in SSRF guard. HTTP also carries
+//     a 30s timeout and a 16 MiB response cap.
+//   - the plugin reads the REAL response status (`resp.status`), not a fake 200.
+//
+//   stratum plugin validate -c examples/plugins/configs/api_source.smql
+//   rm -rf ~/.stratum/state
+//   stratum apply           -c examples/plugins/configs/api_source.smql -e .env
+//
+// Try the allowlist gate: change `allow_http_hosts` to ["example.com"] and
+// re-run. Every fetch is now refused (host not allowed) BEFORE any connection is
+// made, and the source errors cleanly with `HTTP 0` - no silent success.
+
+connection "api"     { driver = "wasm" plugin = "api_source" }
+connection "logsink" { driver = "wasm" plugin = "log_sink" }
+
+plugin "api_source" {
+    path             = "examples/plugins/js/api_source.js"
+    allow_http       = true
+    allow_http_hosts = ["jsonplaceholder.typicode.com"]
+    allow_log        = true
+}
+plugin "log_sink" { path = "examples/plugins/js/log_sink.js" }
+
+pipeline "ingest" {
+    from { connection = connection.api     table = "users" }
+    to   { connection = connection.logsink table = "sink" }
+
+    // The source emits {id, name, email}; log_sink only consumes `id` (it just
+    // counts rows). To keep the richer fields, point `to` at a postgres
+    // connection and map name/email onto real columns.
+    select {
+        id = users.id
+    }
+
+    settings { batch_size = 10 }
+}

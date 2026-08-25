@@ -3,6 +3,10 @@
 const { setOrFail, setSinkPrepare, setSinkFinalize } = require("./registry");
 const http = require("./http");
 const log = require("./log");
+const kv = require("./kv");
+const metrics = require("./metrics");
+const env = require("./env");
+const fs = require("./fs");
 
 function transform(name, opts) {
     validateOpts(name, opts, ["version", "input", "output", "compute"]);
@@ -42,4 +46,4 @@ function validateOpts(name, opts, required) {
     }
 }
 
-module.exports = { transform, filter, source, sink, http, log };
+module.exports = { transform, filter, source, sink, http, log, kv, metrics, env, fs };

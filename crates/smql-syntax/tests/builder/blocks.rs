@@ -310,6 +310,31 @@ fn test_build_plugin_block_minimal() {
 }
 
 #[test]
+fn test_build_plugin_block_with_http_host_allowlist() {
+    // `allow_http_hosts` is a plain string-array attribute; the grammar must
+    // accept it the same way it accepts `allow_fs_read`.
+    let input = r#"
+        plugin "api_src" {
+            path = "./plugins/api.wasm"
+            allow_http = true
+            allow_http_hosts = ["api.example.com", "api.stripe.com"]
+        }
+    "#;
+    let doc = parse(input).expect("should parse");
+    let p = &doc.plugins[0];
+    let hosts = p
+        .attributes
+        .iter()
+        .find(|a| a.key.name == "allow_http_hosts")
+        .expect("allow_http_hosts attribute present");
+    // The value parses as a two-element array expression.
+    assert!(
+        format!("{:?}", hosts.value).contains("api.stripe.com"),
+        "allow_http_hosts should carry both hosts"
+    );
+}
+
+#[test]
 fn test_build_plugin_block_with_config_nested() {
     let input = r#"
         plugin "stripe_src" {

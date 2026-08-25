@@ -34,6 +34,22 @@ const SDK_FILES: &[(&str, &str)] = &[
         "log.js",
         include_str!("../../stratum-plugin-sdk-js/src/log.js"),
     ),
+    (
+        "kv.js",
+        include_str!("../../stratum-plugin-sdk-js/src/kv.js"),
+    ),
+    (
+        "metrics.js",
+        include_str!("../../stratum-plugin-sdk-js/src/metrics.js"),
+    ),
+    (
+        "env.js",
+        include_str!("../../stratum-plugin-sdk-js/src/env.js"),
+    ),
+    (
+        "fs.js",
+        include_str!("../../stratum-plugin-sdk-js/src/fs.js"),
+    ),
 ];
 
 /// Size of the `USER_JS` placeholder baked into the runtime WASM.

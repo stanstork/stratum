@@ -19,3 +19,4 @@ uuid = { version = "1.13.1", features = ["serde"] }
 anyhow = "1.0.102"
 tokio = { version = "1.43.0", features = ["full"] }
 tracing = "0.1.41"
+ureq = "2.12"

@@ -6,6 +6,7 @@ pub struct PluginDecl {
     pub name: String,
     pub path: PathBuf,
     pub allow_http: bool,
+    pub allow_http_hosts: Vec<String>,
     pub allow_kv: bool,
     pub allow_log: bool, // default: true; the field exists so plugins can opt out
     pub allow_metrics: bool,
