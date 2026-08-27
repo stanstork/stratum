@@ -1,5 +1,8 @@
 use crate::{
-    commands::run_completed, config, error::CliError, pretty_printer::PrettyPrinter,
+    commands::{plugin, run_completed},
+    config,
+    error::CliError,
+    pretty_printer::PrettyPrinter,
     tui::orchestrator::run_tui,
 };
 use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan, utils::make_item_id};
@@ -34,6 +37,12 @@ pub async fn execute(
 
     let config_path = config::resolve_path(config_path)?;
     let flags = ExecutionFlags::new(false, integrity);
+
+    // Preflight the plugins before any data moves
+    {
+        let plan = config::load_plan(&config_path, exact_filter, env.clone()).await?;
+        plugin::preflight(&plan, &env)?;
+    }
 
     // Watch for pause sentinel file. Dropping the watcher cleans up the file.
     let _pause_watcher = PauseWatcher::start(&config_path, &shutdown, env.clone()).await?;

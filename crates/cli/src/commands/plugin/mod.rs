@@ -1,12 +1,35 @@
 use crate::{commands::PluginCmd, error::CliError};
+use engine_core::plan::execution::ExecutionPlan;
 use engine_processing::EnvContext;
 use std::sync::Arc;
 use stratum_plugin_compiler::{CompileOpts, compile_to_file};
+use tracing::error;
 
 mod inspect;
 mod shared;
 mod test;
 mod validate;
+
+/// Preflight the plugins in `plan` before a migration runs.
+pub(crate) fn preflight(plan: &ExecutionPlan, env: &EnvContext) -> Result<(), CliError> {
+    if plan.plugins.is_empty() {
+        return Ok(());
+    }
+
+    let outcome = validate::validate_plan(plan, env)?;
+    if !outcome.has_errors() {
+        return Ok(());
+    }
+
+    for line in outcome.error_lines() {
+        error!(target: "plugin::validate", "{line}");
+    }
+
+    Err(CliError::UserMessage(format!(
+        "plugin validation failed ({} error(s)); run `stratum plugin validate` for details",
+        outcome.error_lines().len()
+    )))
+}
 
 pub async fn run(cmd: &PluginCmd, env: Arc<EnvContext>) -> Result<(), CliError> {
     match cmd {

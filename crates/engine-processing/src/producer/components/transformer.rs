@@ -97,11 +97,20 @@ impl TransformService {
         const MAX_ERROR_SAMPLES: usize = 10;
 
         // Run the whole batch through the pipeline stage-by-stage.
+        let run = || self.pipeline.run_batch(rows);
+
         let BatchOutput {
             successful,
             filtered,
             failed,
-        } = self.pipeline.run_batch(rows);
+        } = if matches!(
+            tokio::runtime::Handle::current().runtime_flavor(),
+            tokio::runtime::RuntimeFlavor::MultiThread
+        ) {
+            tokio::task::block_in_place(run)
+        } else {
+            run()
+        };
 
         let mut failed_rows = Vec::with_capacity(failed.len());
         let mut error_samples = Vec::new();

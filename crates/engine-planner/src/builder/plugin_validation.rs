@@ -1,13 +1,62 @@
-use crate::plan::diagnostics::diagnostic::Diagnostic;
+use crate::plan::diagnostics::{diagnostic::Diagnostic, level::DiagnosticLevel};
 use engine_wasm::{
+    registry::PluginRegistry,
     schema::PluginMetadata,
     validation::{Compat, check},
 };
 use model::{
     core::types::Type,
-    execution::pipeline::{PluginTransformCall, ValidationRule},
+    execution::pipeline::{Pipeline, PluginTransformCall, ValidationKind, ValidationRule},
 };
 use std::collections::HashMap;
+
+pub fn blocking_input_reason(
+    pipeline: &Pipeline,
+    registry: &PluginRegistry,
+    available: &HashMap<String, Type>,
+) -> Option<String> {
+    let first_error = |diags: Vec<Diagnostic>| {
+        diags
+            .into_iter()
+            .find(|d| d.level == DiagnosticLevel::Error)
+            .map(|d| d.message)
+    };
+
+    pipeline
+        .plugin_transforms
+        .iter()
+        .find_map(|call| {
+            let plugin = registry.metadata(&call.plugin_name).ok()?;
+            first_error(validate_transform_call(
+                &pipeline.name,
+                call,
+                available,
+                &plugin,
+                None,
+            ))
+        })
+        .or_else(|| {
+            pipeline.validations.iter().find_map(|rule| {
+                if let ValidationKind::WasmFilter {
+                    plugin_name,
+                    input_mapping,
+                } = &rule.kind
+                {
+                    let plugin = registry.metadata(plugin_name).ok()?;
+                    first_error(validate_filter_rule(
+                        &pipeline.name,
+                        rule,
+                        plugin_name,
+                        input_mapping,
+                        available,
+                        &plugin,
+                    ))
+                } else {
+                    None
+                }
+            })
+        })
+}
 
 /// Validate a transform plugin call (`select { col = plugin.x({...}) }`).
 pub fn validate_transform_call(

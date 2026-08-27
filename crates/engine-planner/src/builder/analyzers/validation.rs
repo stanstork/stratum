@@ -33,6 +33,45 @@ use tracing::{error, info, warn};
 pub struct ValidationAnalyzer;
 
 impl ValidationAnalyzer {
+    pub fn no_source(&self, pipeline: &Pipeline) -> Vec<ValidationPlan> {
+        pipeline
+            .validations
+            .iter()
+            .map(|v| self.plan_without_source(v))
+            .collect()
+    }
+
+    fn plan_without_source(&self, validation: &ValidationRule) -> ValidationPlan {
+        let level = match validation.severity {
+            ValidationSeverity::Assert => ValidationLevel::Assert,
+            ValidationSeverity::Warn => ValidationLevel::Warn,
+        };
+        let action = self.validation_action(level.clone(), &validation.action);
+
+        let check = match &validation.kind {
+            ValidationKind::Assert { check } => ValidationCheck {
+                expression: ExpressionAnalyzer::to_string(check),
+                columns_referenced: ExpressionAnalyzer::extract_columns(check),
+            },
+            ValidationKind::WasmFilter {
+                plugin_name,
+                input_mapping,
+            } => ValidationCheck {
+                expression: format!("wasm:{plugin_name}"),
+                columns_referenced: input_mapping.values().cloned().collect(),
+            },
+        };
+
+        ValidationPlan {
+            name: validation.label.clone(),
+            level,
+            check,
+            message: validation.message.clone(),
+            action,
+            estimated_failure_rate: None,
+        }
+    }
+
     /// Primary orchestration logic for analyzing a single validation rule.
     async fn analyze_rule<S: SchemaDriver, D: SchemaDriver>(
         &self,

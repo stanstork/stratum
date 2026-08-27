@@ -1,3 +1,4 @@
+use crate::builder::plugin_validation::blocking_input_reason;
 use crate::{
     builder::{
         analysis::{AnalysisContext, AnalyzerError, AnalyzerResult, PlanAnalyzer},
@@ -37,11 +38,18 @@ use engine_processing::{
         pipeline::{ApplyOutcome, TransformPipeline, ValidationWarning},
     },
 };
+use engine_wasm::registry::{PluginRegistry, unexecutable_plugin_reason};
 use model::{
-    core::value::Value, execution::pipeline::Pipeline, records::Record,
+    core::{types::Type, value::Value},
+    execution::pipeline::Pipeline,
+    records::Record,
     transform::mapping::TransformationMetadata,
 };
-use std::{collections::HashMap, fmt::Write, sync::Arc, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Instant,
+};
 use tracing::info;
 
 /// Configuration for sample collection behavior and privacy
@@ -71,13 +79,6 @@ impl Default for SampleConfig {
     }
 }
 
-/// Orchestrates the collection, transformation, and validation of data samples
-/// to provide a "dry-run" preview of the pipeline's behavior.
-pub struct SampleCollector<S: SchemaDriver> {
-    src_driver: Arc<S>,
-    config: SampleConfig,
-}
-
 struct ValidationContext<'a> {
     validations: &'a [ValidationPlan],
     mapping: &'a TransformationMetadata,
@@ -85,25 +86,51 @@ struct ValidationContext<'a> {
     results: &'a mut Vec<SampleValidationResult>,
 }
 
-impl<S: SchemaDriver> SampleCollector<S> {
-    pub fn new(src_driver: Arc<S>, config: SampleConfig) -> Self {
-        Self { src_driver, config }
+pub struct SampleProcessor {
+    config: SampleConfig,
+}
+
+impl SampleProcessor {
+    pub fn new(config: SampleConfig) -> Self {
+        Self { config }
     }
 
-    pub async fn collect<D: SchemaDriver>(
+    /// Transform and validate pre-fetched `source_rows` into a preview. `query`
+    /// is the SQL description shown in DB output (`None` for plugin sources).
+    #[allow(clippy::too_many_arguments)]
+    pub fn process(
         &self,
+        mut source_rows: Vec<Record>,
         pipeline: &Pipeline,
+        plugin_registry: &PluginRegistry,
         mapping: &TransformationMetadata,
         validations: &[ValidationPlan],
         mapped_columns_only: bool,
-        masking: &MaskingPolicy,
-        ctx: &AnalysisContext<S, D>,
+        query: Option<SampleQuery>,
+        start: Instant,
     ) -> Result<SampleDataPreview, SampleCollectorError> {
-        let start = Instant::now();
+        if let Some(reason) = unexecutable_plugin_reason(pipeline, plugin_registry) {
+            return Ok(self.unavailable_preview(start, query, reason));
+        }
 
-        let (mut source_rows, query) = self.fetch_sample(pipeline, mapping, masking, ctx).await?;
         if source_rows.is_empty() {
             return Ok(self.empty_preview(start, query));
+        }
+
+        // Don't run a plugin the plan has already flagged
+        let available: HashMap<String, Type> = source_rows
+            .first()
+            .map(|r| {
+                r.schema()
+                    .columns()
+                    .iter()
+                    .map(|c| (c.name.to_string(), c.data_type.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if let Some(reason) = blocking_input_reason(pipeline, plugin_registry, &available) {
+            return Ok(self.unavailable_preview(start, query, reason));
         }
 
         source_rows
@@ -112,12 +139,13 @@ impl<S: SchemaDriver> SampleCollector<S> {
 
         let transform_pipeline = build_transform_pipeline(
             pipeline,
-            &ctx.plugin_registry,
+            plugin_registry,
             mapping,
             mapped_columns_only,
             Arc::new(EnvContext::empty()),
         )
         .map_err(|e| SampleCollectorError::PipelineBuildFailed(e.to_string()))?;
+
         let mut sample_rows = Vec::with_capacity(source_rows.len());
         let mut val_stats: HashMap<String, (usize, usize)> = HashMap::new();
 
@@ -134,6 +162,13 @@ impl<S: SchemaDriver> SampleCollector<S> {
 
         info!(table = %pipeline.source.table, count = sample_rows.len(), "collected sample rows");
 
+        let unavailable_reason = self.sample_unavailable_reason(&sample_rows);
+        let stats = self.aggregate_stats(&sample_rows, &val_stats);
+        let issues = sample_rows
+            .iter()
+            .flat_map(|r| r.issues.iter().cloned())
+            .collect();
+
         Ok(SampleDataPreview {
             enabled: true,
             sampled_at: Some(chrono::Utc::now()),
@@ -141,13 +176,40 @@ impl<S: SchemaDriver> SampleCollector<S> {
             sampling_method: self.config.method.clone(),
             duration_ms: Some(start.elapsed().as_millis() as u64),
             query,
-            stats: self.aggregate_stats(&sample_rows, &val_stats),
-            issues: sample_rows
-                .iter()
-                .flat_map(|r| r.issues.iter().cloned())
-                .collect(),
+            stats,
+            issues,
             rows: sample_rows,
+            unavailable_reason,
         })
+    }
+
+    fn sample_unavailable_reason(&self, rows: &[SampleRow]) -> Option<String> {
+        (!rows.is_empty() && rows.iter().all(|r| r.status == SampleRowStatus::Failed)).then(|| {
+            format!(
+                "all {} sampled rows failed to transform - see diagnostics",
+                rows.len()
+            )
+        })
+    }
+
+    fn unavailable_preview(
+        &self,
+        start: Instant,
+        query: Option<SampleQuery>,
+        reason: String,
+    ) -> SampleDataPreview {
+        SampleDataPreview {
+            enabled: true,
+            sampled_at: Some(chrono::Utc::now()),
+            sample_size: 0,
+            sampling_method: self.config.method.clone(),
+            duration_ms: Some(start.elapsed().as_millis() as u64),
+            query,
+            rows: Vec::new(),
+            stats: SampleStats::default(),
+            issues: Vec::new(),
+            unavailable_reason: Some(reason),
+        }
     }
 
     /// Handles the transformation and validation lifecycle for a single row.
@@ -251,8 +313,7 @@ impl<S: SchemaDriver> SampleCollector<S> {
         val_ctx: &mut ValidationContext,
         issues: &mut Vec<SampleIssue>,
     ) {
-        let failed_names: std::collections::HashSet<_> =
-            warnings.iter().map(|w| w.rule.clone()).collect();
+        let failed_names: HashSet<_> = warnings.iter().map(|w| w.rule.clone()).collect();
 
         for warning in warnings {
             val_ctx
@@ -358,6 +419,244 @@ impl<S: SchemaDriver> SampleCollector<S> {
         }
     }
 
+    /// Resolves column values from the current row, accounting for table aliases in joins.
+    fn resolve_val(
+        &self,
+        row: &Record,
+        col_ref: &str,
+        mapping: &TransformationMetadata,
+    ) -> Option<Value> {
+        if let Some(v) = row.value(col_ref) {
+            return Some(v.clone());
+        }
+
+        if let Some((alias, field)) = col_ref.split_once('.') {
+            // Find target field through foreign_fields mapping
+            let target_val = mapping
+                .foreign_fields
+                .values()
+                .flatten()
+                .find(|cr| {
+                    cr.entity.eq_ignore_ascii_case(alias) && cr.field.eq_ignore_ascii_case(field)
+                })
+                .and_then(|cr| cr.target.as_ref())
+                .and_then(|target| row.value(target));
+
+            if let Some(v) = target_val {
+                return Some(v.clone());
+            }
+
+            if let Some(v) = row.value(field) {
+                return Some(v.clone());
+            }
+        }
+
+        row.value(col_ref.split('.').next_back()?).cloned()
+    }
+
+    fn format_val_context(
+        &self,
+        row: &Record,
+        cols: &[String],
+        mapping: &TransformationMetadata,
+    ) -> String {
+        if cols.is_empty() {
+            return "<no columns referenced>".into();
+        }
+
+        cols.iter()
+            .map(|col| {
+                let val_str = self
+                    .resolve_val(row, col, mapping)
+                    .and_then(|v| v.as_string())
+                    .unwrap_or_else(|| "NULL".into());
+                format!("{col}={val_str}")
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    fn map_to_sample_values(&self, row: &Record) -> HashMap<String, SampleValue> {
+        const MAX_DISPLAY: usize = 120;
+
+        row.iter()
+            .map(|f| {
+                let (display, is_null, truncated, len) = match &f.value {
+                    None | Some(Value::Null) => ("NULL".into(), true, false, None),
+                    Some(v) => {
+                        let mut s = v.as_string().unwrap_or_else(|| format!("{:?}", v));
+                        if s.len() > MAX_DISPLAY {
+                            // Safely truncate string up to MAX_DISPLAY ensuring we land on a char boundary
+                            let mut end = MAX_DISPLAY;
+                            while end > 0 && !s.is_char_boundary(end) {
+                                end -= 1;
+                            }
+                            s.truncate(end);
+                            s.push_str("...");
+                            (s.clone(), false, true, Some(s.len()))
+                        } else {
+                            (s, false, false, None)
+                        }
+                    }
+                };
+
+                (
+                    f.name.to_string(),
+                    SampleValue {
+                        display,
+                        value_type: format!("{:?}", f.data_type),
+                        is_null,
+                        truncated,
+                        original_length: len,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn aggregate_stats(
+        &self,
+        rows: &[SampleRow],
+        val_results: &HashMap<String, (usize, usize)>,
+    ) -> SampleStats {
+        let (mut ok, mut warnings, mut skipped, mut errors) = (0, 0, 0, 0);
+
+        for r in rows {
+            match r.status {
+                SampleRowStatus::Ok => ok += 1,
+                SampleRowStatus::Warning => warnings += 1,
+                SampleRowStatus::Skipped => skipped += 1,
+                SampleRowStatus::Failed => errors += 1,
+            }
+        }
+
+        let validation_stats = val_results
+            .iter()
+            .map(|(name, &(passed, failed))| {
+                let total = passed + failed;
+                ValidationStats {
+                    name: name.clone(),
+                    passed,
+                    failed,
+                    pass_rate: if total > 0 {
+                        passed as f32 / total as f32
+                    } else {
+                        0.0
+                    },
+                }
+            })
+            .collect();
+
+        SampleStats {
+            ok,
+            warnings,
+            skipped,
+            errors,
+            validation_stats,
+        }
+    }
+
+    fn extract_identifier(&self, row: &Record) -> Option<String> {
+        let candidates = ["id", "_id", "uuid", "pk", self.config.id_column.as_str()];
+
+        row.iter()
+            .find(|f| candidates.iter().any(|&c| f.name.eq_ignore_ascii_case(c)))
+            .and_then(|f| f.value.as_ref().map(|v| format!("{:?}", v)))
+    }
+
+    fn empty_preview(&self, start: Instant, query: Option<SampleQuery>) -> SampleDataPreview {
+        SampleDataPreview {
+            enabled: true,
+            sampled_at: Some(chrono::Utc::now()),
+            sample_size: 0,
+            sampling_method: self.config.method.clone(),
+            duration_ms: Some(start.elapsed().as_millis() as u64),
+            query,
+            rows: Vec::new(),
+            stats: SampleStats::default(),
+            issues: vec![self.info_issue(0, "EMPTY", "No source data found")],
+            unavailable_reason: None,
+        }
+    }
+
+    fn info_issue(&self, idx: usize, code: &str, msg: &str) -> SampleIssue {
+        SampleIssue {
+            level: SampleIssueLevel::Info,
+            code: code.into(),
+            message: msg.into(),
+            row_index: Some(idx),
+            column: None,
+            suggestion: None,
+        }
+    }
+
+    pub fn apply_masking(&self, preview: &mut SampleDataPreview, masking: &MaskingPolicy) {
+        for row in &mut preview.rows {
+            for val in row.input.values_mut() {
+                if masking.should_mask(&val.display) && !val.is_null {
+                    val.display = masking.mask_value(&val.display);
+                }
+            }
+            if let Some(out) = &mut row.output {
+                for val in out.values_mut() {
+                    if masking.should_mask(&val.display) && !val.is_null {
+                        val.display = masking.mask_value(&val.display);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Orchestrates the collection, transformation, and validation of data samples
+/// to provide a "dry-run" preview of the pipeline's behavior.
+pub struct SampleCollector<S: SchemaDriver> {
+    src_driver: Arc<S>,
+    config: SampleConfig,
+    processor: SampleProcessor,
+}
+
+impl<S: SchemaDriver> SampleCollector<S> {
+    pub fn new(src_driver: Arc<S>, config: SampleConfig) -> Self {
+        Self {
+            src_driver,
+            config: config.clone(),
+            processor: SampleProcessor::new(config),
+        }
+    }
+
+    pub async fn collect<D: SchemaDriver>(
+        &self,
+        pipeline: &Pipeline,
+        mapping: &TransformationMetadata,
+        validations: &[ValidationPlan],
+        mapped_columns_only: bool,
+        masking: &MaskingPolicy,
+        ctx: &AnalysisContext<S, D>,
+    ) -> Result<SampleDataPreview, SampleCollectorError> {
+        let start = Instant::now();
+
+        let (source_rows, query) = self.fetch_sample(pipeline, mapping, masking, ctx).await?;
+
+        // Running the transform pipeline can invoke WASM plugins whose WASI ops
+        // (fs/env) block on Tokio internally - which panics on an async worker
+        // thread. `block_in_place` moves this thread out of the async executor so
+        // those blocking calls are legal (the same reason apply runs plugins on a
+        // blocking thread).
+        tokio::task::block_in_place(|| {
+            self.processor.process(
+                source_rows,
+                pipeline,
+                &ctx.plugin_registry,
+                mapping,
+                validations,
+                mapped_columns_only,
+                query,
+                start,
+            )
+        })
+    }
+
     /// Build the `SELECT` request the sample runs: the source table's columns
     /// (plus any `with { }` join columns so computed fields can resolve), the
     /// `where` filter, and the sampling method (first / random / by-id).
@@ -377,9 +676,10 @@ impl<S: SchemaDriver> SampleCollector<S> {
             .table_metadata(&pipeline.source.table)
             .await
             .map_err(|e| query_err(e.to_string()))?;
-        let mut columns = source_meta.select_fields();
 
+        let mut columns = source_meta.select_fields();
         let mut joins = Vec::new();
+
         if !pipeline.source.joins.is_empty() {
             let format =
                 DataFormat::parse(&pipeline.source.connection.driver).ok_or_else(|| {
@@ -388,6 +688,7 @@ impl<S: SchemaDriver> SampleCollector<S> {
                         pipeline.source.connection.driver
                     ))
                 })?;
+
             if let Some(LinkedSource::Table(join_source)) = LinkedSource::new(
                 self.src_driver.clone(),
                 &format,
@@ -402,14 +703,11 @@ impl<S: SchemaDriver> SampleCollector<S> {
             }
         }
 
-        let filter_clause = match combine_filters(&pipeline.source.filters) {
-            Some(cond) => Some(
-                SqlFilterCompiler::compile(&cond)
-                    .map_err(|e| query_err(e.to_string()))?
-                    .for_table(&pipeline.source.table, &joins),
-            ),
-            None => None,
-        };
+        let filter_clause = combine_filters(&pipeline.source.filters)
+            .map(|cond| SqlFilterCompiler::compile(&cond))
+            .transpose()
+            .map_err(|e| query_err(e.to_string()))?
+            .map(|c| c.for_table(&pipeline.source.table, &joins));
 
         let mut request = FetchRowsRequestBuilder::new(table())
             .alias(table())
@@ -452,6 +750,7 @@ impl<S: SchemaDriver> SampleCollector<S> {
         let dialect = ctx.source_dialect.as_query_dialect();
         let generator = QueryGenerator::new(dialect);
         let (sql, params) = generator.select(&request);
+
         let query = Some(SampleQuery {
             sql: sql.clone(),
             params: self.format_query_params(&params, masking),
@@ -467,185 +766,6 @@ impl<S: SchemaDriver> SampleCollector<S> {
             })?;
 
         Ok((rows, query))
-    }
-
-    /// Resolves column values from the current row, accounting for table aliases in joins.
-    fn resolve_val(
-        &self,
-        row: &Record,
-        col_ref: &str,
-        mapping: &TransformationMetadata,
-    ) -> Option<Value> {
-        if let Some(v) = row.value(col_ref) {
-            return Some(v.clone());
-        }
-
-        if let Some((alias, field)) = col_ref.split_once('.') {
-            for refs in mapping.foreign_fields.values() {
-                for cr in refs {
-                    if cr.entity.eq_ignore_ascii_case(alias)
-                        && cr.field.eq_ignore_ascii_case(field)
-                        && let Some(target) = &cr.target
-                        && let Some(v) = row.value(target)
-                    {
-                        return Some(v.clone());
-                    }
-                }
-            }
-            if let Some(v) = row.value(field) {
-                return Some(v.clone());
-            }
-        }
-
-        row.value(col_ref.split('.').next_back()?).cloned()
-    }
-
-    fn format_val_context(
-        &self,
-        row: &Record,
-        cols: &[String],
-        mapping: &TransformationMetadata,
-    ) -> String {
-        if cols.is_empty() {
-            return "<no columns referenced>".into();
-        }
-        let mut buf = String::new();
-        for (i, col) in cols.iter().enumerate() {
-            if i > 0 {
-                buf.push_str(", ");
-            }
-            let val = self.resolve_val(row, col, mapping);
-            let val_as_string = val
-                .as_ref()
-                .and_then(|v| v.as_string())
-                .unwrap_or_else(|| "NULL".into());
-            let _ = write!(buf, "{}={}", col, val_as_string);
-        }
-        buf
-    }
-
-    fn map_to_sample_values(&self, row: &Record) -> HashMap<String, SampleValue> {
-        const MAX_DISPLAY: usize = 120;
-        row.iter()
-            .map(|f| {
-                let (display, is_null, truncated, len) = match f.value {
-                    Some(v) => {
-                        let s = v.as_string().unwrap_or_else(|| format!("{:?}", v));
-                        if s.len() > MAX_DISPLAY {
-                            (
-                                format!("{}...", &s[..MAX_DISPLAY]),
-                                false,
-                                true,
-                                Some(s.len()),
-                            )
-                        } else {
-                            (s, false, false, None)
-                        }
-                    }
-                    None => ("NULL".into(), true, false, None),
-                };
-                (
-                    f.name.to_string(),
-                    SampleValue {
-                        display,
-                        value_type: format!("{:?}", f.data_type),
-                        is_null,
-                        truncated,
-                        original_length: len,
-                    },
-                )
-            })
-            .collect()
-    }
-
-    fn aggregate_stats(
-        &self,
-        rows: &[SampleRow],
-        val_results: &HashMap<String, (usize, usize)>,
-    ) -> SampleStats {
-        let mut stats = SampleStats {
-            ok: rows
-                .iter()
-                .filter(|r| r.status == SampleRowStatus::Ok)
-                .count(),
-            warnings: rows
-                .iter()
-                .filter(|r| r.status == SampleRowStatus::Warning)
-                .count(),
-            skipped: rows
-                .iter()
-                .filter(|r| r.status == SampleRowStatus::Skipped)
-                .count(),
-            errors: rows
-                .iter()
-                .filter(|r| r.status == SampleRowStatus::Failed)
-                .count(),
-            validation_stats: Vec::new(),
-        };
-
-        for (name, (passed, failed)) in val_results {
-            let total = passed + failed;
-            stats.validation_stats.push(ValidationStats {
-                name: name.clone(),
-                passed: *passed,
-                failed: *failed,
-                pass_rate: if total > 0 {
-                    *passed as f32 / total as f32
-                } else {
-                    0.0
-                },
-            });
-        }
-        stats
-    }
-
-    fn extract_identifier(&self, row: &Record) -> Option<String> {
-        ["id", "_id", "uuid", "pk", &self.config.id_column]
-            .iter()
-            .find_map(|&c| row.iter().find(|f| f.name.eq_ignore_ascii_case(c)))
-            .and_then(|f| f.value.map(|v| format!("{:?}", v)))
-    }
-
-    fn empty_preview(&self, start: Instant, query: Option<SampleQuery>) -> SampleDataPreview {
-        SampleDataPreview {
-            enabled: true,
-            sampled_at: Some(chrono::Utc::now()),
-            sample_size: 0,
-            sampling_method: self.config.method.clone(),
-            duration_ms: Some(start.elapsed().as_millis() as u64),
-            query,
-            rows: Vec::new(),
-            stats: SampleStats::default(),
-            issues: vec![self.info_issue(0, "EMPTY", "No source data found")],
-        }
-    }
-
-    fn info_issue(&self, idx: usize, code: &str, msg: &str) -> SampleIssue {
-        SampleIssue {
-            level: SampleIssueLevel::Info,
-            code: code.into(),
-            message: msg.into(),
-            row_index: Some(idx),
-            column: None,
-            suggestion: None,
-        }
-    }
-
-    fn apply_masking(&self, preview: &mut SampleDataPreview, masking: &MaskingPolicy) {
-        for row in &mut preview.rows {
-            for val in row.input.values_mut() {
-                if masking.should_mask(&val.display) && !val.is_null {
-                    val.display = masking.mask_value(&val.display);
-                }
-            }
-            if let Some(out) = &mut row.output {
-                for val in out.values_mut() {
-                    if masking.should_mask(&val.display) && !val.is_null {
-                        val.display = masking.mask_value(&val.display);
-                    }
-                }
-            }
-        }
     }
 
     fn format_query_params(&self, params: &[Value], masking: &MaskingPolicy) -> Vec<String> {
@@ -702,7 +822,7 @@ impl<S: SchemaDriver, D: SchemaDriver> PlanAnalyzer<S, D> for SampleCollector<S>
             .await
             .map_err(|e| AnalyzerError::error("sample", e.to_string()))?;
 
-        self.apply_masking(&mut preview, &ctx.masking);
+        self.processor.apply_masking(&mut preview, &ctx.masking);
         Ok(preview)
     }
 }

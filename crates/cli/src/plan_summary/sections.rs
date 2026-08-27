@@ -1,4 +1,4 @@
-use super::fmt::{fmt_rows, fmt_seconds, pad, plural};
+use super::fmt::{fmt_rows, fmt_seconds, is_unknown_count, pad, plural};
 use super::section;
 use super::style::Sty;
 use engine_planner::plan::{
@@ -173,6 +173,17 @@ pub(super) fn ddl(out: &mut String, r: &MigrationReport, s: &Sty) {
 pub(super) fn estimates(out: &mut String, r: &MigrationReport, s: &Sty) {
     let e = &r.estimations;
     section(out, s, "Estimates");
+
+    if is_unknown_count(&r.summary.total_source_rows) {
+        let _ = writeln!(
+            out,
+            "  {}",
+            s.dim("unavailable - source row count is unknown at plan time; run apply to measure"),
+        );
+        out.push('\n');
+        return;
+    }
+
     let _ = writeln!(
         out,
         "  {}  {}   {}",
@@ -200,9 +211,9 @@ pub(super) fn estimates(out: &mut String, r: &MigrationReport, s: &Sty) {
     );
     let _ = writeln!(
         out,
-        "  {}  ~{:.1} MB   {}",
+        "  {}  {}   {}",
         pad("transfer", 10),
-        e.network_transfer_mb,
+        fmt_data_size(e.network_transfer_mb),
         s.dim(&format!(
             "· {} batch{}",
             e.total_batches,
@@ -210,6 +221,16 @@ pub(super) fn estimates(out: &mut String, r: &MigrationReport, s: &Sty) {
         )),
     );
     out.push('\n');
+}
+
+fn fmt_data_size(mb: f64) -> String {
+    if mb < 1.0 {
+        format!("~{:.0} KB", (mb * 1024.0).round())
+    } else if mb < 1024.0 {
+        format!("~{mb:.1} MB")
+    } else {
+        format!("~{:.1} GB", mb / 1024.0)
+    }
 }
 
 pub(super) fn verdict(out: &mut String, r: &MigrationReport, s: &Sty) {
@@ -228,13 +249,20 @@ pub(super) fn verdict(out: &mut String, r: &MigrationReport, s: &Sty) {
         .sum();
 
     let mut parts: Vec<String> = Vec::new();
+
     if tables > 0 {
         parts.push(s.green(&format!("{} table{} to create", tables, plural(tables))));
     }
-    parts.push(format!(
-        "{} rows to copy",
-        fmt_rows(&r.summary.total_source_rows)
-    ));
+
+    if is_unknown_count(&r.summary.total_source_rows) {
+        parts.push("row count unknown at plan time".to_string());
+    } else {
+        parts.push(format!(
+            "{} rows to copy",
+            fmt_rows(&r.summary.total_source_rows)
+        ));
+    }
+
     if conversions > 0 {
         let lossy_tag = if lossy > 0 {
             s.yellow(&format!(" ({lossy} lossy)"))

@@ -6,12 +6,19 @@ mod tests {
         registry::{PluginDef, PluginRegistry},
         runtime::{
             engine::{WasmEngine, WasmEngineConfig},
+            instance::PluginInstance,
             limits::{HostCapabilities, ResourceLimits},
         },
         schema::{PluginField, PluginType},
     };
     use model::core::value::Value;
-    use std::path::{Path, PathBuf};
+    use std::{
+        path::{Path, PathBuf},
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+    };
     use wasmtime::{Config, Engine, Linker, Module, Store};
     use wasmtime_wasi::preview1;
 
@@ -386,5 +393,203 @@ mod tests {
 
         let instance = registry.instantiate("adder").unwrap();
         assert_eq!(instance.plugin_name(), "test_transform");
+    }
+
+    /// End-to-end host<->guest capability check: the `test_caps` plugin reads a
+    /// granted env var, reads a file through the granted fs preopen, and keeps a
+    /// per-instance kv counter. Each row's output encodes all three, so a single
+    /// assertion proves env + fs + kv work across the real boundary.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_capabilities_env_fs_http_kv_granted() {
+        let dir = std::env::temp_dir().join("stratum-caps-itest");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("probe.txt");
+        std::fs::write(&file, "filecontents\n").unwrap();
+
+        // A loopback HTTP server the plugin will GET (one response per row).
+        let (url, server) = serve_http(2, b"pong");
+
+        let mut engine = WasmEngine::new(WasmEngineConfig::default()).unwrap();
+        let module = engine
+            .load_module(&test_plugin_path("test_caps.wasm"))
+            .unwrap();
+
+        let caps = HostCapabilities {
+            env: vec![
+                ("CAPS_ENV".into(), "envvalue".into()),
+                ("CAPS_FILE".into(), file.to_string_lossy().into_owned()),
+                ("CAPS_HTTP_URL".into(), url),
+            ],
+            fs_read: vec![dir.clone()],
+            key_value_store: true,
+            metrics: true,
+            http_client: true,
+            http_allowed_hosts: vec!["127.0.0.1".into()],
+            ..HostCapabilities::default()
+        };
+        let mut instance = engine
+            .instantiate(
+                &module,
+                "test_caps".into(),
+                caps,
+                ResourceLimits::for_io_plugins(),
+                None,
+            )
+            .unwrap();
+
+        // WASI fs ops block on Tokio internally; keep them off the async worker.
+        let call = |instance: &mut PluginInstance| {
+            let mut input = PluginInput::new();
+            input.insert("seed".into(), Value::String("row".into()));
+            tokio::task::block_in_place(|| instance.call_transform(&[input]))
+                .unwrap()
+                .pop()
+                .unwrap()
+                .value
+        };
+
+        // Row 1: env + fs + http resolved; kv counter starts at 1.
+        assert_eq!(
+            call(&mut instance),
+            Value::String("kv=1;env=envvalue;fs=filecontents;http=200:pong".into())
+        );
+        // Row 2: same instance -> the kv counter persists and increments.
+        assert_eq!(
+            call(&mut instance),
+            Value::String("kv=2;env=envvalue;fs=filecontents;http=200:pong".into())
+        );
+
+        server.join().ok();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A loopback HTTP/1.1 server that answers `responses` requests with `body`,
+    /// then exits. Returns its URL and the join handle.
+    fn serve_http(responses: usize, body: &'static [u8]) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            for _ in 0..responses {
+                if let Ok((mut stream, _)) = listener.accept() {
+                    let mut buf = [0u8; 1024];
+                    let _ = stream.read(&mut buf);
+                    let head = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = stream.write_all(head.as_bytes());
+                    let _ = stream.write_all(body);
+                    let _ = stream.flush();
+                }
+            }
+        });
+        (format!("http://{addr}/"), handle)
+    }
+
+    /// With no capabilities granted, the same plugin degrades cleanly: env/fs
+    /// read as "-", and the kv counter never persists (denied `kv_set` is a
+    /// no-op, so every row starts from 1).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_capabilities_denied_are_inert() {
+        let mut engine = WasmEngine::new(WasmEngineConfig::default()).unwrap();
+        let module = engine
+            .load_module(&test_plugin_path("test_caps.wasm"))
+            .unwrap();
+        let mut instance = engine
+            .instantiate(
+                &module,
+                "test_caps".into(),
+                HostCapabilities::default(),
+                ResourceLimits::for_io_plugins(),
+                None,
+            )
+            .unwrap();
+
+        let call = |instance: &mut crate::runtime::instance::PluginInstance| {
+            let mut input = PluginInput::new();
+            input.insert("seed".into(), Value::String("row".into()));
+            tokio::task::block_in_place(|| instance.call_transform(&[input]))
+                .unwrap()
+                .pop()
+                .unwrap()
+                .value
+        };
+
+        assert_eq!(
+            call(&mut instance),
+            Value::String("kv=1;env=-;fs=-;http=-".into())
+        );
+        assert_eq!(
+            call(&mut instance),
+            Value::String("kv=1;env=-;fs=-;http=-".into())
+        );
+    }
+
+    /// Minimal subscriber that flags whether any event was emitted on the
+    /// `plugin::metrics` target - enough to assert a metric fired without pulling
+    /// in a logging test dependency.
+    struct MetricSpy(Arc<AtomicBool>);
+
+    impl tracing::Subscriber for MetricSpy {
+        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn event(&self, event: &tracing::Event<'_>) {
+            if event.metadata().target() == "plugin::metrics" {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    /// The `metrics` capability actually emits: granted -> a `plugin::metrics`
+    /// event fires per row; denied -> nothing. The plugin runs on this thread
+    /// (via `block_in_place`), so a thread-local subscriber reliably observes it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_capabilities_metrics_emitted_only_when_granted() {
+        let observe = |metrics_granted: bool| -> bool {
+            let mut engine = WasmEngine::new(WasmEngineConfig::default()).unwrap();
+            let module = engine
+                .load_module(&test_plugin_path("test_caps.wasm"))
+                .unwrap();
+            let caps = HostCapabilities {
+                metrics: metrics_granted,
+                key_value_store: true,
+                ..HostCapabilities::default()
+            };
+            let mut instance = engine
+                .instantiate(
+                    &module,
+                    "test_caps".into(),
+                    caps,
+                    ResourceLimits::for_io_plugins(),
+                    None,
+                )
+                .unwrap();
+
+            let seen = Arc::new(AtomicBool::new(false));
+            let spy = MetricSpy(seen.clone());
+            tracing::subscriber::with_default(spy, || {
+                let mut input = PluginInput::new();
+                input.insert("seed".into(), Value::String("row".into()));
+                tokio::task::block_in_place(|| instance.call_transform(&[input])).unwrap();
+            });
+            seen.load(Ordering::SeqCst)
+        };
+
+        assert!(
+            observe(true),
+            "granted metrics must emit a plugin::metrics event"
+        );
+        assert!(!observe(false), "denied metrics must emit nothing");
     }
 }

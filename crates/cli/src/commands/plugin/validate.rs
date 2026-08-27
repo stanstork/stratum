@@ -27,38 +27,17 @@ pub async fn run(
         return Err(CliError::UserMessage(format!("{path} declares no plugins")));
     }
 
-    // Load + instantiate each declared plugin.
-    let mut engine = WasmEngine::new(WasmEngineConfig::default())?;
-    let mut reports = Vec::new();
-    let mut metas: HashMap<String, PluginMetadata> = HashMap::new();
-    let mut all_ok = true;
-
-    for decl in &plan.plugins {
-        let (report, meta) = validate_one(&mut engine, decl, &env);
-        if report.error.is_some() {
-            all_ok = false;
-        }
-        if let Some(m) = meta {
-            metas.insert(decl.name.clone(), m);
-        }
-        reports.push(report);
-    }
-
-    // Cross-check schema/role against pipeline usage.
-    let (errors, warnings) = cross_check(&plan, &metas);
-    if !errors.is_empty() {
-        all_ok = false;
-    }
+    let outcome = validate_plan(&plan, &env)?;
 
     if as_json {
         let out = serde_json::json!({
-            "plugins": reports,
-            "errors": errors,
-            "warnings": warnings,
+            "plugins": outcome.reports,
+            "errors": outcome.errors,
+            "warnings": outcome.warnings,
         });
         println!("{}", serde_json::to_string_pretty(&out)?);
     } else {
-        for r in &reports {
+        for r in &outcome.reports {
             match &r.error {
                 None => println!(
                     "✓ {:<16} [{}] {} v{}",
@@ -70,23 +49,70 @@ pub async fn run(
                 Some(e) => println!("✗ {:<16} {}", r.name, e),
             }
         }
-        for w in &warnings {
+        for w in &outcome.warnings {
             println!("⚠ {w}");
         }
-        for e in &errors {
+        for e in &outcome.errors {
             println!("✗ {e}");
         }
     }
 
-    if all_ok {
-        Ok(())
-    } else {
+    if outcome.has_errors() {
         Err(CliError::UserMessage("plugin validation failed".into()))
+    } else {
+        Ok(())
     }
 }
 
+/// The result of validating every plugin in a plan against its pipeline usage.
+pub(crate) struct ValidationOutcome {
+    pub reports: Vec<PluginReport>,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+impl ValidationOutcome {
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty() || self.reports.iter().any(|r| r.error.is_some())
+    }
+
+    pub fn error_lines(&self) -> Vec<String> {
+        self.reports
+            .iter()
+            .filter_map(|r| r.error.as_ref().map(|e| format!("{}: {e}", r.name)))
+            .chain(self.errors.iter().cloned())
+            .collect()
+    }
+}
+
+/// Load + instantiate every declared plugin, then cross-check each plugin's
+/// input schema and role against how the pipelines actually use it.
+pub(crate) fn validate_plan(
+    plan: &ExecutionPlan,
+    env: &EnvContext,
+) -> Result<ValidationOutcome, CliError> {
+    let mut engine = WasmEngine::new(WasmEngineConfig::default())?;
+    let mut reports = Vec::new();
+    let mut metas: HashMap<String, PluginMetadata> = HashMap::new();
+
+    for decl in &plan.plugins {
+        let (report, meta) = validate_one(&mut engine, decl, env);
+        if let Some(m) = meta {
+            metas.insert(decl.name.clone(), m);
+        }
+        reports.push(report);
+    }
+
+    let (errors, warnings) = cross_check(plan, &metas);
+    Ok(ValidationOutcome {
+        reports,
+        errors,
+        warnings,
+    })
+}
+
 #[derive(serde::Serialize)]
-struct PluginReport {
+pub(crate) struct PluginReport {
     name: String,
     resolved_name: Option<String>,
     role: Option<String>,

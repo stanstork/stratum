@@ -5,11 +5,14 @@ use crate::{
         instance::PluginInstance,
         limits::{HostCapabilities, ResourceLimits},
     },
-    schema::PluginMetadata,
+    schema::{PluginMetadata, PluginType},
 };
 use model::{
     core::types::Type,
-    execution::{pipeline::Pipeline, plugin::PluginDecl},
+    execution::{
+        pipeline::{Pipeline, ValidationKind},
+        plugin::PluginDecl,
+    },
 };
 use std::{
     collections::HashMap,
@@ -177,6 +180,36 @@ impl PluginRegistry {
     pub fn metadata(&self, name: &str) -> Result<PluginMetadata, WasmError> {
         Ok(self.instantiate(name)?.metadata().clone())
     }
+}
+
+pub fn unexecutable_plugin_reason(
+    pipeline: &Pipeline,
+    registry: &PluginRegistry,
+) -> Option<String> {
+    let check_role = |name: &str, expected: PluginType| -> Option<String> {
+        match registry.metadata(name) {
+            Ok(m) if m.plugin_type == expected => None,
+            Ok(m) => Some(format!(
+                "plugin '{name}' is a {:?}, but is used as a {:?}",
+                m.plugin_type, expected
+            )),
+            Err(_) => Some(format!("plugin '{name}' failed to load")),
+        }
+    };
+
+    pipeline
+        .plugin_transforms
+        .iter()
+        .find_map(|call| check_role(&call.plugin_name, PluginType::Transform))
+        .or_else(|| {
+            pipeline.validations.iter().find_map(|rule| {
+                if let ValidationKind::WasmFilter { plugin_name, .. } = &rule.kind {
+                    check_role(plugin_name, PluginType::Filter)
+                } else {
+                    None
+                }
+            })
+        })
 }
 
 /// Resolve the destination columns produced by a pipeline's plugin transforms
