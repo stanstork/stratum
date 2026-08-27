@@ -210,11 +210,32 @@ Host capabilities are off by default and gated by the `plugin` declaration. The
 SDK exposes them only when granted:
 
 - `allow_log` (on by default) - `log_info` / `log_warn` / `log_error` / `log_debug`.
-- `allow_http` - `http_get` / `http_post`.
-- `allow_kv` - `kv_get` / `kv_set`.
-- `allow_metrics` - `metric_counter` / `metric_gauge`.
+- `allow_http` - `http_get` / `http_post`. Returns the real response status and
+  body (including for 4xx/5xx). Guarded regardless of the grant: link-local /
+  cloud-metadata hosts (169.254.0.0/16, fe80::/10) are always refused, requests
+  time out after 30s, and responses over 16 MiB are rejected rather than
+  truncated. Narrow the reachable hosts with `allow_http_hosts` (see below).
+- `allow_http_hosts` - optional list of hosts (exact match, case-insensitive,
+  port ignored) that `http_request` may reach. Empty = any non-link-local host;
+  non-empty = only the listed hosts. Ignored unless `allow_http` is set.
+- `allow_kv` - `kv_get` / `kv_set`. An **instance-scoped scratch** store: it
+  lives for the plugin instance and carries state between row/batch calls, but is
+  **not** persisted to disk or shared across runs.
+- `allow_metrics` - `metric_counter` / `metric_gauge` (emitted on the host's
+  `plugin::metrics` tracing target).
+- `allow_env` - list of environment-variable **names** the plugin may read via
+  WASI. Values are resolved from the run's environment (the `EnvContext`, so
+  `.env`-file variables count, not just the process environment); a name that
+  isn't set is simply not exposed. Only the listed names are visible - nothing
+  else from the host environment leaks in.
+- `allow_fs_read` / `allow_fs_write` - lists of host directories preopened for
+  the plugin via WASI (read-only / read-write). Each directory **must already
+  exist** at run time; a missing one fails instantiation loudly rather than
+  silently granting nothing. Only the listed directories are reachable.
 
-Calling a denied capability returns a `capability_denied` error.
+A denied HTTP/KV call is inert (HTTP returns a `capability_denied` error to the
+plugin; `kv_get` returns `None`, `kv_set` is a no-op); denied metrics calls are
+no-ops; ungranted env vars and directories are simply absent from the sandbox.
 
 ## Errors and panics
 

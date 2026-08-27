@@ -69,8 +69,8 @@ stratum apply -c migration.smql --pretty
 ```
 [  0.001s] ▶ Starting migration: run-1
 [  0.002s] ◉ Pipeline 'migrate_actor' started (snapshot mode)
-[  0.140s] -> migrate_actor 1,000 rows
-[  1.320s] -> migrate_actor 500,000 rows, 12 skipped, 3 failed
+[  0.140s] → migrate_actor 1,000 rows
+[  1.320s] → migrate_actor 500,000 rows, 12 skipped, 3 failed
 [  2.500s] ✓ Pipeline 'migrate_actor' completed: 1,000,000 rows, 12 skipped, 3 failed in 2.50s (400,000/s)
 [  2.505s] ✓ Migration completed!
    Total:      1,000,000 rows, 12 skipped, 3 failed
@@ -79,7 +79,7 @@ stratum apply -c migration.smql --pretty
    Throughput: 398,406/s
 ```
 
-The line symbols: `▶` run start, `◉` pipeline start, `->` progress, `✓` success,
+The line symbols: `▶` run start, `◉` pipeline start, `→` progress, `✓` success,
 `✗` failure, `◆`/`⧗` integrity finalization (see below). Row counts and
 throughput are thousands-separated.
 
@@ -336,11 +336,11 @@ uncolored output.
 
 ## Choosing a mode
 
-- **CI, cron, redirected output** -> default log mode (add `--log-level debug` to
+- **CI, cron, redirected output** → default log mode (add `--log-level debug` to
   trace). `verify` default output is stable and diffable.
-- **Watching an interactive run** -> `--pretty` for a readable scrolling log, or
+- **Watching an interactive run** → `--pretty` for a readable scrolling log, or
   `--tui` for a live dashboard with controls.
-- **Long or large migrations you want to steer** -> `--tui`, so you can pause and
+- **Long or large migrations you want to steer** → `--tui`, so you can pause and
   checkpoint (`Space`) or cancel (`c`) without losing written data.
-- **Scripting `verify`** -> default output, or `--output report.txt` for the same
+- **Scripting `verify`** → default output, or `--output report.txt` for the same
   text on disk; check the exit code for pass/fail/inconclusive.

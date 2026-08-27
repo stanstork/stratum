@@ -40,12 +40,26 @@ impl SourceReader for WasmSourceReader {
         };
 
         let started = Instant::now();
+
         let page = {
             let mut guard = self
                 .plugin
                 .lock()
                 .expect("wasm source plugin mutex poisoned");
-            guard.call_read_page(cursor_str, batch_size).map_err(|e| {
+
+            // A source plugin's WASI ops (fs/env) block on Tokio internally, which
+            // panics on an async worker thread - run the read off the executor.
+            let mut read = || guard.call_read_page(cursor_str, batch_size);
+
+            let result = if matches!(
+                tokio::runtime::Handle::current().runtime_flavor(),
+                tokio::runtime::RuntimeFlavor::MultiThread
+            ) {
+                tokio::task::block_in_place(read)
+            } else {
+                read()
+            };
+            result.map_err(|e| {
                 DriverError::QueryError(format!(
                     "wasm source '{}' read_page failed: {}",
                     self.plugin_name, e

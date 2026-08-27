@@ -440,6 +440,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "test_caps"
+version = "0.1.0"
+dependencies = [
+ "stratum-plugin-sdk",
+]
+
+[[package]]
 name = "test_echo"
 version = "0.1.0"
 dependencies = [

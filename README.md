@@ -151,7 +151,9 @@ workloads, not yet battle-tested for unattended production use.
 - **Single-node:** execution and state (sled) are local to one machine; there is
   no distributed/coordinated mode.
 - **Plugin host functions** (outbound HTTP, key-value, metrics) are
-  capability-gated and currently stubbed - disabled by default.
+  capability-gated and off by default. Outbound HTTP is guarded (link-local/
+  cloud-metadata blocked, per-request timeout, response-size cap, optional host
+  allowlist); the key-value store is instance-scoped scratch, not persisted.
 - **No published binaries or crates yet** - build from source (below).
 
 These are known and tracked in the issue tracker.
@@ -477,7 +479,7 @@ Rough direction (not commitments):
 - Multiple-table union sources (`from` reading several tables)
 - Configurable connection pooling (pool size, timeouts)
 - Published binaries and crates
-- Plugin host capabilities (HTTP, key-value) beyond the current stubs
+- Persistent (cross-run) plugin key-value store - today's store is instance-scoped scratch
 
 See the [issue tracker](https://github.com/stanstork/stratum/issues) for what's
 actively in progress.

@@ -9,6 +9,7 @@ pub(crate) fn fixture(name: &str) -> String {
 }
 
 mod benchmark;
+mod capabilities;
 mod combined;
 mod filter;
 mod memory_limit;

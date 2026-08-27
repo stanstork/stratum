@@ -237,14 +237,15 @@ impl DurationEstimator {
         total
     }
 
+    /// Estimate a pipeline's peak working memory in MB.
     fn estimate_memory(&self, settings: &PipelineSettings, mappings: &[ColumnMapping]) -> u64 {
-        const BYTES_PER_COL: u64 = 80;
-        const FRAMEWORK_OVERHEAD: u64 = 32;
+        /// Per-lane footprint: a share of the bounded channel window plus the
+        /// read/write buffers and allocator arenas each parallel lane holds.
+        const PER_LANE_MB: u64 = 160;
         const EXPR_MB_LIMIT: u64 = 128;
 
-        let row_size = mappings.len() as u64 * BYTES_PER_COL;
-        let batch_mb = (settings.batch_size as u64 * row_size) / (1024 * 1024);
-        let pipeline_memory = batch_mb * settings.workers as u64;
+        let lanes = settings.lanes.max(1) as u64;
+        let pipeline_memory = lanes * PER_LANE_MB;
 
         let computed_count = mappings
             .iter()
@@ -258,7 +259,7 @@ impl DurationEstimator {
 
         let expr_memory = (computed_count as u64 * 5).min(EXPR_MB_LIMIT);
 
-        pipeline_memory + expr_memory + FRAMEWORK_OVERHEAD
+        pipeline_memory + expr_memory
     }
 }
 
@@ -309,7 +310,14 @@ impl ResourceEstimator {
         execution_order: &[ExecutionStage],
         settings: &ExecutionSettings,
     ) -> u64 {
-        match settings.strategy {
+        // Shared, process-wide baseline paid once regardless of pipeline count:
+        // the async runtime, connection pools, and the allocator's resident base.
+        const PROCESS_BASE_MB: u64 = 256;
+
+        // Peak of the *concurrently live* pipelines' own footprints: sequential
+        // runs one at a time (the largest), parallel runs a stage's pipelines
+        // together (their sum), and the plan peaks on the heaviest stage.
+        let concurrent_peak = match settings.strategy {
             ExecutionStrategy::Sequential => pipelines
                 .iter()
                 .map(|p| p.estimations.memory_mb)
@@ -326,7 +334,9 @@ impl ResourceEstimator {
                 })
                 .max()
                 .unwrap_or(0),
-        }
+        };
+
+        PROCESS_BASE_MB + concurrent_peak
     }
 
     fn total_network(pipelines: &[PipelinePlan]) -> f64 {

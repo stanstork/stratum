@@ -158,10 +158,30 @@ Values are strings - parse them in the handler.
 
 ## Capabilities
 
+JavaScript plugins get the **same** host capabilities as native ones, gated by
+the same `plugin` declaration - `require("@stratum/plugin-sdk")` exposes `log`,
+`http`, `kv`, `metrics`, `env`, and `fs`.
+
 - `log.info` / `log.warn` / `log.error` / `log.debug` - host logging (on by
   default via `allow_log`).
-- `http.get` / `http.post` - outbound HTTP, only when the declaration sets
-  `allow_http = true`.
+- `http.get` / `http.post` / `http.put` - outbound HTTP, only when the
+  declaration sets `allow_http = true`. The response object carries the real
+  `status` and `body` (including for 4xx/5xx). Link-local / cloud-metadata hosts
+  are always refused, requests time out after 30s, and oversized responses are
+  rejected; restrict the reachable hosts with `allow_http_hosts = [...]`.
+- `kv.get(key)` / `kv.set(key, value)` - instance-scoped scratch store
+  (`allow_kv`). `get` returns `null` when absent or denied. Not persisted.
+- `metrics.counter(name, value)` / `metrics.gauge(name, value)` - custom metrics
+  (`allow_metrics`), emitted on the host's `plugin::metrics` tracing target.
+- `env.get(name)` - read a variable named in `allow_env` (resolved from the run
+  environment, `.env` included); `null` if unset or not granted.
+- `fs.readText(path)` / `fs.writeText(path, contents)` - file access within the
+  directories granted by `allow_fs_read` / `allow_fs_write`; `readText` returns
+  `null` on a missing/ungranted file, `writeText` returns `true` on success.
+
+Denied capabilities are inert (a denied `http` call reports `status: 0`;
+`kv.get` / `env.get` / `fs.readText` return `null`; `kv.set`, `metrics`, and
+`fs.writeText` are no-ops), mirroring the native SDK exactly.
 
 ## Native vs. JavaScript - which to use
 
@@ -173,8 +193,8 @@ Values are strings - parse them in the handler.
 | Default budget | lean row budget | larger IO budget (QuickJS boot) |
 | Best for | hot paths, heavy logic | quick logic, no Rust setup |
 
-Both expose identical roles and config; pick by toolchain preference and
-performance needs. On a 10M-row MySQL -> PostgreSQL benchmark a JS transform or
+Both expose identical roles, host capabilities, and config; pick by toolchain
+preference and performance needs. On a 10M-row MySQL -> PostgreSQL benchmark a JS transform or
 filter runs at ~120-127k rows/s, versus ~486k (transform) / ~704k (filter)
 rows/s for the equivalent native Rust plugin. The batch-native ABI already
 amortizes the WASM boundary crossing, so that gap is the QuickJS interpreter

@@ -159,13 +159,14 @@ plugin "normalize" {
   path = "plugins/normalize.js"   // required
 
   // Capabilities - all denied by default except allow_log:
-  allow_http     = false
-  allow_kv       = false
-  allow_log      = true
-  allow_metrics  = false
-  allow_fs_read  = ["data/lookups"]   // list of paths
-  allow_fs_write = []
-  allow_env      = ["TZ"]             // list of variable names
+  allow_http       = false
+  allow_http_hosts = ["api.example.com"]  // optional allowlist; empty = any non-link-local host
+  allow_kv         = false                // instance-scoped scratch store (not persisted)
+  allow_log        = true
+  allow_metrics    = false
+  allow_fs_read    = ["data/lookups"]     // dirs preopened read-only (must exist)
+  allow_fs_write   = []                   // dirs preopened read-write (must exist)
+  allow_env        = ["TZ"]               // env var NAMES; values resolved from the run env (.env included)
 
   // Resource limits (host defaults apply when omitted):
   memory_limit_bytes = 134217728   // 128 MB

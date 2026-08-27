@@ -92,9 +92,9 @@ impl DagExecutor {
             MigrationError::InitializationError(format!("Failed to open state store: {e}"))
         })?);
         let hash_log = Arc::new(RowHashLog::in_state_dir(&state_dir));
-        let exec_ctx = ExecutionContext::new(&plan, state, hash_log, env);
+        let exec_ctx = ExecutionContext::new(&plan, state, hash_log, env.clone());
         let exec_config = plan.execution_config.clone();
-        let plugin_registry = load_registry(&plan.plugins)?;
+        let plugin_registry = load_registry(&plan.plugins, &|name| env.get(name))?;
 
         Ok(Self {
             plan,

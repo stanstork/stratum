@@ -102,6 +102,29 @@ pub async fn run_smql(smql: &str, integrity: bool) -> Result<(), MigrationError>
     run(plan, ExecutionFlags::new(false, mode), shutdown, env).await
 }
 
+/// Like [`run_smql`] but seeds the run's `EnvContext` with `env_vars`, so a
+/// plugin's `allow_env` grants resolve (plain `run_smql` uses an empty context).
+pub async fn run_smql_with_env(
+    smql: &str,
+    env_vars: &[(&str, &str)],
+) -> Result<(), MigrationError> {
+    let doc = parse(smql).expect("parse smql");
+    let mut ctx = EnvContext::empty();
+    for (k, v) in env_vars {
+        ctx.set((*k).to_string(), (*v).to_string());
+    }
+    let env = Arc::new(ctx);
+    let plan = ExecutionPlan::build(&doc, env.clone()).expect("build execution plan");
+    let shutdown = ShutdownSignal::new();
+    run(
+        plan,
+        ExecutionFlags::new(false, IntegrityMode::Off),
+        shutdown,
+        env,
+    )
+    .await
+}
+
 /// Run a migration in a background task and trigger a graceful pause (the Ctrl-C
 /// path: drain current batch, checkpoint, exit) once the Postgres `dest_table`
 /// has at least `min_rows` rows. Returns after the run exits, leaving a

@@ -21,7 +21,17 @@ pub(super) fn commas(n: u64) -> String {
     out
 }
 
+/// Count can't be known at plan time (e.g. a WASM/plugin source that streams or
+/// fetches rows at runtime)
+pub(super) fn is_unknown_count(rc: &RowCount) -> bool {
+    rc.value == 0 && rc.is_estimated && rc.confidence.is_none()
+}
+
 pub(super) fn fmt_rows(rc: &RowCount) -> String {
+    if is_unknown_count(rc) {
+        return "unknown".to_string();
+    }
+
     let n = commas(rc.value);
     if rc.is_estimated { format!("~{n}") } else { n }
 }
@@ -108,5 +118,24 @@ mod tests {
         assert_eq!(bar(0, 100), "");
         assert_eq!(bar(100, 100), "█████"); // full
         assert!(!bar(1, 100).is_empty()); // tiny but non-empty
+    }
+
+    #[test]
+    fn fmt_rows_distinguishes_unknown_from_zero_and_estimates() {
+        // The unknown() sentinel (plugin source) reads as "unknown", not "~0".
+        assert_eq!(fmt_rows(&RowCount::unknown()), "unknown");
+        assert!(is_unknown_count(&RowCount::unknown()));
+
+        // A real empty table is an exact 0.
+        assert_eq!(fmt_rows(&RowCount::exact(0)), "0");
+        assert!(!is_unknown_count(&RowCount::exact(0)));
+
+        // A genuine estimate of ~0 keeps its confidence and stays "~0".
+        assert_eq!(fmt_rows(&RowCount::estimated(0, 0.5)), "~0");
+        assert!(!is_unknown_count(&RowCount::estimated(0, 0.5)));
+
+        // Normal counts are unaffected.
+        assert_eq!(fmt_rows(&RowCount::exact(1000)), "1,000");
+        assert_eq!(fmt_rows(&RowCount::estimated(1000, 0.9)), "~1,000");
     }
 }

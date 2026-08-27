@@ -13,7 +13,10 @@ use connectors::sql::metadata::column::ColumnMetadata;
 use engine_core::plan::execution::ExecutionPlan as CoreExecutionPlan;
 use engine_processing::io::format::DataFormat;
 use engine_schema::type_registry::Dialect;
-use engine_wasm::{registry::PluginRegistry, schema::PluginField};
+use engine_wasm::{
+    registry::PluginRegistry,
+    schema::{PluginField, PluginMetadata, PluginType},
+};
 use expression_engine::ExpressionAnalyzer;
 use model::{
     core::types::Type,
@@ -47,6 +50,7 @@ impl PluginAnalyzer {
                 .validations
                 .iter()
                 .any(|v| matches!(v.kind, ValidationKind::WasmFilter { .. }));
+
             if !has_transforms && !has_wasm_filters {
                 continue;
             }
@@ -73,58 +77,109 @@ impl PluginAnalyzer {
 
             // Transform plugin calls.
             for call in &core.plugin_transforms {
-                let plugin = match plugin_registry.metadata(&call.plugin_name) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        plan.diagnostics.push(
-                            Diagnostic::error(
-                                "PLUGIN_LOAD_FAILED",
-                                &format!(
-                                    "could not load transform plugin '{}': {}",
-                                    call.plugin_name, e
-                                ),
-                            )
-                            .with_pipeline(&plan.name),
-                        );
-                        continue;
-                    }
-                };
-                let dest_ty = dest_types.get(&call.output_column);
-                plan.diagnostics.extend(validate_transform_call(
-                    &plan.name, call, &available, &plugin, dest_ty,
-                ));
+                if let Some(plugin) = Self::load_plugin(
+                    plan,
+                    plugin_registry,
+                    &call.plugin_name,
+                    PluginType::Transform,
+                ) {
+                    let dest_ty = dest_types.get(&call.output_column);
+                    let diags =
+                        validate_transform_call(&plan.name, call, &available, &plugin, dest_ty);
+                    plan.diagnostics.extend(diags);
+                }
             }
 
             // Filter plugin rules in `validate { rule … }`.
             for rule in &core.validations {
-                let ValidationKind::WasmFilter {
+                if let ValidationKind::WasmFilter {
                     plugin_name,
                     input_mapping,
                 } = &rule.kind
-                else {
-                    continue;
-                };
-                let plugin = match plugin_registry.metadata(plugin_name) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        plan.diagnostics.push(
-                            Diagnostic::error(
-                                "PLUGIN_LOAD_FAILED",
-                                &format!("could not load filter plugin '{}': {}", plugin_name, e),
-                            )
-                            .with_pipeline(&plan.name),
-                        );
-                        continue;
-                    }
-                };
-                plan.diagnostics.extend(validate_filter_rule(
+                    && let Some(plugin) =
+                        Self::load_plugin(plan, plugin_registry, plugin_name, PluginType::Filter)
+                {
+                    let diags = validate_filter_rule(
+                        &plan.name,
+                        rule,
+                        plugin_name,
+                        input_mapping,
+                        &available,
+                        &plugin,
+                    );
+                    plan.diagnostics.extend(diags);
+                }
+            }
+        }
+    }
+
+    fn validate_endpoints(
+        &self,
+        plan: &mut PipelinePlan,
+        core: &model::execution::pipeline::Pipeline,
+        registry: &PluginRegistry,
+    ) {
+        // Source side
+        if let Some(plugin_name) = Self::wasm_plugin_of(&core.source.connection)
+            && let Some(meta) = Self::load_plugin(plan, registry, &plugin_name, PluginType::Source)
+        {
+            let refs = Self::referenced_columns(core);
+            plan.diagnostics.extend(validate_source_endpoint(
+                &plan.name,
+                &plugin_name,
+                &refs,
+                &meta,
+            ));
+        }
+
+        // Sink side
+        if let Some(plugin_name) = Self::wasm_plugin_of(&core.destination.connection)
+            && let Some(meta) = Self::load_plugin(plan, registry, &plugin_name, PluginType::Sink)
+        {
+            let produced = Self::produced_columns(core);
+            plan.diagnostics.extend(validate_sink_endpoint(
+                &plan.name,
+                &plugin_name,
+                &produced,
+                &meta,
+            ));
+        }
+    }
+
+    /// Loads the plugin metadata, pushing relevant errors directly to the `PipelinePlan`
+    /// diagnostics if it fails to load or violates the expected role `PluginType`.
+    fn load_plugin(
+        plan: &mut PipelinePlan,
+        registry: &PluginRegistry,
+        plugin_name: &str,
+        role: PluginType,
+    ) -> Option<PluginMetadata> {
+        match registry.metadata(plugin_name) {
+            Ok(meta) if meta.plugin_type != role => {
+                plan.diagnostics.push(Self::role_mismatch(
                     &plan.name,
-                    rule,
                     plugin_name,
-                    input_mapping,
-                    &available,
-                    &plugin,
+                    meta.plugin_type,
+                    role,
                 ));
+                None
+            }
+            Ok(meta) => Some(meta),
+            Err(e) => {
+                let role_str = match role {
+                    PluginType::Source => "source",
+                    PluginType::Sink => "sink",
+                    PluginType::Transform => "transform",
+                    PluginType::Filter => "filter",
+                };
+                plan.diagnostics.push(
+                    Diagnostic::error(
+                        "PLUGIN_LOAD_FAILED",
+                        &format!("could not load {role_str} plugin '{plugin_name}': {e}"),
+                    )
+                    .with_pipeline(&plan.name),
+                );
+                None
             }
         }
     }
@@ -148,9 +203,11 @@ impl PluginAnalyzer {
                 })
                 .collect();
         }
+
         let Some(dialect) = Self::dialect_from_driver(driver) else {
             return HashMap::new();
         };
+
         columns
             .iter()
             .map(|ci| {
@@ -178,47 +235,19 @@ impl PluginAnalyzer {
         }
     }
 
-    fn validate_endpoints(
-        &self,
-        plan: &mut PipelinePlan,
-        core: &model::execution::pipeline::Pipeline,
-        registry: &PluginRegistry,
-    ) {
-        // Source side.
-        if let Some(plugin) = Self::wasm_plugin_of(&core.source.connection) {
-            match registry.metadata(&plugin) {
-                Ok(meta) => {
-                    let refs = Self::referenced_columns(core);
-                    plan.diagnostics
-                        .extend(validate_source_endpoint(&plan.name, &plugin, &refs, &meta));
-                }
-                Err(e) => plan.diagnostics.push(
-                    Diagnostic::error(
-                        "PLUGIN_LOAD_FAILED",
-                        &format!("could not load source plugin '{}': {}", plugin, e),
-                    )
-                    .with_pipeline(&plan.name),
-                ),
-            }
-        }
-        // Sink side.
-        if let Some(plugin) = Self::wasm_plugin_of(&core.destination.connection) {
-            match registry.metadata(&plugin) {
-                Ok(meta) => {
-                    let produced = Self::produced_columns(core);
-                    plan.diagnostics.extend(validate_sink_endpoint(
-                        &plan.name, &plugin, &produced, &meta,
-                    ));
-                }
-                Err(e) => plan.diagnostics.push(
-                    Diagnostic::error(
-                        "PLUGIN_LOAD_FAILED",
-                        &format!("could not load sink plugin '{}': {}", plugin, e),
-                    )
-                    .with_pipeline(&plan.name),
-                ),
-            }
-        }
+    /// A blocking diagnostic for a plugin used in the wrong role (e.g. a Filter
+    /// invoked as a transform).
+    fn role_mismatch(
+        pipeline: &str,
+        name: &str,
+        actual: PluginType,
+        expected: PluginType,
+    ) -> Diagnostic {
+        Diagnostic::error(
+            "PLUGIN_ROLE_MISMATCH",
+            &format!("plugin '{name}' is a {actual:?}, but is used as a {expected:?}"),
+        )
+        .with_pipeline(pipeline)
     }
 
     /// Plugin name carried by a wasm connection's `properties["plugin"]`.

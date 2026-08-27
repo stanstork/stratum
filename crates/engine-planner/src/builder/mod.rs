@@ -4,10 +4,15 @@ use crate::{
             AnalysisContext, AnalysisContextConfig, AnalysisReport, AnalyzerError,
             AnalyzerRegistry, PipelineAnalysisInput,
         },
-        analyzers::{connection::ConnectionAnalyzer, plugin::PluginAnalyzer, sample::SampleConfig},
+        analyzers::{
+            connection::ConnectionAnalyzer,
+            plugin::PluginAnalyzer,
+            sample::{SampleConfig, SampleProcessor},
+            validation::ValidationAnalyzer,
+        },
         data_flow::DataFlowAnalyzer,
         diagnostics::diagnostic_generator::DiagnosticGenerator,
-        endpoint::{is_wasm_pipeline, resolve_destination, resolve_source},
+        endpoint::{PlanSourceEndpoint, is_wasm_pipeline, resolve_destination, resolve_source},
         errors::{ConnectionError, ReportBuilderError, ReportBuilderResult, SourceAnalyzerError},
         estimator::{DurationEstimator, ResourceEstimator},
         graph::GraphAnalyzer,
@@ -39,7 +44,7 @@ use crate::{
             migration_report::MigrationReport,
         },
         pipeline::{plan::PipelinePlan, settings::PipelineSettings},
-        sample::method::SamplingMethod,
+        sample::{method::SamplingMethod, preview::SampleDataPreview},
     },
 };
 use connectors::traits::introspector::SchemaIntrospector;
@@ -47,7 +52,9 @@ use engine_config::settings::{
     Settings, validated::ValidatedSettings, validator::SettingsValidator,
 };
 use engine_core::{
-    context::exec::ConnectionPool, dispatch_drivers, drivers::DriverRef,
+    context::{env::EnvContext, exec::ConnectionPool},
+    dispatch_drivers,
+    drivers::DriverRef,
     plan::execution::ExecutionPlan as CoreExecutionPlan,
 };
 use engine_infra::retry::RetryPolicy;
@@ -59,7 +66,7 @@ use engine_schema::{
     type_registry::{Dialect, TypeRegistry},
 };
 use engine_state::{CalibrationData, WriteClass};
-use engine_wasm::registry::{PluginRegistry, load_registry};
+use engine_wasm::registry::{PluginRegistry, load_registry, plugin_columns};
 use model::execution::flags::IntegrityMode;
 use model::execution::pipeline::RetryConfig as CoreRetryConfig;
 use model::execution::row_count::RowCount;
@@ -78,9 +85,9 @@ use std::{
     collections::{HashMap, HashSet},
     path::Path,
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
-use tracing::info;
+use tracing::{info, warn};
 
 pub mod analysis;
 pub mod analyzers;
@@ -131,6 +138,9 @@ pub struct ReportBuilderConfig {
 
     /// Verbosity level (0 = quiet, 1 = normal, 2+ = verbose)
     pub verbosity: u8,
+
+    /// Environment for resolving plugin `allow_env` grants during sampling.
+    pub env: Option<Arc<EnvContext>>,
 }
 
 impl Default for ReportBuilderConfig {
@@ -147,6 +157,7 @@ impl Default for ReportBuilderConfig {
             auto_mask_sensitive: true,
             exact_where: false, // Use EXPLAIN by default (faster)
             verbosity: 1,
+            env: None,
         }
     }
 }
@@ -189,7 +200,10 @@ impl ReportBuilder {
 
         // Per-run plugin registry - shared with the executor so plan --sample
         // invokes WASM transforms identically to apply.
-        let plugin_registry = load_registry(&core_plan.plugins)?;
+        let env = self.config.env.clone();
+        let plugin_registry = load_registry(&core_plan.plugins, &|name| {
+            env.as_ref().and_then(|e| e.get(name))
+        })?;
 
         // Pipeline Analysis
         let mut pipelines = self
@@ -313,7 +327,6 @@ impl ReportBuilder {
             .await
     }
 
-    /// Slim assembly path for pipelines with at least one WASM endpoint.
     async fn analyze_wasm_pipeline(
         &self,
         pipeline: &Pipeline,
@@ -339,6 +352,8 @@ impl ReportBuilder {
             .calculate_execution_positions(dag, &pipeline.name)
             .unwrap_or((0, 0));
 
+        let sample = self.wasm_source_sample(pipeline, src_ep.as_ref(), plugin_registry);
+
         Ok(PipelinePlan {
             name: pipeline.name.clone(),
             description: pipeline.description.clone(),
@@ -359,9 +374,80 @@ impl ReportBuilder {
             schema_changes,
             diagnostics: Vec::new(),
             estimations: Default::default(),
-            sample: None,
+            sample,
             cascade_tables: Vec::new(),
         })
+    }
+
+    fn wasm_source_sample(
+        &self,
+        pipeline: &Pipeline,
+        src_ep: &dyn PlanSourceEndpoint,
+        plugin_registry: &Arc<PluginRegistry>,
+    ) -> Option<SampleDataPreview> {
+        if !self.config.enable_sampling {
+            return None;
+        }
+
+        // Only a plugin *source* can be sampled by reading a page; a DB source
+        // feeding a WASM sink is sampled via the DB path.
+        let plugin = src_ep.plugin_name()?;
+
+        let sample_config = SampleConfig {
+            enabled: true,
+            size: self.config.sample_size,
+            method: self.config.sample_method.clone(),
+            mask_columns: self.config.mask_columns.clone(),
+            auto_mask_sensitive: self.config.auto_mask_sensitive,
+            sample_ids: self.config.sample_ids.clone(),
+            id_column: self.config.id_column.clone(),
+        };
+
+        let masking = MaskingPolicy::new(
+            self.config.auto_mask_sensitive,
+            self.config.mask_columns.clone(),
+        );
+
+        let start = Instant::now();
+
+        let mut instance = plugin_registry
+            .instantiate(plugin)
+            .map_err(
+                |e| warn!(plugin, error = %e, "wasm sample: could not instantiate source plugin"),
+            )
+            .ok()?;
+
+        let page =
+            tokio::task::block_in_place(|| instance.call_read_page(None, sample_config.size))
+                .map_err(|e| warn!(plugin, error = %e, "wasm sample: read_page failed"))
+                .ok()?;
+
+        let mut records = page.records;
+        records.truncate(sample_config.size);
+
+        let mut mapping = TransformationMetadata::new(pipeline);
+        mapping.set_plugin_columns(plugin_columns(pipeline, plugin_registry));
+
+        let validations = ValidationAnalyzer.no_source(pipeline);
+        let processor = SampleProcessor::new(sample_config);
+
+        let mut preview = tokio::task::block_in_place(|| {
+            processor.process(
+                records,
+                pipeline,
+                plugin_registry,
+                &mapping,
+                &validations,
+                pipeline.has_projection(),
+                None,
+                start,
+            )
+        })
+        .map_err(|e| warn!(plugin, error = %e, "wasm sample: processing failed"))
+        .ok()?;
+
+        processor.apply_masking(&mut preview, &masking);
+        Some(preview)
     }
 
     /// Final step for a pipeline: calculates summaries, execution positions, and resource estimations.

@@ -41,6 +41,17 @@ pub(super) fn card_sample(
         String::new()
     };
 
+    if let Some(reason) = &sp.unavailable_reason {
+        let _ = writeln!(
+            out,
+            "    {} {} {}",
+            s.dim("└"),
+            s.dim("▪"),
+            s.dim(&format!("sample unavailable · {reason}")),
+        );
+        return;
+    }
+
     let _ = writeln!(
         out,
         "    {} {} {}{}",
@@ -114,21 +125,24 @@ fn sample_columns(mappings: &[ColumnMapping], sp: &SampleDataPreview) -> Vec<Str
     if cells.is_empty() {
         return Vec::new();
     }
-    if !mappings.is_empty() {
-        let mut cols: Vec<String> = mappings
-            .iter()
-            .map(|m| m.target.clone())
-            .filter(|t| cells.contains_key(t))
-            .collect();
-        cols.truncate(SAMPLE_MAX_COLS);
-        if !cols.is_empty() {
-            return cols;
-        }
-    }
-    let mut keys: Vec<String> = cells.keys().cloned().collect();
-    keys.sort();
-    keys.truncate(SAMPLE_MAX_COLS);
-    keys
+
+    let mut cols: Vec<String> = mappings
+        .iter()
+        .map(|m| m.target.clone())
+        .filter(|t| cells.contains_key(t))
+        .collect();
+
+    let mut extra: Vec<String> = cells
+        .keys()
+        .filter(|k| !cols.contains(k))
+        .cloned()
+        .collect();
+
+    extra.sort();
+    cols.extend(extra);
+
+    cols.truncate(SAMPLE_MAX_COLS);
+    cols
 }
 
 fn sample_caption(sp: &SampleDataPreview) -> String {

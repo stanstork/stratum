@@ -18,7 +18,9 @@ pub struct HttpResponse {
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "stratum")]
 unsafe extern "C" {
-    // (method, url_ptr, url_len, body_ptr, body_len) -> packed (status_hi16 | body_ptr_hi | body_len_lo)
+    // (method, url_ptr, url_len, body_ptr, body_len) -> packed (ptr, len) of a
+    // response frame in guest memory: [status: u16 LE][body...]. 0 = capability
+    // denied, blocked host, or transport error.
     fn http_request(method: u32, url_ptr: u32, url_len: u32, body_ptr: u32, body_len: u32) -> u64;
 }
 
@@ -51,8 +53,16 @@ fn request(method: HttpMethod, url: &str, body: &[u8]) -> PluginResult<HttpRespo
         return Err(PluginError::capability_denied("http_client"));
     }
 
-    // Decode packed value. Wire format defined by host.
+    // Response frame in guest memory: [status: u16 LE][body...].
     let (resp_ptr, resp_len) = crate::runtime::pack::unpack(packed);
-    let body = unsafe { crate::runtime::abi::read_from_guest(resp_ptr, resp_len) };
-    Ok(HttpResponse { status: 200, body })
+    let raw = unsafe { crate::runtime::abi::read_from_guest(resp_ptr, resp_len) };
+
+    if raw.len() < 2 {
+        return Err(PluginError::capability_denied("http_client"));
+    }
+
+    let status = u16::from_le_bytes([raw[0], raw[1]]) as u32;
+    let body = raw[2..].to_vec();
+
+    Ok(HttpResponse { status, body })
 }

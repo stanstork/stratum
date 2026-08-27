@@ -35,12 +35,13 @@ pub async fn execute(cli: &Cli, commands: &Commands, env: Arc<EnvContext>) -> Re
         info!(config = %config_path, "running dry-run plan");
 
         // Load core plan
-        let core_plan = config::load_plan(&config_path, false, env).await?;
+        let core_plan = config::load_plan(&config_path, false, env.clone()).await?;
 
         // Build DAG
         let dag = build_dag(&core_plan)?;
 
-        // Convert CLI options to planner config
+        // Convert CLI options to planner config. `env` is passed through so
+        // `plan --sample` runs plugins with the same `allow_env` grants as apply.
         let plan_config = build_plan_config(
             *sample,
             *sample_size,
@@ -48,6 +49,7 @@ pub async fn execute(cli: &Cli, commands: &Commands, env: Arc<EnvContext>) -> Re
             id_column.clone(),
             sample_ids.clone(),
             *exact_where,
+            env,
         );
 
         let show_spinner = std::io::stderr().is_terminal()
@@ -111,6 +113,7 @@ fn build_plan_config(
     id_column: Option<String>,
     sample_ids: Option<Vec<String>>,
     exact_where: bool,
+    env: Arc<EnvContext>,
 ) -> ReportBuilderConfig {
     // Convert CLI sample method to engine SamplingMethod
     let sampling_method = match sample_method {
@@ -140,6 +143,7 @@ fn build_plan_config(
         id_column: id_column.unwrap_or_default(),
         sample_ids: sample_ids_values,
         exact_where,
+        env: Some(env),
         ..Default::default()
     }
 }

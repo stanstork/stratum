@@ -55,4 +55,7 @@ pub enum WasmError {
 
     #[error("Plugin not loaded: {name}")]
     PluginNotLoaded { name: String },
+
+    #[error("Failed to configure WASI sandbox for plugin '{plugin}': {message}")]
+    WasiSetup { plugin: String, message: String },
 }

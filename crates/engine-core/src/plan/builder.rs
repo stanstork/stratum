@@ -1275,6 +1275,7 @@ impl PlanBuilder {
             name: block.name.clone(),
             path: PathBuf::new(),
             allow_http: false,
+            allow_http_hosts: Vec::new(),
             allow_kv: false,
             allow_log: true,
             allow_metrics: false,
@@ -1292,6 +1293,7 @@ impl PlanBuilder {
             match attr.key.name.as_str() {
                 "path" => decl.path = as_string(&value).map(PathBuf::from).unwrap_or_default(),
                 "allow_http" => decl.allow_http = as_bool(&value),
+                "allow_http_hosts" => decl.allow_http_hosts = as_str_list(&value),
                 "allow_kv" => decl.allow_kv = as_bool(&value),
                 "allow_log" => decl.allow_log = as_bool(&value),
                 "allow_metrics" => decl.allow_metrics = as_bool(&value),

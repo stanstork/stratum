@@ -55,3 +55,32 @@ export const log: {
     error(msg: string): void;
     debug(msg: string): void;
 };
+
+/** Instance-scoped scratch key-value store (gated by `allow_kv`; not persisted). */
+export const kv: {
+    /** Value for `key`, or null if absent or the capability is denied. */
+    get(key: string): string | null;
+    set(key: string, value: string): void;
+};
+
+/** Custom metrics (gated by `allow_metrics`). No-op when denied. */
+export const metrics: {
+    /** Add `value` (truncated to an integer) to a named counter. */
+    counter(name: string, value: number): void;
+    /** Set a named gauge to `value`. */
+    gauge(name: string, value: number): void;
+};
+
+/** Environment variables granted via `allow_env`. */
+export const env: {
+    /** Value for `name`, or null if unset or not granted. */
+    get(name: string): string | null;
+};
+
+/** File access within directories granted via `allow_fs_read` / `allow_fs_write`. */
+export const fs: {
+    /** File contents as text, or null if missing/unreadable/ungranted. */
+    readText(path: string): string | null;
+    /** Write text to a file; returns true on success. */
+    writeText(path: string, contents: string): boolean;
+};

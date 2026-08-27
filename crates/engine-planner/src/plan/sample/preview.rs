@@ -27,4 +27,6 @@ pub struct SampleDataPreview {
     pub stats: SampleStats,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub issues: Vec<SampleIssue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unavailable_reason: Option<String>,
 }

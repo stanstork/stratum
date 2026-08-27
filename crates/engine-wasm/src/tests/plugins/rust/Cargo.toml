@@ -8,5 +8,6 @@ members = [
     "test_source",
     "test_infinite_loop",
     "test_memory_hog",
+    "test_caps",
 ]
 resolver = "2"
