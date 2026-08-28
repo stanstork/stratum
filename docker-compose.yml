@@ -16,7 +16,7 @@ services:
       MYSQL_USER: sakila_user
       MYSQL_PASSWORD: qwerty123
     ports:
-      - "3306:3306"
+      - "${MYSQL_PORT:-13306}:3306"
     volumes:
       # Seed the Sakila sample database (schema first, then data).
       - ./.github/testdata/sakila-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
@@ -36,7 +36,7 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: testdb
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-15432}:5432"
     volumes:
       # Creates the `pagila` database and loads the dumps. Runs after initdb, so
       # `user` already exists and is the superuser here.

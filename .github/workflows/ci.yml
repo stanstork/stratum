@@ -213,6 +213,8 @@ jobs:
             - name: Run integration tests
               env:
                   RUST_LOG: "info,engine_runtime=debug,engine_processing=debug,connectors=debug"
+                  POSTGRES_PORT: "5432"
+                  MYSQL_PORT: "3306"
               run: cargo test -- --test-threads=1 --nocapture
 
     # Check documentation

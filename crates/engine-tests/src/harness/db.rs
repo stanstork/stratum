@@ -21,16 +21,16 @@ impl Dbms {
     /// Read-only fixture holding the DVD-rental schema.
     pub fn source_url(self) -> &'static str {
         match self {
-            Dbms::MySql => fixtures::MYSQL_SOURCE_URL,
-            Dbms::Postgres => fixtures::PG_SOURCE_URL,
+            Dbms::MySql => fixtures::MYSQL_SOURCE_URL.as_str(),
+            Dbms::Postgres => fixtures::PG_SOURCE_URL.as_str(),
         }
     }
 
     /// Scratch database, emptied before every case.
     pub fn dest_url(self) -> &'static str {
         match self {
-            Dbms::MySql => fixtures::MYSQL_DEST_URL,
-            Dbms::Postgres => fixtures::PG_DEST_URL,
+            Dbms::MySql => fixtures::MYSQL_DEST_URL.as_str(),
+            Dbms::Postgres => fixtures::PG_DEST_URL.as_str(),
         }
     }
 

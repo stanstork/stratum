@@ -4,35 +4,69 @@ use connectors::error::DriverError;
 use mysql_async::Pool;
 use native_tls::TlsConnector;
 use postgres_native_tls::MakeTlsConnector;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use tokio_postgres::{Client, Config, NoTls, config::SslMode};
 use tracing::{error, warn};
 
+// Host ports of the test databases.
+fn mysql_port() -> u16 {
+    env_port("MYSQL_PORT", 13306)
+}
+
+fn pg_port() -> u16 {
+    env_port("POSTGRES_PORT", 15432)
+}
+
+fn env_port(var: &str, default: u16) -> u16 {
+    std::env::var(var)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
 // Read-only source fixtures. Both hold the DVD-rental schema; see `matrix`.
-pub(crate) const MYSQL_SOURCE_URL: &str = "mysql://sakila_user:qwerty123@localhost:3306/sakila";
-pub(crate) const PG_SOURCE_URL: &str = "postgres://user:password@localhost:5432/pagila";
+pub(crate) static MYSQL_SOURCE_URL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "mysql://sakila_user:qwerty123@localhost:{}/sakila",
+        mysql_port()
+    )
+});
+
+pub(crate) static PG_SOURCE_URL: LazyLock<String> =
+    LazyLock::new(|| format!("postgres://user:password@localhost:{}/pagila", pg_port()));
 
 // Scratch destinations, emptied before each case.
-pub(crate) const PG_DEST_URL: &str = "postgres://user:password@localhost:5432/testdb";
-pub(crate) const MYSQL_DEST_URL: &str = "mysql://user:password@localhost:3306/stratum_dest";
+pub(crate) static PG_DEST_URL: LazyLock<String> =
+    LazyLock::new(|| format!("postgres://user:password@localhost:{}/testdb", pg_port()));
+
+pub(crate) static MYSQL_DEST_URL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "mysql://user:password@localhost:{}/stratum_dest",
+        mysql_port()
+    )
+});
 
 pub(crate) async fn mysql_pool(source_db: &str) -> Pool {
     Pool::from_url(match source_db {
-        "sakila" => MYSQL_SOURCE_URL,
-        "dest" => MYSQL_DEST_URL,
+        "sakila" => MYSQL_SOURCE_URL.as_str(),
+        "dest" => MYSQL_DEST_URL.as_str(),
         _ => panic!("Unknown mysql database: {source_db}"),
     })
     .expect("connect mysql")
 }
 
 pub(crate) async fn pg_pool() -> Arc<Client> {
-    Arc::new(connect_client(PG_DEST_URL).await.expect("connect postgres"))
+    Arc::new(
+        connect_client(PG_DEST_URL.as_str())
+            .await
+            .expect("connect postgres"),
+    )
 }
 
 /// Client for the read-only Pagila source database.
 pub(crate) async fn pg_pagila_pool() -> Arc<Client> {
     Arc::new(
-        connect_client(PG_SOURCE_URL)
+        connect_client(PG_SOURCE_URL.as_str())
             .await
             .expect("connect postgres pagila (see .github/workflows/ci.yml for seeding)"),
     )

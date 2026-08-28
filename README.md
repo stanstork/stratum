@@ -191,6 +191,12 @@ cargo build --release
 docker compose down -v
 ```
 
+> **Ports already in use?** The containers publish on **15432** (PostgreSQL) and
+> **13306** (MySQL) by default - not 5432/3306 - so `docker compose up -d` works
+> even if you already run those databases locally. To pick different host ports,
+> set `POSTGRES_PORT` / `MYSQL_PORT` (in `.env` or your shell) and update the
+> matching port in the URLs in `.env`.
+
 ## Usage
 
 ```bash
@@ -459,6 +465,7 @@ Stratum stores pipeline state in `~/.stratum/state/` (sled embedded KV). If a mi
 cargo test
 
 # Integration tests (requires MySQL + PostgreSQL)
+docker compose up -d # seeds the exact test databases
 cargo test -p engine-tests -- --test-threads=1
 
 # Lint
@@ -467,6 +474,11 @@ cargo clippy --all-targets
 # Format
 cargo fmt
 ```
+
+The integration fixtures default to the `docker compose` ports (15432/13306), so
+the two commands above are all you need. To run against databases on other ports,
+set `POSTGRES_PORT` / `MYSQL_PORT` (e.g. `POSTGRES_PORT=5432 MYSQL_PORT=3306
+cargo test -p engine-tests -- --test-threads=1`).
 
 Test fixtures and example configs are in [`examples/configs/`](examples/configs/).
 
