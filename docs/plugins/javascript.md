@@ -57,12 +57,25 @@ stratum plugin compile plugins/upper.js -o plugins/upper.wasm
 
 ### Requirements
 
-JS compilation needs only esbuild (or Node.js for `npx esbuild`) available at
-plan/apply time. The `@stratum/plugin-sdk` package is bundled into the CLI and
-handed to esbuild automatically, so a `.js` plugin compiles from any
-directory without `npm install`, a `node_modules` tree, or `STRATUM_JS_RUNTIME`. The
-bundled SDK always matches the runtime baked into your binary. Prebuilt `.wasm`
-plugins need neither esbuild nor Node.
+Compiling a JS plugin to `.wasm` needs esbuild, and nothing else. The compiler
+resolves it in this order: the `--esbuild-path` flag, then `$STRATUM_ESBUILD`,
+then an `esbuild` binary on `PATH`, then `npx esbuild` (so Node.js alone is
+enough, with no global install). When none is found the compile fails with a
+message telling you how to provide one. This is an authoring prerequisite, like
+needing the `wasm32-wasip1` target to build a native Rust plugin.
+
+The `@stratum/plugin-sdk` package is bundled into the CLI and handed to esbuild
+automatically, so a `.js` compiles from any directory without `npm install`, a
+`node_modules` tree, or `STRATUM_JS_RUNTIME`. The QuickJS runtime is embedded in
+the Stratum binary; `STRATUM_JS_RUNTIME` / `--runtime-wasm` only override it, for
+air-gapped builds. The bundled SDK always matches that embedded runtime.
+
+Compilation happens either explicitly (`stratum plugin compile`) or on demand the
+first time a `plan`/`apply` references a `.js` plugin (cached under
+`~/.stratum/plugin-cache/`, so it runs once). Running a compiled plugin needs
+neither esbuild nor Node: a prebuilt `.wasm` - one you shipped, or built ahead
+with `stratum plugin compile foo.js -o foo.wasm` - loads with no dependencies.
+Keep Node out of production by compiling to `.wasm` once and deploying that.
 
 ## Authoring API
 

@@ -45,7 +45,10 @@ edition = "2024"
 crate-type = ["cdylib"]      # produces a .wasm cdylib
 
 [dependencies]
-stratum-plugin-sdk = "…"     # path or version
+# The SDK is not on crates.io yet. Depend on it from git (pin a rev or tag
+# for a reproducible build) or from a local checkout:
+stratum-plugin-sdk = { git = "https://github.com/stanstork/stratum.git" }
+# stratum-plugin-sdk = { path = "../stratum/crates/sdk/stratum-plugin-sdk" }
 ```
 
 Build:

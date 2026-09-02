@@ -173,6 +173,19 @@ stratum plugin test plugins/feed.wasm  --mode source --json
 stratum plugin test plugins/sink.wasm  --mode sink --input '[{"id":1},{"id":2}]'
 ```
 
+> **Compiling a `.js` needs esbuild or Node.** Only the compile step does; see
+> [javascript.md § Requirements](javascript.md#requirements). Every command that
+> takes a `.wasm` (`inspect`, `test`, and running a plugin during a migration)
+> needs neither esbuild, Node, nor any env vars, because the QuickJS runtime is
+> embedded in the `.wasm`. Native Rust plugins never involve Node.
+
+> **Building a Rust plugin needs the Rust toolchain and the `wasm32-wasip1`
+> target.** Add the target with `rustup target add wasm32-wasip1`, and pull the
+> `stratum-plugin-sdk` dependency from git or a local path (it is not on crates.io
+> yet); see [rust.md § Crate setup](rust.md#crate-setup). Stratum does not compile
+> Rust for you: you build the `.wasm` with `cargo`, then point a `plugin` block at
+> it. The resulting `.wasm` loads like any other, with no toolchain or env vars.
+
 `plugin test` prints one result per input row: transform emits the output value
 per row (`{"values":[...]}` with `--json`), filter emits `PASS`/`REJECT` per row
 (`{"passes":[true,false]}` with `--json`), source reports the page it produced,
