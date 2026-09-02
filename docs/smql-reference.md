@@ -84,7 +84,7 @@ Unqualified reads, writes, and created tables target it (via `search_path`), and
 metadata introspection is scoped to it. Defaults to `public`. The schema must
 already exist. For MySQL, the schema is the database in the connection URL.
 
-**CSV connections** point `url` at a file path and are supported as a **source**
+**CSV connections** point `url` at a file path and are supported as a source
 only. Parsing options live on the connection (not the pipeline `settings` block):
 `delimiter` (default `,`; the escapes `\t`, `\n`, `\r` are recognized, so use
 `"\t"` for TSV), `has_headers` (default `true`), and `pk_column` (optional; marks
@@ -244,9 +244,8 @@ from {
 }
 ```
 
-This is a fan-out of whole-table copies, **not** a union: each table is copied
-into its own destination table. A true multi-source union into one table is not
-supported.
+Each table is copied into its own destination table. A multi-source union into
+one table is not supported.
 
 **With graph references** (see [Graph References](#graph-references)):
 ```smql
@@ -303,7 +302,7 @@ to {
 |---|---|---|---|---|
 | postgres | `copy_format` | `"binary"`, `"text"` | `"binary"` when every column is exactly encodable, else `"text"` | `COPY` wire format |
 | postgres | `pk_creation` | `"pre"`, `"post"` | `"pre"` | `"post"` creates the table without its PK and adds it after the bulk load, so index maintenance doesn't slow the `COPY` |
-| postgres | `on_conflict` | `"do_nothing"`, `"do_update"` | plain insert | `do_nothing` skips colliding rows; `do_update` **upserts** on the primary key (via a staging table + `ON CONFLICT`) |
+| postgres | `on_conflict` | `"do_nothing"`, `"do_update"` | plain insert | `do_nothing` skips colliding rows; `do_update` upserts on the primary key (via a staging table + `ON CONFLICT`) |
 | mysql | `on_conflict` | `"default"`, `"replace"`, `"ignore"` | `"default"` | `LOAD DATA` modifier: `replace` overwrites colliding rows, `ignore` skips them; `default` emits none (`LOCAL INFILE` skips, server-side errors) |
 
 `on_conflict = "do_update"` needs the primary key present during the load, so it
@@ -374,7 +373,7 @@ is joined before `products` references it). All joined tables become available i
 Field mapping block. Syntax is `destination_col = expression`.
 
 > **`select` projects - it restricts output to the columns you list.** With a
-> `select` block the destination gets **only** the columns defined here; without
+> `select` block the destination gets only the columns defined here; without
 > one, every source column is copied straight through.
 
 **Simple column copy:**
@@ -487,7 +486,7 @@ validate {
 
 | Action | Behavior |
 |--------|----------|
-| `skip` | Drop the row and continue - the row is **not** written anywhere (no DLQ) |
+| `skip` | Drop the row and continue - the row is not written anywhere (no DLQ) |
 | `fail` | Send the row to the dead-letter queue (if configured), then abort the pipeline |
 | `warn` | Log a warning and write the row to the destination |
 
@@ -544,7 +543,7 @@ on_error {
 }
 ```
 
-`failed_rows` needs a **nested destination block** - either `table { … }` (as
+`failed_rows` needs a nested destination block - either `table { … }` (as
 above) or `file { … }` for a JSON dead-letter file:
 
 ```smql
@@ -719,7 +718,7 @@ destination connection. What gets split depends on the pipeline:
   key** (`min..max`) into `lanes` contiguous ranges copied in parallel. A table
   without an integer PK falls back to a single lane (no error, no speedup).
 - **Graph pipeline** (`from { with references { data = cascade } }`) - the
-  discovered tables migrate **concurrently**, up to `lanes` at a time, and a
+  discovered tables migrate concurrently, up to `lanes` at a time, and a
   large integer-PK table among them is additionally range-split. So here `lanes`
   is the table-level concurrency, not only an intra-table split.
 
@@ -1079,8 +1078,8 @@ pipeline "warehouse" {
 }
 ```
 
-This is a **fan-out of full-table copies**: each table is copied whole into its
-own destination table (every row, every column). It does **not** follow foreign
+This is a fan-out of full-table copies: each table is copied whole into its
+own destination table (every row, every column). It does not follow foreign
 keys - for FK-graph discovery (which copies only FK-reachable rows) use
 [`with references`](#with-references-block) instead. `tables` is also not a
 union: the tables are not combined into a single destination.
@@ -1129,8 +1128,8 @@ pipelines named `<pipeline>:<table>` (e.g. `warehouse:customer`).
 
 ### Restrictions
 
-A `tables` block is a straight full copy, so the following are rejected with a
-clear error (each is a single-table / single-root concern):
+A `tables` block is a straight full copy, so the following are rejected with an
+error (each is a single-table / single-root concern):
 
 | Not allowed with `tables` | Use instead |
 |---|---|

@@ -230,7 +230,15 @@ impl PipelineOrchestrator {
         let lanes = self.plan_lanes().await?;
 
         let single_lane = lanes.len() == 1;
-        let integrity = self.build_integrity_config(&dest_metas);
+        let intended_pk = if self.settings.integrity().is_enabled() && !self.settings.skip_pk() {
+            self.source_ep
+                .int_key_range(&self.pipeline.source.table)
+                .await
+                .map(|(pk, _, _)| pk)
+        } else {
+            None
+        };
+        let integrity = self.build_integrity_config(&dest_metas, intended_pk.as_deref());
 
         if let Some(config) = &integrity {
             let resuming = self
@@ -511,7 +519,11 @@ impl PipelineOrchestrator {
     }
 
     /// Build the integrity config for this run, or `None` when integrity is off.
-    fn build_integrity_config(&self, dest_metas: &[TableMetadata]) -> Option<IntegrityConfig> {
+    fn build_integrity_config(
+        &self,
+        dest_metas: &[TableMetadata],
+        intended_pk: Option<&str>,
+    ) -> Option<IntegrityConfig> {
         if !self.settings.integrity().is_enabled() {
             return None;
         }
@@ -535,15 +547,23 @@ impl PipelineOrchestrator {
                 .collect();
             column_types.insert(table_name.clone(), col_types);
 
-            // Map primary keys and check for unkeyed tables
-            if m.primary_keys.is_empty() {
-                warn!(
-                    table = %table_name,
-                    "integrity: destination table has no primary key; rows are keyed by their \
-                     own hash, so duplicate identical rows cannot be distinguished"
-                );
-            }
-            key_columns.insert(table_name.clone(), m.primary_keys.clone());
+            let keys = if !m.primary_keys.is_empty() {
+                m.primary_keys.clone()
+            } else if let Some(pk) = intended_pk.filter(|pk| {
+                *table_name == self.pipeline.destination.table && m.columns.contains_key(*pk)
+            }) {
+                vec![pk.to_string()]
+            } else {
+                if !self.settings.skip_pk() {
+                    warn!(
+                        table = %table_name,
+                        "integrity: no usable primary key; rows are keyed by their own hash, \
+                         so duplicate identical rows cannot be distinguished"
+                    );
+                }
+                Vec::new()
+            };
+            key_columns.insert(table_name.clone(), keys);
         }
 
         Some(

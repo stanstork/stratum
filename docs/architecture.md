@@ -1,7 +1,5 @@
 # Architecture Overview
 
-This document explains Stratum's internal architecture and design principles.
-
 ## High-Level Architecture
 
 Stratum is organized into 18 workspace crates following a layered architecture
@@ -64,8 +62,8 @@ graph TB
 - `resume` - continue a paused or interrupted run from its checkpoints
 - `pause` - signal a running migration to stop at a batch boundary
 - `status` - report run state, per-pipeline progress, and stored receipts
-- `reset` - clear a migration's state: run state, checkpoints, WAL. Note it does
-  **not** currently remove the row-hash log or the integrity receipts, which are
+- `reset` - clear a migration's state: run state, checkpoints, WAL. It does
+  not currently remove the row-hash log or the integrity receipts, which are
   keyed by pipeline rather than by run
 - `verify` - post-migration integrity check: re-reads the destination and diffs it
   against the migration's keyed Merkle receipt, reporting missing/extra/changed
@@ -239,10 +237,9 @@ end, resume from a plugin source, and `verify` over a plugin-sourced migration.
 A whole batch crosses in a single call. `columnar_v1` serializes the batch
 column-by-column into a binary wire, the guest iterates the rows internally and
 returns one batch back; `json_v1` remains for debugging and older guests. This is
-why a native-Rust plugin runs near the no-plugin rate rather than well below it -
-what remains is the guest's own compute, not marshalling. A JavaScript plugin
-lands ~4x slower, and that gap is the QuickJS interpreter executing guest code,
-not the boundary.
+why a native-Rust plugin runs near the no-plugin rate: the remaining cost is the
+guest's own compute. A JavaScript plugin lands ~4x slower, and that gap is the
+QuickJS interpreter executing guest code, not the boundary.
 
 Plugin authoring, the SDK macros, and the metadata contract are covered in
 [docs/plugins/](plugins/README.md).
@@ -394,8 +391,7 @@ Producer and consumer are actors in the usual sense - each owns a mailbox (`Prod
 > `PipelineCoordinator::start_cdc{,_pipeline}` all exist, but nothing calls them -
 > no config reaches them, and `ProducerMode::Cdc`'s tick body is a sleep with a
 > `// CDC logic here` placeholder. Stratum does snapshot/batch migration only;
-> change-data-capture is planned. Treat those paths as a reserved shape, not as
-> working code.
+> change-data-capture is planned. Treat those paths as a reserved shape.
 
 ### DAG-Based Parallelism
 Pipelines declare dependencies via `after = [...]`. Topological sort produces execution levels; all pipelines within a level run in parallel. Independent pipelines get maximum throughput; dependent pipelines are automatically serialized.

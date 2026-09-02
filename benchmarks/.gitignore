@@ -1,3 +1,6 @@
 results/
 # Built transform plugins.
 plugins/build/
+
+# Infra
+terraform/

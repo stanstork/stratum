@@ -2,7 +2,7 @@
 
 Stratum can be extended with **WebAssembly plugins** that run inside the
 migration pipeline. A plugin is a sandboxed `.wasm` module the engine loads,
-calls once per **batch** (or per page), and enforces resource limits on.
+calls once per batch (or per page), and enforces resource limits on.
 
 Plugins come in four **roles**:
 
@@ -31,17 +31,16 @@ authoring experience and resource budget differ.
 
 ## The ABI is batch-native
 
-Transform and filter plugins are called **once per batch**, not once per row.
-The host serializes the whole batch, crosses the WASM boundary a single time,
-and the guest returns exactly one result per input row (in order). This
-amortizes the boundary crossing (alloc / serialize / call / deserialize) over
-the entire batch instead of paying it per row - the dominant cost in a trivial
-transform. Both authoring SDKs surface this directly: a Rust handler takes
-`Vec<PluginInput>` and returns a `Vec` of outputs; a JS handler takes the array
-of rows and returns an array of results. The author owns the loop over the
-batch.
+Transform and filter plugins are called once per batch. The host serializes
+the whole batch, crosses the WASM boundary a single time, and the guest returns
+exactly one result per input row (in order). This amortizes the boundary
+crossing (alloc / serialize / call / deserialize) over the entire batch instead
+of paying it per row - the dominant cost in a trivial transform. Both authoring
+SDKs surface this directly: a Rust handler takes `Vec<PluginInput>` and returns
+a `Vec` of outputs; a JS handler takes the array of rows and returns an array of
+results. The author owns the loop over the batch.
 
-Two binary/text **wire formats** carry the batch, negotiated per plugin via the
+Two binary/text wire formats carry the batch, negotiated per plugin via the
 metadata `exchange_format` field:
 
 - **`columnar_v1`** - the default for native Rust transform/filter plugins. A
@@ -49,7 +48,7 @@ metadata `exchange_format` field:
   The host and guest codecs are byte-identical mirrors. Much faster than JSON at
   the boundary.
 - **`json_v1` (flat)** - used by JS transform/filter plugins. Flat JSON arrays of
-  bare values, with **no** `{type, value}` envelope (JS is dynamically typed, so
+  bare values, with no `{type, value}` envelope (JS is dynamically typed, so
   scalars need no type tag).
 
 The *enveloped* `{type, value}` JSON form is still in use: source/sink plugins
@@ -90,7 +89,7 @@ validate {
 
 ### source / sink - as endpoints
 
-A source or sink plugin is wired through a **connection** with `driver = "wasm"`
+A source or sink plugin is wired through a connection with `driver = "wasm"`
 and a `plugin` property naming a declared plugin block:
 
 ```smql
@@ -107,7 +106,7 @@ pipeline "ingest" {
 }
 ```
 
-A WASM **source -> SQL destination** can create the destination table
+A WASM source -> SQL destination can create the destination table
 automatically (`create_missing_tables = true`) - the schema is inferred from the
 source plugin's declared `output` columns.
 
@@ -123,7 +122,7 @@ plugin "sampler" {
 }
 ```
 
-Config reaches handlers in **both runtimes, all roles** - see the per-language
+Config reaches handlers in both runtimes, all roles - see the per-language
 docs for the exact accessor (`config()` / `source_config()` in Rust; the handler
 `config` argument in JS).
 
@@ -148,7 +147,7 @@ The runtime enforces memory (`StoreLimits`), CPU (`fuel`), and wall-clock
 (`epoch`) budgets per call. A plugin that exceeds them traps; the host stays up
 and the failed batch is routed to error handling. Because transform/filter calls
 carry a whole batch, their fuel / output-size / wall-clock limits are treated as
-**per-row rates and scaled by the batch's row count** (capped at 256 MiB output
+per-row rates and scaled by the batch's row count (capped at 256 MiB output
 and 30s wall-clock). Defaults: native transform/filter get 128 MiB memory with a
 per-row rate of 1M fuel / 1 MiB output / 1s; source/sink and JS plugins get a
 larger flat IO budget (128 MiB / 100M fuel / 16 MiB output / 30s) because the
@@ -186,11 +185,11 @@ against how the pipelines use it, without touching a database.
 
 The batch-native ABI plus the `columnar_v1` wire format put native plugins close
 to built-in expressions. On a 10M-row MySQL -> PostgreSQL benchmark: a native
-Rust transform plugin sustains ~513k rows/s and a native Rust filter ~728k
+Rust transform plugin sustains ~510k rows/s and a native Rust filter ~710k
 rows/s (columnar wire, near-native). The equivalent JavaScript plugin/filter
-runs at ~119-126k rows/s - that floor is the QuickJS interpreter itself, not the
-plugin boundary. Pick native Rust for hot paths; reach for JS when the logic is
-light and you'd rather skip the Rust toolchain.
+runs at ~119-128k rows/s. The QuickJS interpreter sets that floor; the batch ABI
+has already amortized the plugin boundary. Pick native Rust for hot paths; reach
+for JS when the logic is light and you'd rather skip the Rust toolchain.
 
 ## Authoring
 

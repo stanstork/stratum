@@ -55,7 +55,7 @@ Plan: 2 tables to create · ~17,099 rows to copy
 ✓ Ready to apply  →  stratum apply -c schema.smql
 ```
 
-The layout is grouped by **pipeline** (like `terraform plan`), not by category.
+The layout is grouped by pipeline, like `terraform plan`.
 
 - **EXECUTION** - the DAG as a rail. Pipelines in the same stage run in parallel;
   later stages wait for earlier ones (`after = [...]` dependencies).
@@ -90,8 +90,8 @@ to `> * # @`.)
 ### Duration estimates
 
 The duration comes from the row count divided by an expected throughput, plus
-fixed overhead (connection setup, checkpoints). Throughput is **self-calibrating
-per machine**, so the estimate sharpens as you use Stratum:
+fixed overhead (connection setup, checkpoints). Throughput is self-calibrating
+per machine, so the estimate sharpens as you use Stratum:
 
 - **Before any run on this machine** the estimate rests on a conservative,
   built-in prior for the destination write path (PostgreSQL COPY, MySQL
@@ -112,9 +112,9 @@ a single-lane one.
 ### Graph / cascade pipelines
 
 A pipeline that discovers its tables by walking the foreign-key graph
-(`from { … with references { data = cascade } }`) is still **one** pipeline, but
-it fans out into a whole closure of tables. `plan` shows a card **per discovered
-table** under a cascade header, so you can see each table's row count, its
+(`from { … with references { data = cascade } }`) is still one pipeline, but
+it fans out into a whole closure of tables. `plan` shows a card per discovered
+table under a cascade header, so you can see each table's row count, its
 create-table, its type conversions, and - with `--sample` - its own transformed
 rows:
 
@@ -129,7 +129,7 @@ PIPELINES
   …
 ```
 
-This matters because each table can carry its **own** field mapping: a named
+Each table can carry its own field mapping: a named
 `select "customer" { … }` block only rewrites the `customer` card, so the samples
 reflect exactly what each table will be written as. The header row total, the
 estimates and the verdict are summed across the whole closure (it all runs as one
@@ -138,10 +138,10 @@ pipeline). Tables that already exist on the destination are shown without a
 
 ### The magnitude bar
 
-The 5-cell bar on each pipeline header shows that pipeline's row estimate **relative
-to the largest pipeline in the plan**, so you can see where the time will go before
+The 5-cell bar on each pipeline header shows that pipeline's row estimate relative
+to the largest pipeline in the plan, so you can see where the time will go before
 reading a number. The heaviest pipeline gets a full green bar (`█████`); smaller
-ones show a proportional sliver (`▏`, `▍`). A plan with a **single pipeline** shows
+ones show a proportional sliver (`▏`, `▍`). A plan with a single pipeline shows
 no bar - there's nothing to compare it against.
 
 Row counts are estimates when introspection can't get an exact figure; those are
@@ -174,7 +174,7 @@ Global flags apply too: `-v`/`-vv` (show logs; disables the spinner), `-q`,
 
 ## The `--json` report
 
-The summary is a readable **digest**; `--json` emits the *complete* report it is
+The summary is a readable digest; `--json` emits the *complete* report it is
 built from - nothing in the report is computed only for the screen. Reach for it
 in CI (gate on `is_executable`, `summary.warning_count`, row counts, …) or to feed
 another tool. Every URL is masked, so the report is safe to archive.
@@ -186,7 +186,7 @@ another tool. Every URL is masked, so the report is safe to archive.
 | `9 columns · pk customer_id` | every column - `name`, `data_type`, nullability, length, PK / auto-increment flags - plus `indexes` and `size_bytes` |
 | `~599 rows` | the row-count object: `value`, `is_estimated`, `confidence` |
 | a card's conversion lines | every `mapping` - source/target types, `mapping_type`, join `source`, nullability |
-| `2 notes hidden` | **all** diagnostics at every level, including the `info` notes the summary collapses |
+| `2 notes hidden` | all diagnostics at every level, including the `info` notes the summary collapses |
 | the execution rail | `execution_order` (the stages) and each pipeline's `execution_stage` / `depends_on` |
 | the ESTIMATES block | `estimations` with `disk_usage_mb`, `network_transfer_mb`, `total_batches`, and per-pipeline breakdowns |
 | - | run metadata: `plan_id`, `generated_at`, `engine_version`, `config_hash`, resolved `defines`, `execution_settings` |
@@ -204,8 +204,8 @@ of the digest maps onto the full structure.
 
 With `--sample`, each pipeline's `sample` object fills in: `enabled: true`, the
 chosen `sampling_method`, and a `rows` array where every row carries its `input`,
-transformed `output`, and validation `status` - the complete sampled data, not the
-5-row / 6-column terminal cap.
+transformed `output`, and validation `status`. That is the complete sampled data,
+without the 5-row / 6-column terminal cap.
 
 ---
 
@@ -215,7 +215,7 @@ With `--sample`, each pipeline is run as a genuine dry run over a few real rows 
 so the preview reflects what will actually be written:
 
 1. **Fetch** - selects the source table's columns, plus any `with { }` join
-   columns, and **applies the `where` filter** so only rows that will migrate are
+   columns, and applies the `where` filter so only rows that will migrate are
    sampled. `--sample-method` chooses *which* rows (`first` N, `random`, or a
    specific set of ids).
 2. **Transform** - runs the pipeline's field mappings and computed columns, so a
@@ -234,10 +234,10 @@ so the preview reflects what will actually be written:
 The preview appears inside the pipeline's card (as its last branch). A per-row
 status glyph (`✓ ⚠ ⊘ ✗`) is shown only when some row isn't a clean pass.
 
-**Display limits (the terminal view only):** the summary shows at most **6
-columns** (chosen in the pipeline's mapping order) and **5 rows**, with cell values
+**Display limits (the terminal view only):** the summary shows at most 6
+columns (chosen in the pipeline's mapping order) and 5 rows, with cell values
 truncated to ~22 characters; extra rows are noted as `… N more rows`. These caps
-keep the summary readable - the **full sampled data is always in `--json`**
+keep the summary readable - the full sampled data is always in `--json`
 (`--sample-size` controls how many rows are collected, independent of the display
 cap).
 

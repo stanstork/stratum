@@ -1,6 +1,6 @@
 # benchmarks/
 
-Reproducible **Stratum** benchmark for MySQL <-> PostgreSQL bulk load. pgloader is
+Reproducible Stratum benchmark for MySQL <-> PostgreSQL bulk load. pgloader is
 an optional comparison (see below). Methodology and published results:
 [docs/benchmarks.md](../docs/benchmarks.md).
 
@@ -23,37 +23,58 @@ is measured natively; otherwise `run.sh` builds and runs it from
 `Dockerfile.stratum`. So `cargo build --release -p cli` first for a native run,
 or just run with nothing built to benchmark the Docker image.
 
+## Separated hosts (external databases)
+
+By default `run.sh` runs both databases in local Docker (`compose.yml`), sharing
+one machine with the engine. To measure the engine over a real network - source
+and destination on their own hosts - set `EXTERNAL_DB=1` and point it at them:
+
+```bash
+EXTERNAL_DB=1 MYSQL_HOST=10.0.0.11 PG_HOST=10.0.0.12 \
+  WITH_PGLOADER=1 PGLOADER_BIN=~/pgloader.jar \
+  ./benchmarks/run.sh
+```
+
+In this mode the harness skips `compose` and talks to the databases with
+networked `mysql`/`psql` clients (at `MYSQL_HOST:33307` / `PG_HOST:54329`), so
+those clients must be installed on the engine host. The databases must already be
+running with the same names/credentials the local compose uses - bring each up
+with `compose.yml` on its own host.
+
 ## pgloader comparison (opt-in)
 
-pgloader is **off by default** - the benchmark measures Stratum. Set
+pgloader is off by default - the benchmark measures Stratum. Set
 `WITH_PGLOADER=1` to add pgloader on the PostgreSQL-target workloads (`sakila`,
 `synthetic`); it never runs on the MySQL-target `reverse` workload, since
 pgloader only migrates *into* PostgreSQL.
 
-`PGLOADER_BIN` measures a local pgloader natively; unset, pgloader runs in Docker
-as **v4** (the JVM rewrite). v4 ships only as a JAR (needs Java 21+) with no
+`PGLOADER_BIN` measures a local pgloader natively - either an executable or a v4
+`.jar` (run with `java -jar`, so Java 21+ must be installed); unset, pgloader runs
+in Docker as v4 (the JVM rewrite). v4 ships only as a JAR (needs Java 21+) with no
 published image, so `run.sh` builds one from `Dockerfile.pgloader` - the JAR
 comes from `PGLOADER_JAR_URL` (default: latest `v4-dev`). Point `PGLOADER_IMAGE`
 at a prebuilt image (e.g. the old `dimitri/pgloader:latest` Lisp build) to pull
 it as-is instead.
 
-**Run both tools the same way for a fair wall-clock** - both native (set
+Run both tools the same way for a fair wall-clock: both native (set
 `STRATUM_BIN` + `PGLOADER_BIN`) or both Docker (set neither). The harness warns
 if they differ but won't force it. Peak RSS for a dockerized tool is sampled from
 `docker stats` (~1-2s, approximate); run native for exact GNU-time RSS.
 
-pgloader runs with **default tuning** (no `workers`/`concurrency`/batch/prefetch
-options) - the numbers are its out-of-the-box behavior, not its ceiling; a tuned
-pgloader would likely do better.
+pgloader runs with default tuning (no `workers`/`concurrency`/batch/prefetch
+options), so the numbers are its out-of-the-box behavior; a tuned pgloader
+would likely do better.
 
 ## Sakila scope note
 
 The Sakila `pgloader` row is **not scope-matched** with Stratum. Stratum's
-`sakila.smql` creates the destination tables + primary keys and copies every
-row; on this workload pgloader also builds the secondary indexes and foreign
-keys, so it does more work. Read the Sakila `pgloader` number as a full-schema
-migration, not a like-for-like data copy. The **synthetic** workload (a single
-table with only a primary key) is the like-for-like comparison.
+`sakila.smql` creates the destination tables, primary keys, and secondary indexes
+and copies every row; the one thing it does not build on this fanned-out run is
+the foreign keys (its independent per-table pipelines have no cross-table
+ordering), and pgloader does build those - so pgloader does a little more work.
+Read the Sakila `pgloader` number as a full-schema migration, not a like-for-like
+data copy. The `synthetic` workload (a single table with only a primary key) is
+the like-for-like comparison.
 
 ## Reverse benchmark (PG -> MySQL, stratum only)
 
@@ -70,14 +91,14 @@ Four Stratum-only workloads, in two matched Rust-vs-JS pairs so the WASM runtime
 are compared on identical per-row work:
 
 - **Transform** (`synthetic_plugin_rust`, `synthetic_plugin_js`) invoke the same
-  `order_net` transform (`a * b`) **three times per row** (plus several
+  `order_net` transform (`a * b`) three times per row (plus several
   copied-through source columns), through a WASM transform plugin.
 - **Filter** (`synthetic_filter_rust`, `synthetic_filter_js`) validate an 8-column
   projection of `orders` with three `order_ok` filter calls per row through the
   validation stage (pass if non-negative; every row passes).
 
 Each pair is one plugin compiled from native Rust and one from JavaScript
-(QuickJS). All four are **Stratum-only** and need **native Stratum** plus the host
+(QuickJS). All four are Stratum-only and need native Stratum plus the host
 toolchain: the `wasm32-wasip1` target (`rustup target add wasm32-wasip1`) and
 `npx` (Node.js). `run.sh` builds all four plugins into `plugins/build/` before the
 run; if native Stratum or the toolchain is missing it logs a note and skips just
@@ -95,7 +116,7 @@ these workloads.
 | `plugins/` | WASM plugins for the plugin workloads: `rust/order_net` + `js/order_net.js` (transform, `a * b`), `rust/order_ok` + `js/order_ok.js` (filter, non-negative check); `run.sh` builds all four into `plugins/build/` |
 | `pgloader/*.load.tpl` | pgloader configs (URLs substituted by `run.sh`) |
 | `synthetic/` | deterministic generators: `generate_mysql.sql` (MySQL source), `generate_pg.sql` (PG source for the reverse run) |
-| `results/<ts>/` | per-run output: `summary.md`, `summary.tsv`, `env.txt`, raw logs (gitignored) |
+| `results/<ts>/` | per-run output: `summary.md`, `summary.tsv` (with a **state on disk (MB)** column - the integrity row-hash store's footprint), `env.txt`, raw logs (gitignored) |
 
 ## Knobs (environment variables)
 
@@ -105,11 +126,11 @@ these workloads.
 | `RUNS` | `3` | repetitions per Sakila scenario (median reported) |
 | `SYNTH_RUNS` | `1` | repetitions per synthetic scenario |
 | `WORKLOADS` | `sakila synthetic synthetic_heavy synthetic_plugin_rust synthetic_plugin_js synthetic_filter_rust synthetic_filter_js` | forward (MySQL->PG) workloads; `synthetic_heavy`, the `synthetic_plugin_*`, and the `synthetic_filter_*` cases are Stratum-only |
-| `TOOLS` | `stratum stratum-integrity stratum-lanes` | Stratum scenarios (`stratum-lanes` = 4 PK-range lanes, integer-PK tables only) |
+| `TOOLS` | `stratum stratum-integrity stratum-lanes stratum-lanes-integrity` | Stratum scenarios: `stratum-integrity` adds `--integrity`; `stratum-lanes` = 4 PK-range lanes (integer-PK tables only); `stratum-lanes-integrity` = both |
 | `WITH_PGLOADER` | `0` | also run pgloader on PG-target workloads (comparison) |
 | `STRATUM_BIN` | `target/release/stratum` | Stratum binary; if it is absent, Stratum runs in Docker |
 | `STRATUM_IMAGE` | `stratum-bench:local` | image tag built for docker-mode Stratum |
-| `PGLOADER_BIN` | *(unset)* | local pgloader binary; unset -> Docker v4 image |
+| `PGLOADER_BIN` | *(unset)* | local pgloader binary or v4 `.jar` (run with `java -jar`); unset -> Docker v4 image |
 | `PGLOADER_IMAGE` | `pgloader-bench:v4` | built from `Dockerfile.pgloader`; set to a prebuilt image to pull instead |
 | `PGLOADER_JAR_URL` | latest `v4-dev` JAR | pgloader v4 JAR baked into the built image |
 | `RUN_REVERSE` | `1` | also run the PG->MySQL reverse benchmark (stratum only) |
@@ -118,6 +139,9 @@ these workloads.
 | `PG_DEST_DB` | `bench_dest` | PostgreSQL destination db (MySQL->PG workloads) |
 | `MYSQL_DEST_DB` | `bench_rev` | MySQL destination db (PG->MySQL reverse) |
 | `PG_SRC_DB` | `bench_src` | PostgreSQL source db seeded for the reverse |
+| `EXTERNAL_DB` | `0` | databases are external: skip `compose`, use networked `mysql`/`psql` clients (see [Separated hosts](#separated-hosts-external-databases)) |
+| `MYSQL_HOST` / `PG_HOST` | `127.0.0.1` | database hosts, used when `EXTERNAL_DB=1` |
+| `KEEP_STATE` | `0` | keep each run's `$HOME/.stratum` instead of deleting it, to inspect the integrity row-hash store on disk |
 
 Every run validates row counts source-vs-destination and aborts on mismatch -
 a reported number always means the data actually arrived.

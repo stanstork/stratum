@@ -3,11 +3,11 @@
 ## What is Stratum?
 Stratum is a declarative data pipeline engine that safely migrates data and schema between databases with:
 
-- **High Performance**: Parallel producer-consumer architecture with batching
-- **Reliability**: Built-in checkpointing, retries, and circuit breakers
-- **Declarative**: SMQL pipelines for data movement and schema migration
-- **Type Safety**: Automatic schema inference and type coercion
-- **Resumability**: Crash-safe with sled-backed state tracking
+- Parallel producer-consumer execution with batching
+- Checkpointing, retries, and circuit breakers built in
+- Declarative SMQL pipelines for data movement and schema migration
+- Automatic schema inference and type coercion
+- Crash-safe resume via sled-backed state tracking
 
 ## Supported Connectors
 

@@ -7,8 +7,8 @@ language, and internal APIs still change frequently. The most valuable way to
 help right now is to **use it and tell me what you find**:
 
 - **Try it out** on a real migration and see whether it fits your use case.
-- **Open an issue** to report a bug, ask a question, or share feedback or ideas -
-  this genuinely shapes where the project goes.
+- **Open an issue** to report a bug, ask a question, or share feedback or ideas.
+  This shapes where the project goes.
 - **Star or watch** the repo to follow along as it matures.
 
 ## Pull requests
