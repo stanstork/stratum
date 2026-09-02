@@ -22,7 +22,7 @@ fn calculate_discount(inputs: Vec<PluginInput>) -> PluginResult<Vec<f64>> {
 }
 ```
 
-The handler takes the **whole batch** (`Vec<PluginInput>`) and returns one output
+The handler takes the whole batch (`Vec<PluginInput>`) and returns one output
 per input - the ABI is batch-native, so there is no per-row entry point. The
 macro decodes the batch, calls your function, and encodes the results.
 

@@ -73,14 +73,14 @@ the Sakila MySQL->Postgres setup used by the other examples (override `MYSQL_URL
 ✗ pipeline 'unmapped_field': plugin 'gross_to_net' input field 'rate' is not provided by its mapping
 ```
 
-Its `type_mismatch` pipeline is a **`plan`-only** check (canonical types) - run
+Its `type_mismatch` pipeline is a `plan`-only check (canonical types) - run
 `s plan -c configs/diagnostics.smql` against a live DB to see
 `PLUGIN_INPUT_TYPE_MISMATCH`.
 
 ## Plugin config
 
 Values from the SMQL `plugin "x" { config { ... } }` block (or `plugin test
---config-json <file>`) reach handlers in **both runtimes, all roles**:
+--config-json <file>`) reach handlers in both runtimes, all roles:
 
 | Role | JS | Rust |
 |---|---|---|

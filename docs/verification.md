@@ -43,11 +43,11 @@ This detects:
 
 Because rows are keyed rather than positioned, the comparison is **order-independent**: nothing about how the migration ran - batch size, lane count, FK traversal order, retries - has to be replayed for verification to work.
 
-The receipt's `table_root` is the portable half of the artifact: 32 bytes that commit to the entire table. It survives after the per-row hashes are deleted, and can be logged, recorded, or handed to an auditor. Retained somewhere outside the state directory, it also makes later tampering with the row-hash store detectable rather than silent - see [Trust boundary](#trust-boundary) for why that step is what makes the difference.
+The receipt's `table_root` is the portable half of the artifact: 32 bytes that commit to the entire table. It survives after the per-row hashes are deleted, and can be logged, recorded, or handed to an auditor. Retained somewhere outside the state directory, it also makes later tampering with the row-hash store detectable rather than silent (see [Trust boundary](#trust-boundary)).
 
 ## What Verification Does Not Prove
 
-**Transform correctness is a unit and integration testing concern, not a cryptographic verification concern.**
+**Transform correctness is checked by unit and integration tests, not by verification.**
 
 The hash is computed over post-transform output. Whether `lower(trim(email))` does the right thing, whether a `when` expression maps tiers correctly - that is validated by tests. Verification checks that the destination matches what was written, not whether what was written is semantically correct.
 
@@ -72,19 +72,19 @@ Two related limits, for completeness:
 
 ### Non-deterministic destination columns
 
-The receipt records the values **written from the source** at apply time; `verify`
-re-reads the **destination** and compares. So if a verified column's destination
+The receipt records the values written from the source at apply time; `verify`
+re-reads the destination and compares. So if a verified column's destination
 value is generated non-deterministically rather than copied, the read-back will
 not match the receipt and `verify` reports a **false mismatch** - even though the
 data movement was correct. This happens when a destination column:
 
-- has a **non-deterministic default** (`now()` / `CURRENT_TIMESTAMP`, `random()`,
+- has a non-deterministic default (`now()` / `CURRENT_TIMESTAMP`, `random()`,
   `uuid_generate_v4()`, …) that fires because the column isn't supplied from the
   source, or
-- is regenerated on write by an **`ON UPDATE CURRENT_TIMESTAMP`** clause or a
-  **trigger** (e.g. on an `on_conflict = "do_update"` upsert).
+- is regenerated on write by an `ON UPDATE CURRENT_TIMESTAMP` clause or a
+  trigger (e.g. on an `on_conflict = "do_update"` upsert).
 
-Stratum does **not** strip such defaults from the destination: a destination
+Stratum does not strip such defaults from the destination: a destination
 column may legitimately need one, and a pre-existing destination table is outside
 the migration's control. If a table has non-deterministic columns, expect
 `verify` to flag it - the mismatch is in those generated columns, not in the
@@ -255,7 +255,7 @@ lives beside it in the row-hash log (`rowhash/apply/…`). The receipt stays a f
   `apply --integrity` to rebuild the log.
 
 A mismatch also lists individual diverging rows by key (`actor_id=42`), each
-tagged missing / extra / changed. The **counts are always complete**; only that
+tagged missing / extra / changed. The counts are always complete; only that
 detail list is capped, at 100 rows, so a fully-diverged table cannot produce an
 unbounded report.
 
@@ -322,9 +322,9 @@ Column types come from `IntegrityConfig.column_types` on the write path and from
 
 ## Row Keys
 
-A row's key is the canonical encoding of its destination primary-key columns, in table order, using the same encoder and the same coercions as the row hash. That matters: a key computed from a transformed output row and a key computed from the same row read back out of the destination must be byte-identical even when the database normalizes the stored representation.
+A row's key is the canonical encoding of its destination primary-key columns, in table order, using the same encoder and the same coercions as the row hash. A key computed from a transformed output row and a key computed from the same row read back out of the destination must be byte-identical even when the database normalizes the stored representation.
 
-Two properties follow, and the rest of the design rests on them:
+Two properties follow:
 
 - **The key is independent of the payload.** A tampered row keeps its key, so it is reported as one `changed` row rather than as a missing row plus an unrelated extra one.
 - **The key is independent of position.** Sorting by key gives a canonical order that has nothing to do with arrival order, which is what makes the Merkle root order-independent.
@@ -344,7 +344,7 @@ leaf = H(0x00 || u32_le(len(key)) || key || row_hash)
 node = H(0x01 || left || right)
 ```
 
-Leaves and internal nodes are hashed in **separate domains** (RFC 6962 style), so a chosen row hash can never be substituted for an interior node - the general Merkle second-preimage attack. The key is bound into the leaf and length-prefixed, so moving a row to a different key changes the root and adjacent key/hash pairs cannot be re-cut to collide.
+Leaves and internal nodes are hashed in separate domains (RFC 6962 style), so a chosen row hash can never be substituted for an interior node - the general Merkle second-preimage attack. The key is bound into the leaf and length-prefixed, so moving a row to a different key changes the root and adjacent key/hash pairs cannot be re-cut to collide.
 
 ### Streaming fold
 
@@ -364,7 +364,7 @@ Memory is O(log n) - a 10M-row table holds ~24 pending hashes, not 10M. The resu
 
 ### Order independence
 
-There is exactly one tree per table, built over the store's key order. No batch subtrees, no per-lane roots, no sorted/unsorted variants - the root is a pure function of the set of `(key, row_hash)` pairs.
+There is exactly one tree per table, built over the store's key order, with no batch subtrees, per-lane roots, or sorted/unsorted variants. The root is a pure function of the set of `(key, row_hash)` pairs.
 
 ---
 
@@ -442,7 +442,7 @@ A record is a 2-byte key length, an 8-byte order, the 32-byte hash, and the
 canonically encoded key - so the fixed 42 bytes dominate, and even a UUID key adds
 under 20%.
 
-Three things are worth knowing before running a large migration with `--integrity`:
+Before running a large migration with `--integrity`:
 
 - **The sealed set is retained**, not deleted at the end of the run. `verify` reads
   it, so it has to outlive `apply`. It is replaced the next time the same pipeline
@@ -480,7 +480,7 @@ never goes through the migration machinery.
 
 ### Staging the destination
 
-Verify reads the whole destination table with a keyset scan over its primary key (falling back to `OFFSET` when there is none), hashes and keys each row with the receipt's `column_order` / `key_columns`, and writes the pairs under the verify scope (`rowhash/verify/…`). Nothing about the migration's shape is replayed - not batch sizes, not lane splits, not read order.
+Verify reads the whole destination table with a keyset scan over its primary key (falling back to `OFFSET` when there is none), hashes and keys each row with the receipt's `column_order` / `key_columns`, and writes the pairs under the verify scope (`rowhash/verify/…`). Nothing about the migration's shape (batch sizes, lane splits, read order) is replayed.
 
 ### The diff
 
@@ -525,7 +525,7 @@ stratum verify -c migration.smql
 stratum verify -c migration.smql --output report.txt
 ```
 
-Without `--integrity`, hashing is disabled and zero overhead is incurred. There is
+Without `--integrity`, hashing is disabled and costs nothing. There is
 no shallower mode: the keyed row set is what the root is folded from, so storing it
 is not optional.
 
@@ -599,11 +599,10 @@ workload measured, and nothing measurable on one already bound by expression
 evaluation. Full per-workload numbers are in
 [benchmarks.md](benchmarks.md#the-cost-of---integrity).
 
-The per-row costs below are rough, order-of-magnitude figures to show *where*
-the work goes, not a benchmark. What matters end-to-end: hashing runs
-**in-flight**, overlapped with the destination write rather than added on top of
-it, so it costs a low single-digit percent overall - hashing is not the limiting
-factor. For measured numbers on real hardware see [benchmarks.md](benchmarks.md).
+The per-row costs above are rough, order-of-magnitude figures to show *where*
+the work goes, not a benchmark. Hashing runs in-flight, overlapped with the
+destination write rather than added on top of it. For measured numbers on real
+hardware see [benchmarks.md](benchmarks.md).
 
 ### Memory
 

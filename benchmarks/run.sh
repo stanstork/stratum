@@ -66,13 +66,21 @@ COMPOSE=(docker compose -f "$SCRIPT_DIR/compose.yml" -p stratum-bench)
 MYSQL_CTR=stratum-bench-mysql
 PG_CTR=stratum-bench-postgres
 MYSQL_PORT=33307
+
 PG_PORT=54329
+# External-DB mode: point the harness at databases on other hosts. When
+# EXTERNAL_DB=1 it skips `compose up` and talks to the DBs with networked
+# mysql/psql clients (at MYSQL_HOST:MYSQL_PORT / PG_HOST:PG_PORT) instead of
+# `docker exec`. Defaults preserve the single-host local behavior.
+MYSQL_HOST="${MYSQL_HOST:-127.0.0.1}"
+PG_HOST="${PG_HOST:-127.0.0.1}"
+EXTERNAL_DB="${EXTERNAL_DB:-0}"
 
 BENCH_ROWS="${BENCH_ROWS:-100000000}"
 RUNS="${RUNS:-3}"
 SYNTH_RUNS="${SYNTH_RUNS:-1}"
 WORKLOADS="${WORKLOADS:-sakila synthetic synthetic_heavy synthetic_plugin_rust synthetic_plugin_js synthetic_filter_rust synthetic_filter_js}"
-TOOLS="${TOOLS:-stratum stratum-integrity stratum-lanes}"
+TOOLS="${TOOLS:-stratum stratum-integrity stratum-lanes stratum-lanes-integrity}"
 # pgloader is an opt-in comparison for PostgreSQL-target workloads only.
 WITH_PGLOADER="${WITH_PGLOADER:-0}"
 PGLOADER_BIN="${PGLOADER_BIN:-}"
@@ -107,10 +115,18 @@ SAKILA_TABLES=(actor address category city country customer film film_actor
 log() { printf '\033[1m[bench]\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[31m[bench] error:\033[0m %s\n' "$*" >&2; exit 1; }
 
-mysql_root() { docker exec -i "$MYSQL_CTR" mysql -uroot -pbench --local-infile=1 2>/dev/null; }
-mysql_scalar() { docker exec "$MYSQL_CTR" mysql -N -uroot -pbench -e "$1" 2>/dev/null; }
-psql_admin() { docker exec "$PG_CTR" psql -U bench -d postgres -v ON_ERROR_STOP=1 -qAt -c "$1"; }
-pg_scalar() { docker exec "$PG_CTR" psql -U bench -d "$1" -qAt -c "$2"; }
+if [[ "$EXTERNAL_DB" == 1 ]]; then
+    # Networked clients (need mysql + psql on this host).
+    mysql_root() { mysql -h "$MYSQL_HOST" -P "$MYSQL_PORT" -uroot -pbench --local-infile=1 2>/dev/null; }
+    mysql_scalar() { mysql -h "$MYSQL_HOST" -P "$MYSQL_PORT" -N -uroot -pbench -e "$1" 2>/dev/null; }
+    psql_admin() { PGPASSWORD=bench psql -h "$PG_HOST" -p "$PG_PORT" -U bench -d postgres -v ON_ERROR_STOP=1 -qAt -c "$1"; }
+    pg_scalar() { PGPASSWORD=bench psql -h "$PG_HOST" -p "$PG_PORT" -U bench -d "$1" -qAt -c "$2"; }
+else
+    mysql_root() { docker exec -i "$MYSQL_CTR" mysql -uroot -pbench --local-infile=1 2>/dev/null; }
+    mysql_scalar() { docker exec "$MYSQL_CTR" mysql -N -uroot -pbench -e "$1" 2>/dev/null; }
+    psql_admin() { docker exec "$PG_CTR" psql -U bench -d postgres -v ON_ERROR_STOP=1 -qAt -c "$1"; }
+    pg_scalar() { docker exec "$PG_CTR" psql -U bench -d "$1" -qAt -c "$2"; }
+fi
 
 # "1:23.45" or "1:02:03" -> seconds (from GNU time -v output)
 wall_to_seconds() {
@@ -237,8 +253,12 @@ fi
 # ---------------------------------------------------------------------------
 # databases up + seed
 # ---------------------------------------------------------------------------
-log "starting bench databases (mysql:$MYSQL_PORT, postgres:$PG_PORT)..."
-"${COMPOSE[@]}" up -d --wait
+if [[ "$EXTERNAL_DB" == 1 ]]; then
+    log "external databases: mysql@$MYSQL_HOST:$MYSQL_PORT, postgres@$PG_HOST:$PG_PORT (compose skipped)"
+else
+    log "starting bench databases (mysql:$MYSQL_PORT, postgres:$PG_PORT)..."
+    "${COMPOSE[@]}" up -d --wait
+fi
 
 # The compose user only gets grants on `sakila`; give it the synthetic db too.
 mysql_scalar "CREATE DATABASE IF NOT EXISTS bench;
@@ -300,7 +320,7 @@ mkdir -p "$RESULTS"
 } | tee "$RESULTS/env.txt" >&2
 
 TSV="$RESULTS/summary.tsv"
-echo -e "workload\ttool\trun\twall_s\trows\trows_per_s\tpeak_rss_mb" >"$TSV"
+echo -e "workload\ttool\trun\twall_s\trows\trows_per_s\tpeak_rss_mb\tstate_mb" >"$TSV"
 
 # ---------------------------------------------------------------------------
 # per-run plumbing
@@ -375,12 +395,12 @@ sample_docker_mem() { # $1 = container name, $2 = outfile
 # docker runs pass identical values.
 stratum_url_env() { # $1 = forward pg dest db
     STRATUM_ENV=(
-        "BENCH_SAKILA_MYSQL_URL=mysql://bench:bench@127.0.0.1:$MYSQL_PORT/sakila"
-        "BENCH_SAKILA_PG_URL=postgres://bench:bench@127.0.0.1:$PG_PORT/$1"
-        "BENCH_SYNTH_MYSQL_URL=mysql://bench:bench@127.0.0.1:$MYSQL_PORT/bench"
-        "BENCH_SYNTH_PG_URL=postgres://bench:bench@127.0.0.1:$PG_PORT/$1"
-        "BENCH_REV_PG_URL=postgres://bench:bench@127.0.0.1:$PG_PORT/$PG_SRC_DB"
-        "BENCH_REV_MYSQL_URL=mysql://bench:bench@127.0.0.1:$MYSQL_PORT/$MYSQL_DEST_DB"
+        "BENCH_SAKILA_MYSQL_URL=mysql://bench:bench@$MYSQL_HOST:$MYSQL_PORT/sakila"
+        "BENCH_SAKILA_PG_URL=postgres://bench:bench@$PG_HOST:$PG_PORT/$1"
+        "BENCH_SYNTH_MYSQL_URL=mysql://bench:bench@$MYSQL_HOST:$MYSQL_PORT/bench"
+        "BENCH_SYNTH_PG_URL=postgres://bench:bench@$PG_HOST:$PG_PORT/$1"
+        "BENCH_REV_PG_URL=postgres://bench:bench@$PG_HOST:$PG_PORT/$PG_SRC_DB"
+        "BENCH_REV_MYSQL_URL=mysql://bench:bench@$MYSQL_HOST:$MYSQL_PORT/$MYSQL_DEST_DB"
         "BENCH_PLUGIN_RUST_WASM=$PLUGIN_RUST_WASM"
         "BENCH_PLUGIN_JS_WASM=$PLUGIN_JS_WASM"
         "BENCH_PLUGIN_FILTER_RUST_WASM=$PLUGIN_FILTER_RUST_WASM"
@@ -433,16 +453,22 @@ run_stratum() { # $1 workload, $2 config, $3 dest db, $4 extra flags, $5 log pre
         /usr/bin/time -v -o "$RESULTS/$5.time" \
         "$STRATUM_BIN" apply -c "$2" "${flags[@]}" >"$RESULTS/$5.log" 2>&1 \
         || die "stratum run failed - see $RESULTS/$5.log"
-    rm -rf "$run_home"
-    parse_time_v "$RESULTS/$5.time"
+    # On-disk state this run wrote: under --integrity the row-hash log + receipts
+    # dominate (~51 B/row for an integer PK); otherwise it's just checkpoints.
+    # Measured before cleanup and returned as a third field (MB).
+    local state_mb
+    state_mb=$(du -sb "$run_home/.stratum" 2>/dev/null | awk '{printf "%.1f", $1/1048576}')
+    [[ -z "$state_mb" ]] && state_mb="0.0"
+    [[ "${KEEP_STATE:-0}" == 1 ]] || rm -rf "$run_home"
+    echo "$(parse_time_v "$RESULTS/$5.time") $state_mb"
 }
 
 run_pgloader() { # $1 load template, $2 pg db, $3 log prefix
     local loadfile="$RESULTS/$3.load"
-    sed -e "s|@@SAKILA_MYSQL_URL@@|mysql://bench:bench@127.0.0.1:$MYSQL_PORT/sakila|" \
-        -e "s|@@SAKILA_PG_URL@@|postgresql://bench:bench@127.0.0.1:$PG_PORT/$2|" \
-        -e "s|@@SYNTH_MYSQL_URL@@|mysql://bench:bench@127.0.0.1:$MYSQL_PORT/bench|" \
-        -e "s|@@SYNTH_PG_URL@@|postgresql://bench:bench@127.0.0.1:$PG_PORT/$2|" \
+    sed -e "s|@@SAKILA_MYSQL_URL@@|mysql://bench:bench@$MYSQL_HOST:$MYSQL_PORT/sakila|" \
+        -e "s|@@SAKILA_PG_URL@@|postgresql://bench:bench@$PG_HOST:$PG_PORT/$2|" \
+        -e "s|@@SYNTH_MYSQL_URL@@|mysql://bench:bench@$MYSQL_HOST:$MYSQL_PORT/bench|" \
+        -e "s|@@SYNTH_PG_URL@@|postgresql://bench:bench@$PG_HOST:$PG_PORT/$2|" \
         "$1" >"$loadfile"
 
     if [[ $PGLOADER_MODE == native ]]; then
@@ -503,7 +529,7 @@ for workload in $WORKLOADS; do
     for tool in $workload_tools; do
         # The lanes scenario needs a `<workload>_lanes.smql` (integer-PK single
         # table); skip it for workloads without one (e.g. sakila).
-        if [[ "$tool" == stratum-lanes && ! -f "$SCRIPT_DIR/stratum/${workload}_lanes.smql" ]]; then
+        if [[ "$tool" == stratum-lanes* && ! -f "$SCRIPT_DIR/stratum/${workload}_lanes.smql" ]]; then
             log "[$workload-$tool] no lanes config, skipping"
             continue
         fi
@@ -521,6 +547,8 @@ for workload in $WORKLOADS; do
                     out=$(run_stratum "$workload" "$SCRIPT_DIR/stratum/$workload.smql" "$dest_db" "--integrity" "$prefix") ;;
                 stratum-lanes)
                     out=$(run_stratum "$workload" "$SCRIPT_DIR/stratum/${workload}_lanes.smql" "$dest_db" "" "$prefix") ;;
+                stratum-lanes-integrity)
+                    out=$(run_stratum "$workload" "$SCRIPT_DIR/stratum/${workload}_lanes.smql" "$dest_db" "--integrity" "$prefix") ;;
                 pgloader)
                     out=$(run_pgloader "$SCRIPT_DIR/pgloader/$workload.load.tpl" "$dest_db" "$prefix") ;;
                 *) die "unknown tool '$tool'" ;;
@@ -528,11 +556,12 @@ for workload in $WORKLOADS; do
 
             wall=$(cut -d' ' -f1 <<<"$out")
             rss=$(cut -d' ' -f2 <<<"$out")
+            state_mb=$(cut -d' ' -f3 <<<"$out"); [[ -z "$state_mb" ]] && state_mb="-"
             rps=$(awk "BEGIN{printf \"%.0f\", ($wall > 0) ? $rows / $wall : 0}")
 
             validate "$workload" "$dest_db" || die "[$prefix] row-count validation failed"
-            log "[$prefix] wall=${wall}s rows/s=$rps peak_rss=${rss}MB - counts verified"
-            echo -e "$workload\t$tool\t$run\t$wall\t$rows\t$rps\t$rss" >>"$TSV"
+            log "[$prefix] wall=${wall}s rows/s=$rps peak_rss=${rss}MB state=${state_mb}MB - counts verified"
+            echo -e "$workload\t$tool\t$run\t$wall\t$rows\t$rps\t$rss\t$state_mb" >>"$TSV"
         done
     done
 done
@@ -551,10 +580,17 @@ if [[ "$RUN_REVERSE" == 1 ]]; then
     rev_have=$(pg_scalar "$PG_SRC_DB" "SELECT COUNT(*) FROM orders" 2>/dev/null || echo 0)
     if [[ "$rev_have" != "$REV_ROWS" ]]; then
         log "reverse: generating $PG_SRC_DB.orders (have: $rev_have). One-time and cached."
-        docker exec -i "$PG_CTR" psql -U bench -d "$PG_SRC_DB" \
-            -v ON_ERROR_STOP=1 -v rows="$REV_ROWS" -q -f - \
-            <"$SCRIPT_DIR/synthetic/generate_pg.sql" >/dev/null \
-            || die "reverse: PG source generation failed"
+        if [[ "$EXTERNAL_DB" == 1 ]]; then
+            PGPASSWORD=bench psql -h "$PG_HOST" -p "$PG_PORT" -U bench -d "$PG_SRC_DB" \
+                -v ON_ERROR_STOP=1 -v rows="$REV_ROWS" -q -f - \
+                <"$SCRIPT_DIR/synthetic/generate_pg.sql" >/dev/null \
+                || die "reverse: PG source generation failed"
+        else
+            docker exec -i "$PG_CTR" psql -U bench -d "$PG_SRC_DB" \
+                -v ON_ERROR_STOP=1 -v rows="$REV_ROWS" -q -f - \
+                <"$SCRIPT_DIR/synthetic/generate_pg.sql" >/dev/null \
+                || die "reverse: PG source generation failed"
+        fi
         [[ "$(pg_scalar "$PG_SRC_DB" 'SELECT COUNT(*) FROM orders')" == "$REV_ROWS" ]] \
             || die "reverse: PG source produced wrong row count"
     else
@@ -571,11 +607,12 @@ if [[ "$RUN_REVERSE" == 1 ]]; then
 
         wall=$(cut -d' ' -f1 <<<"$out")
         rss=$(cut -d' ' -f2 <<<"$out")
+        state_mb=$(cut -d' ' -f3 <<<"$out"); [[ -z "$state_mb" ]] && state_mb="-"
         rps=$(awk "BEGIN{printf \"%.0f\", ($wall > 0) ? $REV_ROWS / $wall : 0}")
 
         validate_reverse "$MYSQL_DEST_DB" "$REV_ROWS" || die "[$prefix] row-count validation failed"
-        log "[$prefix] wall=${wall}s rows/s=$rps peak_rss=${rss}MB - counts verified"
-        echo -e "reverse\tstratum\t$run\t$wall\t$REV_ROWS\t$rps\t$rss" >>"$TSV"
+        log "[$prefix] wall=${wall}s rows/s=$rps peak_rss=${rss}MB state=${state_mb}MB - counts verified"
+        echo -e "reverse\tstratum\t$run\t$wall\t$REV_ROWS\t$rps\t$rss\t$state_mb" >>"$TSV"
     done
 fi
 
@@ -615,9 +652,9 @@ fi
     echo
     echo "## All runs"
     echo
-    echo "| workload | tool | run | wall (s) | rows | rows/s | peak RSS (MB) |"
-    echo "|---|---|---|---|---|---|---|"
-    awk -F'\t' 'NR>1 { printf "| %s | %s | %s | %s | %s | %s | %s |\n", $1,$2,$3,$4,$5,$6,$7 }' "$TSV"
+    echo "| workload | tool | run | wall (s) | rows | rows/s | peak RSS (MB) | state on disk (MB) |"
+    echo "|---|---|---|---|---|---|---|---|"
+    awk -F'\t' 'NR>1 { printf "| %s | %s | %s | %s | %s | %s | %s | %s |\n", $1,$2,$3,$4,$5,$6,$7,$8 }' "$TSV"
     echo
     echo "The \`reverse\` workload is stratum-only: PostgreSQL -> MySQL (\`LOAD DATA\`"
     echo "fast path). pgloader migrates *into* PostgreSQL, so it has no comparison"

@@ -1,8 +1,8 @@
 # Benchmarks: Stratum
 
-A reproducible, in-repo benchmark of **Stratum** on MySQL <-> PostgreSQL bulk
+A reproducible, in-repo benchmark of Stratum on MySQL <-> PostgreSQL bulk
 load. [pgloader](https://github.com/dimitri/pgloader) is available as an optional
-comparison on the PostgreSQL-target workloads, measured against **pgloader v4**
+comparison on the PostgreSQL-target workloads, measured against pgloader v4
 (the current Clojure/JVM rewrite; v3.x was Common Lisp on SBCL).
 
 ```bash
@@ -70,26 +70,24 @@ Per run we record **wall time** (GNU `time -v`), **rows/s** (source rows /
 wall), and **peak RSS** of the migrating process (`Maximum resident set size`;
 for dockerized pgloader it is sampled via `docker stats` and marked
 approximate). Sakila scenarios run 3x (median reported); the single-table
-workloads run once by default (`SYNTH_RUNS` / `REV_RUNS` to change). After
-**every** run the harness
-compares row counts table-by-table between source and destination and fails
-loudly on any mismatch - a number only counts if the data actually arrived.
+workloads run once by default (`SYNTH_RUNS` / `REV_RUNS` to change). After every run the harness compares
+row counts table-by-table between source and destination and fails loudly on
+any mismatch - a number only counts if the data actually arrived.
 
 ## Fairness rules
 
 - **Same databases, same settings**: both tools talk to the same two
-  containers ([`benchmarks/compose.yml`](../benchmarks/compose.yml)) run
-  back-to-back on the same machine. The destination PostgreSQL keeps
-  `fsync`/`synchronous_commit` **on** - loads are measured with real
-  durability. The MySQL source relaxes durability (it is read-only during
-  measured runs; the tuning only speeds up data generation).
+  containers ([`benchmarks/compose.yml`](../benchmarks/compose.yml)). The
+  destination PostgreSQL keeps `fsync`/`synchronous_commit` on - loads are
+  measured with real durability. The MySQL source relaxes durability (it is
+  read-only during measured runs; the tuning only speeds up data generation).
 - **Fresh state every run**: the destination database is dropped and
   recreated, and Stratum runs with an isolated `$HOME` so checkpoint/resume
   state can never carry over between runs.
 - **Deterministic data**: every synthetic value is a pure function of the row
   number, so two machines generating `BENCH_ROWS` rows produce identical
   tables.
-- **Same scope on the synthetic table** (the rigorous comparison): `orders`
+- **Same scope on the synthetic table** (the like-for-like row): `orders`
   has only a primary key, so both tools do identical work - create the table,
   copy every row. No index-parity ambiguity.
 - **Sakila is not a like-for-like comparison** - see the caveat in its section
@@ -106,240 +104,218 @@ loudly on any mismatch - a number only counts if the data actually arrived.
   `WITH` performance clauses beyond what's needed to create tables and copy
   rows. pgloader exposes several knobs (`workers`, `concurrency`, `batch rows`,
   `prefetch rows`, plus destination `work_mem`/`maintenance_work_mem`) that can
-  raise its throughput, so **these numbers are its out-of-the-box behavior, not
-  its ceiling** - a tuned pgloader would likely do better. Stratum is likewise
+  raise its throughput, so these numbers are its out-of-the-box behavior; a
+  tuned pgloader would likely do better. Stratum is likewise
   near-default here (`batch_size = 50000`); its main lever is the `lanes` setting
   (the `stratum-lanes` scenario).
 
-Tunables are in-repo and deliberately boring. Stratum runs `batch_size = 50000`
-and is otherwise default at 1 lane; its parallelism lever is the `lanes` setting,
-so the **4-lane row below is a tuned Stratum config, not the default**. pgloader
-runs its defaults (one COPY stream per table, no worker/concurrency tuning). Read
-the 1-lane Stratum and default pgloader rows as each tool's out-of-the-box point,
-and the 4-lane row as a tuned Stratum data point.
+Tunables are in-repo and deliberately boring. Read the 1-lane Stratum and
+default-pgloader rows as each tool's out-of-the-box point, and the 4-lane row
+as a tuned Stratum data point.
 
 ## Results
 
-> A real, measured **10M-row** run on a single machine - not the official 100M
-> numbers (those will come from a dedicated reference machine), but 10M is large
-> enough that fixed startup cost is amortized. Stratum runs from its native
-> binary; pgloader is the v4 JAR on OpenJDK, default tuning.
+The same harness, configs, and generators run twice on different hardware. Read
+the two tables together. The **100M separated-hosts** run is the reference, the
+realistic networked end-to-end shape. The **10M single-machine** run is the
+reproducible-anywhere companion, faster in absolute terms only because co-located
+`localhost` databases have no network latency. What each column means is in
+[What each configuration measures](#what-each-configuration-measures) below; the
+findings are the same on both runs, only the numbers move.
 
-<!-- BENCH_SAMPLE_START -->
-```
-stratum 0.1.0 (native) · pgloader v4 (Clojure/JVM, default tuning)
-10,000,000-row orders table · MySQL 8.0 <-> PostgreSQL 16
-single machine · benchmark harness DBs in Docker
-```
+Figures are **rows/s** (source rows ÷ wall). Full wall time and peak RSS per run
+are in each run's `benchmarks/results/<ts>/summary.md`; memory is discussed under
+[Memory behavior](#memory-behavior). Every run's destination row count was verified.
 
-### Synthetic - single `orders` table, MySQL -> PostgreSQL
+### 100M rows - separated cloud hosts (the reference)
 
-Both tools do the same work: create the table, copy every row (PK only, so no
-index-parity fuzz). This is the clean head-to-head.
+Three hosts, AWS eu-north-1, one AZ + cluster placement group: engine
+`c7i.2xlarge` (Xeon 8488C, 8 vCPU); source and destination each `i4i.2xlarge`
+(8 vCPU, 64 GB, local NVMe) running MySQL 8.0 (buffer pool 32 GiB) and
+PostgreSQL 16 (`fsync` on), on a private same-AZ network. Stratum 0.1.0 native;
+pgloader v4.0.0 native jar, default tuning. Run via the harness's external-DB
+mode (`EXTERNAL_DB=1 MYSQL_HOST=… PG_HOST=…`).
 
-| scenario | streams | wall (s) | rows/s | peak RSS |
-|---|---|---|---|---|
-| stratum, 1 lane (default) | 1 | 17.3 | 579k | 0.49 GB |
-| stratum, 1 lane `--integrity` | 1 | 20.4 | 490k | 0.50 GB |
-| stratum, 4 lanes (tuned) | 4 | 7.8 | 1.29M | 1.50 GB |
-| pgloader v4 (default) | 1 | 38.6 | 259k | 0.83 GB |
+| workload | 1 lane | 1 lane +int | 4 lanes | 4 lanes +int | pgloader v4 |
+|---|---|---|---|---|---|
+| **synthetic** (like-for-like) | **388,818** | 336,428 | **944,109** | 673,991 | 170,317 |
+| synthetic_heavy (~19 transforms) | 250,815 | 224,462 | — | — | — |
+| plugin_rust (WASM transform) | 331,488 | 269,665 | — | — | — |
+| plugin_js (QuickJS transform) | 94,107 | 87,560 | — | — | — |
+| filter_rust (WASM filter) | 445,692 | 344,388 | — | — | — |
+| filter_js (QuickJS filter) | 85,502 | 81,020 | — | — | — |
+| reverse (PG → MySQL) | 157,503 | — | — | — | — |
+| sakila (many small tables) | 62,524 | 60,879 | — | — | 13,144 |
 
-- **1 lane (default):** 579k rows/s, 0.49 GB (17.3 s) - the identical
-  table-create-plus-copy that pgloader ran (its row above: 259k rows/s, 0.83 GB,
-  38.6 s).
-- **4 lanes (`lanes = 4`, a tuned setting):** 1.29M rows/s, 1.50 GB - roughly 2x
-  the single-lane rate (7.8 s vs 17.3 s). Scaling is sublinear: past ~2 lanes the
-  shared PostgreSQL ingest ceiling (~1.2M rows/s on this box) bounds the total, so
-  lanes trade connections and memory for total throughput (each lane runs
-  concurrently with its own in-flight window, hence the ~1.5 GB).
-- **`--integrity`:** 490k rows/s, about 15% below the plain 1-lane run, while
-  hashing and keying every row, sorting the keyed set, and folding a Merkle root.
-  See [the integrity cost](#the-cost-of---integrity) - it is a roughly fixed
-  per-row cost, so the percentage says as much about how fast the baseline is as
-  about the hashing.
-- **pgloader v4 (default tuning):** 259k rows/s, 0.83 GB.
+**Peak RSS** (the migrating process, not the databases): ~0.5 GB at one lane
+(0.46–0.94 GB across workloads, higher under `--integrity` and on wider
+projections), ~1.5 GB at four lanes; pgloader v4 ~0.6 GB. It's flat with table
+size and scales with lane count - full per-scenario figures are the `peak_rss_mb`
+column of `summary.tsv`, and the mechanism is in [Memory behavior](#memory-behavior).
 
-### Synthetic-heavy - `orders` -> `orders_heavy` with ~19 mixed columns (Stratum only)
+pgloader is included on the `synthetic` and `sakila` rows as a familiar reference
+point (a widely-used tool most people have run), so the numbers have something
+recognizable to sit next to.
 
-Same source table, but each row is projected through ~19 columns: a few string
-functions (`concat`/`upper`/`lower`/`trim`), several arithmetic expressions, date
-extraction (`year`/`month`/`quarter`), and some copied-through source columns.
-This isolates transform CPU from raw data movement with a balanced mix. 
-It's a Stratum-only workload, so there's no comparison row.
+### 10M rows - single machine (reproducible companion)
 
-**Why the rows/s is lower than the plain copy:** transforms run **in-flight** -
-each row's computed columns are evaluated inline as it streams through the
-pipeline (producer -> transform -> consumer -> COPY), not in a separate pass over
-the table. There's no extra I/O, staging, or second read: the drop is purely the
-added per-row expression-evaluation CPU layered onto the same single streaming
-pass. So this number is the cost of the transform work itself, and it scales with
-how much computation each row carries (here ~19 mixed columns).
+One machine with the source + destination in Docker alongside Stratum (shared
+CPU/disk): AMD Ryzen AI 9 HX 370 (12c/24t, Zen 5), 32 GB, Samsung PM9A1 NVMe,
+Fedora 43; MySQL 8.0 / PostgreSQL 16 (`fsync` on). Stratum 0.1.0 native; pgloader
+v4 native. Directional and fully reproducible with `./benchmarks/run.sh`. This is not
+server hardware, and the co-located `localhost` path is why the absolute rates
+run higher than the networked 100M reference above.
 
-| scenario | streams | wall (s) | rows/s | peak RSS |
-|---|---|---|---|---|
-| stratum, 1 lane | 1 | 32.2 | 310k | 0.79 GB |
-| stratum, 1 lane `--integrity` | 1 | 31.5 | 318k | 0.39 GB |
+| workload | 1 lane | 1 lane +int | 4 lanes | 4 lanes +int | pgloader v4 |
+|---|---|---|---|---|---|
+| **synthetic** (like-for-like) | **542k** | 504k | **1.18M** | 876k | 256k |
+| synthetic_heavy (~19 transforms) | 355k | 298k | — | — | — |
+| plugin_rust (WASM transform) | 510k | 389k | — | — | — |
+| plugin_js (QuickJS transform) | 128k | 116k | — | — | — |
+| filter_rust (WASM filter) | 710k | 515k | — | — | — |
+| filter_js (QuickJS filter) | 119k | 112k | — | — | — |
+| reverse (PG -> MySQL) | 255k | — | — | — | — |
+| sakila (many small tables) | 101k | 91k | — | — | 15.1k |
 
-For reference, the plain copy of the same table (no computed columns) ran 579k
-rows/s at 1 lane - so evaluating the ~19 computed columns per row roughly halves
-the throughput (310k rows/s), the pure per-row expression cost layered onto the
-same streaming pass. `--integrity` on top of the transforms costs nothing
-measurable here (318k vs 310k, inside the ~3% run-to-run spread): the pipeline is
-already expression-bound, so the hashing overlaps with work the destination is
-waiting on anyway.
+**Peak RSS:** ~0.5 GB at one lane on the plain copy (up to ~0.78 GB on the
+transform/filter workloads, whose wider write rows draw a larger in-flight
+window), ~1.5 GB at four lanes; pgloader v4 ~0.79 GB.
 
-### Plugin transforms - Rust WASM vs JS (QuickJS) WASM (Stratum only)
+## What each configuration measures
 
-The `order_net` transform (`a * b`) run through a plugin **three times per row**,
-so the two plugin runtimes are compared on identical per-row work (plus several
-copied-through columns for a realistic write width).
+The two tables share these configs. The qualitative findings hold on both runs;
+the hardware moves only the absolute rates.
 
-| scenario | streams | wall (s) | rows/s | peak RSS |
-|---|---|---|---|---|
-| stratum, rust plugin | 1 | 19.5 | 513k | 0.77 GB |
-| stratum, rust plugin `--integrity` | 1 | 24.9 | 403k | 0.75 GB |
-| stratum, js plugin | 1 | 79.3 | 126k | 0.72 GB |
-| stratum, js plugin `--integrity` | 1 | 83.8 | 119k | 0.75 GB |
+### synthetic - the like-for-like row
 
-- **Rust plugins are near-native.** At 513k rows/s the native-Rust transform runs
-  within ~15-30% of the no-plugin throughput despite three boundary crossings per row.
-- **JS plugins are interpreter-bound.** The same three calls through the QuickJS
-  runtime run at 126k rows/s - a ~4x gap that is the interpreter itself executing
-  the guest code, not the boundary crossing or marshalling.
+Both tools do identical work: create the table and copy every row (`orders` has
+only a primary key, so there is no index-parity ambiguity). That makes this the
+cleanest row to read the two side by side. Lanes scale sublinearly: past ~2
+lanes the shared PostgreSQL ingest ceiling bounds the total, so lanes trade connections and memory
+for throughput (each lane runs concurrently with its own in-flight window). Read
+the 1-lane row as Stratum's out-of-the-box point and the 4-lane row as a tuned one.
 
-> **The boundary is batched.** Plugins are invoked **once per batch**, not
-> once per row: a whole batch crosses the WASM host<->guest boundary in a single
-> call over a columnar binary wire, and the guest iterates the rows internally.
-> That is why the native-Rust plugin sits close to the no-plugin rate instead
-> of well below it - the remaining Rust cost is the actual `compute` work, and the
+### synthetic_heavy - expression-evaluation CPU
+
+The same table projected through ~19 mixed computed columns (a few string
+functions, several arithmetic expressions, date extraction, plus copied-through
+columns). Transforms run in-flight: each row's computed columns are evaluated
+inline as it streams (producer -> transform -> consumer -> COPY), with no extra I/O,
+staging, or second read. So the drop from the plain copy is purely the added
+per-row expression CPU: evaluating ~19 columns cuts throughput to about
+two-thirds (355k vs 542k here; 251k vs 389k on the 100M run). `--integrity` costs
+its usual fraction of a microsecond per row on top (about -16% here) - the
+expression CPU does not fully hide the hashing.
+
+### Plugins - Rust WASM vs JS (QuickJS)
+
+Matched pairs: the `order_net` transform (`a * b`) called three times per row
+through each runtime, on identical work (plus copied-through columns for a
+realistic write width). Two findings hold on both runs:
+
+- **Rust plugins are near-native**, within ~5-15% of the no-plugin rate despite
+  three plugin calls per row.
+- **JS plugins are interpreter-bound**: the ~4-6× gap is the QuickJS
+  interpreter executing the guest code.
+
+> **The boundary is batched.** Plugins are invoked once per batch: a whole batch crosses the WASM host<->guest boundary in a single call
+> over a columnar binary wire, and the guest iterates the rows internally. That is
+> why the native-Rust plugin sits close to the no-plugin rate instead of well
+> below it. The remaining Rust cost is the actual `compute` work, and the
 > remaining JS gap is the QuickJS interpreter, not per-row boundary overhead.
 
-### Filter plugins - Rust WASM vs JS (QuickJS) WASM (Stratum only)
+### Filters - the validation stage
 
-The mirror of the transform plugins on the **validation** stage: an 8-column
+The mirror of the plugin transforms on the validation stage: an 8-column
 projection of `orders` where each row is checked by three `order_ok` filter calls
-(pass if non-negative; every row passes, so the full pipeline runs). Same matched
-Rust-vs-JS comparison, exercising the filter path instead of the transform path.
+(every row passes, so the full pipeline runs). Same Rust-near-native /
+JS-interpreter-floor result. The JS *filter* and JS *transform* land at
+essentially the same rate regardless of stage (~120K/s at 10M, ~85K/s networked),
+so that rate is the interpreter's floor, not a cost of the stage or the boundary. The
+Rust filter posts a higher rate than the Rust transform because the narrower
+8-column projection is cheaper to write.
 
-| scenario | streams | wall (s) | rows/s | peak RSS |
-|---|---|---|---|---|
-| stratum, rust filter | 1 | 13.8 | 728k | 0.76 GB |
-| stratum, rust filter `--integrity` | 1 | 17.9 | 558k | 0.74 GB |
-| stratum, js filter | 1 | 83.8 | 119k | 0.64 GB |
-| stratum, js filter `--integrity` | 1 | 87.3 | 115k | 0.73 GB |
+### reverse - PostgreSQL -> MySQL
 
-- **Rust filter: 728k rows/s** - near-native again (the higher rate than the
-  transform run reflects the narrower 8-column projection being written).
-- **JS filter: 119k rows/s** - essentially the same as the JS *transform* (126k).
-  The QuickJS runtime lands at ~120-127k regardless of whether it filters or
-  transforms, which is the tell: this is the interpreter's floor, not a cost of
-  the stage or the boundary.
+Stratum's MySQL write path alone (the `LOAD DATA` fast path into InnoDB);
+pgloader loads *into* PostgreSQL, so it has no comparison row for a MySQL
+destination. A single stream sustains roughly half Stratum's own PostgreSQL
+COPY rate. The limit is InnoDB's always-clustered-index writes, the destination
+engine's ceiling. Lanes apply here too (`orders` has an integer PK).
 
-### Reverse - `orders`, PostgreSQL -> MySQL (Stratum only)
+### sakila - many small tables (directional only)
 
-pgloader loads into PostgreSQL, so this is Stratum's MySQL write path alone (the
-`LOAD DATA` fast path into InnoDB):
-
-| scenario | streams | wall (s) | rows/s | peak RSS |
-|---|---|---|---|---|
-| stratum, 1 lane | 1 | 36.4 | 275k | 0.62 GB |
-
-A single stream sustains ~275k rows/s into InnoDB end-to-end - about half
-Stratum's own PostgreSQL COPY rate, reflecting InnoDB's always-clustered-index
-writes (the destination engine's ceiling). Lanes apply here too (`orders` has an
-integer PK).
+The opposite of a throughput workload: 15 tables, ~46K rows, where fixed
+per-table cost dominates. Stratum's `sakila.smql` fans the tables out into
+independent pipelines run concurrently (`execution { parallel }`). **Not
+scope-matched:** Stratum builds tables, primary keys, and secondary indexes, but a
+fanned-out `tables = [...]` run does not recreate foreign keys (its independent
+per-table pipelines have no cross-table ordering), while pgloader also builds the
+18 foreign keys, so it does more work, and ~2 s of its wall is JVM startup + JIT.
+Treat as directional; `synthetic` is the clean comparison.
 
 ### The cost of `--integrity`
 
-Every scenario above was run twice, with and without `--integrity`. Read as
-percentages the results look inconsistent - anywhere from no measurable cost to
--23%. Read as a per-row cost they are not:
+Hashing every row and folding a Merkle receipt adds a small per-row cost - a
+fraction of a microsecond, clustering around half a µs/row across these
+single-run measurements - so the *percentage* overhead mostly tracks the baseline
+speed rather than the workload. Per row, on the 10M run:
 
 | workload | baseline | `--integrity` | delta | added per row |
 |---|---|---|---|---|
-| synthetic_filter_rust | 728k | 558k | -23% | +0.42 µs |
-| synthetic_plugin_rust | 513k | 403k | -21% | +0.53 µs |
-| synthetic | 579k | 490k | -15% | +0.31 µs |
-| synthetic_plugin_js | 126k | 119k | -5% | +0.45 µs |
-| synthetic_filter_js | 119k | 115k | -4% | +0.36 µs |
-| sakila | 95k | 92k | -4% | +0.41 µs |
-| synthetic_heavy | 310k | 318k | +2% | none measurable |
+| synthetic_filter_rust | 710k | 515k | -27% | +0.53 µs |
+| synthetic_plugin_rust | 510k | 389k | -24% | +0.61 µs |
+| synthetic_heavy | 355k | 298k | -16% | +0.54 µs |
+| sakila | 101k | 91k | -10% | +1.08 µs |
+| synthetic_plugin_js | 128k | 116k | -9% | +0.77 µs |
+| synthetic | 542k | 504k | -7% | +0.14 µs |
+| synthetic_filter_js | 119k | 112k | -5% | +0.46 µs |
 
-Hashing costs roughly **0.3-0.5 µs per row**, near enough constant across
-workloads. The percentage is therefore a statement about the *baseline*: on the
-fastest workload (a narrow projection through a Rust filter, 728k rows/s) a fixed
-0.4 µs is a quarter of the budget; on the JS plugin runs, where each row already
-costs ~8 µs in the interpreter, the same 0.4 µs disappears into the noise.
+On the fastest workload (a narrow projection through a Rust filter) that sub-µs
+cost is about a quarter of the per-row budget, so it reads as -27%; on the JS
+runs, where each row already costs ~8 µs in the interpreter, the same fraction of
+a µs disappears into single-digit noise. These are single-run measurements
+(`SYNTH_RUNS=1`), so the per-row column carries real spread - the plain
+`synthetic` copy landed at -7% and `synthetic_heavy` at -16% this run - read them
+as "sub-µs per row, low-to-mid double-digit percent on fast workloads," not exact
+deltas. The same physics holds on the networked 100M run, where the disk under the
+hash log matters: on a local-NVMe engine `--integrity` costs ~13% single-lane and
+~29% at four lanes (four lanes write four hash streams at once).
 
-`synthetic_heavy` is the instructive case: integrity measured *faster* than the
-baseline (318k vs 310k), which is not a real speed-up - it is inside the ~3%
-run-to-run spread. That workload is expression-bound, so the hashing overlaps
-with work the destination is already waiting on, and the extra cost never reaches
-the wall clock.
-
-Two components make up that per-row figure: hashing and keying each row as it
-passes (overlapped with the pipeline, so often invisible), and a finalize step
-after the last row - sorting the keyed set and folding the Merkle root - which is
-serial and therefore always on the clock. On a 10M-row table the finalize step is
-a few seconds.
-
-`verify` is the other half of the cost, and it is a separate command run later:
-re-reading the 10M-row destination, hashing every row and diffing it against the
-receipt takes **18.6 s** (~540k rows/s) - roughly what the migration itself cost,
-since it is a sequential read plus a hash per row.
-
-Peak RSS shows no consistent integrity cost: some runs are higher, some lower
-(`synthetic_heavy` measured 0.39 GB with integrity against 0.79 GB without), all
-within run-to-run variance. The row hashes are streamed to disk rather than
-buffered, so they do not scale memory - they cost **disk**, roughly 51 bytes per
-row, or ~510 MB for a 10M-row table with an integer primary key. See
+Two components make up the per-row figure: hashing and keying each row as it
+passes (overlapped with the pipeline, so often invisible), and a serial finalize
+after the last row (sorting the keyed set and folding the Merkle root) that is
+always on the clock. The row hashes are streamed to disk, roughly 51 bytes per
+row (~510 MB for a 10M-row integer-PK table), so they cost disk, not memory.
+`verify` is the other half of the cost, a separate command run later: re-reading
+the destination, hashing every row, and diffing it against the receipt runs at
+roughly the migration's own rate (a sequential read plus a hash per row). See
 [verification.md](verification.md#storage-footprint).
-
-### Sakila (many small tables) - directional only
-
-The full Sakila DB (15 tables, ~46k rows) is the opposite workload: fixed
-per-table cost dominates, not throughput. Stratum's `sakila.smql` fans the 15
-tables out into independent pipelines run concurrently (`execution { parallel }`).
-
-| scenario | wall (s, median) | rows/s | peak RSS | scope |
-|---|---|---|---|---|
-| stratum | 0.5 | 95k | 0.15 GB | tables + data + secondary indexes (no FKs) |
-| stratum `--integrity` | 0.5 | 92k | 0.20 GB | + Merkle receipts |
-| pgloader v4 | 3.2 | 14.4k | 0.69 GB | tables + data **+ 37 indexes + 18 FKs** |
-
-Stratum finishes in ~0.5 s; pgloader in ~3.2 s. The two do **different work**
-here, though, so the numbers aren't directly comparable: Stratum builds the
-tables, primary keys, and secondary indexes, but a fanned-out `tables = [...]`
-run does not recreate foreign keys (its independent per-table pipelines have no
-cross-table ordering), so pgloader still does more - it also builds the 18 FKs.
-At 46k rows ~2 s of pgloader's wall time is JVM startup + JIT. Directional only.
-<!-- BENCH_SAMPLE_END -->
 
 ## Reading the numbers honestly
 
-- **Benchmark at scale, not toy sizes.** Fixed startup (runtime boot, JVM JIT
+- **Benchmark at scale.** Fixed startup (runtime boot, JVM JIT
   warmup, schema introspection) is ~1-2 s for both tools. Below a few million
   rows it dominates the wall clock and distorts the numbers. Use ≥10M rows.
-- **Parallelism is a lever, and it's a tuning axis - read it as such.** Both
-  write one COPY stream per table by default; Stratum's `lanes = N` is a tuned
-  setting (the 4-lane row above), pgloader splits a table via `concurrency`.
-  Past ~2 streams both sit on the shared PostgreSQL ingest ceiling, so a single
-  stream is the out-of-the-box point and the multi-lane number is a tuned one.
+- **Parallelism is a tuning axis.** Both write one COPY stream per table by default; Stratum's `lanes = N` is a tuned
+  setting (the 4-lane row), pgloader splits a table via `concurrency`. Past ~2
+  streams both sit on the shared PostgreSQL ingest ceiling, so a single stream is
+  the out-of-the-box point and the multi-lane number is a tuned one.
 - `--integrity` hashes every row and maintains Merkle receipts; the point of the
-  separate row is that you see exactly what verification costs. It has no
-  pgloader counterpart, so there's no pgloader row for it.
+  separate column is that you see exactly what verification costs. It has no
+  pgloader counterpart, so there's no pgloader figure for it.
 - Peak RSS measures the migrating process only, not the databases.
 
 ## Memory behavior
 
 Both tools stream and are bounded - neither holds the whole table, and neither's
-footprint grows with table size. pgloader v4 (JVM) did 10M in ~0.83 GB with no
+footprint grows with table size. pgloader v4 (JVM) did 10M in ~0.79 GB with no
 tuning, bounded by the JVM heap (`-Xmx`) and its `prefetch rows`.
 
-Stratum holds only a bounded in-flight window: **peak RSS is flat with table
-size** - the same at 10M as at 100M - but *scales with lane count*, since each
-lane has its own window (≈0.49 GB at 1 lane -> ≈1.5 GB at 4 lanes on the sample
-box). That is a deliberate, predictable trade: memory for parallelism.
+Stratum holds only a bounded in-flight window: peak RSS is flat with table
+size - the same at 10M as at 100M - but scales with lane count, since each
+lane has its own window (≈0.5 GB at 1 lane -> ≈1.5 GB at 4 lanes on the sample
+box). That is a deliberate trade of memory for parallelism.
 
 Two things set Stratum's per-lane footprint:
 
@@ -374,17 +350,24 @@ WITH_PGLOADER=1 ./benchmarks/run.sh      # add the pgloader comparison
 ./benchmarks/run.sh clean                # tear down containers + volumes
 ```
 
+**Separated hosts.** To reproduce the 100M reference run with the databases on
+their own machines, set `EXTERNAL_DB=1` plus `MYSQL_HOST` / `PG_HOST` - the harness
+then skips `compose` and talks to the databases over networked `mysql`/`psql`
+clients (at `MYSQL_HOST:33307` / `PG_HOST:54329`).
+
 pgloader is **opt-in** (`WITH_PGLOADER=1`) and only on the PostgreSQL-target
-workloads. Set `PGLOADER_BIN` to measure a local pgloader natively; unset, it
-runs as Docker **v4** built from `Dockerfile.pgloader`. For a fair wall-clock run
-both tools the same way - both native (`STRATUM_BIN` + `PGLOADER_BIN`) or both
-Docker; the harness warns when they differ. Key env vars:
+workloads. Set `PGLOADER_BIN` to measure a local pgloader natively (a v4 `.jar`
+is run with `java -jar`); unset, it runs as Docker v4 built from
+`Dockerfile.pgloader`. For a fair wall-clock run both tools the same way - both
+native (`STRATUM_BIN` + `PGLOADER_BIN`) or both Docker; the harness warns when
+they differ. Key env vars:
 
 | Var | Purpose |
 |---|---|
 | `WITH_PGLOADER=1` | add pgloader on the PG-target workloads (off by default) |
-| `PGLOADER_BIN` | local pgloader binary; unset -> Docker v4 image (`PGLOADER_IMAGE` / `PGLOADER_JAR_URL`) |
+| `PGLOADER_BIN` | local pgloader binary or `.jar`; unset -> Docker v4 image (`PGLOADER_IMAGE` / `PGLOADER_JAR_URL`) |
 | `STRATUM_BIN` | Stratum binary; absent -> build and run from `Dockerfile.stratum` |
+| `EXTERNAL_DB` / `MYSQL_HOST` / `PG_HOST` | target databases on other hosts instead of local compose |
 | `PG_DEST_DB` / `MYSQL_DEST_DB` / `PG_SRC_DB` | destination / source database names |
 
 The synthetic table is generated once (server-side, deterministic) and cached
@@ -392,7 +375,7 @@ in a Docker volume; only the first run at a given `BENCH_ROWS` pays the
 generation cost. See [`benchmarks/README.md`](../benchmarks/README.md) for the
 full knob list.
 
-**Write encoding.** The PostgreSQL destination uses **binary `COPY`** by default
+**Write encoding.** The PostgreSQL destination uses binary `COPY` by default
 (`COPY ... WITH (FORMAT binary)`), which skips both the client-side text
 formatting and the server-side text parser. A table is encoded in binary only
 when every destination column is a type Stratum can encode exactly; anything

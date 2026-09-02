@@ -139,8 +139,8 @@ pub fn __set_aggregator_config(cfg: AggregatorConfig) {
 
 Every role's `__stratum_initialize` already parses the host config blob into the
 general store readable via `stratum_plugin_sdk::config()` - that's what
-`InitBody::None` does (transform/filter use it). **If `config()` is enough for
-your role, reuse `InitBody::None` and skip this step.**
+`InitBody::None` does (transform/filter use it). If `config()` is enough for
+your role, reuse `InitBody::None` and skip this step.
 
 Add a new variant only if your role also exposes a *role-specific* accessor (the
 way source/sink add `source_config()` / `sink_config()` on top of `config()`):

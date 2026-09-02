@@ -136,7 +136,7 @@ See [The TUI dashboard](#the-tui-dashboard) for the full walkthrough.
 
 The totals the dashboard shows progress *against* - the `/N` in the **Rows**
 column, the denominator in the **Progress** panel, and every percentage and ETA
-derived from them - are **estimates**. They come from the source's row-count
+derived from them - are estimates. They come from the source's row-count
 statistics gathered at plan time, not an exact `COUNT(*)`, so they can be off in
 either direction (statistics lag; filtered or freshly-written tables are the
 usual culprits). The processed-row counts are exact; only the target is an
@@ -152,8 +152,8 @@ Two consequences to expect:
   may differ from the estimate you watched during the run.
 
 If you need an exact count-verified guarantee that the destination matches the
-source, that's what [`stratum verify`](#verify-output) and `--integrity` are for -
-the dashboard estimate is for progress feedback, not a correctness check.
+source, that's what [`stratum verify`](#verify-output) and `--integrity` are for.
+The dashboard estimate is for progress feedback.
 
 ### Keyboard controls
 
@@ -195,7 +195,7 @@ columns are always present; secondary columns drop as space runs out:
 | ETA | 96 |
 
 At an 80×24 terminal (the classic minimum) you keep the name, status, progress
-bar, and rows; rate and ETA are dropped. Pipeline identity is never sacrificed.
+bar, and rows; rate and ETA are dropped.
 
 The progress bars and row totals are measured against *estimated* source counts -
 see [Estimated vs actual row counts](#estimated-vs-actual-row-counts) above.
@@ -326,7 +326,7 @@ keep the terminal output clean.
 
 ## Colors and `--no-color`
 
-Color is only applied when **all** of these hold: the mode opts into it
+Color is only applied when all of these hold: the mode opts into it
 (`--pretty`, or the TUI), `--no-color` is not set, and stdout is a TTY. Piping to
 a file or another process therefore yields plain text automatically. The `✓`/`✗`/
 `?` glyphs and Unicode symbols are not color - they remain in the default,

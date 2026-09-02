@@ -2,7 +2,7 @@
 
 A JavaScript plugin is a single `.js` file that registers a handler with the
 `@stratum/plugin-sdk` package. You don't need a Rust toolchain - Stratum bundles
-your code into a prebuilt **QuickJS** WebAssembly runtime and runs it through the
+your code into a prebuilt QuickJS WebAssembly runtime and runs it through the
 same engine as native plugins.
 
 ## How it works (the QuickJS runtime)
@@ -20,7 +20,7 @@ turned into a `.wasm` module in three steps (handled by
    output schema - producing the same metadata JSON a native plugin bakes in at
    compile time.
 3. **Patch.** The bundled JS and the metadata JSON are written into two reserved
-   data segments of a **prebuilt runtime WASM**
+   data segments of a prebuilt runtime WASM
    (`stratum-plugin-js-runtime`, a QuickJS interpreter compiled to
    `wasm32-wasip1` via `rquickjs`). The result is an ordinary `.wasm` plugin.
 
@@ -29,13 +29,13 @@ At migration time the engine loads that `.wasm` like any other: on
 embedded bundle (registering your handler), and applies the config; each
 role call (`__stratum_transform`, `__stratum_read_page`, …) marshals the payload
 to/from JS values and invokes your handler. Transform and filter are called
-**once per batch** - your handler receives the array of rows and returns an array
+once per batch - your handler receives the array of rows and returns an array
 of results, one per row. JS plugins use the flat `json_v1` wire format (plain
 JSON arrays of bare values, no `{type, value}` envelope), so a row arrives as an
 ordinary JS object. The only differences from a native plugin are the QuickJS
 boot cost and a larger default resource budget.
 
-This means **every JS plugin embeds its own copy of the QuickJS runtime**
+Every JS plugin therefore embeds its own copy of the QuickJS runtime
 (~5 MB). That's expected - the compiled `.wasm` is self-contained.
 
 ### Compilation is automatic
@@ -57,10 +57,10 @@ stratum plugin compile plugins/upper.js -o plugins/upper.wasm
 
 ### Requirements
 
-JS compilation needs only **esbuild** (or Node.js for `npx esbuild`) available at
+JS compilation needs only esbuild (or Node.js for `npx esbuild`) available at
 plan/apply time. The `@stratum/plugin-sdk` package is bundled into the CLI and
-handed to esbuild automatically, so a `.js` plugin compiles from **any
-directory** - no `npm install`, no `node_modules`, no `STRATUM_JS_RUNTIME`. The
+handed to esbuild automatically, so a `.js` plugin compiles from any
+directory without `npm install`, a `node_modules` tree, or `STRATUM_JS_RUNTIME`. The
 bundled SDK always matches the runtime baked into your binary. Prebuilt `.wasm`
 plugins need neither esbuild nor Node.
 
@@ -72,7 +72,7 @@ file.
 
 ### transform
 
-`compute(rows, config)` receives the **whole batch** (an array of row objects)
+`compute(rows, config)` receives the whole batch (an array of row objects)
 and must return an array of the same length - one output value per row.
 
 ```js
@@ -158,7 +158,7 @@ Values are strings - parse them in the handler.
 
 ## Capabilities
 
-JavaScript plugins get the **same** host capabilities as native ones, gated by
+JavaScript plugins get the same host capabilities as native ones, gated by
 the same `plugin` declaration - `require("@stratum/plugin-sdk")` exposes `log`,
 `http`, `kv`, `metrics`, `env`, and `fs`.
 
@@ -195,10 +195,10 @@ Denied capabilities are inert (a denied `http` call reports `status: 0`;
 
 Both expose identical roles, host capabilities, and config; pick by toolchain
 preference and performance needs. On a 10M-row MySQL -> PostgreSQL benchmark a JS transform or
-filter runs at ~120-127k rows/s, versus ~486k (transform) / ~704k (filter)
+filter runs at ~119-128k rows/s, versus ~510k (transform) / ~710k (filter)
 rows/s for the equivalent native Rust plugin. The batch-native ABI already
 amortizes the WASM boundary crossing, so that gap is the QuickJS interpreter
-executing your handler, not marshalling overhead. See [rust.md](./rust.md) for
+executing your handler. See [rust.md](./rust.md) for
 the native path, and
 [`benchmarks/plugins/js/`](../../benchmarks/plugins/js/) (`order_net.js`,
 `order_ok.js`) for the batch-form JS plugins the benchmark uses.

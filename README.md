@@ -4,9 +4,9 @@
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)](LICENSE)
 ![Status: early development](https://img.shields.io/badge/status-early%20development-orange)
 
-Stratum is a declarative data pipeline engine written in Rust. It migrates data and schema between databases safely, with crash recovery, parallel execution, rich transformation capabilities, and cryptographic post-migration verification.
+Stratum is a declarative data pipeline engine written in Rust. It migrates data and schema between databases safely, with crash recovery, parallel execution, in-flight transforms, and cryptographic post-migration verification.
 
-On a 10M-row MySQL->PostgreSQL copy it sustains ~580K rows/s on a single lane and up to ~1.3M rows/s with parallel lanes ([benchmarks](docs/benchmarks.md)).
+On a 100M-row MySQL->PostgreSQL copy with the databases on separate hosts (over a real network), it sustains ~390K rows/s on a single lane and ~940K rows/s with four parallel lanes ([benchmarks](docs/benchmarks.md)).
 
 ```smql
 connection "source" {
@@ -40,14 +40,14 @@ pipeline "customers" {
 Most database migrations are either hand-written scripts or heavyweight ETL/CDC
 platforms. Stratum sits in between - one declarative tool that:
 
-- **Reads like config, not code.** A single SMQL file describes the whole
+- **Reads like config.** A single SMQL file describes the whole
   migration: source, destination, filters, transforms, schema, and dependencies.
 - **Is safe to re-run.** Crash-safe checkpoints mean an interrupted migration
   resumes exactly where it stopped - no half-applied state, no re-processed rows.
 - **Checks it worked.** Cryptographic (Merkle-tree) verification re-reads the
   destination and detects any difference from what was written, down to the
   offending row.
-- **Migrates schema, not just rows.** Tables, indexes, foreign keys, ENUMs, and
+- **Migrates schema too.** Tables, indexes, foreign keys, ENUMs, and
   sequences - with FK-aware ordering and dependency-graph discovery.
 - **Extends without forking.** Transforms, filters, sources, and sinks can be
   sandboxed WASM/JS plugins.
@@ -86,7 +86,7 @@ Most managed databases (AWS RDS, GCP Cloud SQL, Azure, Neon, Supabase,
 PlanetScale, Aiven, Heroku) require TLS. Both SQL drivers negotiate it from
 the connection URL - no extra config. Each driver uses its ecosystem's native
 parameter names; the per-driver tables below show exactly what each mode
-encrypts and verifies. To **authenticate** the server (not just encrypt), use a
+encrypts and verifies. To authenticate the server as well as encrypt the link, use a
 verifying mode (`verify-full` / `verify_ca`), with a CA bundle for private CAs.
 
 **PostgreSQL** - libpq-style `sslmode` (plus optional `sslrootcert`):
@@ -136,16 +136,15 @@ verification if the certificate's CN doesn't match the host:
 
 ## Project Status
 
-Stratum is **pre-1.0 and under active development**. The engine runs real
-migrations today - data + schema, with verification, crash-safe resume, and
-plugins - but the SMQL language and internal APIs still change between commits.
-Treat it as promising-but-young: well suited to evaluation and non-critical
-workloads, not yet battle-tested for unattended production use.
+Stratum is pre-1.0. The engine runs real migrations today - data + schema,
+with verification, crash-safe resume, and plugins - but the SMQL language and
+internal APIs still change between commits. Use it for evaluation and
+non-critical workloads; don't leave it unattended in production yet.
 
 **Current limitations:**
 
 - **Destinations:** PostgreSQL (COPY fast-path) and MySQL (LOAD DATA fast-path).
-  CSV is supported as a **source** only.
+  CSV is supported as a source only.
 - **Snapshot/batch migration only** - change-data-capture (CDC) is planned but
   not implemented.
 - **Single-node:** execution and state (sled) are local to one machine; there is
@@ -155,8 +154,6 @@ workloads, not yet battle-tested for unattended production use.
   cloud-metadata blocked, per-request timeout, response-size cap, optional host
   allowlist); the key-value store is instance-scoped scratch, not persisted.
 - **No published binaries or crates yet** - build from source (below).
-
-These are known and tracked in the issue tracker.
 
 ## Install
 
@@ -192,7 +189,7 @@ docker compose down -v
 ```
 
 > **Ports already in use?** The containers publish on **15432** (PostgreSQL) and
-> **13306** (MySQL) by default - not 5432/3306 - so `docker compose up -d` works
+> **13306** (MySQL) by default (not 5432/3306), so `docker compose up -d` works
 > even if you already run those databases locally. To pick different host ports,
 > set `POSTGRES_PORT` / `MYSQL_PORT` (in `.env` or your shell) and update the
 > matching port in the URLs in `.env`.
@@ -244,7 +241,7 @@ stratum plugin --help
 ```
 
 > **`plan` summary vs `--json`.** The default `plan` output is a compact human
-> summary. `--json` emits the **complete** report it's built from - every column
+> summary. `--json` emits the complete report it's built from - every column
 > with its type and indexes, the full row-count objects (`value` / `is_estimated`
 > / `confidence`), all mappings and joins, per-pipeline diagnostics *including* the
 > routine `info` notes the summary collapses, execution stages, and full resource
@@ -412,7 +409,7 @@ pipeline "customers" {
 }
 ```
 
-Plugins can also act as a pipeline's **source** or **sink** via a
+Plugins can also act as a pipeline's source or sink via a
 `connection { driver = "wasm" plugin = "..." }`. See
 [docs/plugins/](docs/plugins/README.md) for authoring in
 [Rust](docs/plugins/rust.md) or [JavaScript](docs/plugins/javascript.md),
@@ -436,7 +433,7 @@ stratum verify -c migration.smql
 #   order_id=3412 - changed: expected a3f1b2c49d8c7b6a actual 9d8c7b6a1f2e3d4c
 ```
 
-Every row hash is keyed by its primary key, so verification is independent of batch size, lane count, and read order - it detects modified, deleted, and inserted rows by key, not just count differences.
+Every row hash is keyed by its primary key, so verification is independent of batch size, lane count, and read order - it detects modified, deleted, and inserted rows by key.
 
 Integrity costs ~0.3-0.5 µs per row, and the hashes stream to disk rather than memory: about 51 bytes per row, so a 10M-row table with an integer key leaves ~510 MB under `~/.stratum/state/` until that pipeline runs again. See [docs/verification.md](docs/verification.md) for the full design and [benchmarks](docs/benchmarks.md#the-cost-of---integrity) for the measured overhead.
 

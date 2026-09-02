@@ -23,7 +23,7 @@ role macros (`#[stratum_transform]`, `#[stratum_filter]`, `#[stratum_source]`,
   panic becomes a clean error, not an instance teardown), and encodes the result.
 
 The host calls these exports over a batch-native wire protocol. Transform and
-filter are invoked **once per batch**: the entry point decodes the whole batch
+filter are invoked once per batch: the entry point decodes the whole batch
 into a `Vec<PluginInput>`, hands it to your function, and encodes the `Vec` of
 results you return. Native transform/filter plugins use the compact binary
 `columnar_v1` format at the boundary (baked into the plugin's metadata as
@@ -67,7 +67,7 @@ plugin "my_plugin" { path = "target/wasm32-wasip1/release/my_plugin.wasm" }
 ### transform
 
 `fn(Vec<PluginInput>) -> PluginResult<Vec<T>>` where `T: Into<Value>`. The
-handler receives the **whole batch** and returns one output per input, in order
+handler receives the whole batch and returns one output per input, in order
 (you own the loop). `output` declares the result type tag.
 
 ```rust
@@ -220,17 +220,17 @@ SDK exposes them only when granted:
   non-empty = only the listed hosts. Ignored unless `allow_http` is set.
 - `allow_kv` - `kv_get` / `kv_set`. An **instance-scoped scratch** store: it
   lives for the plugin instance and carries state between row/batch calls, but is
-  **not** persisted to disk or shared across runs.
+  not persisted to disk or shared across runs.
 - `allow_metrics` - `metric_counter` / `metric_gauge` (emitted on the host's
   `plugin::metrics` tracing target).
 - `allow_env` - list of environment-variable **names** the plugin may read via
   WASI. Values are resolved from the run's environment (the `EnvContext`, so
-  `.env`-file variables count, not just the process environment); a name that
+  `.env`-file variables count alongside the process environment); a name that
   isn't set is simply not exposed. Only the listed names are visible - nothing
   else from the host environment leaks in.
 - `allow_fs_read` / `allow_fs_write` - lists of host directories preopened for
-  the plugin via WASI (read-only / read-write). Each directory **must already
-  exist** at run time; a missing one fails instantiation loudly rather than
+  the plugin via WASI (read-only / read-write). Each directory must already
+  exist at run time; a missing one fails instantiation loudly rather than
   silently granting nothing. Only the listed directories are reachable.
 
 A denied HTTP/KV call is inert (HTTP returns a `capability_denied` error to the
@@ -241,9 +241,9 @@ no-ops; ungranted env vars and directories are simply absent from the sandbox.
 
 Return `Err(PluginError::…)` for expected failures (`invalid_input`, `internal`,
 …). Panics are caught and converted to a plugin error, so a bug in your handler
-fails the batch rather than tearing down the instance. Note that transform/filter
-handlers return one result per row but a single `Err` (or panic) fails the whole
-batch - validate individual rows and encode a per-row verdict (a
+fails the batch rather than tearing down the instance. Transform/filter handlers
+return one result per row, but a single `Err` (or panic) fails the whole batch.
+Validate individual rows and encode a per-row verdict (a
 `FilterDecision::reject`, a sentinel output value) when you want to reject a row
 without failing its neighbors. How a failure is handled (skip, DLQ, abort) is
 controlled by the check's `action` / the pipeline's `on_error`.

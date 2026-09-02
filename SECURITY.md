@@ -31,10 +31,10 @@ security fixes.
 ## Credential handling
 
 - Database credentials are supplied through the SMQL `env(...)` function and are
-  **not** persisted in Stratum's state store (`~/.stratum/state/`).
+  not persisted in Stratum's state store (`~/.stratum/state/`).
 - Connection URLs and any field whose name matches a sensitive pattern
-  (`password`, `secret`, `token`, `key`, `api_key`, `auth`, `credential`, …) are
-  **masked** in generated plans and log output (e.g.
+  (`password`, `secret`, `token`, `key`, `api_key`, `auth`, `credential`, and so on) are
+  masked in generated plans and log output (e.g.
   `mysql://user:****@host/db`). See
   `crates/engine-planner/src/builder/utils/masking.rs`.
 - The `ping` command does not log raw connection URLs.
@@ -75,8 +75,8 @@ WASM and JavaScript (QuickJS) plugins run inside a Wasmtime sandbox with
 
 **Trust boundaries you should be aware of:**
 
-- A plugin is **arbitrary code you choose to load**. The sandbox limits what a
-  plugin *can reach* (no FS/network, bounded CPU/memory), but you should still
+- A plugin is arbitrary code you choose to load. The sandbox limits what a
+  plugin can reach (no FS/network, bounded CPU/memory), but you should still
   only run plugins you trust, especially `.wasm` binaries you did not build.
 - Compiling a `.js` plugin to WASM shells out to `esbuild` (via `npx`) on first
   use. That toolchain runs on the host with your privileges; pre-compile to
@@ -84,8 +84,8 @@ WASM and JavaScript (QuickJS) plugins run inside a Wasmtime sandbox with
 
 ## Database & input safety
 
-- Stratum executes SQL derived from **your own SMQL configuration** against
-  **your own databases** - the operator who writes the config is the trust
+- Stratum executes SQL derived from your own SMQL configuration against
+  your own databases. The operator who writes the config is the trust
   anchor. Treat SMQL config files like any other infrastructure code.
 - Row data read from a source is carried as values/COPY payloads, not spliced
   into DDL.
@@ -98,4 +98,4 @@ secrets in logs/plans/state.
 
 Out of scope: issues that require a malicious SMQL config you authored yourself,
 or running an untrusted `.wasm` plugin you deliberately loaded (the sandbox
-mitigates but does not eliminate this risk - see trust boundaries above).
+mitigates but does not eliminate this risk; see trust boundaries above).
