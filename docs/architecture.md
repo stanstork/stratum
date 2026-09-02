@@ -33,7 +33,7 @@ graph TB
 | `engine-state` | Infrastructure | Sled embedded KV - checkpoints, WAL, run state, integrity receipts; plus the append-and-sort log holding per-row integrity hashes |
 | `engine-infra` | Infrastructure | EventBus, Metrics, Progress, Retry utilities |
 | `engine-schema` | Schema | Type system, DDL generation, FK dependency graph, schema planning |
-| `engine-core` | Core Services | ExecutionContext, DriverRef, plan builder - re-exports state/schema/infra |
+| `engine-core` | Core Services | ExecutionContext, DriverRef, plan builder |
 | `engine-config` | Config | SMQL -> validated settings, connection resolution |
 | `engine-planner` | Planning | Execution plan analysis, metadata cache, diagnostics |
 | `engine-wasm` | Execution | WASM plugin host: registry, wasmtime runtime, resource limits, host<->guest wire |
@@ -140,7 +140,7 @@ Phase 2: Data migration (existing pipeline system)
 Phase 3: CREATE INDEX + ALTER TABLE ADD CONSTRAINT (FK creation)
 ```
 
-**Re-exported** via `engine-core`: `use engine_core::schema::*`
+All of these are exported from the crate root: `use engine_schema::*`.
 
 ---
 
@@ -316,7 +316,7 @@ machine's real rates instead of a cold-start prior (see [plan.md](plan.md)). It'
 a regenerable cache, independent of the run state store.
 
 #### EventBus (`engine-infra/event_bus/`)
-Pub/Sub over `MigrationEvent` (32 variants in `model/events/migration.rs`):
+Pub/Sub over `MigrationEvent` (36 variants in `model/events/migration.rs`):
 - Run lifecycle: `Started`, `Completed`, `Failed`, `Paused`, `Resumed`, `Cancelled`
 - Actor lifecycle: `ProducerStarted`/`Stopped`, `ConsumerStarted`/`Stopped`
 - Per batch: `BatchRead`, `BatchWritten`, `BatchProcessed`, `BatchRetrying`, `BatchFailed`

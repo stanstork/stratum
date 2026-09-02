@@ -54,6 +54,7 @@ Stratum scenarios per workload:
 | stratum | `stratum apply` (native binary or Docker image), 1 lane (default) |
 | stratum&#8209;lanes | `lanes = 4` - split a single-table copy into 4 parallel key-range lanes, each on its own source + destination connection (config `synthetic_lanes.smql`). Shows how one large table parallelizes. |
 | stratum&#8209;integrity | `stratum apply --integrity` - row hashing + Merkle receipts, so the verification overhead is visible instead of hidden (works with lanes) |
+| stratum&#8209;lanes&#8209;integrity | `lanes = 4` plus `--integrity` - the "4 lanes +int" column. Measures the verification cost when four lanes each write their own hash stream. |
 
 > **Lanes need an integer primary key.** Stratum parallelizes a single table by
 > range-splitting its integer PK (`min..max`); a table without one transparently

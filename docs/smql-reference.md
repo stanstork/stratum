@@ -705,7 +705,7 @@ settings {
 | `skip_seq` | bool | `false` | Don't create identity/auto-increment sequences on the destination |
 | `skip_unique` | bool | `false` | Don't create UNIQUE constraints on the destination |
 | `skip_check` | bool | `false` | Don't create CHECK constraints on the destination |
-| `lanes` | integer (1–32) | `1` | Parallel copy workers - see [lanes](#lanes--parallel-copy) below |
+| `lanes` | integer (1–32) | `1` | Parallel copy workers - see [lanes](#lanes---parallel-copy) below |
 
 > The `skip_*` schema flags apply only to tables Stratum creates (`create_missing_tables = true`) and only for SQL destinations. All default to `false` - the destination reproduces the source's indexes, sequences, and constraints for the columns that survive any projection.
 
@@ -948,7 +948,7 @@ from {
 | `with references {}` | ✓ | ✗ |
 | `with references { data = cascade }` | ✓ | ✓ (referenced rows only) |
 
-**Parallelism.** A `cascade` migration honors the [`lanes`](#lanes--parallel-copy)
+**Parallelism.** A `cascade` migration honors the [`lanes`](#lanes---parallel-copy)
 setting: the discovered tables migrate concurrently, up to `lanes` at a time, and
 a large integer-PK table is additionally range-split. `--integrity` forces
 sequential migration (one table at a time) for deterministic receipts.
