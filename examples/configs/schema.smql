@@ -58,8 +58,9 @@ pipeline "migrate_customer" {
     }
 
     paginate {
-        strategy = "pk"
-        cursor   = "customer.customer_id"
+        strategy   = "pk"
+        cursor     = "customer.customer_id"
+        tiebreaker = "customer.email"
     }
 
     settings {

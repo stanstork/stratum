@@ -15,8 +15,10 @@ impl DialectConverter for ToPostgres {
         convert_type(source)
     }
 
+    // PostgreSQL renders auto-increment columns as SERIAL/BIGSERIAL,
+    // and SERIAL already creates and OWNS a backing <table>_<column>_seq.
     fn use_explicit_sequences(&self) -> bool {
-        true
+        false
     }
 }
 

@@ -28,14 +28,17 @@ impl<D: DataReader + Send + Sync + 'static> RowCounter<D> {
         if filter.is_none() {
             // No filter: try fast methods first
             match self.count_fast(table, schema).await {
-                Ok(count) => return Ok(count),
+                Ok(count) if count.value > 0 => return Ok(count),
+                Ok(_) => {
+                    debug!(table = %table, "fast count returned 0; verifying with exact count");
+                }
                 Err(_) => {
                     debug!(table = %table, "fast count failed, trying exact");
                 }
             }
         }
 
-        // With filter or as fallback: exact count
+        // With filter, or as a fallback for a failed/zero fast count: exact count.
         self.count_exact(table, schema, filter).await
     }
 
