@@ -1,8 +1,30 @@
-# Paganel
+<p align="center">
+  <picture>
+    <source
+      media="(prefers-color-scheme: dark)"
+      srcset="docs/assets/paganel-mark-dark.svg">
+    <img
+      src="docs/assets/paganel-mark-light.svg"
+      alt="Paganel logo"
+      width="128">
+  </picture>
+</p>
 
-[![CI](https://github.com/stanstork/stratum/actions/workflows/ci.yml/badge.svg)](https://github.com/stanstork/stratum/actions/workflows/ci.yml)
-[![License: AGPL v3](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)](LICENSE)
-![Status: early development](https://img.shields.io/badge/status-early%20development-orange)
+<h1 align="center">Paganel</h1>
+
+<p align="center">
+  <strong>Declarative data pipelines, cryptographically verified.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/stanstork/stratum/actions/workflows/ci.yml">
+    <img src="https://github.com/stanstork/stratum/actions/workflows/ci.yml/badge.svg" alt="CI">
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/license-AGPL%20v3-blue.svg" alt="AGPL v3">
+  </a>
+  <img src="https://img.shields.io/badge/status-early%20development-orange" alt="Early development">
+</p>
 
 Paganel is a declarative data pipeline engine written in Rust. It migrates data and schema between databases safely, with crash recovery, parallel execution, in-flight transforms, and cryptographic post-migration verification.
 
