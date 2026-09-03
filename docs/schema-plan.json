@@ -3,7 +3,7 @@
   "generated_at": "2026-07-13T14:49:59.598740769Z",
   "engine_version": "0.1.0",
   "config_hash": "fa0cb8d44363a7a270e0cfa8e650088255e4b0becc418326b457c0f358865d28",
-  "config_path": "examples/configs/schema.smql",
+  "config_path": "examples/configs/schema.ppl",
   "execution_settings": {
     "strategy": "sequential",
     "max_concurrency": 1,

@@ -3,9 +3,9 @@
 //! isolates the per-row plugin-filter invocation cost (the WASM boundary + value
 //! marshalling), not the predicate. Paired with ../../js/order_ok.js (identical
 //! logic in JS) so the two plugin runtimes are compared on the same filter work.
-use stratum_plugin_sdk::{stratum_filter, FilterDecision, PluginInput, PluginResult};
+use paganel_plugin_sdk::{paganel_filter, FilterDecision, PluginInput, PluginResult};
 
-#[stratum_filter(
+#[paganel_filter(
     name = "order_ok",
     version = "1.0.0",
     input = [

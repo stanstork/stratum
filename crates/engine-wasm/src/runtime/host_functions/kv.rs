@@ -5,7 +5,7 @@ use wasmtime::{Caller, Linker};
 pub(super) fn link(linker: &mut Linker<PluginState>) -> Result<(), WasmError> {
     linker
         .func_wrap(
-            "stratum",
+            "paganel",
             "kv_get",
             |mut caller: Caller<'_, PluginState>, key_ptr: u32, key_len: u32| -> u64 {
                 if !caller.data().capabilities.key_value_store {
@@ -26,7 +26,7 @@ pub(super) fn link(linker: &mut Linker<PluginState>) -> Result<(), WasmError> {
 
     linker
         .func_wrap(
-            "stratum",
+            "paganel",
             "kv_set",
             |mut caller: Caller<'_, PluginState>,
              key_ptr: u32,
@@ -60,11 +60,11 @@ mod tests {
     /// `k` back. `run` returns the packed (ptr,len) that `kv_get` handed back.
     const KV_WAT: &str = r#"
         (module
-          (import "stratum" "kv_set" (func $kv_set (param i32 i32 i32 i32)))
-          (import "stratum" "kv_get" (func $kv_get (param i32 i32) (result i64)))
+          (import "paganel" "kv_set" (func $kv_set (param i32 i32 i32 i32)))
+          (import "paganel" "kv_get" (func $kv_get (param i32 i32) (result i64)))
           (memory (export "memory") 1)
           (global $bump (mut i32) (i32.const 1024))
-          (func (export "__stratum_alloc") (param $len i32) (result i32)
+          (func (export "__paganel_alloc") (param $len i32) (result i32)
             (local $p i32)
             (local.set $p (global.get $bump))
             (global.set $bump (i32.add (global.get $bump) (local.get $len)))
@@ -111,9 +111,9 @@ mod tests {
         // Set nothing; get a key that was never stored.
         let wat = r#"
             (module
-              (import "stratum" "kv_get" (func $kv_get (param i32 i32) (result i64)))
+              (import "paganel" "kv_get" (func $kv_get (param i32 i32) (result i64)))
               (memory (export "memory") 1)
-              (func (export "__stratum_alloc") (param i32) (result i32) (i32.const 1024))
+              (func (export "__paganel_alloc") (param i32) (result i32) (i32.const 1024))
               (data (i32.const 16) "missing")
               (func (export "run") (result i64)
                 (call $kv_get (i32.const 16) (i32.const 7))))

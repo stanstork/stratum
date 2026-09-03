@@ -8,7 +8,7 @@ use std::io::Read;
 pub use engine_wasm::registry::caps_from_decl;
 
 /// Limits to run a plugin with: start from the runtime/role-appropriate ceiling
-/// (`suggested_limits`), then let any explicit SMQL override win. Shares the
+/// (`suggested_limits`), then let any explicit PPL override win. Shares the
 /// runtime's `resolve_limits` so CLI tooling and `apply` size plugins identically.
 pub fn limits_for(meta: &PluginMetadata, decl: Option<&PluginDecl>) -> ResourceLimits {
     match decl {

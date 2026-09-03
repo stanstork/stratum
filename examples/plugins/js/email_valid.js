@@ -2,7 +2,7 @@
 // Rejected rows carry a reason (surfaced in DLQ / logs).
 // Test:  plugin test email_valid.js --input '{"email":"a@b.com"}'  -> PASS
 //        plugin test email_valid.js --input '{"email":"nope"}'     -> REJECT
-const { filter } = require("@stratum/plugin-sdk");
+const { filter } = require("@paganel/plugin-sdk");
 
 const RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 

@@ -2,21 +2,21 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::harness::smql::dest_smql;
+    use crate::harness::ppl::dest_ppl;
     use crate::{
         features::plugins::fixture,
         harness::runner::{
             DbType, assert_table_exists, get_cell_as_string, get_cell_as_usize, get_column_names,
-            get_pg_column_type, get_row_count, run_smql,
+            get_pg_column_type, get_row_count, run_ppl,
         },
         reset_postgres_schema,
     };
     use tracing_test::traced_test;
 
-    /// Build a `wasm-source -> postgres` SMQL doc. `config_block` is inserted
+    /// Build a `wasm-source -> postgres` PPL doc. `config_block` is inserted
     /// verbatim inside the plugin block (use "" for plugin defaults).
-    fn smql(dest_table: &str, config_block: &str) -> String {
-        dest_smql(&format!(
+    fn ppl(dest_table: &str, config_block: &str) -> String {
+        dest_ppl(&format!(
             r#"
             plugin "feed" {{
                 path = "{plugin}"
@@ -52,7 +52,7 @@ mod tests {
     async fn wasm_source_creates_table_and_migrates_rows() {
         reset_postgres_schema().await;
 
-        run_smql(&smql("synth", ""), false)
+        run_ppl(&ppl("synth", ""), false)
             .await
             .expect("migration succeeds");
 
@@ -74,7 +74,7 @@ mod tests {
     async fn wasm_source_infers_column_types() {
         reset_postgres_schema().await;
 
-        run_smql(&smql("synth", ""), false)
+        run_ppl(&ppl("synth", ""), false)
             .await
             .expect("migration succeeds");
 
@@ -88,7 +88,7 @@ mod tests {
     async fn wasm_source_row_values_are_correct() {
         reset_postgres_schema().await;
 
-        run_smql(&smql("synth", ""), false)
+        run_ppl(&ppl("synth", ""), false)
             .await
             .expect("migration succeeds");
 
@@ -122,7 +122,7 @@ mod tests {
         reset_postgres_schema().await;
 
         let cfg = r#"config { total = "5" page_size = "2" }"#;
-        run_smql(&smql("synth_cfg", cfg), false)
+        run_ppl(&ppl("synth_cfg", cfg), false)
             .await
             .expect("migration succeeds");
 

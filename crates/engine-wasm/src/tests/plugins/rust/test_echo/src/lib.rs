@@ -1,6 +1,6 @@
-use stratum_plugin_sdk::{PluginInput, PluginResult, Value, stratum_transform};
+use paganel_plugin_sdk::{PluginInput, PluginResult, Value, paganel_transform};
 
-#[stratum_transform(
+#[paganel_transform(
     name = "test_echo",
     version = "1.0.0",
     output = "json",

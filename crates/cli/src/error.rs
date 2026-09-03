@@ -3,8 +3,8 @@ use engine_runtime::{dag::error::DagError, error::MigrationError};
 use engine_verify::error::VerifyError;
 use engine_wasm::error::WasmError;
 use model::execution::errors::ConvertError;
-use smql_syntax::errors::{BuildError, SmqlError};
-use stratum_plugin_compiler::CompileError;
+use paganel_plugin_compiler::CompileError;
+use ppl_syntax::errors::{BuildError, PplError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -12,8 +12,8 @@ pub enum CliError {
     #[error("Failed to read the configuration file: {0}")]
     ConfigFileRead(#[from] std::io::Error),
 
-    #[error("Failed to parse the configuration file as SMQL: {0}")]
-    ConfigParse(#[from] SmqlError),
+    #[error("Failed to parse the configuration file as PPL: {0}")]
+    ConfigParse(#[from] PplError),
 
     #[error("Failed to deserialize the configuration file as JSON AST: {0}")]
     ConfigDeserialize(#[from] serde_json::Error),

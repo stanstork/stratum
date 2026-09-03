@@ -1,0 +1,204 @@
+// pagila.ppl - PostgreSQL -> MySQL migration (reverse direction)
+//
+// Migrates the Pagila sample database (the PostgreSQL port of Sakila) from
+// PostgreSQL into MySQL. This exercises the PG-source / MySQL-destination path,
+// including the MySQL `LOAD DATA` fast path and the PgToMysql type converter
+// (notably the `mpaa_rating` ENUM on `film.rating`).
+//
+// ── One-time setup ────────────────────────────────────────────────────────
+// The compose MySQL only ships the `sakila` database, whose table names collide
+// with Pagila's. Create a fresh destination database first:
+//
+//   docker exec -i mysql_db mysql -uroot -proot -e \
+//     "CREATE DATABASE IF NOT EXISTS pagila; \
+//      GRANT ALL ON pagila.* TO 'sakila_user'@'%'; FLUSH PRIVILEGES;"
+//
+// Then add these to your .env (source is the `pagila` PG database loaded via
+// the pagila-schema.sql / pagila-data.sql dumps):
+//
+//   PAGILA_URL      = postgres://user:password@localhost:5432/pagila
+//   MYSQL_DEST_URL  = mysql://sakila_user:qwerty123@localhost:3306/pagila
+//
+// Run:
+//   pag apply -c pagila.ppl -e .env
+//
+// Note: foreign keys are not created here. Each pipeline migrates a single table,
+// and a table's FKs are only emitted when the referenced table is part of the same
+// pipeline - so they are filtered out automatically. `after = [...]` orders the
+// *data* load so parent rows land before children. (To skip FKs use
+// `skip_fk = true`; keep `skip_pk` off, since MySQL needs the
+// primary key for its AUTO_INCREMENT columns. Use examples/configs/pagila-graph.ppl
+// to migrate the whole FK graph with constraints.)
+
+define {
+    pg_url    = env("PAGILA_URL")
+    mysql_url = env("MYSQL_DEST_URL")
+}
+
+connection "pg"    { driver = "postgres" url = define.pg_url    }
+connection "mysql" { driver = "mysql"    url = define.mysql_url }
+
+// ── Level 0: independent root tables (run in parallel) ────────────────────
+
+pipeline "language" {
+    from { connection = connection.pg     table = "language" }
+    to   { connection = connection.mysql  table = "language" }
+    settings {
+        create_missing_tables = true
+        batch_size            = 100
+    }
+}
+
+pipeline "actor" {
+    from { connection = connection.pg     table = "actor" }
+    to   { connection = connection.mysql  table = "actor" }
+    settings {
+        create_missing_tables = true
+        batch_size            = 200
+    }
+}
+
+pipeline "category" {
+    from { connection = connection.pg     table = "category" }
+    to   { connection = connection.mysql  table = "category" }
+    settings {
+        create_missing_tables = true
+        batch_size            = 100
+    }
+}
+
+pipeline "country" {
+    from { connection = connection.pg     table = "country" }
+    to   { connection = connection.mysql  table = "country" }
+    settings {
+        create_missing_tables = true
+        batch_size            = 200
+    }
+}
+
+// ── Level 1: city -> country ──────────────────────────────────────────────
+
+pipeline "city" {
+    after = ["country"]
+    from { connection = connection.pg     table = "city" }
+    to   { connection = connection.mysql  table = "city" }
+    settings {
+        create_missing_tables = true
+        batch_size            = 200
+    }
+}
+
+// ── Level 2: address -> city ──────────────────────────────────────────────
+
+pipeline "address" {
+    after = ["city"]
+    from { connection = connection.pg     table = "address" }
+    to   { connection = connection.mysql  table = "address" }
+    settings {
+        create_missing_tables = true
+        batch_size            = 200
+    }
+}
+
+// ── Level 3: film (+ ENUM), staff, store ──────────────────────────────────
+
+// film.rating is a PostgreSQL `mpaa_rating` ENUM -> exercises the enum path.
+pipeline "film" {
+    after = ["language"]
+    from { connection = connection.pg     table = "film" }
+    to   { connection = connection.mysql  table = "film" }
+    settings {
+        create_missing_tables = true
+        batch_size            = 200
+    }
+}
+
+// staff references store; FKs are not emitted here (single-table pipelines).
+pipeline "staff" {
+    after = ["address"]
+    from { connection = connection.pg     table = "staff" }
+    to   { connection = connection.mysql  table = "staff" }
+    settings {
+        create_missing_tables = true
+        batch_size            = 50
+    }
+}
+
+pipeline "store" {
+    after = ["staff"]
+    from { connection = connection.pg     table = "store" }
+    to   { connection = connection.mysql  table = "store" }
+    settings {
+        create_missing_tables = true
+        batch_size            = 50
+    }
+}
+
+// ── Level 4: customer, inventory, film_actor, film_category ───────────────
+
+pipeline "customer" {
+    after = ["address", "store"]
+    from { connection = connection.pg     table = "customer" }
+    to   { connection = connection.mysql  table = "customer" }
+    settings {
+        create_missing_tables = true
+        batch_size            = 500
+    }
+}
+
+pipeline "inventory" {
+    after = ["film", "store"]
+    from { connection = connection.pg     table = "inventory" }
+    to   { connection = connection.mysql  table = "inventory" }
+    settings {
+        create_missing_tables = true
+        batch_size            = 1000
+    }
+}
+
+pipeline "film_actor" {
+    after = ["film", "actor"]
+    from { connection = connection.pg     table = "film_actor" }
+    to   { connection = connection.mysql  table = "film_actor" }
+    settings {
+        create_missing_tables = true
+        batch_size            = 1000
+    }
+}
+
+pipeline "film_category" {
+    after = ["film", "category"]
+    from { connection = connection.pg     table = "film_category" }
+    to   { connection = connection.mysql  table = "film_category" }
+    settings {
+        create_missing_tables = true
+        batch_size            = 1000
+    }
+}
+
+// ── Level 5: rental -> inventory, customer, staff ─────────────────────────
+
+pipeline "rental" {
+    after = ["inventory", "customer", "staff"]
+    from { connection = connection.pg     table = "rental" }
+    to   { connection = connection.mysql  table = "rental" }
+    settings {
+        create_missing_tables = true
+        batch_size            = 1000
+    }
+}
+
+// ── Level 6: payment -> rental ────────────────────────────────────────────
+//
+// In PostgreSQL `payment` is a partitioned table; selecting from the parent
+// returns all rows across its `payment_p2022_*` partitions, which land in a
+// single plain MySQL table here.
+pipeline "payment" {
+    after = ["rental"]
+    from { connection = connection.pg     table = "payment" }
+    to   { connection = connection.mysql  table = "payment" }
+    settings {
+        create_missing_tables = true
+        batch_size            = 1000
+    }
+}

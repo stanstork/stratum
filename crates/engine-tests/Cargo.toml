@@ -15,7 +15,7 @@ engine-processing = { path = "../engine-processing" }
 engine-config = { path = "../engine-config" }
 engine-planner = { path = "../engine-planner" }
 engine-verify = { path = "../engine-verify" }
-smql-syntax = { path = "../smql-syntax" }
+ppl-syntax = { path = "../ppl-syntax" }
 chrono = { version = "0.4.39", features = ["serde"] }
 blake3 = "1.8.2"
 bigdecimal = "0.4.7"

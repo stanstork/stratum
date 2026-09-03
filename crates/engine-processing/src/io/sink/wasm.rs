@@ -22,7 +22,7 @@ impl WasmSinkAdapter {
 
 #[async_trait]
 impl Sink for WasmSinkAdapter {
-    /// Run the plugin's `__stratum_prepare` once before the first batch. No-op
+    /// Run the plugin's `__paganel_prepare` once before the first batch. No-op
     /// if the plugin defines no prepare hook.
     async fn prepare(&self) -> Result<(), DriverError> {
         let plugin = self.plugin.clone();
@@ -43,7 +43,7 @@ impl Sink for WasmSinkAdapter {
         })
     }
 
-    /// Hand the batch to the plugin's `__stratum_write_batch`. The destination
+    /// Hand the batch to the plugin's `__paganel_write_batch`. The destination
     /// table is implied by the plugin's config (set at init), so `meta` is not
     /// forwarded - the wire payload carries only the records.
     async fn write_batch(

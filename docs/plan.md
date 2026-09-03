@@ -1,11 +1,11 @@
-# `stratum plan`
+# `pag plan`
 
 `plan` is a **dry run**. It connects to the source and destination, introspects
 their schemas, works out execution order, estimates cost, and prints a summary of
 exactly what `apply` *would* do - without writing anything or moving any data.
 
 ```bash
-stratum plan -c migration.smql
+pag plan -c migration.ppl
 ```
 
 It's the first command most people run, so its default output is a concise,
@@ -22,7 +22,7 @@ log stream instead of the spinner.
 ## Reading the summary
 
 ```
-stratum plan · schema.smql
+pag plan · schema.ppl
 2 pipelines · 2 connections · ~17,099 rows · 2 tables to create
 
 EXECUTION
@@ -52,7 +52,7 @@ ESTIMATES
 
 ────────────────────────────────────────────────────────────────────────
 Plan: 2 tables to create · ~17,099 rows to copy
-✓ Ready to apply  →  stratum apply -c schema.smql
+✓ Ready to apply  →  pag apply -c schema.ppl
 ```
 
 The layout is grouped by pipeline, like `terraform plan`.
@@ -91,7 +91,7 @@ to `> * # @`.)
 
 The duration comes from the row count divided by an expected throughput, plus
 fixed overhead (connection setup, checkpoints). Throughput is self-calibrating
-per machine, so the estimate sharpens as you use Stratum:
+per machine, so the estimate sharpens as you use Paganel:
 
 - **Before any run on this machine** the estimate rests on a conservative,
   built-in prior for the destination write path (PostgreSQL COPY, MySQL
@@ -100,11 +100,11 @@ per machine, so the estimate sharpens as you use Stratum:
   deliberately wide.
 - **Each `apply` records the throughput it actually achieved**, keyed by write
   path and normalized to a single lane, into a small store at
-  `~/.stratum/calibration`. The next `plan` uses that measured rate: the `rough`
+  `~/.paganel/calibration`. The next `plan` uses that measured rate: the `rough`
   label drops and the band tightens. The first real run replaces the prior
   outright; later runs move a rolling average.
 
-The store is a regenerable cache - deleting `~/.stratum/calibration` just returns
+The store is a regenerable cache - deleting `~/.paganel/calibration` just returns
 estimates to their cold-start priors. `lanes` are accounted for (more lanes raise
 the projected throughput sublinearly), so a `lanes = N` plan estimates faster than
 a single-lane one.
@@ -153,7 +153,7 @@ prefixed with `~`.
 
 | Flag | Effect |
 |------|--------|
-| `-c, --config <FILE>` | Path to the SMQL config (auto-discovered if omitted). |
+| `-c, --config <FILE>` | Path to the PPL config (auto-discovered if omitted). |
 | `--json` | Emit the full machine-readable report instead of the summary. Stable, for CI/tooling. |
 | `--ddl` | Append the exact `CREATE` / `ALTER` statements the migration would run (see below). |
 | `--sample` | Collect and preview transformed rows per pipeline (see below). |
@@ -168,7 +168,7 @@ Global flags apply too: `-v`/`-vv` (show logs; disables the spinner), `-q`,
 `--no-color`, `-e, --env-file <FILE>`.
 
 `stdout` carries only the summary (or JSON) - logs go to `stderr` - so
-`stratum plan --json > plan.json` is always valid JSON.
+`pag plan --json > plan.json` is always valid JSON.
 
 ---
 
@@ -198,7 +198,7 @@ For a graph/cascade pipeline each pipeline object additionally carries a
 ### Full example
 
 [**`schema-plan.json`**](schema-plan.json) is the complete, unedited report for
-`stratum plan -c schema.smql --json` (the two-pipeline plan shown at the top of
+`pag plan -c schema.ppl --json` (the two-pipeline plan shown at the top of
 this page) - all URLs masked. Open it alongside the summary to see how each line
 of the digest maps onto the full structure.
 
@@ -277,7 +277,7 @@ DDL
   	"paid_at" timestamp NOT NULL
   );
 
-  2 statements · verbatim - exactly what `stratum apply` runs, in order
+  2 statements · verbatim - exactly what `pag apply` runs, in order
 ```
 
 The comment carries a `· breaking` or `· irreversible` tag when a statement is
@@ -298,5 +298,5 @@ is no report to show.
 
 ---
 
-See also: [smql-reference.md](smql-reference.md) for the config language, and
+See also: [ppl-reference.md](ppl-reference.md) for the config language, and
 [verification.md](verification.md) for verifying a completed migration.

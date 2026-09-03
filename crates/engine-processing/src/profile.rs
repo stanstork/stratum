@@ -41,10 +41,10 @@ pub static INTEGRITY: Bucket = Bucket::new(); // subset of SEND: hashing, keying
 pub static WRITE: Bucket = Bucket::new(); // writing a batch to the destination
 pub static CHECKPOINT: Bucket = Bucket::new(); // state-store commit + checkpoint per batch
 
-/// True when profiling output is requested (`STRATUM_PROFILE` set).
+/// True when profiling output is requested (`PAGANEL_PROFILE` set).
 pub fn enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("STRATUM_PROFILE").is_some())
+    *ENABLED.get_or_init(|| std::env::var_os("PAGANEL_PROFILE").is_some())
 }
 
 /// Record `d` against `bucket` (always cheap; recording is unconditional so the
@@ -67,13 +67,13 @@ pub fn record_stage(kind: &'static str, d: Duration) {
     }
 }
 
-/// Print the stage summary to stderr. No-op unless `STRATUM_PROFILE` is set.
+/// Print the stage summary to stderr. No-op unless `PAGANEL_PROFILE` is set.
 pub fn dump() {
     if !enabled() {
         return;
     }
 
-    eprintln!("\n==== stratum stage profile (cumulative actor wall-time) ====");
+    eprintln!("\n==== paganel stage profile (cumulative actor wall-time) ====");
 
     let rows = [
         ("producer: fetch (read source)", FETCH.read()),

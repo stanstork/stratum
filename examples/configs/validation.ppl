@@ -1,0 +1,139 @@
+// validation.ppl - Row-level validation: skip, warn, and fail
+//
+// Paganel can validate each row before writing it to the destination.
+// Three actions are available:
+//
+//   action = skip   - Row is silently excluded from the destination.
+//                     The receipt (if using --integrity) does not include it.
+//
+//   warn "name" {}  - Row is written but a warning is logged. Useful for
+//                     surfacing data-quality issues without blocking the migration.
+//
+//   action = fail   - Row is rejected and (if on_error is configured) routed
+//                     to a Dead Letter Queue. See dlq.ppl for a DLQ example.
+//
+// Run:
+//   pag apply -c validation.ppl -e .env
+
+define {
+    mysql_url    = env("MYSQL_URL")
+    postgres_url = env("POSTGRES_URL")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+// ── action = skip: filtered rows never reach the destination ─────────────
+
+// Migrates only payments with a positive, non-excessive amount.
+// Rows outside that range are silently dropped - the destination will have
+// fewer rows than the source, which is intentional.
+pipeline "migrate_payments_clean" {
+    from { connection = connection.src  table = "payment" }
+    to   { connection = connection.dst  table = "payment_clean" }
+
+    validate {
+        assert "positive_amount" {
+            check   = payment.amount > 0
+            message = "Zero or negative amounts are invalid"
+            action  = skip
+        }
+        assert "reasonable_amount" {
+            check   = payment.amount <= 10.00
+            message = "Amount exceeds ceiling of 10.00 - possible data error"
+            action  = skip
+        }
+    }
+
+    select {
+        payment_id   = payment.payment_id
+        customer_id  = payment.customer_id
+        staff_id     = payment.staff_id
+        amount       = payment.amount
+        payment_date = payment.payment_date
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 500
+    }
+}
+
+// ── warn: all rows migrate, quality issues are surfaced in logs ──────────
+
+// Migrates all films. Films with unusual rental economics trigger a warning
+// but are still written to the destination unchanged.
+pipeline "migrate_films_with_warnings" {
+    from { connection = connection.src  table = "film" }
+    to   { connection = connection.dst  table = "film" }
+
+    validate {
+        warn "long_rental_duration" {
+            check   = film.rental_duration <= 7
+            message = "Rental duration exceeds 7 days - review pricing"
+        }
+        warn "high_replacement_cost" {
+            check   = film.replacement_cost <= 25.00
+            message = "Replacement cost is unusually high"
+        }
+    }
+
+    select {
+        film_id          = film.film_id
+        title            = film.title
+        rental_duration  = film.rental_duration
+        rental_rate      = film.rental_rate
+        replacement_cost = film.replacement_cost
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 200
+    }
+}
+
+// ── Combining skip + warn on joined data ─────────────────────────────────
+
+// Migrates a denormalised film_actor record enriched with actor and film
+// details. skip drops rows with high-cost films; warn flags incomplete data.
+pipeline "migrate_film_actor_details" {
+    from { connection = connection.src  table = "film_actor" }
+    to   { connection = connection.dst  table = "film_actor_details" }
+
+    with {
+        actor from actor where actor.actor_id == film_actor.actor_id
+        film  from film  where film.film_id   == film_actor.film_id
+    }
+
+    validate {
+        // Skip films with a high replacement cost - those records are
+        // handled by a separate pipeline with additional checks.
+        assert "standard_replacement_cost" {
+            check   = film.replacement_cost <= 20.00
+            message = "High-cost film handled by separate pipeline"
+            action  = skip
+        }
+
+        // Warn when actor name data is incomplete.
+        warn "complete_actor_name" {
+            check   = actor.first_name != "" && actor.last_name != ""
+            message = "Actor record has an empty first or last name"
+        }
+    }
+
+    select {
+        actor_id             = film_actor.actor_id
+        film_id              = film_actor.film_id
+        actor_full_name      = concat(actor.first_name, " ", actor.last_name)
+        film_title           = film.title
+        film_rental_rate     = film.rental_rate
+        film_replacement_cost = film.replacement_cost
+    }
+
+    settings {
+        create_missing_tables = true
+        skip_pk               = true
+        skip_fk               = true
+        batch_size            = 500
+    }
+}

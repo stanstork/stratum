@@ -22,14 +22,14 @@ use std::{
 use tracing::info;
 use wasmtime::Module;
 
-/// Plugin definition from SMQL configuration.
+/// Plugin definition from PPL configuration.
 #[derive(Debug, Clone)]
 pub struct PluginDef {
     pub name: String,
     pub path: PathBuf,
     pub capabilities: HostCapabilities,
     pub limits: ResourceLimits,
-    /// Plugin-specific config as JSON bytes (from SMQL `config { }` block).
+    /// Plugin-specific config as JSON bytes (from PPL `config { }` block).
     pub config_json: Option<Vec<u8>>,
 }
 
@@ -46,7 +46,7 @@ impl PluginDef {
     }
 }
 
-/// Host capabilities from an SMQL `plugin { ... }` declaration.
+/// Host capabilities from an PPL `plugin { ... }` declaration.
 pub fn caps_from_decl(
     decl: &PluginDecl,
     resolve_env: &dyn Fn(&str) -> Option<String>,
@@ -72,7 +72,7 @@ pub fn caps_from_decl(
 /// Resource limits to run a plugin with: start from the runtime/role-appropriate
 /// ceiling the plugin's own metadata suggests (`suggested_limits` - JS/IO plugins
 /// get the generous `for_io_plugins` budget QuickJS boot needs, native row plugins
-/// get the tight `for_row_plugins` budget), then let any explicit SMQL override win.
+/// get the tight `for_row_plugins` budget), then let any explicit PPL override win.
 pub fn resolve_limits(meta: &PluginMetadata, decl: &PluginDecl) -> ResourceLimits {
     let mut limits = meta.suggested_limits();
     if let Some(m) = decl.memory_limit_bytes {
@@ -128,10 +128,10 @@ impl PluginRegistry {
         Ok(())
     }
 
-    /// Load a plugin straight from its SMQL declaration. Compiles the module,
+    /// Load a plugin straight from its PPL declaration. Compiles the module,
     /// reads its metadata, and sizes resource limits from the plugin's runtime
     /// hint (so JS plugins get the fuel QuickJS boot needs without the author
-    /// having to spell it out) with explicit SMQL overrides applied on top.
+    /// having to spell it out) with explicit PPL overrides applied on top.
     pub fn load_decl(
         &mut self,
         decl: &PluginDecl,

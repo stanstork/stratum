@@ -6,7 +6,7 @@
 // Each call to readPage returns up to `page_size` rows starting at the cursor
 // offset. The cursor is the next offset as a decimal string; null means "start
 // from 0". `has_more` is false on the final page so the host stops paging.
-const { source } = require("@stratum/plugin-sdk");
+const { source } = require("@paganel/plugin-sdk");
 
 source("test_source", {
   version: "1.0.0",

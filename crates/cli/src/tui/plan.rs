@@ -8,7 +8,7 @@ use engine_planner::{
     plan::execution::migration_report::MigrationReport,
 };
 use engine_runtime::dag::{Dag, builder::DagBuilder};
-use smql_syntax::builder::parse;
+use ppl_syntax::builder::parse;
 use std::{collections::HashMap, path::Path, sync::Arc};
 use tracing::info;
 
@@ -20,7 +20,7 @@ pub struct PlanContext {
     pub pipelines: HashMap<String, PipelineState>,
 }
 
-/// Builds execution plan from SMQL configuration file
+/// Builds execution plan from PPL configuration file
 pub async fn build_plan_context(
     config_path: &str,
     exact_filter: bool,
@@ -28,9 +28,9 @@ pub async fn build_plan_context(
 ) -> Result<PlanContext, CliError> {
     info!(config = %config_path, "building execution plan");
 
-    // Parse SMQL
-    let smql_content = std::fs::read_to_string(config_path)?;
-    let ast = parse(&smql_content)?;
+    // Parse PPL
+    let ppl_content = std::fs::read_to_string(config_path)?;
+    let ast = parse(&ppl_content)?;
 
     // Build core plan
     let mut core_plan = CoreExecutionPlan::build(&ast, env.clone())?;

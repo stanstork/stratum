@@ -1,14 +1,14 @@
-# Stratum
+# Paganel
 
 [![CI](https://github.com/stanstork/stratum/actions/workflows/ci.yml/badge.svg)](https://github.com/stanstork/stratum/actions/workflows/ci.yml)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL%20v3-blue.svg)](LICENSE)
 ![Status: early development](https://img.shields.io/badge/status-early%20development-orange)
 
-Stratum is a declarative data pipeline engine written in Rust. It migrates data and schema between databases safely, with crash recovery, parallel execution, in-flight transforms, and cryptographic post-migration verification.
+Paganel is a declarative data pipeline engine written in Rust. It migrates data and schema between databases safely, with crash recovery, parallel execution, in-flight transforms, and cryptographic post-migration verification.
 
 On a 100M-row MySQL->PostgreSQL copy with the databases on separate hosts (over a real network), it sustains ~390K rows/s on a single lane and ~940K rows/s with four parallel lanes ([benchmarks](docs/benchmarks.md)).
 
-```smql
+```ppl
 connection "source" {
   driver = "mysql"
   url    = env("MYSQL_URL")
@@ -35,12 +35,12 @@ pipeline "customers" {
 }
 ```
 
-## Why Stratum?
+## Why Paganel?
 
 Most database migrations are either hand-written scripts or heavyweight ETL/CDC
-platforms. Stratum sits in between - one declarative tool that:
+platforms. Paganel sits in between - one declarative tool that:
 
-- **Reads like config.** A single SMQL file describes the whole
+- **Reads like config.** A single PPL file describes the whole
   migration: source, destination, filters, transforms, schema, and dependencies.
 - **Is safe to re-run.** Crash-safe checkpoints mean an interrupted migration
   resumes exactly where it stopped - no half-applied state, no re-processed rows.
@@ -52,13 +52,13 @@ platforms. Stratum sits in between - one declarative tool that:
 - **Extends without forking.** Transforms, filters, sources, and sinks can be
   sandboxed WASM/JS plugins.
 
-If a `pg_dump | psql` one-liner covers your case, use that. Stratum is for
+If a `pg_dump | psql` one-liner covers your case, use that. Paganel is for
 migrations that need transformation, cross-engine type mapping, dependency
 ordering, resumability, or verification.
 
 ## Features
 
-- **Declarative pipelines** - SMQL v2.1 with SQL-inspired syntax
+- **Declarative pipelines** - PPL with SQL-inspired syntax
 - **Schema migration** - CREATE TABLE, indexes, foreign keys, ENUMs, sequences
 - **DAG execution** - `after = [pipeline.x]` dependencies, parallel levels
 - **Crash recovery** - sled-backed checkpoints, automatic resume
@@ -102,7 +102,7 @@ verifying mode (`verify-full` / `verify_ca`), with a CA bundle for private CAs.
 These follow libpq: `require` encrypts but does not authenticate the server;
 `verify-ca` / `verify-full` verify the certificate.
 
-```smql
+```ppl
 connection "dest" {
   driver = "postgres"
   url    = env("POSTGRES_URL")  # e.g. postgres://user:pass@db.example.com:5432/app?sslmode=verify-full
@@ -123,7 +123,7 @@ chain can be verified: `?sslmode=verify-full&sslrootcert=/path/to/ca.pem`.
 | `require_ssl=true&verify_identity=false`    | TLS       | verified   | not checked |
 | `ssl_ca=/path/to/ca.pem`                    | TLS       | verified against CA | verified |
 
-```smql
+```ppl
 connection "source" {
   driver = "mysql"
   url    = env("MYSQL_URL")  # e.g. mysql://user:pass@db.example.com:3306/app?require_ssl=true
@@ -136,8 +136,8 @@ verification if the certificate's CN doesn't match the host:
 
 ## Project Status
 
-Stratum is pre-1.0. The engine runs real migrations today - data + schema,
-with verification, crash-safe resume, and plugins - but the SMQL language and
+Paganel is pre-1.0. The engine runs real migrations today - data + schema,
+with verification, crash-safe resume, and plugins - but the PPL language and
 internal APIs still change between commits. Use it for evaluation and
 non-critical workloads; don't leave it unattended in production yet.
 
@@ -161,9 +161,9 @@ non-critical workloads; don't leave it unattended in production yet.
 
 ```bash
 git clone https://github.com/stanstork/stratum.git
-cd stratum
+cd paganel
 cargo build --release
-# binary at ./target/release/stratum
+# binary at ./target/release/pag
 ```
 
 ## Quick Start
@@ -176,13 +176,13 @@ PostgreSQL - and run an example migration:
 # 1. Start source + destination databases (credentials match .env.example)
 docker compose up -d
 
-# 2. Point Stratum at them
+# 2. Point Paganel at them
 cp .env.example .env
 
 # 3. Build, preview, then execute an example migration
 cargo build --release
-./target/release/stratum plan  -c examples/configs/schema.smql -e .env   # dry run, no writes
-./target/release/stratum apply -c examples/configs/schema.smql -e .env   # execute
+./target/release/pag plan  -c examples/configs/schema.ppl -e .env   # dry run, no writes
+./target/release/pag apply -c examples/configs/schema.ppl -e .env   # execute
 
 # Tear everything down (and delete the data)
 docker compose down -v
@@ -198,46 +198,46 @@ docker compose down -v
 
 ```bash
 # Analyze migration plan (dry run, no changes) - prints a human summary
-stratum plan -c migration.smql
+pag plan -c migration.ppl
 
 # Full machine-readable report (for CI / tooling)
-stratum plan -c migration.smql --json
+pag plan -c migration.ppl --json
 
 # Preview transformed sample rows in the summary
-stratum plan -c migration.smql --sample --sample-size 10
+pag plan -c migration.ppl --sample --sample-size 10
 
 # Print the exact CREATE / ALTER DDL the migration would run
-stratum plan -c migration.smql --ddl
+pag plan -c migration.ppl --ddl
 
 # Execute migration
-stratum apply -c migration.smql
+pag apply -c migration.ppl
 
 # Execute with live TUI progress
-stratum apply -c migration.smql --tui
+pag apply -c migration.ppl --tui
 
 # Execute with colored output
-stratum apply -c migration.smql --pretty
+pag apply -c migration.ppl --pretty
 
 # Execute and commit a keyed Merkle integrity receipt
-stratum apply -c migration.smql --integrity
+pag apply -c migration.ppl --integrity
 
 # Verify destination matches stored receipt
-stratum verify -c migration.smql
+pag verify -c migration.ppl
 
 # Verify and write report to file
-stratum verify -c migration.smql --output report.txt
+pag verify -c migration.ppl --output report.txt
 
 # Test database connectivity
-stratum ping --url mysql://user:pass@localhost:3306/db
+pag ping --url mysql://user:pass@localhost:3306/db
 
 # Inspect or control a run
-stratum status -c migration.smql   # show run status
-stratum pause  -c migration.smql   # request a graceful pause
-stratum resume -c migration.smql   # resume a paused run
-stratum reset  -c migration.smql   # clear all state for a migration
+pag status -c migration.ppl   # show run status
+pag pause  -c migration.ppl   # request a graceful pause
+pag resume -c migration.ppl   # resume a paused run
+pag reset  -c migration.ppl   # clear all state for a migration
 
 # Plugin tooling (compile / inspect / validate / test WASM & JS plugins)
-stratum plugin --help
+pag plugin --help
 ```
 
 > **`plan` summary vs `--json`.** The default `plan` output is a compact human
@@ -247,7 +247,7 @@ stratum plugin --help
 > routine `info` notes the summary collapses, execution stages, and full resource
 > estimations - plus run metadata (`plan_id`, `config_hash`, resolved `defines`).
 > Use the summary to read, `--json` to gate CI or feed tooling. `stdout` carries
-> only the report, so `stratum plan --json > plan.json` is always valid JSON. See
+> only the report, so `pag plan --json > plan.json` is always valid JSON. See
 > [docs/plan.md](docs/plan.md#the---json-report) for the shape, and
 > [docs/schema-plan.json](docs/schema-plan.json) for a complete example report.
 
@@ -273,14 +273,14 @@ stratum plugin --help
 
 | Variable | Description |
 |----------|-------------|
-| `STRATUM_CONFIG` | Path to config file (overrides auto-discovery) |
-| `STRATUM_LOG_LEVEL` | Default log level |
+| `PAGANEL_CONFIG` | Path to config file (overrides auto-discovery) |
+| `PAGANEL_LOG_LEVEL` | Default log level |
 | `RUST_LOG` | Standard Rust log filter |
 
 ## Quick Examples
 
 **Multi-pipeline DAG with dependencies:**
-```smql
+```ppl
 pipeline "dim_products" {
   from { connection = connection.src table = "products" }
   to   { connection = connection.dst table = "dim_products", mode = "replace" }
@@ -316,7 +316,7 @@ pipeline "fact_orders" {
 ```
 
 **Schema migration with FK graph:**
-```smql
+```ppl
 pipeline "migrate_orders_full" {
   from {
     connection = connection.mysql_prod
@@ -341,7 +341,7 @@ pipeline "migrate_orders_full" {
 ```
 
 **Multi-table pipeline (one block, many tables):**
-```smql
+```ppl
 // `tables` fans out into one full-copy pipeline per table - connections and
 // settings declared once. Tables run under the `execution` strategy (parallel
 // here). Optional per-table tweaks: `select "T"` projects/renames columns and
@@ -365,7 +365,7 @@ pipeline "warehouse" {
 ```
 
 **Data validation and error handling:**
-```smql
+```ppl
 validate {
   assert "positive_total" {
     check   = orders.total >= 0
@@ -385,7 +385,7 @@ on_error {
 ```
 
 **WASM plugins (transform + filter):**
-```smql
+```ppl
 // Declare plugins once - a .js is compiled to WASM (QuickJS) on first use;
 // a prebuilt .wasm (e.g. native Rust) is loaded as-is.
 plugin "to_upper"    { path = "plugins/upper.js" }
@@ -418,10 +418,10 @@ capabilities, and resource limits. Runnable examples: [`examples/plugins/`](exam
 **Cryptographic verification:**
 ```bash
 # 1. Migrate with integrity receipts
-stratum apply -c migration.smql --integrity
+pag apply -c migration.ppl --integrity
 
 # 2. Later, check the destination against what was written
-stratum verify -c migration.smql
+pag verify -c migration.ppl
 
 # ✓ migrate_customers/customers - match (13,842 rows, root a3f1b2c49d8c7b6a, 312ms)
 # ✓ migrate_orders/orders       - match (127,491 rows, root 5e2d8a1c04b93f77, 2,841ms)
@@ -435,25 +435,25 @@ stratum verify -c migration.smql
 
 Every row hash is keyed by its primary key, so verification is independent of batch size, lane count, and read order - it detects modified, deleted, and inserted rows by key.
 
-Integrity costs ~0.3-0.5 µs per row, and the hashes stream to disk rather than memory: about 51 bytes per row, so a 10M-row table with an integer key leaves ~510 MB under `~/.stratum/state/` until that pipeline runs again. See [docs/verification.md](docs/verification.md) for the full design and [benchmarks](docs/benchmarks.md#the-cost-of---integrity) for the measured overhead.
+Integrity costs ~0.3-0.5 µs per row, and the hashes stream to disk rather than memory: about 51 bytes per row, so a 10M-row table with an integer key leaves ~510 MB under `~/.paganel/state/` until that pipeline runs again. See [docs/verification.md](docs/verification.md) for the full design and [benchmarks](docs/benchmarks.md#the-cost-of---integrity) for the measured overhead.
 
 ## State & Resume
 
-Stratum stores pipeline state in `~/.stratum/state/` (sled embedded KV). If a migration is interrupted, re-running the same command resumes from the last checkpoint - no rows are re-processed. Integrity receipts are stored in the same directory under `receipt:{pipeline}:{table}` keys.
+Paganel stores pipeline state in `~/.paganel/state/` (sled embedded KV). If a migration is interrupted, re-running the same command resumes from the last checkpoint - no rows are re-processed. Integrity receipts are stored in the same directory under `receipt:{pipeline}:{table}` keys.
 
-`apply` also records the throughput it achieves into a separate calibration cache (`~/.stratum/calibration`) so `stratum plan` can estimate duration from this machine's measured rates rather than a generic default; until then it shows a conservative, clearly-labelled rough estimate. See [docs/plan.md](docs/plan.md#duration-estimates).
+`apply` also records the throughput it achieves into a separate calibration cache (`~/.paganel/calibration`) so `pag plan` can estimate duration from this machine's measured rates rather than a generic default; until then it shows a conservative, clearly-labelled rough estimate. See [docs/plan.md](docs/plan.md#duration-estimates).
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
-| [docs/plan.md](docs/plan.md) | Reading `stratum plan` - the summary, flags, sampling, and the magnitude bar |
-| [docs/smql-reference.md](docs/smql-reference.md) | Full SMQL v2.1 language reference |
+| [docs/plan.md](docs/plan.md) | Reading `pag plan` - the summary, flags, sampling, and the magnitude bar |
+| [docs/ppl-reference.md](docs/ppl-reference.md) | Full PPL language reference |
 | [docs/architecture.md](docs/architecture.md) | Crate map, design decisions, data flow |
 | [docs/plugins/](docs/plugins/README.md) | WASM plugins - roles, native Rust & JS (QuickJS) runtimes, authoring, CLI |
 | [docs/verification.md](docs/verification.md) | Cryptographic verification design and implementation |
-| [docs/benchmarks.md](docs/benchmarks.md) | Reproducible Stratum benchmark (optional pgloader comparison) - methodology, results, `./benchmarks/run.sh` |
-| [examples/configs/](examples/configs/) | Runnable SMQL examples - schema mapping, DAG dependencies, validation, DLQ, and [`when.smql`](examples/configs/when.smql) (conditional values & computed-column chains) |
+| [docs/benchmarks.md](docs/benchmarks.md) | Reproducible Paganel benchmark (optional pgloader comparison) - methodology, results, `./benchmarks/run.sh` |
+| [examples/configs/](examples/configs/) | Runnable PPL examples - schema mapping, DAG dependencies, validation, DLQ, and [`when.ppl`](examples/configs/when.ppl) (conditional values & computed-column chains) |
 
 ## Development
 
@@ -495,11 +495,11 @@ actively in progress.
 
 ## License
 
-Stratum is licensed under the **GNU Affero General Public License v3.0 or later**
+Paganel is licensed under the **GNU Affero General Public License v3.0 or later**
 (`AGPL-3.0-or-later`). See [LICENSE](LICENSE) for the full text.
 
 ```
-Copyright (C) 2026 Stratum contributors
+Copyright (C) 2026 Paganel contributors
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU Affero General Public License as published by the Free

@@ -13,7 +13,7 @@ use model::{
 };
 use std::path::Path;
 
-/// `stratum plugin test <plugin.wasm> [--mode ...] [--input ...]` - run a plugin
+/// `pag plugin test <plugin.wasm> [--mode ...] [--input ...]` - run a plugin
 /// once with sample input and print the result.
 pub fn run(
     path: &Path,
@@ -35,7 +35,7 @@ pub fn run(
     let module = engine.load_module(&wasm)?;
     let meta = engine.read_metadata(&module)?;
 
-    // Limits sized off the runtime hint (no SMQL decl here).
+    // Limits sized off the runtime hint (no PPL decl here).
     let limits = limits_for(&meta, None);
     let config = config_json
         .map(|p| read_text(Some(p)))

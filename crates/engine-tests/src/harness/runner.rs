@@ -16,7 +16,7 @@ use model::{
 };
 use mysql_async::Row as MySqlRow;
 use mysql_async::prelude::Queryable;
-use smql_syntax::builder::parse;
+use ppl_syntax::builder::parse;
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -83,14 +83,14 @@ pub enum DbType {
 ///
 /// The file holds pipelines only; connections come from the harness, so no test
 /// config contains a driver name or URL. `name` is relative to `configs/`, e.g.
-/// `"verify/film.smql"`.
+/// `"verify/film.ppl"`.
 pub async fn run_config(name: &str) -> Result<(), MigrationError> {
-    run_smql(&Direction::MYSQL_TO_POSTGRES.config(name), false).await
+    run_ppl(&Direction::MYSQL_TO_POSTGRES.config(name), false).await
 }
 
-/// Parse & run the SMQL plan, panicking on any error
-pub async fn run_smql(smql: &str, integrity: bool) -> Result<(), MigrationError> {
-    let doc = parse(smql).expect("parse smql");
+/// Parse & run the PPL plan, panicking on any error
+pub async fn run_ppl(ppl: &str, integrity: bool) -> Result<(), MigrationError> {
+    let doc = parse(ppl).expect("parse ppl");
     let env = Arc::new(EnvContext::empty());
     let plan = ExecutionPlan::build(&doc, env.clone()).expect("build execution plan");
     let shutdown = ShutdownSignal::new();
@@ -102,13 +102,10 @@ pub async fn run_smql(smql: &str, integrity: bool) -> Result<(), MigrationError>
     run(plan, ExecutionFlags::new(false, mode), shutdown, env).await
 }
 
-/// Like [`run_smql`] but seeds the run's `EnvContext` with `env_vars`, so a
-/// plugin's `allow_env` grants resolve (plain `run_smql` uses an empty context).
-pub async fn run_smql_with_env(
-    smql: &str,
-    env_vars: &[(&str, &str)],
-) -> Result<(), MigrationError> {
-    let doc = parse(smql).expect("parse smql");
+/// Like [`run_ppl`] but seeds the run's `EnvContext` with `env_vars`, so a
+/// plugin's `allow_env` grants resolve (plain `run_ppl` uses an empty context).
+pub async fn run_ppl_with_env(ppl: &str, env_vars: &[(&str, &str)]) -> Result<(), MigrationError> {
+    let doc = parse(ppl).expect("parse ppl");
     let mut ctx = EnvContext::empty();
     for (k, v) in env_vars {
         ctx.set((*k).to_string(), (*v).to_string());
@@ -128,20 +125,15 @@ pub async fn run_smql_with_env(
 /// Run a migration in a background task and trigger a graceful pause (the Ctrl-C
 /// path: drain current batch, checkpoint, exit) once the Postgres `dest_table`
 /// has at least `min_rows` rows. Returns after the run exits, leaving a
-/// resumable checkpoint. Re-run the same SMQL with `run_smql` to resume.
-pub async fn run_smql_with_pause(smql: &str, dest_table: &str, min_rows: i64) {
-    run_smql_with_pause_mode(smql, dest_table, min_rows, false).await
+/// resumable checkpoint. Re-run the same PPL with `run_ppl` to resume.
+pub async fn run_ppl_with_pause(ppl: &str, dest_table: &str, min_rows: i64) {
+    run_ppl_with_pause_mode(ppl, dest_table, min_rows, false).await
 }
 
-/// Like [`run_smql_with_pause`] but lets the caller enable integrity hashing,
+/// Like [`run_ppl_with_pause`] but lets the caller enable integrity hashing,
 /// so an interrupted run can be resumed and then verified.
-pub async fn run_smql_with_pause_mode(
-    smql: &str,
-    dest_table: &str,
-    min_rows: i64,
-    integrity: bool,
-) {
-    let doc = parse(smql).expect("parse smql");
+pub async fn run_ppl_with_pause_mode(ppl: &str, dest_table: &str, min_rows: i64, integrity: bool) {
+    let doc = parse(ppl).expect("parse ppl");
     let env = Arc::new(EnvContext::empty());
     let plan = ExecutionPlan::build(&doc, env.clone()).expect("build execution plan");
 
@@ -187,8 +179,8 @@ pub async fn pg_count_or_zero(table: &str) -> i64 {
     }
 }
 
-pub async fn run_verify_smql(smql: &str) -> Result<(), VerifyError> {
-    let doc = parse(smql).expect("parse smql");
+pub async fn run_verify_ppl(ppl: &str) -> Result<(), VerifyError> {
+    let doc = parse(ppl).expect("parse ppl");
     let env = Arc::new(EnvContext::empty());
     let plan = ExecutionPlan::build(&doc, env.clone()).expect("build execution plan");
     let results = engine_verify::verifier::verify(plan, env).await?;

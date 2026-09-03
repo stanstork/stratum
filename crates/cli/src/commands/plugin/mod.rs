@@ -1,8 +1,8 @@
 use crate::{commands::PluginCmd, error::CliError};
 use engine_core::plan::execution::ExecutionPlan;
 use engine_processing::EnvContext;
+use paganel_plugin_compiler::{CompileOpts, compile_to_file};
 use std::sync::Arc;
-use stratum_plugin_compiler::{CompileOpts, compile_to_file};
 use tracing::error;
 
 mod inspect;
@@ -26,7 +26,7 @@ pub(crate) fn preflight(plan: &ExecutionPlan, env: &EnvContext) -> Result<(), Cl
     }
 
     Err(CliError::UserMessage(format!(
-        "plugin validation failed ({} error(s)); run `stratum plugin validate` for details",
+        "plugin validation failed ({} error(s)); run `pag plugin validate` for details",
         outcome.error_lines().len()
     )))
 }

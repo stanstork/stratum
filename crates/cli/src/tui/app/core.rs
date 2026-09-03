@@ -198,7 +198,7 @@ impl App {
                     title: "■ Migration Cancelled".to_string(),
                     message: "The migration was aborted.\n\n\
                               Progress up to the last completed batch is on disk. Re-run to \
-                              continue from there, or `stratum reset` to discard it and start over."
+                              continue from there, or `pag reset` to discard it and start over."
                         .to_string(),
                 };
             }
@@ -706,7 +706,7 @@ pub(crate) mod test_support {
             generated_at: Utc::now(),
             engine_version: "0.0.0-test".to_string(),
             config_hash: String::new(),
-            config_path: "test.smql".to_string(),
+            config_path: "test.ppl".to_string(),
             execution_settings: Default::default(),
             defines: Default::default(),
             connections: Vec::new(),

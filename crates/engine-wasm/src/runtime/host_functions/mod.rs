@@ -130,7 +130,7 @@ fn write_guest_bytes(caller: &mut Caller<'_, PluginState>, data: &[u8]) -> Optio
     let len = u32::try_from(data.len()).ok()?;
 
     // Call the guest's own allocator so the buffer lives in its heap.
-    let alloc = caller.get_export("__stratum_alloc")?.into_func()?;
+    let alloc = caller.get_export("__paganel_alloc")?.into_func()?;
     let alloc = alloc.typed::<u32, u32>(&caller).ok()?;
 
     let ptr = alloc.call(&mut *caller, len).ok()?;
@@ -206,7 +206,7 @@ mod tests {
         assert!(PluginState::new("p".into(), ok_caps, &limits).is_ok());
 
         // A missing directory is a hard WasiSetup error, not a silent no-grant.
-        let missing = std::env::temp_dir().join("stratum-does-not-exist-a1b2c3");
+        let missing = std::env::temp_dir().join("paganel-does-not-exist-a1b2c3");
         let bad_caps = HostCapabilities {
             fs_read: vec![missing],
             ..HostCapabilities::default()

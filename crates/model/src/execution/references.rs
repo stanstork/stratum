@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Configuration for graph-based schema and data migration.
-/// Populated from the `with references { ... }` block in SMQL.
+/// Populated from the `with references { ... }` block in PPL.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphReferences {
     pub data_mode: DataMode,

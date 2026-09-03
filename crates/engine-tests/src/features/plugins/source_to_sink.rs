@@ -2,12 +2,12 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::{features::plugins::fixture, harness::runner::run_smql, reset_postgres_schema};
+    use crate::{features::plugins::fixture, harness::runner::run_ppl, reset_postgres_schema};
     use tracing_test::traced_test;
 
-    /// Build a `wasm source -> wasm sink` SMQL doc: `test_source` emits `total`
+    /// Build a `wasm source -> wasm sink` PPL doc: `test_source` emits `total`
     /// rows in pages of `page_size`; `test_sink` asserts it received `expect`.
-    fn smql(total: u64, page_size: u64, expect: u64) -> String {
+    fn ppl(total: u64, page_size: u64, expect: u64) -> String {
         format!(
             r#"
             plugin "feed" {{
@@ -45,7 +45,7 @@ mod tests {
     async fn wasm_source_to_sink_drains_all_rows() {
         reset_postgres_schema().await;
 
-        run_smql(&smql(10, 3, 10), false)
+        run_ppl(&ppl(10, 3, 10), false)
             .await
             .expect("all source rows should reach the sink");
     }
@@ -57,7 +57,7 @@ mod tests {
     async fn wasm_source_to_sink_respects_config_and_paging() {
         reset_postgres_schema().await;
 
-        run_smql(&smql(7, 3, 7), false)
+        run_ppl(&ppl(7, 3, 7), false)
             .await
             .expect("paged source rows should all reach the sink");
     }
@@ -69,7 +69,7 @@ mod tests {
     async fn wasm_sink_detects_count_mismatch() {
         reset_postgres_schema().await;
 
-        let result = run_smql(&smql(5, 2, 6), false).await;
+        let result = run_ppl(&ppl(5, 2, 6), false).await;
         assert!(
             result.is_err(),
             "sink expecting 6 but source emitting 5 should fail the migration"

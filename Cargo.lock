@@ -569,12 +569,12 @@ dependencies = [
  "mimalloc",
  "model",
  "mysql_async",
+ "paganel-plugin-compiler",
+ "ppl-syntax",
  "query-builder",
  "ratatui",
  "serde",
  "serde_json",
- "smql-syntax",
- "stratum-plugin-compiler",
  "thiserror 2.0.18",
  "tokio",
  "tokio-postgres",
@@ -653,12 +653,12 @@ dependencies = [
  "mysql_common",
  "native-tls",
  "postgres-native-tls",
+ "ppl-syntax",
  "query-builder",
  "rust_decimal",
  "ryu",
  "serde",
  "serde_json",
- "smql-syntax",
  "thiserror 2.0.18",
  "tokio",
  "tokio-postgres",
@@ -1208,11 +1208,11 @@ dependencies = [
  "futures",
  "md5",
  "model",
+ "ppl-syntax",
  "query-builder",
  "reqwest",
  "serde",
  "serde_json",
- "smql-syntax",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1230,11 +1230,11 @@ dependencies = [
  "engine-state",
  "expression-engine",
  "model",
+ "ppl-syntax",
  "query-builder",
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "smql-syntax",
  "tokio",
 ]
 
@@ -1304,9 +1304,9 @@ dependencies = [
  "futures",
  "model",
  "mysql_async",
+ "ppl-syntax",
  "query-builder",
  "serde_json",
- "smql-syntax",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -1335,8 +1335,8 @@ dependencies = [
  "engine-wasm",
  "futures",
  "model",
+ "ppl-syntax",
  "query-builder",
- "smql-syntax",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -1397,9 +1397,9 @@ dependencies = [
  "mysql_common",
  "native-tls",
  "postgres-native-tls",
+ "ppl-syntax",
  "query-builder",
  "serde_json",
- "smql-syntax",
  "tempfile",
  "tokio",
  "tokio-postgres",
@@ -1472,8 +1472,8 @@ dependencies = [
  "engine-core",
  "hex",
  "model",
+ "ppl-syntax",
  "smallvec",
- "smql-syntax",
  "thiserror 2.0.18",
  "tracing",
 ]
@@ -2546,10 +2546,10 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "lazy_static",
+ "ppl-syntax",
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "smql-syntax",
  "thiserror 2.0.18",
  "uuid",
  "xxhash-rust",
@@ -2765,6 +2765,17 @@ name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
+
+[[package]]
+name = "paganel-plugin-compiler"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "rquickjs",
+ "serde_json",
+ "thiserror 2.0.18",
+ "walrus",
+]
 
 [[package]]
 name = "parking_lot"
@@ -3000,6 +3011,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ppl-syntax"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.11.0",
+ "md5",
+ "pest",
+ "pest_derive",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3101,9 +3127,9 @@ dependencies = [
  "md5",
  "model",
  "pest",
+ "ppl-syntax",
  "serde",
  "serde_json",
- "smql-syntax",
  "thiserror 2.0.18",
  "tracing",
 ]
@@ -3930,21 +3956,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "smql-syntax"
-version = "0.1.0"
-dependencies = [
- "bitflags 2.11.0",
- "md5",
- "pest",
- "pest_derive",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "socket2"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3975,17 +3986,6 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
-
-[[package]]
-name = "stratum-plugin-compiler"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "rquickjs",
- "serde_json",
- "thiserror 2.0.18",
- "walrus",
-]
 
 [[package]]
 name = "stringprep"

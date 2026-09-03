@@ -3,7 +3,7 @@
 // Test:  plugin test in_range.js --input '{"value":5,"max":10}'   -> PASS
 //        plugin test in_range.js --input '{"value":50,"max":10}'  -> REJECT
 //        plugin test in_range.js --input '{"value":0,"max":10}'   -> PASS (>=0 boundary)
-const { filter } = require("@stratum/plugin-sdk");
+const { filter } = require("@paganel/plugin-sdk");
 
 filter("in_range", {
   version: "1.0.0",

@@ -1,12 +1,12 @@
 //! A transform plugin that exercises every host capability, so the integration
 //! tests can assert them end to end.
 
-use stratum_plugin_sdk::{
+use paganel_plugin_sdk::{
     PluginInput, PluginResult, env_get, fs_read_to_string, http_get, kv_get, kv_set,
-    metric_counter, stratum_transform,
+    metric_counter, paganel_transform,
 };
 
-#[stratum_transform(
+#[paganel_transform(
     name = "test_caps",
     version = "1.0.0",
     output = "string",

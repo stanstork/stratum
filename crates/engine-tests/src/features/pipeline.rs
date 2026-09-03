@@ -2,12 +2,12 @@
 mod tests {
     use std::{fs, path::PathBuf};
 
-    use crate::harness::smql::feature_smql;
+    use crate::harness::ppl::feature_ppl;
     use crate::{
         harness::runner::{
             ACTORS_TABLE_DDL, DbType, PIPELINE_FAILURES_TABLE_DDL, assert_column_exists,
             assert_row_count, assert_table_exists, execute, fetch_rows, get_cell_as_string,
-            get_cell_as_usize, get_row_count, run_smql,
+            get_cell_as_usize, get_row_count, run_ppl,
         },
         reset_postgres_schema,
     };
@@ -18,7 +18,7 @@ mod tests {
     };
     use engine_processing::EnvContext;
     use engine_runtime::dag::builder::DagBuilder;
-    use smql_syntax::builder::parse;
+    use ppl_syntax::builder::parse;
     use tracing_test::traced_test;
 
     // Test Settings: Default (no special flags).
@@ -29,7 +29,7 @@ mod tests {
     async fn missing_table_not_created_without_setting() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
             pipeline "migrate_actor" {
                 from {
@@ -44,7 +44,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
         assert_table_exists("actor", false).await;
     }
 
@@ -58,7 +58,7 @@ mod tests {
     async fn create_missing_tables_creates_table_and_copies_data() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
             pipeline "migrate_actor" {
                 from {
@@ -76,7 +76,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         assert_table_exists("actor", true).await;
         assert_row_count("actor", "sakila", "actor").await;
@@ -98,7 +98,7 @@ mod tests {
         // Create the actor table in Postgres without the full_name column
         execute(ACTORS_TABLE_DDL).await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
             pipeline "migrate_actor" {
                 from {
@@ -122,7 +122,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         assert_table_exists("actor", true).await;
         assert_row_count("actor", "sakila", "actor").await;
@@ -144,7 +144,7 @@ mod tests {
         // Create the actor table in Postgres
         execute(ACTORS_TABLE_DDL).await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
             pipeline "migrate_actor" {
                 from {
@@ -159,7 +159,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
         assert_row_count("actor", "sakila", "actor").await;
     }
 
@@ -178,7 +178,7 @@ mod tests {
     async fn create_table_with_computed_column_and_skip_constraints() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
             pipeline "migrate_actor" {
                 from {
@@ -204,7 +204,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         assert_row_count("actor", "sakila", "actor").await;
         assert_column_exists("actor", "full_name", true).await;
@@ -234,7 +234,7 @@ mod tests {
     async fn validation_skip_and_warn_actions_filter_rows() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
 
             // Pipeline 1: Test SKIP action - skip rows with invalid payments
@@ -415,7 +415,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         // Pipeline 1: Verify payments with SKIP validation
         // Validation: amount > 0 AND amount <= 5.00
@@ -499,7 +499,7 @@ mod tests {
     async fn validation_on_joined_tables_and_computed_fields() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
 
             // Pipeline: Test validation with joined tables and transformed fields
@@ -635,7 +635,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         // Pipeline 1: Verify film_actor_details with joined validations
         // Validation: film.rental_rate <= 2.99 AND film.replacement_cost <= 20.00
@@ -732,7 +732,7 @@ mod tests {
     async fn validation_fail_action_stops_pipeline() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
 
             pipeline "migrate_actors_with_fail" {
@@ -772,7 +772,7 @@ mod tests {
         );
 
         // Run the migration with fail validation
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         // Verify that the table was created (pipeline starts execution)
         assert_table_exists("actors_validated", true).await;
@@ -821,7 +821,7 @@ mod tests {
         // Create the DLQ table before running the migration
         execute(PIPELINE_FAILURES_TABLE_DDL).await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
 
             pipeline "migrate_actors_strict_validation" {
@@ -867,7 +867,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         // Verify destination table was created
         assert_table_exists("actors_validated_strict", true).await;
@@ -927,7 +927,7 @@ mod tests {
         // Clean up previous test file if exists
         let _ = std::fs::remove_file(dlq_path);
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
 
             pipeline "migrate_payments_file_dlq" {
@@ -965,7 +965,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         // Verify destination table has data
         assert_table_exists("payments_file_dlq", true).await;
@@ -1052,7 +1052,7 @@ mod tests {
 
         execute(ACTORS_TABLE_DDL).await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
             pipeline "migrate_actor_with_before_hooks" {
                 from {
@@ -1080,7 +1080,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         assert_table_exists("actor", true).await;
         assert_row_count("actor", "sakila", "actor").await;
@@ -1109,7 +1109,7 @@ mod tests {
 
         execute(ACTORS_TABLE_DDL).await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
             pipeline "migrate_actor_with_after_hooks" {
                 from {
@@ -1138,7 +1138,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         assert_table_exists("actor", true).await;
         assert_row_count("actor", "sakila", "actor").await;
@@ -1171,7 +1171,7 @@ mod tests {
 
         execute(ACTORS_TABLE_DDL).await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
             pipeline "migrate_actor_full_lifecycle" {
                 from {
@@ -1207,7 +1207,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         assert_table_exists("actor", true).await;
         assert_row_count("actor", "sakila", "actor").await;
@@ -1221,7 +1221,7 @@ mod tests {
 
     // Test Settings: COMPREHENSIVE PLAN GENERATION TEST (DRY RUN).
     // Scenario:
-    // - Tests all SMQL v2.1 features using the Sakila database.
+    // - Tests all PPL features using the Sakila database.
     // - Configuration includes 14 pipelines covering:
     //   * Execution settings (parallel, max_concurrency, on_failure)
     //   * Define block with constants and environment variables
@@ -1251,14 +1251,14 @@ mod tests {
     // - No actual data is migrated (dry run only).
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
-    async fn plan_generation_covers_all_smql_features() {
+    async fn plan_generation_covers_all_ppl_features() {
         // Load comprehensive test configuration
-        let path = "../../examples/configs/plan-generation.smql";
+        let path = "../../examples/configs/plan-generation.ppl";
         let config_path = PathBuf::from(path);
         let config_content = fs::read_to_string(&config_path).expect("read config file");
 
-        // Parse SMQL configuration
-        let doc = parse(&config_content).expect("parse SMQL config");
+        // Parse PPL configuration
+        let doc = parse(&config_content).expect("parse PPL config");
 
         // Build core execution plan.
         let mut env = EnvContext::empty();
@@ -1286,7 +1286,7 @@ mod tests {
         let report_config = ReportBuilderConfig::default();
         let report_builder = ReportBuilder::new(report_config);
 
-        // Generate the detailed migration report (this is what `stratum plan` does)
+        // Generate the detailed migration report (this is what `pag plan` does)
         let report = report_builder
             .build(&core_plan, &dag, config_path.as_ref())
             .await
@@ -1549,7 +1549,7 @@ mod tests {
             "Report should have config hash"
         );
         assert!(
-            report.config_path.contains("plan-generation.smql"),
+            report.config_path.contains("plan-generation.ppl"),
             "Config path should be correct"
         );
 

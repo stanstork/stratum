@@ -1,6 +1,6 @@
 # Output Modes
 
-How `stratum apply` and `stratum verify` report progress and results in the
+How `pag apply` and `pag verify` report progress and results in the
 terminal - and how to pick the mode that fits your context (CI, an interactive
 terminal, or a live migration you want to watch).
 
@@ -46,11 +46,11 @@ the mode for CI, cron, and anything that redirects output - it's line-oriented,
 greppable, and honors `RUST_LOG` / `--log-level`.
 
 ```bash
-stratum apply -c migration.smql
+pag apply -c migration.ppl
 ```
 
 ```
-INFO executing migration config=migration.smql
+INFO executing migration config=migration.ppl
 INFO migration completed successfully
 ```
 
@@ -63,7 +63,7 @@ stream (per-batch progress, checkpoints, retries).
 elapsed-time stamp. It's meant for a human watching an interactive terminal.
 
 ```bash
-stratum apply -c migration.smql --pretty
+pag apply -c migration.ppl --pretty
 ```
 
 ```
@@ -83,7 +83,7 @@ The line symbols: `▶` run start, `◉` pipeline start, `→` progress, `✓` s
 `✗` failure, `◆`/`⧗` integrity finalization (see below). Row counts and
 throughput are thousands-separated.
 
-In pretty mode the raw log stream is routed to `~/.stratum/pretty.log` instead of
+In pretty mode the raw log stream is routed to `~/.paganel/pretty.log` instead of
 the terminal, so the colored output stays clean. Tail that file if you need the
 underlying logs.
 
@@ -94,7 +94,7 @@ table, an execution-stage map, and live aggregate panels for progress,
 throughput, timing, and data volume.
 
 ```bash
-stratum apply -c migration.smql --tui
+pag apply -c migration.ppl --tui
 ```
 
 See [The TUI dashboard](#the-tui-dashboard) for the full walkthrough.
@@ -105,7 +105,7 @@ See [The TUI dashboard](#the-tui-dashboard) for the full walkthrough.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│ STRATUM  RUNNING                                                                  View: Overview │
+│ PAGANEL  RUNNING                                                                  View: Overview │
 │                                                                                                  │
 │Pipeline          Status        Progress                        Rows          Rate        ETA     │
 │> migrate_actor   ✔ Done        [████████████████████]  100%    200           --/s        0s      │
@@ -152,7 +152,7 @@ Two consequences to expect:
   may differ from the estimate you watched during the run.
 
 If you need an exact count-verified guarantee that the destination matches the
-source, that's what [`stratum verify`](#verify-output) and `--integrity` are for.
+source, that's what [`pag verify`](#verify-output) and `--integrity` are for.
 The dashboard estimate is for progress feedback.
 
 ### Keyboard controls
@@ -235,7 +235,7 @@ In `--pretty` mode the same phases print inline:
 ```
 
 Once receipts are committed, verify the destination against them with
-[`stratum verify`](#verify-output). See [verification.md](verification.md) for
+[`pag verify`](#verify-output). See [verification.md](verification.md) for
 the cryptographic model.
 
 ### Resuming from a checkpoint
@@ -252,11 +252,11 @@ If a run has already completed, `apply` doesn't reopen the dashboard (or re-run
 the migration). It prints a short notice and exits successfully:
 
 ```
-Migration for 'migration.smql' already completed.
+Migration for 'migration.ppl' already completed.
 ```
 
 The same guard applies to `--pretty` and default modes; the default mode logs it
-as an `info` line. Use `stratum reset -c migration.smql` to clear the state and
+as an `info` line. Use `pag reset -c migration.ppl` to clear the state and
 run again from scratch.
 
 ---
@@ -273,7 +273,7 @@ documented result glyphs - but adds no color, header, phase lines, or summary.
 It's stable, greppable, and identical to what `--output <file>` writes to disk.
 
 ```bash
-stratum verify -c migration.smql
+pag verify -c migration.ppl
 ```
 
 ```
@@ -305,11 +305,11 @@ glyphs are the same - pretty mode layers decoration on top, it doesn't change th
 result lines.
 
 ```bash
-stratum verify -c migration.smql --pretty
+pag verify -c migration.ppl --pretty
 ```
 
 ```
-◆ Verifying: migration.smql
+◆ Verifying: migration.ppl
 ⧗ migrate_actor/actor
     reading destination…
     sorting row hashes…
@@ -319,7 +319,7 @@ stratum verify -c migration.smql --pretty
 ✓ 1 matched, 1 without a receipt
 ```
 
-Like `apply --pretty`, this mode routes raw logs to `~/.stratum/pretty.log` to
+Like `apply --pretty`, this mode routes raw logs to `~/.paganel/pretty.log` to
 keep the terminal output clean.
 
 ---

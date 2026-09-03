@@ -1,5 +1,0 @@
-# Keep the build context small: never ship build artifacts, results, or VCS
-# metadata into the stratum bench image.
-target/
-benchmarks/results/
-.git/

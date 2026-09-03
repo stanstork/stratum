@@ -73,7 +73,7 @@ mod tests {
 
         assert_eq!(
             sql,
-            r"LOAD DATA LOCAL INFILE 'stratum' INTO TABLE `users` FIELDS TERMINATED BY '\t' ESCAPED BY '\\' LINES TERMINATED BY '\n' (`id`, `name`)"
+            r"LOAD DATA LOCAL INFILE 'paganel' INTO TABLE `users` FIELDS TERMINATED BY '\t' ESCAPED BY '\\' LINES TERMINATED BY '\n' (`id`, `name`)"
         );
         assert!(params.is_empty());
     }
@@ -90,7 +90,7 @@ mod tests {
 
         assert_eq!(
             sql,
-            r"LOAD DATA LOCAL INFILE 'stratum' INTO TABLE `users` FIELDS TERMINATED BY '\t' ESCAPED BY '\\' LINES TERMINATED BY '\n'"
+            r"LOAD DATA LOCAL INFILE 'paganel' INTO TABLE `users` FIELDS TERMINATED BY '\t' ESCAPED BY '\\' LINES TERMINATED BY '\n'"
         );
         assert!(!sql.contains('('));
     }
@@ -124,7 +124,7 @@ mod tests {
         let (sql, _) = render(load);
 
         assert!(
-            sql.starts_with("LOAD DATA LOCAL INFILE 'stratum' REPLACE INTO TABLE `users`"),
+            sql.starts_with("LOAD DATA LOCAL INFILE 'paganel' REPLACE INTO TABLE `users`"),
             "got: {sql}"
         );
     }
@@ -143,7 +143,7 @@ mod tests {
         let (sql, _) = render(load);
 
         assert!(
-            sql.starts_with("LOAD DATA LOCAL INFILE 'stratum' IGNORE INTO TABLE `users`"),
+            sql.starts_with("LOAD DATA LOCAL INFILE 'paganel' IGNORE INTO TABLE `users`"),
             "got: {sql}"
         );
     }
@@ -160,7 +160,7 @@ mod tests {
 
         assert!(!sql.contains("REPLACE"));
         assert!(!sql.contains("IGNORE"));
-        assert!(sql.starts_with("LOAD DATA LOCAL INFILE 'stratum' INTO TABLE `users`"));
+        assert!(sql.starts_with("LOAD DATA LOCAL INFILE 'paganel' INTO TABLE `users`"));
     }
 
     #[test]
@@ -174,7 +174,7 @@ mod tests {
 
         let (sql, _) = render(load);
 
-        assert!(sql.starts_with("LOAD DATA INFILE 'stratum'"));
+        assert!(sql.starts_with("LOAD DATA INFILE 'paganel'"));
         assert!(!sql.contains("LOCAL"));
     }
 }

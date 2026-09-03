@@ -86,7 +86,7 @@ fn is_blocked_http_host(url: &str) -> bool {
 pub(super) fn link(linker: &mut Linker<PluginState>) -> Result<(), WasmError> {
     linker
         .func_wrap(
-            "stratum",
+            "paganel",
             "http_request",
             |mut caller: Caller<'_, PluginState>,
              method: u32,
@@ -229,11 +229,11 @@ mod tests {
         format!(
             r#"
             (module
-              (import "stratum" "http_request"
+              (import "paganel" "http_request"
                 (func $http (param i32 i32 i32 i32 i32) (result i64)))
               (memory (export "memory") 1)
               (global $bump (mut i32) (i32.const 2048))
-              (func (export "__stratum_alloc") (param $len i32) (result i32)
+              (func (export "__paganel_alloc") (param $len i32) (result i32)
                 (local $p i32)
                 (local.set $p (global.get $bump))
                 (global.set $bump (i32.add (global.get $bump) (local.get $len)))

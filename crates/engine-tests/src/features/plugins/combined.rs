@@ -2,12 +2,12 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::harness::smql::dest_smql;
+    use crate::harness::ppl::dest_ppl;
     use crate::{
         features::plugins::fixture,
         harness::runner::{
             DbType, assert_table_exists, get_cell_as_f64, get_column_names, get_pg_column_type,
-            get_row_count, run_smql,
+            get_row_count, run_ppl,
         },
         reset_postgres_schema,
     };
@@ -16,8 +16,8 @@ mod tests {
     /// Build a `wasm source -> postgres` pipeline that exercises a transform
     /// plugin (select) and a filter plugin (validate) together. `total` source
     /// rows are generated.
-    fn smql(dest_table: &str, total: u64) -> String {
-        dest_smql(&format!(
+    fn ppl(dest_table: &str, total: u64) -> String {
+        dest_ppl(&format!(
             r#"
             plugin "feed"     {{ path = "{source}" config {{ total = "{total}" page_size = "3" }} }}
             plugin "adder"    {{ path = "{transform}" }}
@@ -62,7 +62,7 @@ mod tests {
         reset_postgres_schema().await;
 
         // Source emits ids 0..=9 (10 rows); filter drops id 0 -> 9 rows.
-        run_smql(&smql("enriched", 10), false)
+        run_ppl(&ppl("enriched", 10), false)
             .await
             .expect("migration succeeds");
 
@@ -110,7 +110,7 @@ mod tests {
         reset_postgres_schema().await;
 
         // ids 0..=5 (6 rows); filter drops id 0 -> 5 rows.
-        run_smql(&smql("enriched_small", 6), false)
+        run_ppl(&ppl("enriched_small", 6), false)
             .await
             .expect("migration succeeds");
 

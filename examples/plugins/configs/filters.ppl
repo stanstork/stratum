@@ -1,0 +1,61 @@
+// filters.ppl - filter plugins used as validation checks.
+//
+// A filter plugin is a boolean predicate in an `assert`/`warn` check:
+//     assert "name" { check = plugin.<name>({ field: table.col }) action = <action> }
+// `action` is one of: skip (drop row), fail (abort pipeline), warn. Reject
+// reasons from the plugin surface in logs / DLQ.
+//
+//   plugin validate -c examples/plugins/configs/filters.ppl
+//   pag apply   -c examples/plugins/configs/filters.ppl -e .env
+
+define {
+    mysql_url    = env("MYSQL_URL")
+    postgres_url = env("POSTGRES_URL")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+plugin "email_valid" { path = "examples/plugins/js/email_valid.js" }
+plugin "in_range"    { path = "examples/plugins/js/in_range.js" }
+
+// Drop customers whose email is malformed.
+pipeline "customers_clean" {
+    from { connection = connection.src  table = "customer" }
+    to   { connection = connection.dst  table = "customer_clean" }
+
+    validate {
+        assert "good_email" {
+            check  = plugin.email_valid({ email: customer.email })
+            action = skip
+        }
+    }
+
+    select {
+        customer_id = customer.customer_id
+        email       = customer.email
+    }
+
+    settings { create_missing_tables = true  batch_size = 200 }
+}
+
+// Keep only films whose `length` falls within [0, rental_duration*10]. Both
+// inputs come from the row. Reject -> hard fail (flip to `skip` to drop instead).
+pipeline "films_bounded" {
+    from { connection = connection.src  table = "film" }
+    to   { connection = connection.dst  table = "film_bounded" }
+
+    validate {
+        assert "length_in_range" {
+            check  = plugin.in_range({ value: film.length, max: film.rental_duration })
+            action = skip
+        }
+    }
+
+    select {
+        film_id = film.film_id
+        length  = film.length
+    }
+
+    settings { create_missing_tables = true  batch_size = 200 }
+}

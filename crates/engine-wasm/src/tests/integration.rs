@@ -48,7 +48,7 @@ mod tests {
 
         for name in ["log_debug", "log_info", "log_warn", "log_error"] {
             linker
-                .func_wrap("stratum", name, |_ptr: u32, _len: u32| {})
+                .func_wrap("paganel", name, |_ptr: u32, _len: u32| {})
                 .unwrap();
         }
 
@@ -67,21 +67,21 @@ mod tests {
 
         // 5. Resolve ABI exports
         let alloc_fn = instance
-            .get_typed_func::<u32, u32>(&mut store, "__stratum_alloc")
+            .get_typed_func::<u32, u32>(&mut store, "__paganel_alloc")
             .unwrap();
         let dealloc_fn = instance
-            .get_typed_func::<(u32, u32), ()>(&mut store, "__stratum_dealloc")
+            .get_typed_func::<(u32, u32), ()>(&mut store, "__paganel_dealloc")
             .unwrap();
         let metadata_fn = instance
-            .get_typed_func::<(), u64>(&mut store, "__stratum_metadata")
+            .get_typed_func::<(), u64>(&mut store, "__paganel_metadata")
             .unwrap();
-        // SDK-generated __stratum_initialize takes (config_ptr, config_len)
+        // SDK-generated __paganel_initialize takes (config_ptr, config_len)
         // so plugins can receive runtime configuration. Pass (0, 0) for none.
         let init_fn = instance
-            .get_typed_func::<(u32, u32), u32>(&mut store, "__stratum_initialize")
+            .get_typed_func::<(u32, u32), u32>(&mut store, "__paganel_initialize")
             .unwrap();
         let transform_fn = instance
-            .get_typed_func::<(u32, u32), u64>(&mut store, "__stratum_transform")
+            .get_typed_func::<(u32, u32), u64>(&mut store, "__paganel_transform")
             .unwrap();
         let memory = instance.get_memory(&mut store, "memory").unwrap();
 
@@ -401,7 +401,7 @@ mod tests {
     /// assertion proves env + fs + kv work across the real boundary.
     #[tokio::test(flavor = "multi_thread")]
     async fn test_capabilities_env_fs_http_kv_granted() {
-        let dir = std::env::temp_dir().join("stratum-caps-itest");
+        let dir = std::env::temp_dir().join("paganel-caps-itest");
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("probe.txt");
         std::fs::write(&file, "filecontents\n").unwrap();

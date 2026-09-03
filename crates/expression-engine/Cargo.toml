@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 model = { path = "../model" }
-smql-syntax = { path = "../smql-syntax" }
+ppl-syntax = { path = "../ppl-syntax" }
 bigdecimal = "0.4"
 chrono = "0.4.39"
 smallvec = "1.15"

@@ -8,7 +8,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-stratum-plugin-sdk = { path = "../../../../crates/sdk/stratum-plugin-sdk" }
+paganel-plugin-sdk = { path = "../../../../crates/sdk/paganel-plugin-sdk" }
 
 [profile.release]
 opt-level = 3

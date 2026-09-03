@@ -1,6 +1,6 @@
 # Plugins
 
-Stratum can be extended with **WebAssembly plugins** that run inside the
+Paganel can be extended with **WebAssembly plugins** that run inside the
 migration pipeline. A plugin is a sandboxed `.wasm` module the engine loads,
 calls once per batch (or per page), and enforces resource limits on.
 
@@ -56,19 +56,19 @@ exchange records that way, and `columnar_v1` falls back to a per-cell enveloped
 JSON encoding (`TAG_CELL`) for columns whose value types have no native columnar
 representation (mixed or host-only variants).
 
-## Using a plugin in SMQL
+## Using a plugin in PPL
 
 Every plugin used by a pipeline is declared once with a `plugin` block, then
 referenced by role.
 
-```smql
+```ppl
 plugin "to_upper" { path = "plugins/upper.js" }      # JS, compiled on first use
 plugin "adder"    { path = "plugins/adder.wasm" }    # prebuilt native module
 ```
 
 ### transform - in `select`
 
-```smql
+```ppl
 select {
   id        = users.id
   loud_name = plugin.to_upper({ name: users.name })   # plugin output column
@@ -78,7 +78,7 @@ select {
 
 ### filter - in `validate`
 
-```smql
+```ppl
 validate {
   assert "positive" {
     check  = plugin.is_positive({ value: orders.amount })
@@ -92,7 +92,7 @@ validate {
 A source or sink plugin is wired through a connection with `driver = "wasm"`
 and a `plugin` property naming a declared plugin block:
 
-```smql
+```ppl
 connection "feed" { driver = "wasm" plugin = "my_source" }
 connection "out"  { driver = "wasm" plugin = "my_sink" }
 
@@ -115,7 +115,7 @@ source plugin's declared `output` columns.
 A `config { ... }` block on the declaration is passed to the plugin at init
 time. Values are strings; parse them inside the handler.
 
-```smql
+```ppl
 plugin "sampler" {
   path   = "plugins/sampler.wasm"
   config { rate = "0.2" }
@@ -131,7 +131,7 @@ docs for the exact accessor (`config()` / `source_config()` in Rust; the handler
 Plugins are sandboxed and denied everything by default. Grant capabilities and
 override limits on the declaration:
 
-```smql
+```ppl
 plugin "geo" {
   path = "plugins/geo_enrich.js"
 
@@ -157,20 +157,20 @@ QuickJS boot needs more headroom.
 
 ```bash
 # Compile a JS plugin to WASM (otherwise done automatically on apply/plan)
-stratum plugin compile plugins/upper.js -o plugins/upper.wasm
+pag plugin compile plugins/upper.js -o plugins/upper.wasm
 
 # Print a plugin's metadata (name, version, role, schema)
-stratum plugin inspect plugins/upper.wasm
+pag plugin inspect plugins/upper.wasm
 
-# Validate every plugin referenced by an SMQL config (offline, no DB)
-stratum plugin validate -c migration.smql
+# Validate every plugin referenced by an PPL config (offline, no DB)
+pag plugin validate -c migration.ppl
 
 # Run a plugin over a batch of sample rows (input is a JSON ARRAY of rows;
 # a single object is accepted as a one-row batch)
-stratum plugin test plugins/upper.wasm --input '[{"name":"ada"},{"name":"grace"}]'
-stratum plugin test plugins/order_ok.wasm --mode filter --input '[{"amount":10},{"amount":-5}]'
-stratum plugin test plugins/feed.wasm  --mode source --json
-stratum plugin test plugins/sink.wasm  --mode sink --input '[{"id":1},{"id":2}]'
+pag plugin test plugins/upper.wasm --input '[{"name":"ada"},{"name":"grace"}]'
+pag plugin test plugins/order_ok.wasm --mode filter --input '[{"amount":10},{"amount":-5}]'
+pag plugin test plugins/feed.wasm  --mode source --json
+pag plugin test plugins/sink.wasm  --mode sink --input '[{"id":1},{"id":2}]'
 ```
 
 > **Compiling a `.js` needs esbuild or Node.** Only the compile step does; see
@@ -181,8 +181,8 @@ stratum plugin test plugins/sink.wasm  --mode sink --input '[{"id":1},{"id":2}]'
 
 > **Building a Rust plugin needs the Rust toolchain and the `wasm32-wasip1`
 > target.** Add the target with `rustup target add wasm32-wasip1`, and pull the
-> `stratum-plugin-sdk` dependency from git or a local path (it is not on crates.io
-> yet); see [rust.md § Crate setup](rust.md#crate-setup). Stratum does not compile
+> `paganel-plugin-sdk` dependency from git or a local path (it is not on crates.io
+> yet); see [rust.md § Crate setup](rust.md#crate-setup). Paganel does not compile
 > Rust for you: you build the `.wasm` with `cargo`, then point a `plugin` block at
 > it. The resulting `.wasm` loads like any other, with no toolchain or env vars.
 
@@ -206,7 +206,7 @@ for JS when the logic is light and you'd rather skip the Rust toolchain.
 
 ## Authoring
 
-- **[rust.md](./rust.md)** - write a native plugin with the `#[stratum_*]` macros.
+- **[rust.md](./rust.md)** - write a native plugin with the `#[paganel_*]` macros.
 - **[javascript.md](./javascript.md)** - write a JS plugin and how the QuickJS
   runtime works.
 
@@ -215,5 +215,5 @@ Runnable examples live in [`examples/plugins/`](../../examples/plugins/).
 ### Extending the SDK (maintainers)
 
 - **[adding-roles.md](./adding-roles.md)** - add a new plugin role to the SDK.
-- **[macro-expansion.md](./macro-expansion.md)** - what the `#[stratum_*]`
+- **[macro-expansion.md](./macro-expansion.md)** - what the `#[paganel_*]`
   attribute macros expand to.
