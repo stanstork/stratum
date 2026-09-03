@@ -13,7 +13,7 @@
 <h1 align="center">Paganel</h1>
 
 <p align="center">
-  <strong>Database migration that proves it worked.</strong>
+  <strong>Data migration that proves it worked.</strong>
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@
   <img src="https://img.shields.io/badge/status-early%20development-orange" alt="Early development">
 </p>
 
-Paganel is a declarative data pipeline engine written in Rust. It migrates data and schema between databases safely, with crash recovery, parallel execution, in-flight transforms, and cryptographic post-migration verification.
+Paganel is a data migration engine written in Rust. It moves data and schema between systems with crash recovery, parallel execution, and in-flight transforms, then cryptographically verifies that the destination matches what was written, down to the row. Today that means MySQL, PostgreSQL, and CSV; sources and sinks can also be sandboxed WASM plugins, so anything with data can stand at either end of a pipeline.
 
 On a 100M-row MySQL->PostgreSQL copy with the databases on separate hosts (over a real network), it sustains ~390K rows/s on a single lane and ~940K rows/s with four parallel lanes ([benchmarks](docs/benchmarks.md)).
 
