@@ -13,16 +13,12 @@
 <h1 align="center">Paganel</h1>
 
 <p align="center">
-  <strong>Declarative data pipelines, cryptographically verified.</strong>
+  <strong>Database migration that proves it worked.</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/stanstork/stratum/actions/workflows/ci.yml">
-    <img src="https://github.com/stanstork/stratum/actions/workflows/ci.yml/badge.svg" alt="CI">
-  </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/badge/license-AGPL%20v3-blue.svg" alt="AGPL v3">
-  </a>
+  <a href="https://github.com/stanstork/stratum/actions/workflows/ci.yml"><img src="https://github.com/stanstork/stratum/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL%20v3-blue.svg" alt="AGPL v3"></a>
   <img src="https://img.shields.io/badge/status-early%20development-orange" alt="Early development">
 </p>
 
