@@ -15,7 +15,7 @@ impl LoadDataBuilder {
                 table,
                 columns: Vec::new(),
                 local: true,
-                file_name: "stratum".to_string(),
+                file_name: "paganel".to_string(),
                 on_conflict: LoadDataConflict::Default,
                 fields_terminated_by: r"\t".to_string(),
                 fields_escaped_by: r"\\".to_string(),
@@ -61,7 +61,7 @@ mod tests {
         assert!(load.table.schema.is_none());
         assert!(load.columns.is_empty());
         assert!(load.local);
-        assert_eq!(load.file_name, "stratum");
+        assert_eq!(load.file_name, "paganel");
         assert_eq!(load.on_conflict, LoadDataConflict::Default);
         assert_eq!(load.fields_terminated_by, r"\t");
         assert_eq!(load.fields_escaped_by, r"\\");

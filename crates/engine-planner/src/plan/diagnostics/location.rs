@@ -2,7 +2,7 @@ use serde::Serialize;
 
 #[derive(Serialize, Debug, Clone)]
 pub struct SourceLocation {
-    /// Line number in SMQL file (1-indexed)
+    /// Line number in PPL file (1-indexed)
     pub line: usize,
 
     /// Column number in line (1-indexed)

@@ -2,19 +2,19 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::harness::smql::source_smql;
+    use crate::harness::ppl::source_ppl;
     use crate::{
         features::plugins::fixture,
-        harness::runner::{DbType, get_row_count, run_smql},
+        harness::runner::{DbType, get_row_count, run_ppl},
         reset_postgres_schema,
     };
     use tracing_test::traced_test;
 
-    /// Build a `mysql -> wasm sink` SMQL doc draining `actor` into `test_sink`
+    /// Build a `mysql -> wasm sink` PPL doc draining `actor` into `test_sink`
     /// (declared `sink`) with `expect` rows. Only `id` is produced, matching the
     /// sink's declared input.
-    fn smql(expect: i64) -> String {
-        source_smql(&format!(
+    fn ppl(expect: i64) -> String {
+        source_ppl(&format!(
             r#"
             plugin "sink" {{
                 path = "{plugin}"
@@ -47,7 +47,7 @@ mod tests {
 
         let total = get_row_count("actor", "sakila", DbType::MySql).await;
 
-        run_smql(&smql(total), false)
+        run_ppl(&ppl(total), false)
             .await
             .expect("sink should receive exactly the source row count");
     }
@@ -61,7 +61,7 @@ mod tests {
 
         let total = get_row_count("actor", "sakila", DbType::MySql).await;
 
-        let result = run_smql(&smql(total + 1), false).await;
+        let result = run_ppl(&ppl(total + 1), false).await;
         assert!(
             result.is_err(),
             "finalize should fail when the received total != expect (proves finalize ran)"

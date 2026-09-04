@@ -1,0 +1,45 @@
+// file_lookup.ppl - the FS + ENV capabilities in a transform plugin.
+//
+// `weighted_score` enriches each row from a lookup table on disk. It reads the
+// file with the FS capability (`allow_fs_read`) and finds its path via the ENV
+// capability (`allow_env`, variable PAGANEL_WEIGHTS; a default is used when the
+// variable is unset). It reads Sakila's `actor` table and writes `actor_scored`
+// with each actor's weight from data/weights.json (0 for keys not in the table).
+//
+//   pag plugin validate -c examples/plugins/configs/file_lookup.ppl
+//   pag apply           -c examples/plugins/configs/file_lookup.ppl -e .env
+//
+// Notes:
+//   - `allow_fs_read` grants a DIRECTORY (which must exist); the plugin may read
+//     any file beneath it and nothing outside it. Paths are relative to the
+//     working directory you run Paganel from (the repo root here).
+//   - to point at a different file, set PAGANEL_WEIGHTS in your .env and make
+//     sure its directory is covered by `allow_fs_read`.
+//   - remove `allow_fs_read` (or `allow_env`) to see the capability gate: the
+//     lookup falls back to an empty table and every score becomes 0.
+
+define {
+    mysql_url    = env("MYSQL_URL")
+    postgres_url = env("POSTGRES_URL")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+plugin "weighted_score" {
+    path          = "examples/plugins/js/weighted_score.js"
+    allow_fs_read = ["examples/plugins/data"]   // directory must exist
+    allow_env     = ["PAGANEL_WEIGHTS"]         // optional path override
+}
+
+pipeline "score" {
+    from { connection = connection.src  table = "actor" }
+    to   { connection = connection.dst  table = "actor_scored" }
+
+    select {
+        actor_id = actor.actor_id
+        weight   = plugin.weighted_score({ key: actor.actor_id })
+    }
+
+    settings { create_missing_tables = true  batch_size = 200 }
+}

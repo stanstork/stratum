@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        harness::runner::{DbType, assert_row_count, get_row_count, run_smql},
+        harness::runner::{DbType, assert_row_count, get_row_count, run_ppl},
         mysql_pool, reset_postgres_schema,
     };
     use mysql_async::prelude::Queryable;
@@ -23,8 +23,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn paginate_default_offset() {
         reset_postgres_schema().await;
-        let smql = paginate_config!("paginate_default.smql");
-        run_smql(&smql, false).await.expect("apply failed");
+        let ppl = paginate_config!("paginate_default.ppl");
+        run_ppl(&ppl, false).await.expect("apply failed");
         assert_row_count("actor", "sakila", "actor").await;
     }
 
@@ -36,8 +36,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn paginate_pk_small_table() {
         reset_postgres_schema().await;
-        let smql = paginate_config!("paginate_pk.smql");
-        run_smql(&smql, false).await.expect("apply failed");
+        let ppl = paginate_config!("paginate_pk.ppl");
+        run_ppl(&ppl, false).await.expect("apply failed");
         assert_row_count("actor", "sakila", "actor").await;
     }
 
@@ -49,8 +49,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn paginate_pk_large_table() {
         reset_postgres_schema().await;
-        let smql = paginate_config!("paginate_pk_large.smql");
-        run_smql(&smql, false).await.expect("apply failed");
+        let ppl = paginate_config!("paginate_pk_large.ppl");
+        run_ppl(&ppl, false).await.expect("apply failed");
         assert_row_count("payment", "sakila", "payment").await;
     }
 
@@ -67,8 +67,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn paginate_numeric_with_tiebreaker() {
         reset_postgres_schema().await;
-        let smql = paginate_config!("paginate_numeric.smql");
-        run_smql(&smql, false).await.expect("apply failed");
+        let ppl = paginate_config!("paginate_numeric.ppl");
+        run_ppl(&ppl, false).await.expect("apply failed");
         assert_row_count("payment", "sakila", "payment").await;
     }
 
@@ -84,8 +84,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn paginate_timestamp_datetime_column() {
         reset_postgres_schema().await;
-        let smql = paginate_config!("paginate_timestamp.smql");
-        run_smql(&smql, false).await.expect("apply failed");
+        let ppl = paginate_config!("paginate_timestamp.ppl");
+        run_ppl(&ppl, false).await.expect("apply failed");
         assert_row_count("payment", "sakila", "payment").await;
     }
 
@@ -104,8 +104,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn paginate_timestamp_with_timezone() {
         reset_postgres_schema().await;
-        let smql = paginate_config!("paginate_timestamp_tz.smql");
-        run_smql(&smql, false).await.expect("apply failed");
+        let ppl = paginate_config!("paginate_timestamp_tz.ppl");
+        run_ppl(&ppl, false).await.expect("apply failed");
         assert_row_count("actor", "sakila", "actor").await;
     }
 
@@ -122,8 +122,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn paginate_pk_exact_batch_boundary() {
         reset_postgres_schema().await;
-        let smql = paginate_config!("paginate_pk_exact_boundary.smql");
-        run_smql(&smql, false).await.expect("apply failed");
+        let ppl = paginate_config!("paginate_pk_exact_boundary.ppl");
+        run_ppl(&ppl, false).await.expect("apply failed");
         let count = get_row_count("actor", "sakila", DbType::Postgres).await;
         let expected = get_row_count("actor", "sakila", DbType::MySql).await;
         assert_eq!(
@@ -140,8 +140,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn paginate_pk_partial_last_page() {
         reset_postgres_schema().await;
-        let smql = paginate_config!("paginate_pk_partial_last.smql");
-        run_smql(&smql, false).await.expect("apply failed");
+        let ppl = paginate_config!("paginate_pk_partial_last.ppl");
+        run_ppl(&ppl, false).await.expect("apply failed");
         let count = get_row_count("actor", "sakila", DbType::Postgres).await;
         let expected = get_row_count("actor", "sakila", DbType::MySql).await;
         assert_eq!(
@@ -163,8 +163,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn paginate_pk_join_and_filter() {
         reset_postgres_schema().await;
-        let smql = paginate_config!("paginate_pk_join_filter.smql");
-        run_smql(&smql, false).await.expect("apply failed");
+        let ppl = paginate_config!("paginate_pk_join_filter.ppl");
+        run_ppl(&ppl, false).await.expect("apply failed");
 
         // Count the expected rows directly in MySQL with the same filter
         let mysql = mysql_pool("sakila").await;

@@ -178,9 +178,9 @@ mod tests {
 
     async fn create_test_context() -> Arc<ExecutionContext> {
         use engine_core::context::env::EnvContext;
-        use smql_syntax::ast::{doc::SmqlDocument, span::Span};
+        use ppl_syntax::ast::{doc::PplDocument, span::Span};
 
-        let doc = SmqlDocument {
+        let doc = PplDocument {
             define_block: None,
             execution_block: None,
             connections: vec![],

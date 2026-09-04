@@ -7,7 +7,7 @@
 #   ./build_fixtures.sh js        # build only the JS fixtures
 #
 # The JS branch shells out to `npx esbuild` (downloaded on demand) and to the
-# `stratum plugin compile` CLI, which patches each bundle into a pre-built JS
+# `pag plugin compile` CLI, which patches each bundle into a pre-built JS
 # runtime WASM.
 
 set -euo pipefail
@@ -17,7 +17,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 FIXTURES_DIR="$SCRIPT_DIR/fixtures"
 RUST_PLUGINS_DIR="$SCRIPT_DIR/plugins/rust"
 JS_PLUGINS_DIR="$SCRIPT_DIR/plugins/js"
-RUNTIME_WASM="$REPO_ROOT/crates/sdk/stratum-plugin-compiler/assets/stratum-plugin-js-runtime.wasm"
+RUNTIME_WASM="$REPO_ROOT/crates/sdk/paganel-plugin-compiler/assets/paganel-plugin-js-runtime.wasm"
 
 TARGET="${1:-all}"
 
@@ -42,18 +42,18 @@ build_js() {
     }
 
     # 1. Pre-build the JS runtime WASM the compiler patches into. The crate is a
-    #    cdylib, so the artifact is stratum_plugin_js_runtime.wasm. It is excluded
+    #    cdylib, so the artifact is paganel_plugin_js_runtime.wasm. It is excluded
     #    from the root workspace (wasm-only, see Cargo.toml), so build it by its
     #    manifest path; its artifacts land in the crate's own target dir.
-    echo "Building JS runtime (stratum-plugin-js-runtime)..."
-    JS_RUNTIME_DIR="$REPO_ROOT/crates/sdk/stratum-plugin-js-runtime"
+    echo "Building JS runtime (paganel-plugin-js-runtime)..."
+    JS_RUNTIME_DIR="$REPO_ROOT/crates/sdk/paganel-plugin-js-runtime"
     cargo build --manifest-path "$JS_RUNTIME_DIR/Cargo.toml" --target wasm32-wasip1 --release
     mkdir -p "$(dirname "$RUNTIME_WASM")"
-    cp "$JS_RUNTIME_DIR/target/wasm32-wasip1/release/stratum_plugin_js_runtime.wasm" "$RUNTIME_WASM"
+    cp "$JS_RUNTIME_DIR/target/wasm32-wasip1/release/paganel_plugin_js_runtime.wasm" "$RUNTIME_WASM"
 
     # 2. A thin wrapper so the compiler can invoke esbuild via npx (single
     #    binary path; npx --yes fetches esbuild on first use). The compiler
-    #    supplies `@stratum/plugin-sdk` to esbuild itself (embedded + aliased),
+    #    supplies `@paganel/plugin-sdk` to esbuild itself (embedded + aliased),
     #    so no node_modules setup is needed here.
     ESBUILD_WRAPPER="$SCRIPT_DIR/.esbuild-npx.sh"
     cat > "$ESBUILD_WRAPPER" <<'EOF'

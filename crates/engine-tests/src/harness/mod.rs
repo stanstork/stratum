@@ -1,8 +1,8 @@
 pub mod db;
 pub mod direction;
 pub mod fixtures;
+pub mod ppl;
 pub mod runner;
-pub mod smql;
 
 pub use db::Dbms;
 pub use direction::Direction;

@@ -32,7 +32,7 @@ Keyed Merkle receipts for post-migration integrity verification
 
 Conventional migration verification relies on row count comparison. Matching counts do not guarantee matching data: silent corruption, partial writes, network-level bit flips, and OOM kills mid-batch can all produce a destination with the correct row count but incorrect data.
 
-Stratum hashes each post-transform row, keys that hash by the row's primary key, and commits the whole keyed set to a single Merkle root stored in a `VerificationReceipt`. The `verify` command re-reads the destination, rebuilds the same keyed set, and compares - reporting each difference by primary key.
+Paganel hashes each post-transform row, keys that hash by the row's primary key, and commits the whole keyed set to a single Merkle root stored in a `VerificationReceipt`. The `verify` command re-reads the destination, rebuilds the same keyed set, and compares - reporting each difference by primary key.
 
 This detects:
 
@@ -53,7 +53,7 @@ The hash is computed over post-transform output. Whether `lower(trim(email))` do
 
 Verification also does not prove that the correct rows were selected from the source. If a `where` filter was wrong and selected the wrong rows, the destination hash will still match the stored receipt - because the receipt was computed from whatever was written.
 
-**Self-attestation.** Both halves of the comparison are produced by Stratum: the receipt records what the producer computed, and verify re-reads what the destination holds. This is strong evidence against data loss, corruption, partial writes, and after-the-fact modification. It is not an end-to-end proof that source and destination agree - that needs a second commitment taken on the source side, which is out of scope here (see [Future Extensions](#future-extensions)).
+**Self-attestation.** Both halves of the comparison are produced by Paganel: the receipt records what the producer computed, and verify re-reads what the destination holds. This is strong evidence against data loss, corruption, partial writes, and after-the-fact modification. It is not an end-to-end proof that source and destination agree - that needs a second commitment taken on the source side, which is out of scope here (see [Future Extensions](#future-extensions)).
 
 ### Trust boundary
 
@@ -67,7 +67,7 @@ What closes the gap is retaining the root somewhere the modification cannot reac
 
 Two related limits, for completeness:
 
-- **No authorship.** The root commits to content, not to who produced it. Anyone can compute a valid root for any data, so a receipt cannot distinguish one Stratum run from a forged file. Signing the root would be the fix; nothing here does that today.
+- **No authorship.** The root commits to content, not to who produced it. Anyone can compute a valid root for any data, so a receipt cannot distinguish one Paganel run from a forged file. Signing the root would be the fix; nothing here does that today.
 - **No secret.** There is no keyed MAC, so the commitment is verifiable by anyone - which is what makes it auditable, and also why it proves nothing about provenance.
 
 ### Non-deterministic destination columns
@@ -84,7 +84,7 @@ data movement was correct. This happens when a destination column:
 - is regenerated on write by an `ON UPDATE CURRENT_TIMESTAMP` clause or a
   trigger (e.g. on an `on_conflict = "do_update"` upsert).
 
-Stratum does not strip such defaults from the destination: a destination
+Paganel does not strip such defaults from the destination: a destination
 column may legitimately need one, and a pre-existing destination table is outside
 the migration's control. If a table has non-deterministic columns, expect
 `verify` to flag it - the mismatch is in those generated columns, not in the
@@ -387,7 +387,7 @@ would charge per-record index memory for an index no one queries. They live in a
 append-and-sort log:
 
 ```
-~/.stratum/state/rowhash/{scope}/{pipeline}/{table}/
+~/.paganel/state/rowhash/{scope}/{pipeline}/{table}/
     pending.log     appended during the run, unsorted
     run-000.tmp     sorted chunks, only while sealing a set too large to sort in memory
     sorted.log      the sealed set: sorted by key, one record per key
@@ -446,8 +446,8 @@ Before running a large migration with `--integrity`:
 
 - **The sealed set is retained**, not deleted at the end of the run. `verify` reads
   it, so it has to outlive `apply`. It is replaced the next time the same pipeline
-  runs, and removed by `stratum reset`. A 10M-row table with an integer key leaves
-  ~510 MB on disk under `~/.stratum/state/rowhash/apply/`.
+  runs, and removed by `pag reset`. A 10M-row table with an integer key leaves
+  ~510 MB on disk under `~/.paganel/state/rowhash/apply/`.
 - **Sealing needs headroom.** The pending log, the sorted runs, and the merged
   output all exist at once for part of the seal, so peak disk during finalize is up
   to ~3x the sealed size - about **1.5 GB** for that 10M-row table, falling back to
@@ -516,13 +516,13 @@ The CLI also supports writing the report to a file via `--output`.
 
 ```bash
 # Run migration and commit a keyed Merkle receipt per destination table
-stratum apply -c migration.smql --integrity
+pag apply -c migration.ppl --integrity
 
 # Verify the destination against the stored receipt
-stratum verify -c migration.smql
+pag verify -c migration.ppl
 
 # Write the verification report to a file
-stratum verify -c migration.smql --output report.txt
+pag verify -c migration.ppl --output report.txt
 ```
 
 Without `--integrity`, hashing is disabled and costs nothing. There is

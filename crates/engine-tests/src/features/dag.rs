@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use crate::harness::smql::feature_smql;
+    use crate::harness::ppl::feature_ppl;
     use crate::{
-        harness::runner::{assert_row_count, assert_table_exists, run_smql},
+        harness::runner::{assert_row_count, assert_table_exists, run_ppl},
         reset_postgres_schema,
     };
     use tracing_test::traced_test;
@@ -21,7 +21,7 @@ mod tests {
     async fn tc_dag_01_sequential_dependencies() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
 
             // First pipeline - no dependencies
@@ -79,7 +79,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         // Verify all tables were created and populated
         assert_table_exists("actor", true).await;
@@ -105,7 +105,7 @@ mod tests {
     async fn tc_dag_02_parallel_execution() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
 
             // Root pipeline - no dependencies
@@ -182,7 +182,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         // Verify all tables were created and populated
         assert_table_exists("actor", true).await;
@@ -212,7 +212,7 @@ mod tests {
     async fn tc_dag_03_diamond_dependencies() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
 
             // Level 0: Root
@@ -308,7 +308,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         // Verify all tables were created and populated
         assert_table_exists("actor", true).await;
@@ -336,7 +336,7 @@ mod tests {
     async fn tc_dag_04_independent_pipelines() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
 
             // All independent pipelines
@@ -388,7 +388,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         // Verify all tables were created and populated
         assert_table_exists("actor", true).await;
@@ -412,7 +412,7 @@ mod tests {
     async fn tc_dag_05_complex_dependencies() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
 
             // Level 0: Two independent roots
@@ -522,7 +522,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         // Verify all tables were created and populated
         assert_table_exists("actor", true).await;
@@ -556,7 +556,7 @@ mod tests {
     async fn tc_dag_07_failure_continue_independent() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
             execution {
                 max_concurrency = 8
@@ -662,7 +662,7 @@ mod tests {
         );
 
         // This should fail but continue with independent pipelines
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         // Verify successful pipelines
         assert_table_exists("actor", true).await;
@@ -687,7 +687,7 @@ mod tests {
     async fn tc_dag_06_wide_dependencies() {
         reset_postgres_schema().await;
 
-        let tmpl = feature_smql(
+        let tmpl = feature_ppl(
             r#"
             execution {
                 strategy = "parallel"
@@ -782,7 +782,7 @@ mod tests {
         "#,
         );
 
-        let _ = run_smql(&tmpl, false).await;
+        let _ = run_ppl(&tmpl, false).await;
 
         // Verify all tables were created and populated
         assert_table_exists("actor", true).await;

@@ -3,13 +3,13 @@ use clap::Parser;
 
 #[derive(Parser)]
 #[command(
-    name = "stratum",
+    name = "pag",
     version = env!("CARGO_PKG_VERSION"),
     about = "Data migration tool",
     long_version = build_version_string(),
     after_help = "ENVIRONMENT VARIABLES:
-  STRATUM_CONFIG      Path to config file (overrides auto-discovery)
-  STRATUM_LOG_LEVEL   Log level: error, warn, info, debug, trace"
+  PAGANEL_CONFIG      Path to config file (overrides auto-discovery)
+  PAGANEL_LOG_LEVEL   Log level: error, warn, info, debug, trace"
 )]
 pub struct Cli {
     #[command(subcommand)]

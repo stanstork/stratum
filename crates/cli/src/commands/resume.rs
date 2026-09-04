@@ -34,7 +34,7 @@ pub async fn execute(
                 }
                 RunStatus::Failed { error, .. } => {
                     return Err(CliError::UserMessage(format!(
-                        "Migration '{config_path}' is in failed state: {error}\nUse 'stratum apply' to retry from last checkpoint."
+                        "Migration '{config_path}' is in failed state: {error}\nUse 'pag apply' to retry from last checkpoint."
                     )));
                 }
                 RunStatus::Running => {
@@ -45,7 +45,7 @@ pub async fn execute(
             },
             Ok(None) => {
                 return Err(CliError::UserMessage(format!(
-                    "No previous run found for '{config_path}' (run_id: {run_id})\nUse 'stratum apply' to start a new migration."
+                    "No previous run found for '{config_path}' (run_id: {run_id})\nUse 'pag apply' to start a new migration."
                 )));
             }
             Err(_) => {
@@ -54,7 +54,7 @@ pub async fn execute(
         },
         Err(_) => {
             return Err(CliError::UserMessage(format!(
-                "No previous run found for '{config_path}'\nUse 'stratum apply' to start a new migration."
+                "No previous run found for '{config_path}'\nUse 'pag apply' to start a new migration."
             )));
         }
     }

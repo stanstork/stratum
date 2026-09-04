@@ -1,7 +1,7 @@
 // JS counterpart of plugins/test_transform (adds two f64 fields).
-// Compiled into the JS runtime WASM via `stratum-plugin-compiler` and used by
+// Compiled into the JS runtime WASM via `paganel-plugin-compiler` and used by
 // the parity tests to assert it behaves identically to the Rust fixture.
-const { transform } = require("@stratum/plugin-sdk");
+const { transform } = require("@paganel/plugin-sdk");
 
 transform("test_transform", {
   version: "1.0.0",

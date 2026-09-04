@@ -6,8 +6,8 @@
 mod tests {
     use crate::{
         features::plugins::fixture,
-        harness::runner::{DbType, get_row_count, run_smql},
-        harness::smql::feature_smql,
+        harness::ppl::feature_ppl,
+        harness::runner::{DbType, get_row_count, run_ppl},
         reset_postgres_schema,
     };
     use std::time::{Duration, Instant};
@@ -16,8 +16,8 @@ mod tests {
     /// regressions, not normal variance.
     const MAX_PLUGIN_RUN: Duration = Duration::from_secs(120);
 
-    fn baseline_smql(dest: &str) -> String {
-        feature_smql(&format!(
+    fn baseline_ppl(dest: &str) -> String {
+        feature_ppl(&format!(
             r#"
 
             pipeline "bench" {{
@@ -39,8 +39,8 @@ mod tests {
         ))
     }
 
-    fn plugin_smql(dest: &str) -> String {
-        feature_smql(&format!(
+    fn plugin_ppl(dest: &str) -> String {
+        feature_ppl(&format!(
             r#"
             plugin "adder" {{ path = "{plugin}" }}
 
@@ -65,11 +65,11 @@ mod tests {
         ))
     }
 
-    /// Reset, run the SMQL, and return the wall-clock duration.
-    async fn time_run(smql: &str) -> Duration {
+    /// Reset, run the PPL, and return the wall-clock duration.
+    async fn time_run(ppl: &str) -> Duration {
         reset_postgres_schema().await;
         let start = Instant::now();
-        run_smql(smql, false).await.expect("migration failed");
+        run_ppl(ppl, false).await.expect("migration failed");
         start.elapsed()
     }
 
@@ -78,11 +78,11 @@ mod tests {
         let src = get_row_count("payment", "sakila", DbType::MySql).await;
 
         // Baseline: plain column copy.
-        let base = time_run(&baseline_smql("bench_baseline")).await;
+        let base = time_run(&baseline_ppl("bench_baseline")).await;
         let base_rows = get_row_count("bench_baseline", "testdb", DbType::Postgres).await;
 
         // With a per-row Rust transform plugin.
-        let plug = time_run(&plugin_smql("bench_plugin")).await;
+        let plug = time_run(&plugin_ppl("bench_plugin")).await;
         let plug_rows = get_row_count("bench_plugin", "testdb", DbType::Postgres).await;
 
         // Correctness: both migrate every row.

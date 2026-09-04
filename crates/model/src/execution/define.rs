@@ -18,7 +18,7 @@ pub struct GlobalDefinitions {
 /// Tracks the source of a definition value for planner reporting
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DefinitionSource {
-    /// Literal value in SMQL config
+    /// Literal value in PPL config
     Literal,
 
     /// From env("VAR") - required

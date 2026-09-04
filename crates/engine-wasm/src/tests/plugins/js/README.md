@@ -25,27 +25,27 @@ then compiles every plugin here:
 
 That branch:
 
-1. rebuilds `stratum-plugin-js-runtime` into the compiler crate's committed asset
-   (`crates/sdk/stratum-plugin-compiler/assets/stratum-plugin-js-runtime.wasm`),
+1. rebuilds `paganel-plugin-js-runtime` into the compiler crate's committed asset
+   (`crates/sdk/paganel-plugin-compiler/assets/paganel-plugin-js-runtime.wasm`),
    which the compiler embeds,
 2. writes a wrapper that runs `npx esbuild`, and
-3. runs `stratum plugin compile <file>.js -o ../../fixtures/<file>_js.wasm` for each.
+3. runs `pag plugin compile <file>.js -o ../../fixtures/<file>_js.wasm` for each.
 
 The per-file command (what the loop runs) is:
 
 ```bash
-stratum plugin compile test_transform.js \
+pag plugin compile test_transform.js \
     -o ../../fixtures/test_transform_js.wasm \
     --esbuild-path <npx-esbuild-wrapper> \
     --runtime-wasm <freshly-built runtime asset>
 ```
 
-`@stratum/plugin-sdk` needs no `node_modules` setup: the compiler bundles the
+`@paganel/plugin-sdk` needs no `node_modules` setup: the compiler bundles the
 SDK it embeds and hands it to esbuild (`--runtime-wasm` here just pins the
 freshly-rebuilt runtime instead of the embedded default).
 
-Under the hood this is `stratum-plugin-compiler`, which bundles the JS with the
-`@stratum/plugin-sdk` package via esbuild, extracts metadata by running the
+Under the hood this is `paganel-plugin-compiler`, which bundles the JS with the
+`@paganel/plugin-sdk` package via esbuild, extracts metadata by running the
 bundle in QuickJS, and patches both into the runtime's data segments. The
 compiled `*_js.wasm` files load through the same `WasmEngine` as the Rust
 fixtures, so the parity tests run them side by side.

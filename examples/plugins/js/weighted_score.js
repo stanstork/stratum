@@ -2,7 +2,7 @@
 // capability (`allow_fs_read`) to read the file and the ENV capability
 // (`allow_env`) to locate it.
 //
-// The lookup path comes from the STRATUM_WEIGHTS env var when set, otherwise a
+// The lookup path comes from the PAGANEL_WEIGHTS env var when set, otherwise a
 // default. The file is read once and cached for the instance. Returns the weight
 // for the row's key, or 0 when the key is absent.
 //
@@ -10,15 +10,15 @@
 // inside a granted directory). Both see exactly the sandbox the declaration
 // grants - identical to what a Rust plugin gets via std::env / std::fs.
 //
-// Test: run via configs/file_lookup.smql.
-const { transform, fs, env } = require("@stratum/plugin-sdk");
+// Test: run via configs/file_lookup.ppl.
+const { transform, fs, env } = require("@paganel/plugin-sdk");
 
 const DEFAULT_PATH = "examples/plugins/data/weights.json";
 
 let weights = null;
 function loadWeights() {
   if (weights) return weights;
-  const path = env.get("STRATUM_WEIGHTS") || DEFAULT_PATH;
+  const path = env.get("PAGANEL_WEIGHTS") || DEFAULT_PATH;
   const text = fs.readText(path);
   weights = text ? JSON.parse(text) : {};
   return weights;

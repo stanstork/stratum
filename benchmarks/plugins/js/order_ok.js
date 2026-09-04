@@ -2,7 +2,7 @@
 // its `amount` is non-negative. Deliberately identical logic to ../rust/order_ok
 // so the two plugin runtimes are measured on the same per-row filter work -
 // isolating each runtime's invocation cost, not the predicate.
-const { filter } = require("@stratum/plugin-sdk");
+const { filter } = require("@paganel/plugin-sdk");
 
 filter("order_ok", {
   version: "1.0.0",

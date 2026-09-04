@@ -87,7 +87,7 @@ impl DagExecutor {
             MigrationError::InitializationError("Could not determine home directory".to_string())
         })?;
 
-        let state_dir = home_dir.join(".stratum/state");
+        let state_dir = home_dir.join(".paganel/state");
         let state = Arc::new(SledStateStore::open(&state_dir).map_err(|e| {
             MigrationError::InitializationError(format!("Failed to open state store: {e}"))
         })?);

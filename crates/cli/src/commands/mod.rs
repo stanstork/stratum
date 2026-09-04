@@ -17,9 +17,9 @@ pub mod status;
 pub mod verify;
 pub mod version;
 
-const STATE_DIR: &str = ".stratum/state";
+const STATE_DIR: &str = ".paganel/state";
 
-/// Returns the path to the state directory (~/.stratum/state/).
+/// Returns the path to the state directory (~/.paganel/state/).
 pub fn state_dir() -> Result<PathBuf, CliError> {
     let home = dirs::home_dir()
         .ok_or_else(|| CliError::Unknown("Could not determine home directory".to_string()))?;
@@ -82,7 +82,7 @@ pub enum PluginCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Validate every plugin referenced in an SMQL config.
+    /// Validate every plugin referenced in an PPL config.
     Validate {
         #[arg(short = 'c', long)]
         config: Option<String>,
@@ -117,7 +117,7 @@ pub enum Commands {
         #[arg(
             short = 'c',
             long,
-            help = "Path to SMQL config file (auto-discovered if not specified)"
+            help = "Path to PPL config file (auto-discovered if not specified)"
         )]
         config: Option<String>,
 
@@ -165,7 +165,7 @@ pub enum Commands {
         #[arg(
             short = 'c',
             long,
-            help = "Path to SMQL config file (auto-discovered if not specified)"
+            help = "Path to PPL config file (auto-discovered if not specified)"
         )]
         config: Option<String>,
 
@@ -187,7 +187,7 @@ pub enum Commands {
         #[arg(
             short = 'c',
             long,
-            help = "Path to SMQL config file (auto-discovered if not specified)"
+            help = "Path to PPL config file (auto-discovered if not specified)"
         )]
         config: Option<String>,
 
@@ -220,7 +220,7 @@ pub enum Commands {
         #[arg(
             short = 'c',
             long,
-            help = "Path to SMQL config file. If provided, shows status for that migration only"
+            help = "Path to PPL config file. If provided, shows status for that migration only"
         )]
         config: Option<String>,
     },
@@ -229,7 +229,7 @@ pub enum Commands {
         #[arg(
             short = 'c',
             long,
-            help = "Path to SMQL config file (auto-discovered if not specified)"
+            help = "Path to PPL config file (auto-discovered if not specified)"
         )]
         config: Option<String>,
 
@@ -247,7 +247,7 @@ pub enum Commands {
         #[arg(
             short = 'c',
             long,
-            help = "Path to SMQL config file (auto-discovered if not specified)"
+            help = "Path to PPL config file (auto-discovered if not specified)"
         )]
         config: Option<String>,
 
@@ -256,7 +256,7 @@ pub enum Commands {
     },
     /// Send pause signal to a running migration
     Pause {
-        #[arg(short = 'c', long, help = "Path to SMQL config file")]
+        #[arg(short = 'c', long, help = "Path to PPL config file")]
         config: String,
     },
     /// Show version information

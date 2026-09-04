@@ -1,14 +1,14 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        harness::runner::{DbType, execute, get_row_count, run_smql, run_verify_smql},
+        harness::runner::{DbType, execute, get_row_count, run_ppl, run_verify_ppl},
         reset_postgres_schema,
     };
     use engine_core::plan::execution::ExecutionPlan;
     use engine_processing::EnvContext;
     use engine_verify::verify;
     use model::integrity::result::{DivergenceKind, VerificationResult};
-    use smql_syntax::builder::parse;
+    use ppl_syntax::builder::parse;
     use std::sync::Arc;
     use tracing_test::traced_test;
 
@@ -37,131 +37,129 @@ mod tests {
             }
         "#;
         dir.reset().await;
-        let smql = dir.smql(body);
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql)
+        let ppl = dir.ppl(body);
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl)
             .await
             .expect("verify should match for PG -> MySQL");
     }
 
     /// Simplest case: actor table, small row count, straightforward types.
-    // Config: crates/engine-tests/configs/verify/actor.smql
+    // Config: crates/engine-tests/configs/verify/actor.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_actor_matches() {
         reset_postgres_schema().await;
-        let smql = verify_config!("actor.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = verify_config!("actor.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// Larger table with DECIMAL, TIMESTAMP, nullable INT columns.
-    // Config: crates/engine-tests/configs/verify/payment.smql
+    // Config: crates/engine-tests/configs/verify/payment.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_payment_matches() {
         reset_postgres_schema().await;
-        let smql = verify_config!("payment.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = verify_config!("payment.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// Type-rich table: ENUM, SET, YEAR, DECIMAL, TEXT, nullable SMALLINT.
-    // Config: crates/engine-tests/configs/verify/language.smql (prereq, no integrity)
-    //         examples/configs/verify/film.smql      (with integrity)
+    // Config: crates/engine-tests/configs/verify/language.ppl (prereq, no integrity)
+    //         examples/configs/verify/film.ppl      (with integrity)
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_film_matches() {
         reset_postgres_schema().await;
         // Language must exist first to satisfy film's FK constraint.
         // No integrity receipt is needed for this prerequisite step.
-        run_smql(&verify_config!("language.smql"), false)
+        run_ppl(&verify_config!("language.ppl"), false)
             .await
             .expect("language apply failed");
-        let film_smql = verify_config!("film.smql");
-        run_smql(&film_smql, true).await.expect("film apply failed");
-        run_verify_smql(&film_smql)
-            .await
-            .expect("film verify failed");
+        let film_ppl = verify_config!("film.ppl");
+        run_ppl(&film_ppl, true).await.expect("film apply failed");
+        run_verify_ppl(&film_ppl).await.expect("film verify failed");
     }
 
     /// Verify works when batch_size divides row count evenly (no partial last batch).
-    // Config: crates/engine-tests/configs/verify/actor_exact_batch.smql  (batch_size=200, actor=200 rows)
+    // Config: crates/engine-tests/configs/verify/actor_exact_batch.ppl  (batch_size=200, actor=200 rows)
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_exact_batch_boundary() {
         reset_postgres_schema().await;
-        let smql = verify_config!("actor_exact_batch.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = verify_config!("actor_exact_batch.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// Verify works when the last batch is partial (total rows % batch_size != 0).
-    // Config: crates/engine-tests/configs/verify/actor_partial_batch.smql  (batch_size=77, actor=200 rows)
+    // Config: crates/engine-tests/configs/verify/actor_partial_batch.ppl  (batch_size=77, actor=200 rows)
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_partial_last_batch() {
         reset_postgres_schema().await;
-        let smql = verify_config!("actor_partial_batch.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = verify_config!("actor_partial_batch.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// Cascade migration: payment + FK depth-1 (customer, staff, rental).
-    // Config: crates/engine-tests/configs/verify/payment_cascade.smql
+    // Config: crates/engine-tests/configs/verify/payment_cascade.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_cascade_payment_matches() {
         reset_postgres_schema().await;
-        let smql = verify_config!("payment_cascade.smql");
-        run_smql(&smql, true).await.expect("cascade apply failed");
-        run_verify_smql(&smql).await.expect("cascade verify failed");
+        let ppl = verify_config!("payment_cascade.ppl");
+        run_ppl(&ppl, true).await.expect("cascade apply failed");
+        run_verify_ppl(&ppl).await.expect("cascade verify failed");
     }
 
     /// Verify detects when a row has been modified in the destination after apply.
-    // Config: crates/engine-tests/configs/verify/actor.smql
+    // Config: crates/engine-tests/configs/verify/actor.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_detects_modified_row() {
         use crate::harness::runner::execute;
 
         reset_postgres_schema().await;
-        let smql = verify_config!("actor.smql");
-        run_smql(&smql, true).await.expect("apply failed");
+        let ppl = verify_config!("actor.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
 
         execute("UPDATE actor SET first_name = 'TAMPERED' WHERE actor_id = 1").await;
 
-        let result = run_verify_smql(&smql).await;
+        let result = run_verify_ppl(&ppl).await;
         assert!(result.is_err(), "verify should have detected the mismatch");
     }
 
     /// Verify detects when a row has been deleted from the destination after apply.
-    // Config: crates/engine-tests/configs/verify/actor.smql
+    // Config: crates/engine-tests/configs/verify/actor.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_detects_deleted_row() {
         use crate::harness::runner::execute;
 
         reset_postgres_schema().await;
-        let smql = verify_config!("actor.smql");
-        run_smql(&smql, true).await.expect("apply failed");
+        let ppl = verify_config!("actor.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
 
         execute("DELETE FROM actor WHERE actor_id = 1").await;
 
-        let result = run_verify_smql(&smql).await;
+        let result = run_verify_ppl(&ppl).await;
         assert!(result.is_err(), "verify should have detected the mismatch");
     }
 
     /// Verify returns NoPriorRun (no error) when no receipt exists yet.
-    // Config: crates/engine-tests/configs/verify/actor.smql
+    // Config: crates/engine-tests/configs/verify/actor.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_no_receipt_is_not_error() {
         reset_postgres_schema().await;
-        let smql = verify_config!("actor.smql");
+        let ppl = verify_config!("actor.ppl");
         // Migrate without --integrity so no receipt is written.
-        run_smql(&smql, false).await.expect("apply failed");
-        run_verify_smql(&smql)
+        run_ppl(&ppl, false).await.expect("apply failed");
+        run_verify_ppl(&ppl)
             .await
             .expect("verify should not error on missing receipt");
     }
@@ -174,14 +172,14 @@ mod tests {
     ///
     /// Key insight: verify checks "destination == receipt", NOT "destination == source".
     /// A filtered migration verifies correctly even though it's a subset of the source.
-    // Config: crates/engine-tests/configs/verify/payment_staff_filter.smql
+    // Config: crates/engine-tests/configs/verify/payment_staff_filter.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_where_filter_matches() {
         reset_postgres_schema().await;
-        let smql = verify_config!("payment_staff_filter.smql");
+        let ppl = verify_config!("payment_staff_filter.ppl");
 
-        run_smql(&smql, true).await.expect("apply failed");
+        run_ppl(&ppl, true).await.expect("apply failed");
 
         // Destination has only staff_id=1 rows - fewer than the full payment table.
         let dest_count = get_row_count("payment", "sakila", DbType::Postgres).await;
@@ -191,7 +189,7 @@ mod tests {
             "filter should have excluded some rows (got {dest_count} of {total_count})"
         );
 
-        run_verify_smql(&smql).await.expect("verify failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// SKIP validation: rows failing the check are excluded from the destination.
@@ -199,14 +197,14 @@ mod tests {
     /// `action = skip` silently drops rows that fail the check - they never reach
     /// the destination and are not included in the receipt. Verify sees a smaller
     /// destination but the receipt matches exactly what was written.
-    // Config: crates/engine-tests/configs/verify/payment_skip_validation.smql
+    // Config: crates/engine-tests/configs/verify/payment_skip_validation.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_skip_validation_matches() {
         reset_postgres_schema().await;
-        let smql = verify_config!("payment_skip_validation.smql");
+        let ppl = verify_config!("payment_skip_validation.ppl");
 
-        run_smql(&smql, true).await.expect("apply failed");
+        run_ppl(&ppl, true).await.expect("apply failed");
 
         // Destination has only amount <= 5.00 rows.
         let dest_count = get_row_count("payment", "sakila", DbType::Postgres).await;
@@ -216,21 +214,21 @@ mod tests {
             "skip validation should have excluded some rows (got {dest_count} of {total_count})"
         );
 
-        run_verify_smql(&smql).await.expect("verify failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// WARN validation: rows failing the check are still migrated (warn != skip).
     ///
     /// All rows reach the destination. The receipt covers the full table.
     /// Verify should pass with the complete row count.
-    // Config: crates/engine-tests/configs/verify/actor_warn_validation.smql
+    // Config: crates/engine-tests/configs/verify/actor_warn_validation.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_warn_validation_all_rows_present() {
         reset_postgres_schema().await;
-        let smql = verify_config!("actor_warn_validation.smql");
+        let ppl = verify_config!("actor_warn_validation.ppl");
 
-        run_smql(&smql, true).await.expect("apply failed");
+        run_ppl(&ppl, true).await.expect("apply failed");
 
         // Warn does NOT skip rows - destination should have the full actor count.
         let dest_count = get_row_count("actor", "sakila", DbType::Postgres).await;
@@ -240,7 +238,7 @@ mod tests {
             "warn validation must not skip rows (dest={dest_count}, src={source_count})"
         );
 
-        run_verify_smql(&smql).await.expect("verify failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// WHERE filter + SKIP validation combined.
@@ -249,14 +247,14 @@ mod tests {
     /// then the skip validation further excludes rows that pass the filter but fail
     /// the check. Verify only sees the doubly-reduced destination and compares it
     /// against the receipt, which was built from the same doubly-reduced set.
-    // Config: crates/engine-tests/configs/verify/payment_filter_and_skip.smql
+    // Config: crates/engine-tests/configs/verify/payment_filter_and_skip.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_filter_and_skip_combined() {
         reset_postgres_schema().await;
-        let smql = verify_config!("payment_filter_and_skip.smql");
+        let ppl = verify_config!("payment_filter_and_skip.ppl");
 
-        run_smql(&smql, true).await.expect("apply failed");
+        run_ppl(&ppl, true).await.expect("apply failed");
 
         // Both conditions reduce the destination below the full payment count.
         let dest_count = get_row_count("payment", "sakila", DbType::Postgres).await;
@@ -266,7 +264,7 @@ mod tests {
             "filter + skip should have excluded rows (got {dest_count} of {total_count})"
         );
 
-        run_verify_smql(&smql).await.expect("verify failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// JOIN + WHERE filter + TIMESTAMP pagination, then verify.
@@ -279,14 +277,14 @@ mod tests {
     ///   - computed columns in the receipt hashes
     ///   - a filtered source (receipt covers only the staff_id=1 rows)
     ///   - non-PK cursor: verify replays identical timestamp batch boundaries
-    // Config: crates/engine-tests/configs/verify/rental_join_filter_ts.smql
+    // Config: crates/engine-tests/configs/verify/rental_join_filter_ts.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_join_filter_timestamp_pagination() {
         reset_postgres_schema().await;
-        let smql = verify_config!("rental_join_filter_ts.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = verify_config!("rental_join_filter_ts.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// CASCADE migration of payment with NUMERIC pagination, then verify.
@@ -303,30 +301,30 @@ mod tests {
     ///   - non-PK cursor on the root table
     ///   - variable cascade row counts per batch (customer/staff/rental counts
     ///     differ between the staff_id=1 and staff_id=2 halves)
-    // Config: crates/engine-tests/configs/verify/payment_cascade_numeric.smql
+    // Config: crates/engine-tests/configs/verify/payment_cascade_numeric.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_cascade_with_numeric_pagination() {
         reset_postgres_schema().await;
-        let smql = verify_config!("payment_cascade_numeric.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = verify_config!("payment_cascade_numeric.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// Tamper detection still works on a filtered result set.
     ///
     /// Even though only a subset was migrated, modifying any row in that subset
     /// changes its hash and causes verify to detect the mismatch.
-    // Config: crates/engine-tests/configs/verify/payment_staff_filter.smql
+    // Config: crates/engine-tests/configs/verify/payment_staff_filter.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_filtered_detects_tampering() {
         use crate::harness::runner::execute;
 
         reset_postgres_schema().await;
-        let smql = verify_config!("payment_staff_filter.smql");
+        let ppl = verify_config!("payment_staff_filter.ppl");
 
-        run_smql(&smql, true).await.expect("apply failed");
+        run_ppl(&ppl, true).await.expect("apply failed");
 
         execute(
             "UPDATE payment SET amount = amount + 100.00 WHERE payment_id = \
@@ -334,7 +332,7 @@ mod tests {
         )
         .await;
 
-        let result = run_verify_smql(&smql).await;
+        let result = run_verify_ppl(&ppl).await;
         assert!(
             result.is_err(),
             "verify should detect tampering in filtered result set"
@@ -345,15 +343,15 @@ mod tests {
     ///
     /// The receipt records N rows across M batches. If the destination gains a new
     /// row after apply, the hash of at least one batch will differ from the receipt.
-    // Config: crates/engine-tests/configs/verify/actor.smql
+    // Config: crates/engine-tests/configs/verify/actor.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_detects_inserted_row() {
         use crate::harness::runner::execute;
 
         reset_postgres_schema().await;
-        let smql = verify_config!("actor.smql");
-        run_smql(&smql, true).await.expect("apply failed");
+        let ppl = verify_config!("actor.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
 
         execute(
             "INSERT INTO actor (actor_id, first_name, last_name, last_update) \
@@ -361,7 +359,7 @@ mod tests {
         )
         .await;
 
-        let result = run_verify_smql(&smql).await;
+        let result = run_verify_ppl(&ppl).await;
         assert!(
             result.is_err(),
             "verify should detect the extra inserted row"
@@ -373,15 +371,15 @@ mod tests {
     /// customer_name is a concat() of first_name + last_name from the joined
     /// customer table. If someone updates customer_name directly in the
     /// destination, the row hash changes and verify must catch it.
-    // Config: crates/engine-tests/configs/verify/rental_join_filter_ts.smql
+    // Config: crates/engine-tests/configs/verify/rental_join_filter_ts.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_detects_tamper_in_computed_column() {
         use crate::harness::runner::execute;
 
         reset_postgres_schema().await;
-        let smql = verify_config!("rental_join_filter_ts.smql");
-        run_smql(&smql, true).await.expect("apply failed");
+        let ppl = verify_config!("rental_join_filter_ts.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
 
         execute(
             "UPDATE rental SET customer_name = 'TAMPERED NAME' \
@@ -389,7 +387,7 @@ mod tests {
         )
         .await;
 
-        let result = run_verify_smql(&smql).await;
+        let result = run_verify_ppl(&ppl).await;
         assert!(
             result.is_err(),
             "verify should detect tampering in a computed column"
@@ -402,15 +400,15 @@ mod tests {
     /// Each cascade table has its own keyed receipt.
     /// Modifying a row in a leaf table (customer) must change its receipt hash
     /// and cause verify to report a mismatch.
-    // Config: crates/engine-tests/configs/verify/payment_cascade.smql
+    // Config: crates/engine-tests/configs/verify/payment_cascade.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_cascade_detects_tamper_in_leaf_table() {
         use crate::harness::runner::execute;
 
         reset_postgres_schema().await;
-        let smql = verify_config!("payment_cascade.smql");
-        run_smql(&smql, true).await.expect("cascade apply failed");
+        let ppl = verify_config!("payment_cascade.ppl");
+        run_ppl(&ppl, true).await.expect("cascade apply failed");
 
         // Tamper with a customer row - a cascade leaf table
         execute(
@@ -419,7 +417,7 @@ mod tests {
         )
         .await;
 
-        let result = run_verify_smql(&smql).await;
+        let result = run_verify_ppl(&ppl).await;
         assert!(
             result.is_err(),
             "verify should detect tampering in a cascade leaf table"
@@ -431,14 +429,14 @@ mod tests {
     /// Receipt batch boundaries are keyed by payment_id cursor positions.
     /// Verify replays identical page boundaries by re-reading payment in
     /// the same order.
-    // Config: crates/engine-tests/configs/verify/payment_pk.smql
+    // Config: crates/engine-tests/configs/verify/payment_pk.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_pk_pagination() {
         reset_postgres_schema().await;
-        let smql = verify_config!("payment_pk.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = verify_config!("payment_pk.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// Verify works with NUMERIC pagination on a plain (non-cascade) table.
@@ -446,28 +444,28 @@ mod tests {
     /// Distinct from the cascade+numeric test: single table, no FK-dependent rows.
     /// Confirms the numeric composite cursor (staff_id + payment_id) replays
     /// correctly in verify when there is no cascade receipt overhead.
-    // Config: crates/engine-tests/configs/verify/payment_numeric_plain.smql
+    // Config: crates/engine-tests/configs/verify/payment_numeric_plain.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_numeric_pagination_no_cascade() {
         reset_postgres_schema().await;
-        let smql = verify_config!("payment_numeric_plain.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = verify_config!("payment_numeric_plain.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// Verify works with DEFAULT (OFFSET/LIMIT) pagination at scale.
     ///
     /// OFFSET-based batches carry no cursor state; the receipt records row counts
     /// per batch index and verify replays pages sequentially by position.
-    // Config: crates/engine-tests/configs/verify/payment_default.smql
+    // Config: crates/engine-tests/configs/verify/payment_default.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_with_default_pagination_large_table() {
         reset_postgres_schema().await;
-        let smql = verify_config!("payment_default.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = verify_config!("payment_default.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// Verify handles an empty result set (0 rows, 0 batches in receipt).
@@ -475,14 +473,14 @@ mod tests {
     /// A WHERE clause that matches no rows produces an empty migration.
     /// Verify must exit its batch loop immediately and return OK rather
     /// than looping indefinitely or reporting a spurious mismatch.
-    // Config: crates/engine-tests/configs/verify/actor_empty.smql
+    // Config: crates/engine-tests/configs/verify/actor_empty.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_empty_table() {
         reset_postgres_schema().await;
-        let smql = verify_config!("actor_empty.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql)
+        let ppl = verify_config!("actor_empty.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl)
             .await
             .expect("verify of empty result should pass");
     }
@@ -491,18 +489,18 @@ mod tests {
     ///
     /// The first batch is simultaneously the last - exercises the boundary
     /// where start = end = only batch. The receipt has exactly one entry.
-    // Config: crates/engine-tests/configs/verify/actor_single_row.smql
+    // Config: crates/engine-tests/configs/verify/actor_single_row.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_single_row() {
         reset_postgres_schema().await;
-        let smql = verify_config!("actor_single_row.smql");
-        run_smql(&smql, true).await.expect("apply failed");
+        let ppl = verify_config!("actor_single_row.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
 
         let dest_count = get_row_count("actor", "sakila", DbType::Postgres).await;
         assert_eq!(dest_count, 1, "expected exactly 1 row in destination");
 
-        run_verify_smql(&smql).await.expect("verify failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// Verify hashes NULL values consistently across source and destination.
@@ -510,30 +508,30 @@ mod tests {
     /// rental.return_date is DATETIME NULL; many rows have NULL there (open
     /// rentals not yet returned). Stable NULL encoding is required for hashes
     /// to match between MySQL and PostgreSQL.
-    // Config: crates/engine-tests/configs/verify/rental_plain.smql
+    // Config: crates/engine-tests/configs/verify/rental_plain.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_many_null_columns() {
         reset_postgres_schema().await;
-        let smql = verify_config!("rental_plain.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = verify_config!("rental_plain.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// Verify is idempotent - running it twice on unchanged data must both pass.
     ///
     /// Verify is a read-only operation. Re-running it against the same receipt
     /// and the same destination must produce identical results without side effects.
-    // Config: crates/engine-tests/configs/verify/actor.smql
+    // Config: crates/engine-tests/configs/verify/actor.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_idempotent() {
         reset_postgres_schema().await;
-        let smql = verify_config!("actor.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("first verify failed");
+        let ppl = verify_config!("actor.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("first verify failed");
         // Run a second time - receipt and data are unchanged; must still pass
-        run_verify_smql(&smql)
+        run_verify_ppl(&ppl)
             .await
             .expect("second verify should also pass");
     }
@@ -541,33 +539,33 @@ mod tests {
     /// Verify handles a config with multiple pipelines linked by an after dependency.
     ///
     /// Both language (6 rows) and film (1,000 rows) pipelines are migrated with
-    /// integrity. run_verify_smql must verify every pipeline in the config and
+    /// integrity. run_verify_ppl must verify every pipeline in the config and
     /// return OK only if all receipts match.
-    // Config: crates/engine-tests/configs/verify/dag_language_film.smql
+    // Config: crates/engine-tests/configs/verify/dag_language_film.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_dag_pipeline() {
         reset_postgres_schema().await;
-        let smql = verify_config!("dag_language_film.smql");
-        run_smql(&smql, true).await.expect("dag apply failed");
-        run_verify_smql(&smql).await.expect("dag verify failed");
+        let ppl = verify_config!("dag_language_film.ppl");
+        run_ppl(&ppl, true).await.expect("dag apply failed");
+        run_verify_ppl(&ppl).await.expect("dag verify failed");
     }
 
     /// Verify names the tampered row by primary key.
     ///
     /// Row-level detail is no longer a mode: every row is keyed, so a mismatch
     /// always reports which row diverged and how, not just a batch range.
-    // Config: crates/engine-tests/configs/verify/actor.smql
+    // Config: crates/engine-tests/configs/verify/actor.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_reports_the_tampered_row_by_key() {
         reset_postgres_schema().await;
-        let smql = verify_config!("actor.smql");
-        run_smql(&smql, true).await.expect("apply failed");
+        let ppl = verify_config!("actor.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
 
         execute("UPDATE actor SET last_name = 'HACKED' WHERE actor_id = 5").await;
 
-        let results = verify_results(&smql).await;
+        let results = verify_results(&ppl).await;
         let mismatch = results
             .iter()
             .find_map(|r| match r {
@@ -595,13 +593,13 @@ mod tests {
     /// A deleted row is reported as missing *by key*, and an inserted one as
     /// extra - the two are distinguishable, which positional receipts could not
     /// do (both simply shifted every following row).
-    // Config: crates/engine-tests/configs/verify/actor.smql
+    // Config: crates/engine-tests/configs/verify/actor.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_distinguishes_missing_from_extra_rows() {
         reset_postgres_schema().await;
-        let smql = verify_config!("actor.smql");
-        run_smql(&smql, true).await.expect("apply failed");
+        let ppl = verify_config!("actor.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
 
         execute("DELETE FROM actor WHERE actor_id = 3").await;
         execute(
@@ -610,7 +608,7 @@ mod tests {
         )
         .await;
 
-        let results = verify_results(&smql).await;
+        let results = verify_results(&ppl).await;
         let summary = results
             .iter()
             .find_map(|r| match r {
@@ -629,17 +627,17 @@ mod tests {
     /// Their rows arrive in FK-join order, which used to force a single sorted
     /// root with no row-level detail. Keyed by primary key, a tampered leaf row
     /// is named exactly like one in the root table.
-    // Config: crates/engine-tests/configs/verify/payment_cascade.smql
+    // Config: crates/engine-tests/configs/verify/payment_cascade.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_cascade_names_the_tampered_leaf_row() {
         reset_postgres_schema().await;
-        let smql = verify_config!("payment_cascade.smql");
-        run_smql(&smql, true).await.expect("cascade apply failed");
+        let ppl = verify_config!("payment_cascade.ppl");
+        run_ppl(&ppl, true).await.expect("cascade apply failed");
 
         execute("UPDATE customer SET first_name = 'TAMPERED' WHERE customer_id = 3").await;
 
-        let results = verify_results(&smql).await;
+        let results = verify_results(&ppl).await;
         let named = results.iter().any(|r| match r {
             VerificationResult::Mismatch {
                 receipt,
@@ -660,14 +658,14 @@ mod tests {
     /// Four range lanes write interleaved and out of key order. Because each row
     /// carries its key, lane layout has no bearing on the root or on row-level
     /// localization - which per-batch receipts lost entirely for parallel runs.
-    // Config: crates/engine-tests/configs/verify/payment_lanes.smql
+    // Config: crates/engine-tests/configs/verify/payment_lanes.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_multi_lane_migration() {
         reset_postgres_schema().await;
-        let smql = verify_config!("payment_lanes.smql");
-        run_smql(&smql, true).await.expect("lane apply failed");
-        run_verify_smql(&smql).await.expect("lane verify failed");
+        let ppl = verify_config!("payment_lanes.ppl");
+        run_ppl(&ppl, true).await.expect("lane apply failed");
+        run_verify_ppl(&ppl).await.expect("lane verify failed");
 
         execute(
             "UPDATE payment SET amount = amount + 1.00 \
@@ -675,7 +673,7 @@ mod tests {
         )
         .await;
 
-        let results = verify_results(&smql).await;
+        let results = verify_results(&ppl).await;
         let changed_one = results.iter().any(|r| {
             matches!(
                 r,
@@ -696,23 +694,23 @@ mod tests {
     /// integrity was on, because the receipt needed one ordered accumulator.
     /// Keyed hashes removed that constraint, so this exercises the combination
     /// that was previously unreachable.
-    // Config: crates/engine-tests/configs/verify/payment_cascade_lanes.smql
+    // Config: crates/engine-tests/configs/verify/payment_cascade_lanes.ppl
     #[traced_test]
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_cascade_with_parallel_table_lanes() {
         reset_postgres_schema().await;
-        let smql = verify_config!("payment_cascade_lanes.smql");
-        run_smql(&smql, true)
+        let ppl = verify_config!("payment_cascade_lanes.ppl");
+        run_ppl(&ppl, true)
             .await
             .expect("cascade lane apply failed");
-        run_verify_smql(&smql)
+        run_verify_ppl(&ppl)
             .await
             .expect("cascade lane verify failed");
     }
 
     /// Run verify and hand back the raw results for assertions on detail.
-    async fn verify_results(smql: &str) -> Vec<VerificationResult> {
-        let doc = parse(smql).expect("parse");
+    async fn verify_results(ppl: &str) -> Vec<VerificationResult> {
+        let doc = parse(ppl).expect("parse");
         let env = Arc::new(EnvContext::empty());
         let plan = ExecutionPlan::build(&doc, env.clone()).expect("build plan");
         verify(plan, env).await.expect("verify call failed")

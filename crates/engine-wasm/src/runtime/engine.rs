@@ -19,7 +19,7 @@ use wasmtime::{Engine, Linker, Module};
 pub struct WasmEngineConfig {
     /// Enable AOT compilation caching to disk.
     pub cache_compiled_modules: bool,
-    /// Directory for cached compiled modules. Default: ~/.stratum/wasm_cache/
+    /// Directory for cached compiled modules. Default: ~/.paganel/wasm_cache/
     pub cache_dir: Option<PathBuf>,
     /// Enable parallel compilation of WASM modules.
     pub parallel_compilation: bool,

@@ -1,20 +1,20 @@
 # Plugin Examples
 
-A spread of small JS plugins and SMQL configs for exercising the plugin system.
+A spread of small JS plugins and PPL configs for exercising the plugin system.
 
 ```
 examples/plugins/
   js/         one plugin per file (compiled + cached on first use)
-  configs/    SMQL wiring the plugins into pipelines
+  configs/    PPL wiring the plugins into pipelines
 ```
 
 ## Setup
 
 esbuild (or `npx esbuild`) must be on `PATH` - that's the only requirement. The
-`@stratum/plugin-sdk` package the plugins `require(...)` is bundled into the CLI
+`@paganel/plugin-sdk` package the plugins `require(...)` is bundled into the CLI
 and supplied to esbuild automatically, so these compile with no `npm install`.
 
-(A `node_modules/@stratum/plugin-sdk` symlink is committed next to the plugins so
+(A `node_modules/@paganel/plugin-sdk` symlink is committed next to the plugins so
 editors and `node --test` resolve the SDK too; it isn't needed to compile.)
 
 ```bash
@@ -34,25 +34,25 @@ alias s='cargo run -p cli --'   # or ./target/debug/cli
 | `in_range.js` | filter | numeric bounds, two fields | `--input '{"value":50,"max":10}'` -> `REJECT` |
 | `counter_source.js` | source | cursor paging | `s plugin test js/counter_source.js --json` -> 3 rows, `has_more=true` |
 | `log_sink.js` | sink | host logging capability | `--mode sink --input '[{"id":1},{"id":2}]'` -> `rows_written=2` |
-| `geo_enrich.js` | transform | **HTTP capability** (needs `allow_http`) | run via `configs/capabilities.smql` |
-| `api_source.js` | source | **HTTP capability** - fetches rows from a JSON API | run via `configs/api_source.smql` |
-| `running_total.js` | transform | **KV + metrics** - running sum across rows | run via `configs/stateful_kv.smql` |
-| `weighted_score.js` | transform | **FS + env** - lookup table from disk | run via `configs/file_lookup.smql` |
+| `geo_enrich.js` | transform | **HTTP capability** (needs `allow_http`) | run via `configs/capabilities.ppl` |
+| `api_source.js` | source | **HTTP capability** - fetches rows from a JSON API | run via `configs/api_source.ppl` |
+| `running_total.js` | transform | **KV + metrics** - running sum across rows | run via `configs/stateful_kv.ppl` |
+| `weighted_score.js` | transform | **FS + env** - lookup table from disk | run via `configs/file_lookup.ppl` |
 | `throws_on_init.js` | - | **negative**: throws at load | `s plugin inspect js/throws_on_init.js` -> clean compile error |
 
 ## Configs (`configs/`)
 
 | File | Purpose | Run |
 |---|---|---|
-| `transforms.smql` | transforms in `select` (clean) | `s plugin validate -c …` ✓ / `s plan -c …` / `s apply -c …` |
-| `filters.smql` | filters in `validate { rule … }` (clean) | `s plugin validate -c …` ✓ |
-| `capabilities.smql` | HTTP grant + resource-limit overrides | toggle `allow_http` to test the gate |
-| `api_source.smql` | HTTP-backed **source** + `allow_http_hosts` allowlist | `s apply -c …` (needs network, no DB); narrow the allowlist to test the gate |
-| `stateful_kv.smql` | **KV + metrics** transform (running total) | `s apply -c …` -> `running` climbs 1,3,6,10,… |
-| `file_lookup.smql` | **FS + env** transform (on-disk lookup table) | `s apply -c …`; drop `allow_fs_read` to see scores fall back to 0 |
-| `diagnostics.smql` | **deliberately broken** - one fault per pipeline | `s plugin validate -c …` / `s plan -c …` -> expect errors |
-| `source_endpoint.smql` | WASM plugin as the pipeline **source** (`driver = "wasm"`, cursor paging) | `s apply -c …` -> 7 rows, cursor `None->3->6->None` (no DB) |
-| `sink_endpoint.smql` | WASM plugin as the pipeline **sink** + prepare/finalize lifecycle | `s apply -c …` -> prepare / wrote / finalize logs (no DB) |
+| `transforms.ppl` | transforms in `select` (clean) | `s plugin validate -c …` ✓ / `s plan -c …` / `s apply -c …` |
+| `filters.ppl` | filters in `validate { rule … }` (clean) | `s plugin validate -c …` ✓ |
+| `capabilities.ppl` | HTTP grant + resource-limit overrides | toggle `allow_http` to test the gate |
+| `api_source.ppl` | HTTP-backed **source** + `allow_http_hosts` allowlist | `s apply -c …` (needs network, no DB); narrow the allowlist to test the gate |
+| `stateful_kv.ppl` | **KV + metrics** transform (running total) | `s apply -c …` -> `running` climbs 1,3,6,10,… |
+| `file_lookup.ppl` | **FS + env** transform (on-disk lookup table) | `s apply -c …`; drop `allow_fs_read` to see scores fall back to 0 |
+| `diagnostics.ppl` | **deliberately broken** - one fault per pipeline | `s plugin validate -c …` / `s plan -c …` -> expect errors |
+| `source_endpoint.ppl` | WASM plugin as the pipeline **source** (`driver = "wasm"`, cursor paging) | `s apply -c …` -> 7 rows, cursor `None->3->6->None` (no DB) |
+| `sink_endpoint.ppl` | WASM plugin as the pipeline **sink** + prepare/finalize lifecycle | `s apply -c …` -> prepare / wrote / finalize logs (no DB) |
 
 `plugin validate` works offline (no DB). The endpoint configs
 (`source_endpoint`/`sink_endpoint`) are also fully self-contained - no DB needed.
@@ -63,9 +63,9 @@ the Sakila MySQL->Postgres setup used by the other examples (override `MYSQL_URL
 > **Plugin endpoints vs. transform/filter.** A transform/filter plugin is called
 > inside `select`/`validate` as `plugin.<name>(...)`. A *source/sink* plugin is a
 > `connection { driver = "wasm" plugin = "<name>" }` referenced from `from`/`to` -
-> see `source_endpoint.smql` / `sink_endpoint.smql`.
+> see `source_endpoint.ppl` / `sink_endpoint.ppl`.
 
-### What `diagnostics.smql` should report
+### What `diagnostics.ppl` should report
 
 ```
 ⚠ pipeline 'unknown_key': plugin 'upper' mapping references unknown input field 'bogus'
@@ -74,19 +74,19 @@ the Sakila MySQL->Postgres setup used by the other examples (override `MYSQL_URL
 ```
 
 Its `type_mismatch` pipeline is a `plan`-only check (canonical types) - run
-`s plan -c configs/diagnostics.smql` against a live DB to see
+`s plan -c configs/diagnostics.ppl` against a live DB to see
 `PLUGIN_INPUT_TYPE_MISMATCH`.
 
 ## Plugin config
 
-Values from the SMQL `plugin "x" { config { ... } }` block (or `plugin test
+Values from the PPL `plugin "x" { config { ... } }` block (or `plugin test
 --config-json <file>`) reach handlers in both runtimes, all roles:
 
 | Role | JS | Rust |
 |---|---|---|
 | source / sink | `readPage(config, cursor)` / `writeBatch(config, batch)` (1st arg) | `source_config()` / `sink_config()`, or `config()` |
-| transform / filter | 2nd handler arg: `compute(row, config)` / `evaluate(row, config)` | `stratum_plugin_sdk::config()` |
-| sink prepare/finalize | `prepare(config)` / `finalize(config)` | `#[stratum_sink(..., prepare = "fn", finalize = "fn")]`; the fns read `config()` |
+| transform / filter | 2nd handler arg: `compute(row, config)` / `evaluate(row, config)` | `paganel_plugin_sdk::config()` |
+| sink prepare/finalize | `prepare(config)` / `finalize(config)` | `#[paganel_sink(..., prepare = "fn", finalize = "fn")]`; the fns read `config()` |
 
 ```bash
 echo '{"rate":"0.2"}' > /tmp/cfg.json

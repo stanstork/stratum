@@ -1,33 +1,33 @@
 #!/usr/bin/env bash
-# Stratum benchmark harness (MySQL <-> PostgreSQL bulk load).
+# Paganel benchmark harness (MySQL <-> PostgreSQL bulk load).
 #
-#   ./benchmarks/run.sh              # benchmark Stratum on every workload
+#   ./benchmarks/run.sh              # benchmark Paganel on every workload
 #   ./benchmarks/run.sh clean        # tear down bench containers + volumes
 #
-# This benchmarks STRATUM. pgloader is an OPTIONAL comparison and only applies
+# This benchmarks PAGANEL. pgloader is an OPTIONAL comparison and only applies
 # to PostgreSQL-target workloads (pgloader only migrates *into* PostgreSQL);
-# enable it with WITH_PGLOADER=1. By default only Stratum runs.
+# enable it with WITH_PGLOADER=1. By default only Paganel runs.
 #
 # Workloads
 #   sakila                 full Sakila DB, MySQL -> PostgreSQL: schema + data
 #   synthetic              one deterministic ~200 B/row table (default 100M rows), MySQL -> PostgreSQL
 #   synthetic_heavy        same table, ~20 computed columns (concat/upper/year/arithmetic);
-#                          Stratum only (pgloader has no computed-column transforms)
+#                          Paganel only (pgloader has no computed-column transforms)
 #   synthetic_plugin_rust  same table, one column via a native-Rust WASM transform plugin
 #   synthetic_plugin_js    same table, one column via a JavaScript (QuickJS) WASM plugin
-#                          (both Stratum only; need native Stratum + the wasm32 target / npx)
-#   reverse                the synthetic table, PostgreSQL -> MySQL (Stratum only; RUN_REVERSE)
+#                          (both Paganel only; need native Paganel + the wasm32 target / npx)
+#   reverse                the synthetic table, PostgreSQL -> MySQL (Paganel only; RUN_REVERSE)
 #
-# Stratum scenarios (TOOLS)
-#   stratum            single lane (default)
-#   stratum-integrity  --integrity: row hashing + Merkle receipts
-#   stratum-lanes      4 parallel PK-range lanes; runs only where a
-#                      <workload>_lanes.smql config exists (currently: synthetic).
+# Paganel scenarios (TOOLS)
+#   paganel            single lane (default)
+#   paganel-integrity  --integrity: row hashing + Merkle receipts
+#   paganel-lanes      4 parallel PK-range lanes; runs only where a
+#                      <workload>_lanes.ppl config exists (currently: synthetic).
 #                      Lanes parallelize a table only when it has an integer PK.
 #
-# Stratum: binary or docker
-#   If a Stratum binary exists at STRATUM_BIN (default target/release/stratum) it
-#   is measured natively; otherwise Stratum is built and run from Dockerfile.stratum.
+# Paganel: binary or docker
+#   If a Paganel binary exists at PAGANEL_BIN (default target/release/pag) it
+#   is measured natively; otherwise Paganel is built and run from Dockerfile.paganel.
 #
 # pgloader comparison (opt-in: WITH_PGLOADER=1)
 #   Adds pgloader to the PostgreSQL-target workloads. Native when PGLOADER_BIN is
@@ -44,13 +44,13 @@
 #   RUNS=3                 repetitions per sakila scenario (median reported)
 #   SYNTH_RUNS=1           repetitions per synthetic scenario
 #   WORKLOADS="sakila synthetic"
-#   TOOLS="stratum stratum-integrity"    Stratum scenarios to run
+#   TOOLS="paganel paganel-integrity"    Paganel scenarios to run
 #   WITH_PGLOADER=0        also run pgloader on PG-target workloads (comparison)
-#   STRATUM_BIN=...        Stratum binary; if it is absent, Stratum runs in docker
+#   PAGANEL_BIN=...        Paganel binary; if it is absent, Paganel runs in docker
 #   PGLOADER_BIN=...       local pgloader binary; empty -> docker v4 image
 #   PGLOADER_IMAGE / PGLOADER_JAR_URL    docker pgloader image / v4 jar url
-#   STRATUM_IMAGE=stratum-bench:local    image built for docker-mode Stratum
-#   RUN_REVERSE=1          also run the PG -> MySQL reverse benchmark (stratum only)
+#   PAGANEL_IMAGE=paganel-bench:local    image built for docker-mode Paganel
+#   RUN_REVERSE=1          also run the PG -> MySQL reverse benchmark (paganel only)
 #   REV_ROWS=$BENCH_ROWS   row count for the reverse benchmark's PG source
 #   REV_RUNS=$SYNTH_RUNS   repetitions for the reverse benchmark
 #   PG_DEST_DB / MYSQL_DEST_DB / PG_SRC_DB   destination / source database names
@@ -61,10 +61,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMPOSE=(docker compose -f "$SCRIPT_DIR/compose.yml" -p stratum-bench)
+COMPOSE=(docker compose -f "$SCRIPT_DIR/compose.yml" -p paganel-bench)
 
-MYSQL_CTR=stratum-bench-mysql
-PG_CTR=stratum-bench-postgres
+MYSQL_CTR=paganel-bench-mysql
+PG_CTR=paganel-bench-postgres
 MYSQL_PORT=33307
 
 PG_PORT=54329
@@ -80,7 +80,7 @@ BENCH_ROWS="${BENCH_ROWS:-100000000}"
 RUNS="${RUNS:-3}"
 SYNTH_RUNS="${SYNTH_RUNS:-1}"
 WORKLOADS="${WORKLOADS:-sakila synthetic synthetic_heavy synthetic_plugin_rust synthetic_plugin_js synthetic_filter_rust synthetic_filter_js}"
-TOOLS="${TOOLS:-stratum stratum-integrity stratum-lanes stratum-lanes-integrity}"
+TOOLS="${TOOLS:-paganel paganel-integrity paganel-lanes paganel-lanes-integrity}"
 # pgloader is an opt-in comparison for PostgreSQL-target workloads only.
 WITH_PGLOADER="${WITH_PGLOADER:-0}"
 PGLOADER_BIN="${PGLOADER_BIN:-}"
@@ -89,11 +89,11 @@ PGLOADER_BIN="${PGLOADER_BIN:-}"
 # that instead (it is pulled, not built). PGLOADER_JAR_URL selects the v4 build.
 PGLOADER_IMAGE="${PGLOADER_IMAGE:-pgloader-bench:v4}"
 PGLOADER_JAR_URL="${PGLOADER_JAR_URL:-https://github.com/dimitri/pgloader/releases/download/v4-dev/pgloader.jar}"
-STRATUM_IMAGE="${STRATUM_IMAGE:-stratum-bench:local}"
+PAGANEL_IMAGE="${PAGANEL_IMAGE:-paganel-bench:local}"
 RUN_REVERSE="${RUN_REVERSE:-1}"
 REV_ROWS="${REV_ROWS:-$BENCH_ROWS}"
 REV_RUNS="${REV_RUNS:-$SYNTH_RUNS}"
-STRATUM_RUN_CTR=stratum-bench-run
+PAGANEL_RUN_CTR=paganel-bench-run
 # Destination / source databases (overridable to target your own instances).
 PG_DEST_DB="${PG_DEST_DB:-bench_dest}"     # PostgreSQL dest for MySQL -> PG workloads
 MYSQL_DEST_DB="${MYSQL_DEST_DB:-bench_rev}" # MySQL dest for the PG -> MySQL reverse
@@ -145,10 +145,10 @@ parse_time_v() {
 # clean subcommand
 # ---------------------------------------------------------------------------
 if [[ "${1:-}" == "clean" ]]; then
-    docker rm -f stratum-bench-pgloader "$STRATUM_RUN_CTR" >/dev/null 2>&1 || true
-    docker image rm -f "$STRATUM_IMAGE" "$PGLOADER_IMAGE" >/dev/null 2>&1 || true
+    docker rm -f paganel-bench-pgloader "$PAGANEL_RUN_CTR" >/dev/null 2>&1 || true
+    docker image rm -f "$PAGANEL_IMAGE" "$PGLOADER_IMAGE" >/dev/null 2>&1 || true
     "${COMPOSE[@]}" down -v
-    log "bench containers, volumes, and the stratum image removed"
+    log "bench containers, volumes, and the paganel image removed"
     exit 0
 fi
 
@@ -159,31 +159,31 @@ command -v docker >/dev/null || die "docker is required"
 docker compose version >/dev/null 2>&1 || die "docker compose v2 is required"
 [[ -x /usr/bin/time ]] || die "GNU time (/usr/bin/time) is required"
 
-# Stratum mode: use a binary if one exists at STRATUM_BIN (default
-# target/release/stratum), otherwise build and run it from Dockerfile.stratum.
-STRATUM_BIN="${STRATUM_BIN:-$REPO_ROOT/target/release/stratum}"
-if [[ -x "$STRATUM_BIN" ]]; then
-    STRATUM_MODE=native
-    STRATUM_VERSION="$("$STRATUM_BIN" --version 2>/dev/null | head -1 || echo unknown)"
-    log "stratum: native $STRATUM_BIN ($STRATUM_VERSION)"
+# Paganel mode: use a binary if one exists at PAGANEL_BIN (default
+# target/release/pag), otherwise build and run it from Dockerfile.paganel.
+PAGANEL_BIN="${PAGANEL_BIN:-$REPO_ROOT/target/release/pag}"
+if [[ -x "$PAGANEL_BIN" ]]; then
+    PAGANEL_MODE=native
+    PAGANEL_VERSION="$("$PAGANEL_BIN" --version 2>/dev/null | head -1 || echo unknown)"
+    log "paganel: native $PAGANEL_BIN ($PAGANEL_VERSION)"
 else
-    STRATUM_MODE=docker
-    log "stratum: no binary at $STRATUM_BIN, building docker image $STRATUM_IMAGE..."
-    docker build -f "$SCRIPT_DIR/Dockerfile.stratum" -t "$STRATUM_IMAGE" "$REPO_ROOT" >&2 \
-        || die "failed to build stratum image $STRATUM_IMAGE"
-    STRATUM_VERSION="$(docker run --rm "$STRATUM_IMAGE" stratum --version 2>/dev/null | head -1 || echo unknown)"
-    log "stratum: docker $STRATUM_IMAGE ($STRATUM_VERSION)"
+    PAGANEL_MODE=docker
+    log "paganel: no binary at $PAGANEL_BIN, building docker image $PAGANEL_IMAGE..."
+    docker build -f "$SCRIPT_DIR/Dockerfile.paganel" -t "$PAGANEL_IMAGE" "$REPO_ROOT" >&2 \
+        || die "failed to build paganel image $PAGANEL_IMAGE"
+    PAGANEL_VERSION="$(docker run --rm "$PAGANEL_IMAGE" pag --version 2>/dev/null | head -1 || echo unknown)"
+    log "paganel: docker $PAGANEL_IMAGE ($PAGANEL_VERSION)"
 fi
 
-# Plugin workloads need native Stratum plus the host toolchain to build the two
-# transform plugins (Rust -> wasm32-wasip1, and `stratum plugin compile` for JS).
+# Plugin workloads need native Paganel plus the host toolchain to build the two
+# transform plugins (Rust -> wasm32-wasip1, and `pag plugin compile` for JS).
 # On any shortfall, drop the plugin workloads with a note rather than aborting.
 if [[ " $WORKLOADS " == *" synthetic_plugin_"* || " $WORKLOADS " == *" synthetic_filter_"* ]]; then
     drop_plugins() {
         WORKLOADS="$(tr ' ' '\n' <<<"$WORKLOADS" | grep -vE '^synthetic_(plugin|filter)_' | tr '\n' ' ')"
     }
-    if [[ $STRATUM_MODE != native ]]; then
-        log "note: plugin workloads need native Stratum (build $STRATUM_BIN); skipping synthetic_plugin_*"
+    if [[ $PAGANEL_MODE != native ]]; then
+        log "note: plugin workloads need native Paganel (build $PAGANEL_BIN); skipping synthetic_plugin_*"
         drop_plugins
     else
         log "building transform plugins (Rust -> wasm32, JS -> wasm)..."
@@ -192,13 +192,13 @@ if [[ " $WORKLOADS " == *" synthetic_plugin_"* || " $WORKLOADS " == *" synthetic
                 --target wasm32-wasip1 --release) >&2 \
             && cp "$SCRIPT_DIR/plugins/rust/order_net/target/wasm32-wasip1/release/order_net.wasm" \
                 "$PLUGIN_RUST_WASM" \
-            && "$STRATUM_BIN" plugin compile "$SCRIPT_DIR/plugins/js/order_net.js" \
+            && "$PAGANEL_BIN" plugin compile "$SCRIPT_DIR/plugins/js/order_net.js" \
                 -o "$PLUGIN_JS_WASM" >&2 \
             && (cd "$REPO_ROOT" && cargo build --manifest-path benchmarks/plugins/rust/order_ok/Cargo.toml \
                 --target wasm32-wasip1 --release) >&2 \
             && cp "$SCRIPT_DIR/plugins/rust/order_ok/target/wasm32-wasip1/release/order_ok.wasm" \
                 "$PLUGIN_FILTER_RUST_WASM" \
-            && "$STRATUM_BIN" plugin compile "$SCRIPT_DIR/plugins/js/order_ok.js" \
+            && "$PAGANEL_BIN" plugin compile "$SCRIPT_DIR/plugins/js/order_ok.js" \
                 -o "$PLUGIN_FILTER_JS_WASM" >&2; then
             log "plugins ready: transform ($(basename "$PLUGIN_RUST_WASM"), $(basename "$PLUGIN_JS_WASM")), filter ($(basename "$PLUGIN_FILTER_RUST_WASM"), $(basename "$PLUGIN_FILTER_JS_WASM"))"
         else
@@ -244,9 +244,9 @@ if [[ "$WITH_PGLOADER" == 1 ]]; then
             docker image inspect "$PGLOADER_IMAGE" >/dev/null 2>&1 || docker pull "$PGLOADER_IMAGE"
         fi
     fi
-    if [[ $STRATUM_MODE != "$PGLOADER_MODE" ]]; then
-        log "note: stratum is $STRATUM_MODE but pgloader is $PGLOADER_MODE - for a fair"
-        log "      comparison run both the same way (set STRATUM_BIN + PGLOADER_BIN, or neither)."
+    if [[ $PAGANEL_MODE != "$PGLOADER_MODE" ]]; then
+        log "note: paganel is $PAGANEL_MODE but pgloader is $PGLOADER_MODE - for a fair"
+        log "      comparison run both the same way (set PAGANEL_BIN + PGLOADER_BIN, or neither)."
     fi
 fi
 
@@ -295,7 +295,7 @@ mkdir -p "$RESULTS"
 {
     echo "date_utc: $(date -u +%FT%TZ)"
     echo "commit: $(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-    echo "stratum: $STRATUM_VERSION ($STRATUM_MODE)"
+    echo "paganel: $PAGANEL_VERSION ($PAGANEL_MODE)"
     case $PGLOADER_MODE in
         native) echo "pgloader: $("${PGLOADER_CMD[@]}" --version 2>/dev/null | head -1) (native: ${PGLOADER_CMD[*]})" ;;
         docker)
@@ -315,7 +315,7 @@ mkdir -p "$RESULTS"
     echo "bench_rows: $BENCH_ROWS"
     echo "runs: sakila=$RUNS synthetic=$SYNTH_RUNS"
     if [[ "$RUN_REVERSE" == 1 ]]; then
-        echo "reverse: pg->mysql rows=$REV_ROWS runs=$REV_RUNS (stratum only)"
+        echo "reverse: pg->mysql rows=$REV_ROWS runs=$REV_RUNS (paganel only)"
     fi
 } | tee "$RESULTS/env.txt" >&2
 
@@ -389,12 +389,12 @@ sample_docker_mem() { # $1 = container name, $2 = outfile
     done
 }
 
-# The connection URLs every stratum config may reference. $1 = destination db
+# The connection URLs every paganel config may reference. $1 = destination db
 # name (a PG db for forward workloads; ignored by the reverse config, which
 # targets the fixed `bench_rev` MySQL db). Kept in one place so native and
 # docker runs pass identical values.
-stratum_url_env() { # $1 = forward pg dest db
-    STRATUM_ENV=(
+paganel_url_env() { # $1 = forward pg dest db
+    PAGANEL_ENV=(
         "BENCH_SAKILA_MYSQL_URL=mysql://bench:bench@$MYSQL_HOST:$MYSQL_PORT/sakila"
         "BENCH_SAKILA_PG_URL=postgres://bench:bench@$PG_HOST:$PG_PORT/$1"
         "BENCH_SYNTH_MYSQL_URL=mysql://bench:bench@$MYSQL_HOST:$MYSQL_PORT/bench"
@@ -408,37 +408,37 @@ stratum_url_env() { # $1 = forward pg dest db
     )
 }
 
-run_stratum() { # $1 workload, $2 config, $3 dest db, $4 extra flags, $5 log prefix
+run_paganel() { # $1 workload, $2 config, $3 dest db, $4 extra flags, $5 log prefix
     local flags=()
     [[ -n "$4" ]] && flags=($4)
-    stratum_url_env "$3"
+    paganel_url_env "$3"
 
-    if [[ $STRATUM_MODE == docker ]]; then
+    if [[ $PAGANEL_MODE == docker ]]; then
         # Mirror the dockerized-pgloader invocation: same --network host, same
         # host databases. Wall clock + sampled docker-stats memory, exactly as
         # pgloader is measured in docker mode (so the two are compared like for
         # like). GNU `time -v` can't see into the container, hence this path.
         local envflags=() e
-        for e in "${STRATUM_ENV[@]}"; do envflags+=(-e "$e"); done
+        for e in "${PAGANEL_ENV[@]}"; do envflags+=(-e "$e"); done
         local memfile="$RESULTS/$5.mem" start end rc
-        docker rm -f "$STRATUM_RUN_CTR" >/dev/null 2>&1 || true
+        docker rm -f "$PAGANEL_RUN_CTR" >/dev/null 2>&1 || true
         start=$(date +%s.%N)
-        docker run --name "$STRATUM_RUN_CTR" --rm --network host \
+        docker run --name "$PAGANEL_RUN_CTR" --rm --network host \
             "${envflags[@]}" \
-            -v "$SCRIPT_DIR/stratum:/cfg:ro,z" \
-            "$STRATUM_IMAGE" \
-            stratum apply -c "/cfg/$(basename "$2")" "${flags[@]}" \
+            -v "$SCRIPT_DIR/paganel:/cfg:ro,z" \
+            "$PAGANEL_IMAGE" \
+            pag apply -c "/cfg/$(basename "$2")" "${flags[@]}" \
             >"$RESULTS/$5.log" 2>&1 &
         local waiter=$!
-        sample_docker_mem "$STRATUM_RUN_CTR" "$memfile" &
+        sample_docker_mem "$PAGANEL_RUN_CTR" "$memfile" &
         local sampler=$!
         rc=0
         wait "$waiter" || rc=$?
         end=$(date +%s.%N)
-        docker rm -f "$STRATUM_RUN_CTR" >/dev/null 2>&1 || true
+        docker rm -f "$PAGANEL_RUN_CTR" >/dev/null 2>&1 || true
         kill "$sampler" 2>/dev/null || true
         wait "$sampler" 2>/dev/null || true
-        [[ $rc -eq 0 ]] || die "stratum run failed - see $RESULTS/$5.log"
+        [[ $rc -eq 0 ]] || die "paganel run failed - see $RESULTS/$5.log"
         local mem
         mem=$(cat "$memfile" 2>/dev/null || echo 0)
         [[ "$mem" == 0 ]] && mem="n/a"
@@ -446,18 +446,18 @@ run_stratum() { # $1 workload, $2 config, $3 dest db, $4 extra flags, $5 log pre
         return
     fi
 
-    # Native: isolate stratum's sled state under a throwaway HOME per run.
+    # Native: isolate paganel's sled state under a throwaway HOME per run.
     local run_home="$RESULTS/$5.home"
     mkdir -p "$run_home"
-    env HOME="$run_home" "${STRATUM_ENV[@]}" \
+    env HOME="$run_home" "${PAGANEL_ENV[@]}" \
         /usr/bin/time -v -o "$RESULTS/$5.time" \
-        "$STRATUM_BIN" apply -c "$2" "${flags[@]}" >"$RESULTS/$5.log" 2>&1 \
-        || die "stratum run failed - see $RESULTS/$5.log"
+        "$PAGANEL_BIN" apply -c "$2" "${flags[@]}" >"$RESULTS/$5.log" 2>&1 \
+        || die "paganel run failed - see $RESULTS/$5.log"
     # On-disk state this run wrote: under --integrity the row-hash log + receipts
     # dominate (~51 B/row for an integer PK); otherwise it's just checkpoints.
     # Measured before cleanup and returned as a third field (MB).
     local state_mb
-    state_mb=$(du -sb "$run_home/.stratum" 2>/dev/null | awk '{printf "%.1f", $1/1048576}')
+    state_mb=$(du -sb "$run_home/.paganel" 2>/dev/null | awk '{printf "%.1f", $1/1048576}')
     [[ -z "$state_mb" ]] && state_mb="0.0"
     [[ "${KEEP_STATE:-0}" == 1 ]] || rm -rf "$run_home"
     echo "$(parse_time_v "$RESULTS/$5.time") $state_mb"
@@ -477,7 +477,7 @@ run_pgloader() { # $1 load template, $2 pg db, $3 log prefix
             || die "pgloader run failed - see $RESULTS/$3.log"
         parse_time_v "$RESULTS/$3.time"
     else
-        local ctr=stratum-bench-pgloader memfile="$RESULTS/$3.mem" start end rc
+        local ctr=paganel-bench-pgloader memfile="$RESULTS/$3.mem" start end rc
         docker rm -f "$ctr" >/dev/null 2>&1 || true
         start=$(date +%s.%N)
         docker run --name "$ctr" --network host \
@@ -521,15 +521,15 @@ for workload in $WORKLOADS; do
 
     # pgloader is added (when enabled) only to workloads that have a load
     # template. `synthetic_heavy` has none - pgloader has no expression/computed-
-    # column transforms, so it can't express that workload - so it's stratum-only.
+    # column transforms, so it can't express that workload - so it's paganel-only.
     workload_tools="$TOOLS"
     [[ $PGLOADER_MODE != skip && -f "$SCRIPT_DIR/pgloader/$workload.load.tpl" ]] \
         && workload_tools="$workload_tools pgloader"
 
     for tool in $workload_tools; do
-        # The lanes scenario needs a `<workload>_lanes.smql` (integer-PK single
+        # The lanes scenario needs a `<workload>_lanes.ppl` (integer-PK single
         # table); skip it for workloads without one (e.g. sakila).
-        if [[ "$tool" == stratum-lanes* && ! -f "$SCRIPT_DIR/stratum/${workload}_lanes.smql" ]]; then
+        if [[ "$tool" == paganel-lanes* && ! -f "$SCRIPT_DIR/paganel/${workload}_lanes.ppl" ]]; then
             log "[$workload-$tool] no lanes config, skipping"
             continue
         fi
@@ -541,14 +541,14 @@ for workload in $WORKLOADS; do
 
             log "[$prefix] running..."
             case $tool in
-                stratum)
-                    out=$(run_stratum "$workload" "$SCRIPT_DIR/stratum/$workload.smql" "$dest_db" "" "$prefix") ;;
-                stratum-integrity)
-                    out=$(run_stratum "$workload" "$SCRIPT_DIR/stratum/$workload.smql" "$dest_db" "--integrity" "$prefix") ;;
-                stratum-lanes)
-                    out=$(run_stratum "$workload" "$SCRIPT_DIR/stratum/${workload}_lanes.smql" "$dest_db" "" "$prefix") ;;
-                stratum-lanes-integrity)
-                    out=$(run_stratum "$workload" "$SCRIPT_DIR/stratum/${workload}_lanes.smql" "$dest_db" "--integrity" "$prefix") ;;
+                paganel)
+                    out=$(run_paganel "$workload" "$SCRIPT_DIR/paganel/$workload.ppl" "$dest_db" "" "$prefix") ;;
+                paganel-integrity)
+                    out=$(run_paganel "$workload" "$SCRIPT_DIR/paganel/$workload.ppl" "$dest_db" "--integrity" "$prefix") ;;
+                paganel-lanes)
+                    out=$(run_paganel "$workload" "$SCRIPT_DIR/paganel/${workload}_lanes.ppl" "$dest_db" "" "$prefix") ;;
+                paganel-lanes-integrity)
+                    out=$(run_paganel "$workload" "$SCRIPT_DIR/paganel/${workload}_lanes.ppl" "$dest_db" "--integrity" "$prefix") ;;
                 pgloader)
                     out=$(run_pgloader "$SCRIPT_DIR/pgloader/$workload.load.tpl" "$dest_db" "$prefix") ;;
                 *) die "unknown tool '$tool'" ;;
@@ -567,10 +567,10 @@ for workload in $WORKLOADS; do
 done
 
 # ---------------------------------------------------------------------------
-# reverse benchmark: PG -> MySQL (stratum only; separate from the pgloader
+# reverse benchmark: PG -> MySQL (paganel only; separate from the pgloader
 # comparison above - pgloader migrates into PostgreSQL, so there is no MySQL
 # destination to compare it against). Same harness (reset -> run -> validate),
-# a stratum-only tool set, and its own rows in the TSV (workload=reverse).
+# a paganel-only tool set, and its own rows in the TSV (workload=reverse).
 # ---------------------------------------------------------------------------
 if [[ "$RUN_REVERSE" == 1 ]]; then
     log "reverse: seeding PG source $PG_SRC_DB.orders ($REV_ROWS rows)..."
@@ -598,12 +598,12 @@ if [[ "$RUN_REVERSE" == 1 ]]; then
     fi
 
     for run in $(seq 1 "$REV_RUNS"); do
-        prefix="reverse-stratum-$run"
+        prefix="reverse-paganel-$run"
         log "[$prefix] resetting MySQL destination $MYSQL_DEST_DB..."
         reset_mysql_db "$MYSQL_DEST_DB"
 
         log "[$prefix] running..."
-        out=$(run_stratum "reverse" "$SCRIPT_DIR/stratum/synthetic_reverse.smql" "" "" "$prefix")
+        out=$(run_paganel "reverse" "$SCRIPT_DIR/paganel/synthetic_reverse.ppl" "" "" "$prefix")
 
         wall=$(cut -d' ' -f1 <<<"$out")
         rss=$(cut -d' ' -f2 <<<"$out")
@@ -612,7 +612,7 @@ if [[ "$RUN_REVERSE" == 1 ]]; then
 
         validate_reverse "$MYSQL_DEST_DB" "$REV_ROWS" || die "[$prefix] row-count validation failed"
         log "[$prefix] wall=${wall}s rows/s=$rps peak_rss=${rss}MB state=${state_mb}MB - counts verified"
-        echo -e "reverse\tstratum\t$run\t$wall\t$REV_ROWS\t$rps\t$rss\t$state_mb" >>"$TSV"
+        echo -e "reverse\tpaganel\t$run\t$wall\t$REV_ROWS\t$rps\t$rss\t$state_mb" >>"$TSV"
     done
 fi
 
@@ -620,14 +620,14 @@ fi
 # report
 # ---------------------------------------------------------------------------
 {
-    echo "# Stratum benchmark results"
+    echo "# Paganel benchmark results"
     echo
     if [[ $PGLOADER_MODE == skip ]]; then
-        echo "Stratum on MySQL <-> PostgreSQL bulk load. Run with \`WITH_PGLOADER=1\`"
+        echo "Paganel on MySQL <-> PostgreSQL bulk load. Run with \`WITH_PGLOADER=1\`"
         echo "to add pgloader as a comparison on the PostgreSQL-target workloads."
     else
-        echo "Stratum on MySQL <-> PostgreSQL bulk load, with pgloader as a comparison"
-        echo "on the PostgreSQL-target workloads (\`reverse\` is stratum-only)."
+        echo "Paganel on MySQL <-> PostgreSQL bulk load, with pgloader as a comparison"
+        echo "on the PostgreSQL-target workloads (\`reverse\` is paganel-only)."
     fi
     echo
     echo '```'
@@ -656,15 +656,15 @@ fi
     echo "|---|---|---|---|---|---|---|---|"
     awk -F'\t' 'NR>1 { printf "| %s | %s | %s | %s | %s | %s | %s | %s |\n", $1,$2,$3,$4,$5,$6,$7,$8 }' "$TSV"
     echo
-    echo "The \`reverse\` workload is stratum-only: PostgreSQL -> MySQL (\`LOAD DATA\`"
+    echo "The \`reverse\` workload is paganel-only: PostgreSQL -> MySQL (\`LOAD DATA\`"
     echo "fast path). pgloader migrates *into* PostgreSQL, so it has no comparison"
     echo "point for a MySQL destination - it is reported apart from the forward rows."
     if [[ $PGLOADER_MODE != skip ]]; then
         echo
         echo "pgloader comparison notes: on \`sakila\`, pgloader v4 also builds secondary"
         echo "indexes and foreign keys (its WITH toggles to skip them were removed), while"
-        echo "stratum builds tables + primary keys and secondary indexes but not foreign keys - so \`sakila\` is not scope-matched;"
-        echo "\`synthetic\` (table + PK, one table) is the clean head-to-head. Run stratum and"
+        echo "paganel builds tables + primary keys and secondary indexes but not foreign keys - so \`sakila\` is not scope-matched;"
+        echo "\`synthetic\` (table + PK, one table) is the clean head-to-head. Run paganel and"
         echo "pgloader the same way (both native, or both docker) for a fair wall-clock; peak"
         echo "RSS for a dockerized tool is \`docker stats\`-sampled (~1-2s) and approximate."
         echo

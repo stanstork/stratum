@@ -2,7 +2,7 @@
 
 ## High-Level Architecture
 
-Stratum is organized into 18 workspace crates following a layered architecture
+Paganel is organized into 18 workspace crates following a layered architecture
 (plus the plugin SDK crates, which are excluded from the workspace because they
 build for `wasm32` targets):
 
@@ -18,7 +18,7 @@ graph TB
     Connectors --> Core[Core & Infra<br/>engine-core, engine-state, engine-infra]
     Wasm --> Lang
     Processing --> Core
-    Core --> Lang[Language & Model<br/>smql-syntax, model, expression-engine, query-builder]
+    Core --> Lang[Language & Model<br/>ppl-syntax, model, expression-engine, query-builder]
 ```
 
 ## Crate Map
@@ -26,7 +26,7 @@ graph TB
 | Crate | Layer | Responsibility |
 |-------|-------|----------------|
 | `model` | Language | Core domain types (`Value`, `Pipeline`, `Record`, transformations) |
-| `smql-syntax` | Language | SMQL parser -> AST (pest-based) |
+| `ppl-syntax` | Language | PPL parser -> AST (pest-based) |
 | `expression-engine` | Language | Expression evaluation (filters, computed columns, functions) |
 | `query-builder` | Language | SQL AST + dialect-aware rendering |
 | `connectors` | Data Access | MySQL, PostgreSQL, CSV drivers; unified `Driver` trait hierarchy |
@@ -34,7 +34,7 @@ graph TB
 | `engine-infra` | Infrastructure | EventBus, Metrics, Progress, Retry utilities |
 | `engine-schema` | Schema | Type system, DDL generation, FK dependency graph, schema planning |
 | `engine-core` | Core Services | ExecutionContext, DriverRef, plan builder |
-| `engine-config` | Config | SMQL -> validated settings, connection resolution |
+| `engine-config` | Config | PPL -> validated settings, connection resolution |
 | `engine-planner` | Planning | Execution plan analysis, metadata cache, diagnostics |
 | `engine-wasm` | Execution | WASM plugin host: registry, wasmtime runtime, resource limits, host<->guest wire |
 | `engine-processing` | Execution | Producer-consumer pipeline, transforms, Source/Sink/Destination abstractions |
@@ -42,7 +42,7 @@ graph TB
 | `engine-verify` | Verification | Re-reads the destination and diffs it against the migration's Merkle receipt |
 | `cli` | Interface | Commands (plan, apply, verify, ping), TUI, signal handling |
 | `engine-tests` | Testing | Integration test suite (MySQL ↔ PostgreSQL, Sakila database) |
-| `sdk/stratum-plugin-compiler` | Tooling | Compiles plugin sources to WASM modules for `stratum plugin` |
+| `sdk/paganel-plugin-compiler` | Tooling | Compiles plugin sources to WASM modules for `pag plugin` |
 
 ---
 
@@ -79,13 +79,13 @@ graph TB
 ### 2. Planning Layer (`crates/engine-planner`, `crates/engine-config`)
 
 **Responsibilities:**
-- Parse and validate SMQL configuration
+- Parse and validate PPL configuration
 - Build `ExecutionPlan` with deterministic hash (for resume identification)
 - Resolve environment variables (`env("VAR", "default")`)
 - Analyze pipelines: estimate row counts, detect schema mismatches
 
 **Key Components:**
-- **`engine-config`**: Loads SMQL -> `ExecutionPlan` with validated settings per pipeline
+- **`engine-config`**: Loads PPL -> `ExecutionPlan` with validated settings per pipeline
 - **`engine-planner`**: Builds analysis context, caches table metadata via `MetadataCache<D>`
 
 ---
@@ -293,7 +293,7 @@ Extracted from `engine-core` to keep it slim. Consumers depend on them directly 
 no longer re-exports the infrastructure crates under aliases.
 
 #### StateStore (`engine-state/store`)
-Sled embedded KV database at `~/.stratum/state/`:
+Sled embedded KV database at `~/.paganel/state/`:
 - `SledStateStore` - ACID checkpoints with WAL
 - Checkpoint stores: cursor position, row counts, timestamps
 - Resume: on restart, load checkpoint and skip processed rows
@@ -301,7 +301,7 @@ Sled embedded KV database at `~/.stratum/state/`:
 - `MerkleStore` - integrity receipts, one per pipeline and table
 
 #### RowHashLog (`engine-state/log`)
-A peer of the store, not part of it, at `~/.stratum/state/rowhash/`. Per-row
+A peer of the store, not part of it, at `~/.paganel/state/rowhash/`. Per-row
 integrity hashes are bulk data with a narrow access pattern - appended once, read
 back once in key order, deleted - so they live in an append-only log sorted by
 external merge sort rather than in the key-value store, which would charge
@@ -310,7 +310,7 @@ table size; disk carries the set (~51 bytes/row). See
 [verification.md](verification.md#row-hashes).
 
 `engine-state` also holds `CalibrationData` - a small, separate sled db at
-`~/.stratum/calibration` recording achieved throughput per destination write
+`~/.paganel/calibration` recording achieved throughput per destination write
 path. `apply` records into it; `plan` reads it to estimate duration from this
 machine's real rates instead of a cold-start prior (see [plan.md](plan.md)). It's
 a regenerable cache, independent of the run state store.
@@ -341,7 +341,7 @@ and `pause` uses to stop a run at a batch boundary.
 
 | Crate | Description |
 |-------|-------------|
-| `smql-syntax` | pest-based parser -> AST (`PipelineBlock`, `ConnectionBlock`, etc.) |
+| `ppl-syntax` | pest-based parser -> AST (`PipelineBlock`, `ConnectionBlock`, etc.) |
 | `model` | `Value`, `CanonicalValue`, `Record`, `Batch`, `Pipeline`, `Type`, `Transform`, execution types |
 | `expression-engine` | Expression evaluator: binary ops, string/date/math functions, null handling |
 | `query-builder` | SQL AST nodes + `Render` trait; dialect-specific rendering (MySQL, PostgreSQL); offset strategies |
@@ -353,7 +353,7 @@ and `pause` uses to stop a run at a batch boundary.
 ### Typical Migration
 
 ```
-1. Parse SMQL  ->  AST  (smql-syntax)
+1. Parse PPL  ->  AST  (ppl-syntax)
 2. Build plan  ->  ExecutionPlan + hash  (engine-config, engine-core)
 3. Analyze     ->  MetadataCache, row counts, diagnostics  (engine-planner)
 4. Initialize  ->  ExecutionContext (connection pool, SledStateStore, run_id)
@@ -390,7 +390,7 @@ Producer and consumer are actors in the usual sense - each owns a mailbox (`Prod
 > `CdcStarted`/`CdcStopped` events, `ProducerMode::Cdc`, and
 > `PipelineCoordinator::start_cdc{,_pipeline}` all exist, but nothing calls them -
 > no config reaches them, and `ProducerMode::Cdc`'s tick body is a sleep with a
-> `// CDC logic here` placeholder. Stratum does snapshot/batch migration only;
+> `// CDC logic here` placeholder. Paganel does snapshot/batch migration only;
 > change-data-capture is planned. Treat those paths as a reserved shape.
 
 ### DAG-Based Parallelism

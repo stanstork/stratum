@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="2 2 102 102" fill="none" role="img">
+  <title>Paganel</title>
+  <!-- Paganel mark for dark backgrounds -->
+  <circle cx="20" cy="76" r="8" stroke="#A5A6F6" stroke-width="6"/>
+  <path d="M 26 70 L 40 56 L 60 56 L 76 40" stroke="#A5A6F6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="50" cy="56" r="7" fill="#A5A6F6"/>
+  <path d="M 82 22 L 94 34 L 82 46 L 70 34 Z" stroke="#A5A6F6" stroke-width="6" stroke-linejoin="round"/>
+</svg>

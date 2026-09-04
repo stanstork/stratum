@@ -1,0 +1,79 @@
+// multi-table.ppl - one pipeline block, many tables (MySQL -> PostgreSQL)
+//
+// Instead of writing a near-identical `pipeline { ... }` for every table, list
+// them in `from { tables = [...] }`. Paganel fans the block out into one
+// independent full-copy pipeline per table - the connections are declared once.
+//
+// Each expanded pipeline is a plain single-table copy (every row, every column).
+// Per-table tweaks reuse the same syntax the graph feature uses:
+//   - `select "T" { ... }`      -> becomes table T's projection / column renames
+//   - `to { map { T = "..." } }` -> renames T's destination table
+// A table with neither is copied verbatim.
+//
+// vs `with references { data = cascade }` (see pagila-graph.ppl): that discovers
+// tables by walking the FK graph and copies only FK-reachable rows. `tables`
+// copies whole tables and never follows relations - use it when you want a
+// straight, complete copy of a known set of tables.
+//
+// NOT allowed with `tables` (each is a single-table / single-root concern, so
+// they error): `table`, `with references`, `with { joins }`, an unnamed
+// `select { }`, `where`, and `validate`.
+//
+// ── How do the expanded pipelines run? ────────────────────────────────────
+// They are independent (no `after` dependencies between them), so scheduling
+// follows the top-level `execution` block:
+//   - no `execution` block        -> Sequential (default): one table at a time
+//   - strategy = "parallel"       -> up to `max_concurrency` tables at once
+// This block opts into parallel, so the tables below load concurrently, 4 at a
+// time. (Fanning out does not itself change scheduling - the expansions are
+// ordinary pipelines the executor schedules like any other.)
+
+execution {
+    strategy        = "parallel"
+    max_concurrency = 4
+}
+
+connection "src" {
+    driver = "mysql"
+    url    = env("SRC_URL", "mysql://user:password@localhost:3306/shop")
+}
+
+connection "dst" {
+    driver = "postgres"
+    url    = env("DST_URL", "postgres://user:password@localhost:5432/warehouse")
+}
+
+pipeline "shop" {
+    from {
+        connection = connection.src
+        tables = [
+            "categories",
+            "products",
+            "customers",
+            "orders",
+        ]
+    }
+
+    to {
+        connection = connection.dst
+
+        // Rename one destination table; the rest keep their source names.
+        map {
+            customers = "dim_customer"
+        }
+    }
+
+    // Project + rename columns for the `customers` table only. Every other
+    // listed table is copied in full.
+    select "customers" {
+        customer_id = customers.customer_id
+        given_name  = customers.first_name
+        family_name = customers.last_name
+        email       = customers.email
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 5000
+    }
+}

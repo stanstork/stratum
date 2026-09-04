@@ -100,7 +100,7 @@ fn init_state() -> Result<(Arc<SledStateStore>, Arc<RowHashLog>), VerifyError> {
         .ok_or_else(|| {
             VerifyError::InitializationError("Failed to determine home directory".to_string())
         })?
-        .join(".stratum/state");
+        .join(".paganel/state");
 
     let state = SledStateStore::open(&state_dir)
         .map(Arc::new)

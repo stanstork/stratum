@@ -1,27 +1,27 @@
-# Benchmarks: Stratum
+# Benchmarks: Paganel
 
-A reproducible, in-repo benchmark of Stratum on MySQL <-> PostgreSQL bulk
+A reproducible, in-repo benchmark of Paganel on MySQL <-> PostgreSQL bulk
 load. [pgloader](https://github.com/dimitri/pgloader) is available as an optional
 comparison on the PostgreSQL-target workloads, measured against pgloader v4
 (the current Clojure/JVM rewrite; v3.x was Common Lisp on SBCL).
 
 ```bash
-./benchmarks/run.sh                      # benchmark Stratum (100M-row synthetic table)
+./benchmarks/run.sh                      # benchmark Paganel (100M-row synthetic table)
 BENCH_ROWS=10000000 ./benchmarks/run.sh  # scaled-down run
 WITH_PGLOADER=1 ./benchmarks/run.sh      # also compare against pgloader
 ```
 
-Everything lives in [`benchmarks/`](../benchmarks/): the harness, the SMQL and
+Everything lives in [`benchmarks/`](../benchmarks/): the harness, the PPL and
 pgloader configs, the data generators, and this methodology. Results land in
 `benchmarks/results/<timestamp>/` as a self-contained report (raw logs
 included).
 
-> **pgloader is opt-in.** By default `run.sh` benchmarks Stratum only. Pass
+> **pgloader is opt-in.** By default `run.sh` benchmarks Paganel only. Pass
 > `WITH_PGLOADER=1` to add pgloader on the workloads it can express - `sakila`
 > and `synthetic`; it's skipped on `synthetic_heavy` (no computed-column
-> transforms) and `reverse` (can't target MySQL). Stratum runs from a native
-> binary when one exists at `STRATUM_BIN` (default `target/release/stratum`),
-> otherwise from `Dockerfile.stratum`.
+> transforms) and `reverse` (can't target MySQL). Paganel runs from a native
+> binary when one exists at `PAGANEL_BIN` (default `target/release/pag`),
+> otherwise from `Dockerfile.paganel`.
 
 ## What is measured
 
@@ -31,40 +31,40 @@ Eight workloads:
 |---|---|---|---|
 | **sakila** | MySQL -> PostgreSQL | the full [Sakila](https://dev.mysql.com/doc/sakila/en/) sample DB: 15 tables, ~46K rows | many-small-tables overhead: connection setup, schema creation, per-table coordination |
 | **synthetic** | MySQL -> PostgreSQL | one `orders` table, **100M rows** by default, ~200 B/row: BIGINT PK, INT, ENUM, DECIMAL, SMALLINT, FLOAT, CHAR, VARCHARs, BOOLEAN, UUID-shaped CHAR(36), TIMESTAMP, DATETIME, DATE, with NULLs sprinkled | sustained single-table throughput and memory behavior |
-| **synthetic_heavy** | MySQL -> PostgreSQL | the same `orders` table projected through ~19 mixed columns: a few string functions (`concat`/`upper`/`lower`/`trim`), several arithmetic expressions, date extraction (`year`/`month`/`quarter`), and some copied-through columns | Stratum only - expression-evaluation CPU (compiled expressions, per-batch schema) |
-| **synthetic_plugin_rust** | MySQL -> PostgreSQL | the same table with the **native-Rust WASM** `order_net` transform plugin called 3x per row, plus copied-through columns | Stratum only - per-row cost of repeated Rust WASM transform calls |
-| **synthetic_plugin_js** | MySQL -> PostgreSQL | the same table, same 3 calls, via a **JavaScript (QuickJS) WASM** transform plugin | Stratum only - the same, for the JS-on-QuickJS runtime (compare against the Rust plugin) |
-| **synthetic_filter_rust** | MySQL -> PostgreSQL | a narrower 8-column projection of `orders`, each row validated by 3 calls to the **native-Rust WASM** `order_ok` filter plugin (every row passes) | Stratum only - per-row cost of WASM *filter* calls through the validation stage |
-| **synthetic_filter_js** | MySQL -> PostgreSQL | the same 8-column projection, same 3 filter calls, via a **JavaScript (QuickJS) WASM** filter plugin | Stratum only - the same, for the JS-on-QuickJS runtime (compare against the Rust filter) |
-| **reverse** | PostgreSQL -> MySQL | the same `orders` table, into MySQL via `LOAD DATA` | Stratum only - the MySQL write path (pgloader loads into PostgreSQL) |
+| **synthetic_heavy** | MySQL -> PostgreSQL | the same `orders` table projected through ~19 mixed columns: a few string functions (`concat`/`upper`/`lower`/`trim`), several arithmetic expressions, date extraction (`year`/`month`/`quarter`), and some copied-through columns | Paganel only - expression-evaluation CPU (compiled expressions, per-batch schema) |
+| **synthetic_plugin_rust** | MySQL -> PostgreSQL | the same table with the **native-Rust WASM** `order_net` transform plugin called 3x per row, plus copied-through columns | Paganel only - per-row cost of repeated Rust WASM transform calls |
+| **synthetic_plugin_js** | MySQL -> PostgreSQL | the same table, same 3 calls, via a **JavaScript (QuickJS) WASM** transform plugin | Paganel only - the same, for the JS-on-QuickJS runtime (compare against the Rust plugin) |
+| **synthetic_filter_rust** | MySQL -> PostgreSQL | a narrower 8-column projection of `orders`, each row validated by 3 calls to the **native-Rust WASM** `order_ok` filter plugin (every row passes) | Paganel only - per-row cost of WASM *filter* calls through the validation stage |
+| **synthetic_filter_js** | MySQL -> PostgreSQL | the same 8-column projection, same 3 filter calls, via a **JavaScript (QuickJS) WASM** filter plugin | Paganel only - the same, for the JS-on-QuickJS runtime (compare against the Rust filter) |
+| **reverse** | PostgreSQL -> MySQL | the same `orders` table, into MySQL via `LOAD DATA` | Paganel only - the MySQL write path (pgloader loads into PostgreSQL) |
 
 The four plugin workloads run **matched pairs** so the Rust-WASM and
 JS-QuickJS-WASM runtimes are compared on identical per-row work: the two
 `plugin` cases invoke the `order_net` transform (`a * b`) three times per row plus
 copied-through columns; the two `filter` cases invoke the `order_ok` filter
 (pass if non-negative) three times per row through the validation stage. All four
-are Stratum-only and need native Stratum plus the host toolchain (the
+are Paganel-only and need native Paganel plus the host toolchain (the
 `wasm32-wasip1` target and `npx`); `run.sh` builds the plugins and skips these
 workloads with a note if the toolchain is absent.
 
-Stratum scenarios per workload:
+Paganel scenarios per workload:
 
 | Scenario | Command |
 |---|---|
-| stratum | `stratum apply` (native binary or Docker image), 1 lane (default) |
-| stratum&#8209;lanes | `lanes = 4` - split a single-table copy into 4 parallel key-range lanes, each on its own source + destination connection (config `synthetic_lanes.smql`). Shows how one large table parallelizes. |
-| stratum&#8209;integrity | `stratum apply --integrity` - row hashing + Merkle receipts, so the verification overhead is visible instead of hidden (works with lanes) |
-| stratum&#8209;lanes&#8209;integrity | `lanes = 4` plus `--integrity` - the "4 lanes +int" column. Measures the verification cost when four lanes each write their own hash stream. |
+| paganel | `pag apply` (native binary or Docker image), 1 lane (default) |
+| paganel&#8209;lanes | `lanes = 4` - split a single-table copy into 4 parallel key-range lanes, each on its own source + destination connection (config `synthetic_lanes.ppl`). Shows how one large table parallelizes. |
+| paganel&#8209;integrity | `pag apply --integrity` - row hashing + Merkle receipts, so the verification overhead is visible instead of hidden (works with lanes) |
+| paganel&#8209;lanes&#8209;integrity | `lanes = 4` plus `--integrity` - the "4 lanes +int" column. Measures the verification cost when four lanes each write their own hash stream. |
 
-> **Lanes need an integer primary key.** Stratum parallelizes a single table by
+> **Lanes need an integer primary key.** Paganel parallelizes a single table by
 > range-splitting its integer PK (`min..max`); a table without one transparently
-> falls back to a single lane (no error, no speedup). So the `stratum-lanes`
+> falls back to a single lane (no error, no speedup). So the `paganel-lanes`
 > scenario runs on `synthetic` (BIGINT PK) but is skipped on `sakila`.
 
 Optional comparison (`WITH_PGLOADER=1`), added only to the MySQL -> PostgreSQL
 copy workloads - `sakila` and `synthetic`. It is not run on the transform
 workloads (`synthetic_heavy`, `synthetic_plugin_rust`, `synthetic_plugin_js` -
-Stratum-only) or `reverse` (pgloader loads into PostgreSQL, so there is no
+Paganel-only) or `reverse` (pgloader loads into PostgreSQL, so there is no
 MySQL-destination comparison):
 
 Per run we record **wall time** (GNU `time -v`), **rows/s** (source rows /
@@ -83,7 +83,7 @@ any mismatch - a number only counts if the data actually arrived.
   measured with real durability. The MySQL source relaxes durability (it is
   read-only during measured runs; the tuning only speeds up data generation).
 - **Fresh state every run**: the destination database is dropped and
-  recreated, and Stratum runs with an isolated `$HOME` so checkpoint/resume
+  recreated, and Paganel runs with an isolated `$HOME` so checkpoint/resume
   state can never carry over between runs.
 - **Deterministic data**: every synthetic value is a pure function of the row
   number, so two machines generating `BENCH_ROWS` rows produce identical
@@ -92,12 +92,12 @@ any mismatch - a number only counts if the data actually arrived.
   has only a primary key, so both tools do identical work - create the table,
   copy every row. No index-parity ambiguity.
 - **Sakila is not a like-for-like comparison** - see the caveat in its section
-  below. Stratum builds the tables, primary keys, and secondary indexes, but
+  below. Paganel builds the tables, primary keys, and secondary indexes, but
   not the foreign keys; pgloader also builds the foreign keys, so it still does
   somewhat more work. Treat Sakila as directional only.
 - **JVM in UTC**: pgloader v4 must run with `-Duser.timezone=UTC`, or its
   MySQL JDBC driver throws `HOUR_OF_DAY: 3 -> 4` on any timestamp that lands in
-  a daylight-saving gap in the JVM's local zone. The data is fine - Stratum
+  a daylight-saving gap in the JVM's local zone. The data is fine - Paganel
   reads the same rows without issue; it's a Connector/J footgun. Wall time
   includes JVM startup + JIT warmup (~2 s), counted honestly.
 - **pgloader runs with default tuning.** The harness passes no pgloader
@@ -106,13 +106,13 @@ any mismatch - a number only counts if the data actually arrived.
   rows. pgloader exposes several knobs (`workers`, `concurrency`, `batch rows`,
   `prefetch rows`, plus destination `work_mem`/`maintenance_work_mem`) that can
   raise its throughput, so these numbers are its out-of-the-box behavior; a
-  tuned pgloader would likely do better. Stratum is likewise
+  tuned pgloader would likely do better. Paganel is likewise
   near-default here (`batch_size = 50000`); its main lever is the `lanes` setting
-  (the `stratum-lanes` scenario).
+  (the `paganel-lanes` scenario).
 
-Tunables are in-repo and deliberately boring. Read the 1-lane Stratum and
+Tunables are in-repo and deliberately boring. Read the 1-lane Paganel and
 default-pgloader rows as each tool's out-of-the-box point, and the 4-lane row
-as a tuned Stratum data point.
+as a tuned Paganel data point.
 
 ## Results
 
@@ -133,7 +133,7 @@ are in each run's `benchmarks/results/<ts>/summary.md`; memory is discussed unde
 Three hosts, AWS eu-north-1, one AZ + cluster placement group: engine
 `c7i.2xlarge` (Xeon 8488C, 8 vCPU); source and destination each `i4i.2xlarge`
 (8 vCPU, 64 GB, local NVMe) running MySQL 8.0 (buffer pool 32 GiB) and
-PostgreSQL 16 (`fsync` on), on a private same-AZ network. Stratum 0.1.0 native;
+PostgreSQL 16 (`fsync` on), on a private same-AZ network. Paganel 0.1.0 native;
 pgloader v4.0.0 native jar, default tuning. Run via the harness's external-DB
 mode (`EXTERNAL_DB=1 MYSQL_HOST=… PG_HOST=…`).
 
@@ -160,9 +160,9 @@ recognizable to sit next to.
 
 ### 10M rows - single machine (reproducible companion)
 
-One machine with the source + destination in Docker alongside Stratum (shared
+One machine with the source + destination in Docker alongside Paganel (shared
 CPU/disk): AMD Ryzen AI 9 HX 370 (12c/24t, Zen 5), 32 GB, Samsung PM9A1 NVMe,
-Fedora 43; MySQL 8.0 / PostgreSQL 16 (`fsync` on). Stratum 0.1.0 native; pgloader
+Fedora 43; MySQL 8.0 / PostgreSQL 16 (`fsync` on). Paganel 0.1.0 native; pgloader
 v4 native. Directional and fully reproducible with `./benchmarks/run.sh`. This is not
 server hardware, and the co-located `localhost` path is why the absolute rates
 run higher than the networked 100M reference above.
@@ -194,7 +194,7 @@ only a primary key, so there is no index-parity ambiguity). That makes this the
 cleanest row to read the two side by side. Lanes scale sublinearly: past ~2
 lanes the shared PostgreSQL ingest ceiling bounds the total, so lanes trade connections and memory
 for throughput (each lane runs concurrently with its own in-flight window). Read
-the 1-lane row as Stratum's out-of-the-box point and the 4-lane row as a tuned one.
+the 1-lane row as Paganel's out-of-the-box point and the 4-lane row as a tuned one.
 
 ### synthetic_heavy - expression-evaluation CPU
 
@@ -238,18 +238,18 @@ Rust filter posts a higher rate than the Rust transform because the narrower
 
 ### reverse - PostgreSQL -> MySQL
 
-Stratum's MySQL write path alone (the `LOAD DATA` fast path into InnoDB);
+Paganel's MySQL write path alone (the `LOAD DATA` fast path into InnoDB);
 pgloader loads *into* PostgreSQL, so it has no comparison row for a MySQL
-destination. A single stream sustains roughly half Stratum's own PostgreSQL
+destination. A single stream sustains roughly half Paganel's own PostgreSQL
 COPY rate. The limit is InnoDB's always-clustered-index writes, the destination
 engine's ceiling. Lanes apply here too (`orders` has an integer PK).
 
 ### sakila - many small tables (directional only)
 
 The opposite of a throughput workload: 15 tables, ~46K rows, where fixed
-per-table cost dominates. Stratum's `sakila.smql` fans the tables out into
+per-table cost dominates. Paganel's `sakila.ppl` fans the tables out into
 independent pipelines run concurrently (`execution { parallel }`). **Not
-scope-matched:** Stratum builds tables, primary keys, and secondary indexes, but a
+scope-matched:** Paganel builds tables, primary keys, and secondary indexes, but a
 fanned-out `tables = [...]` run does not recreate foreign keys (its independent
 per-table pipelines have no cross-table ordering), while pgloader also builds the
 18 foreign keys, so it does more work, and ~2 s of its wall is JVM startup + JIT.
@@ -298,7 +298,7 @@ roughly the migration's own rate (a sequential read plus a hash per row). See
 - **Benchmark at scale.** Fixed startup (runtime boot, JVM JIT
   warmup, schema introspection) is ~1-2 s for both tools. Below a few million
   rows it dominates the wall clock and distorts the numbers. Use ≥10M rows.
-- **Parallelism is a tuning axis.** Both write one COPY stream per table by default; Stratum's `lanes = N` is a tuned
+- **Parallelism is a tuning axis.** Both write one COPY stream per table by default; Paganel's `lanes = N` is a tuned
   setting (the 4-lane row), pgloader splits a table via `concurrency`. Past ~2
   streams both sit on the shared PostgreSQL ingest ceiling, so a single stream is
   the out-of-the-box point and the multi-lane number is a tuned one.
@@ -313,12 +313,12 @@ Both tools stream and are bounded - neither holds the whole table, and neither's
 footprint grows with table size. pgloader v4 (JVM) did 10M in ~0.79 GB with no
 tuning, bounded by the JVM heap (`-Xmx`) and its `prefetch rows`.
 
-Stratum holds only a bounded in-flight window: peak RSS is flat with table
+Paganel holds only a bounded in-flight window: peak RSS is flat with table
 size - the same at 10M as at 100M - but scales with lane count, since each
 lane has its own window (≈0.5 GB at 1 lane -> ≈1.5 GB at 4 lanes on the sample
 box). That is a deliberate trade of memory for parallelism.
 
-Two things set Stratum's per-lane footprint:
+Two things set Paganel's per-lane footprint:
 
 - **Bounded in-flight window.** The producer -> consumer batch channel is
   bounded two ways, whichever binds first:
@@ -332,20 +332,20 @@ Two things set Stratum's per-lane footprint:
 - **Allocator.** The pipeline is allocation-heavy (each row carries its
   column values), and the default glibc allocator spawns many per-thread
   arenas on a high-core machine and retains freed memory in them - which
-  inflated peak RSS ~2-3x as a pure artifact. Stratum links
+  inflated peak RSS ~2-3x as a pure artifact. Paganel links
   [mimalloc](https://github.com/microsoft/mimalloc) to keep that in check and
   return memory to the OS; it also modestly improved throughput.
 
 ## Reproducing
 
-Prerequisites: Docker (with compose v2) and GNU time (`/usr/bin/time`). Stratum
-runs natively from `STRATUM_BIN` (default `target/release/stratum`) when it
-exists, otherwise it is built and run from `Dockerfile.stratum` - which compiles
-Stratum inside a Rust builder stage, so Docker alone suffices. The host Rust
+Prerequisites: Docker (with compose v2) and GNU time (`/usr/bin/time`). Paganel
+runs natively from `PAGANEL_BIN` (default `target/release/pag`) when it
+exists, otherwise it is built and run from `Dockerfile.paganel` - which compiles
+Paganel inside a Rust builder stage, so Docker alone suffices. The host Rust
 toolchain is needed only to build the native binary yourself.
 
 ```bash
-./benchmarks/run.sh                      # benchmark Stratum; ~45 GB free disk at 100M rows
+./benchmarks/run.sh                      # benchmark Paganel; ~45 GB free disk at 100M rows
 BENCH_ROWS=1000000 RUNS=3 ./benchmarks/run.sh   # smaller, faster
 WITH_PGLOADER=1 ./benchmarks/run.sh      # add the pgloader comparison
 ./benchmarks/run.sh clean                # tear down containers + volumes
@@ -360,14 +360,14 @@ pgloader is **opt-in** (`WITH_PGLOADER=1`) and only on the PostgreSQL-target
 workloads. Set `PGLOADER_BIN` to measure a local pgloader natively (a v4 `.jar`
 is run with `java -jar`); unset, it runs as Docker v4 built from
 `Dockerfile.pgloader`. For a fair wall-clock run both tools the same way - both
-native (`STRATUM_BIN` + `PGLOADER_BIN`) or both Docker; the harness warns when
+native (`PAGANEL_BIN` + `PGLOADER_BIN`) or both Docker; the harness warns when
 they differ. Key env vars:
 
 | Var | Purpose |
 |---|---|
 | `WITH_PGLOADER=1` | add pgloader on the PG-target workloads (off by default) |
 | `PGLOADER_BIN` | local pgloader binary or `.jar`; unset -> Docker v4 image (`PGLOADER_IMAGE` / `PGLOADER_JAR_URL`) |
-| `STRATUM_BIN` | Stratum binary; absent -> build and run from `Dockerfile.stratum` |
+| `PAGANEL_BIN` | Paganel binary; absent -> build and run from `Dockerfile.paganel` |
 | `EXTERNAL_DB` / `MYSQL_HOST` / `PG_HOST` | target databases on other hosts instead of local compose |
 | `PG_DEST_DB` / `MYSQL_DEST_DB` / `PG_SRC_DB` | destination / source database names |
 
@@ -379,21 +379,21 @@ full knob list.
 **Write encoding.** The PostgreSQL destination uses binary `COPY` by default
 (`COPY ... WITH (FORMAT binary)`), which skips both the client-side text
 formatting and the server-side text parser. A table is encoded in binary only
-when every destination column is a type Stratum can encode exactly; anything
+when every destination column is a type Paganel can encode exactly; anything
 else (arrays, network/geometry types, …) transparently falls back to the CSV
 text `COPY` path, as does any individual value that can't be encoded. Force the
 CSV path for comparison or debugging with `to { postgres { copy_format = "text" } }`.
 
-`run.sh` drives the `stratum-lanes` scenario (4 lanes, `synthetic_lanes.smql`)
-directly. Lanes are an SMQL setting, not an env var, so for a different lane
+`run.sh` drives the `paganel-lanes` scenario (4 lanes, `synthetic_lanes.ppl`)
+directly. Lanes are an PPL setting, not an env var, so for a different lane
 count copy that config and change `lanes = N`, or run it manually against the
 harness's databases:
 
 ```bash
-# Stratum, 4 lanes over the table (isolated $HOME + fresh dest DB per run)
+# Paganel, 4 lanes over the table (isolated $HOME + fresh dest DB per run)
 BENCH_SYNTH_MYSQL_URL=mysql://bench:bench@127.0.0.1:33307/bench \
   BENCH_SYNTH_PG_URL=postgres://bench:bench@127.0.0.1:54329/bench_dest \
-  /usr/bin/time -v target/release/stratum apply -c benchmarks/stratum/synthetic_lanes.smql
+  /usr/bin/time -v target/release/pag apply -c benchmarks/paganel/synthetic_lanes.ppl
 ```
 
 The pgloader v4 load files the harness generates use the multi-line `FROM`/`INTO`

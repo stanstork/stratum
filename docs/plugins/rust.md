@@ -1,24 +1,24 @@
 # Native (Rust) plugins
 
 A native plugin is an ordinary Rust crate compiled to `wasm32-wasip1`. You write
-one function and annotate it with a `#[stratum_*]` attribute macro from
-`stratum-plugin-sdk`; the macro emits the full host ABI around it. This is the
+one function and annotate it with a `#[paganel_*]` attribute macro from
+`paganel-plugin-sdk`; the macro emits the full host ABI around it. This is the
 smallest, fastest plugin form - no JavaScript engine is embedded.
 
 ## How it works
 
-The SDK (`stratum-plugin-sdk`) provides the value types, typed accessors, and the
-role macros (`#[stratum_transform]`, `#[stratum_filter]`, `#[stratum_source]`,
-`#[stratum_sink]`). Each macro generates:
+The SDK (`paganel-plugin-sdk`) provides the value types, typed accessors, and the
+role macros (`#[paganel_transform]`, `#[paganel_filter]`, `#[paganel_source]`,
+`#[paganel_sink]`). Each macro generates:
 
 - a **sentinel** symbol (defining two role macros in one crate is a link error -
   one role per module),
-- host **allocator** hooks (`__stratum_alloc` / `__stratum_dealloc`) so the host
+- host **allocator** hooks (`__paganel_alloc` / `__paganel_dealloc`) so the host
   can hand bytes into the plugin's linear memory,
-- a **metadata** export (`__stratum_metadata`) - the name/version/role/schema
+- a **metadata** export (`__paganel_metadata`) - the name/version/role/schema
   baked in as JSON at compile time,
 - an **initialize** export that parses the host-supplied `config` blob,
-- the **role entry point** (`__stratum_transform`, `__stratum_read_page`, …)
+- the **role entry point** (`__paganel_transform`, `__paganel_read_page`, …)
   that decodes the wire payload, calls your function inside `catch_unwind` (a
   panic becomes a clean error, not an instance teardown), and encodes the result.
 
@@ -47,8 +47,8 @@ crate-type = ["cdylib"]      # produces a .wasm cdylib
 [dependencies]
 # The SDK is not on crates.io yet. Depend on it from git (pin a rev or tag
 # for a reproducible build) or from a local checkout:
-stratum-plugin-sdk = { git = "https://github.com/stanstork/stratum.git" }
-# stratum-plugin-sdk = { path = "../stratum/crates/sdk/stratum-plugin-sdk" }
+paganel-plugin-sdk = { git = "https://github.com/stanstork/stratum.git" }
+# paganel-plugin-sdk = { path = "../stratum/crates/sdk/paganel-plugin-sdk" }
 ```
 
 Build:
@@ -61,7 +61,7 @@ cargo build --target wasm32-wasip1 --release
 
 Point a `plugin` block at the resulting `.wasm`:
 
-```smql
+```ppl
 plugin "my_plugin" { path = "target/wasm32-wasip1/release/my_plugin.wasm" }
 ```
 
@@ -74,9 +74,9 @@ handler receives the whole batch and returns one output per input, in order
 (you own the loop). `output` declares the result type tag.
 
 ```rust
-use stratum_plugin_sdk::{stratum_transform, PluginInput, PluginResult};
+use paganel_plugin_sdk::{paganel_transform, PluginInput, PluginResult};
 
-#[stratum_transform(
+#[paganel_transform(
     name = "adder",
     version = "1.0.0",
     output = "f64",
@@ -105,9 +105,9 @@ host rejects the batch.
 input, in order. No `output`.
 
 ```rust
-use stratum_plugin_sdk::{stratum_filter, FilterDecision, PluginInput, PluginResult};
+use paganel_plugin_sdk::{paganel_filter, FilterDecision, PluginInput, PluginResult};
 
-#[stratum_filter(
+#[paganel_filter(
     name = "positive",
     version = "1.0.0",
     input = [{ name = "value", type = "i64", nullable = false }]
@@ -134,9 +134,9 @@ fn positive(inputs: Vec<PluginInput>) -> PluginResult<Vec<FilterDecision>> {
 the host knows when to stop.
 
 ```rust
-use stratum_plugin_sdk::{stratum_source, source_config, PluginResult, Record, SourcePage};
+use paganel_plugin_sdk::{paganel_source, source_config, PluginResult, Record, SourcePage};
 
-#[stratum_source(
+#[paganel_source(
     name = "counter",
     version = "1.0.0",
     output_schema = [
@@ -173,9 +173,9 @@ with `input`. Optional `prepare` / `finalize` lifecycle hooks run once before th
 first batch and once after the last.
 
 ```rust
-use stratum_plugin_sdk::{stratum_sink, PluginBatch, PluginResult, WriteResult};
+use paganel_plugin_sdk::{paganel_sink, PluginBatch, PluginResult, WriteResult};
 
-#[stratum_sink(
+#[paganel_sink(
     name = "counter_sink",
     version = "1.0.0",
     input = [{ name = "id", type = "i64", nullable = false }],
@@ -196,14 +196,14 @@ The `config { ... }` block on the declaration is delivered at init. Every role
 can read the general store; source/sink also get a role-specific accessor.
 
 ```rust
-use stratum_plugin_sdk::config;
+use paganel_plugin_sdk::config;
 
 let rate: f64 = config().get("rate").and_then(|s| s.parse().ok()).unwrap_or(1.0);
 ```
 
 | Role | Accessor |
 |------|----------|
-| any | `stratum_plugin_sdk::config()` |
+| any | `paganel_plugin_sdk::config()` |
 | source | `source_config()` (or `config()`) |
 | sink | `sink_config()` (or `config()`); `prepare`/`finalize` fns read `config()` |
 
@@ -254,9 +254,9 @@ controlled by the check's `action` / the pipeline's `on_error`.
 ## Verifying the build
 
 ```bash
-stratum plugin inspect target/wasm32-wasip1/release/my_plugin.wasm
+pag plugin inspect target/wasm32-wasip1/release/my_plugin.wasm
 # --input is a JSON array of rows (a batch); one output is printed per row.
-stratum plugin test    target/wasm32-wasip1/release/my_plugin.wasm --input '[{"a":2,"b":3},{"a":10,"b":1}]'
+pag plugin test    target/wasm32-wasip1/release/my_plugin.wasm --input '[{"a":2,"b":3},{"a":10,"b":1}]'
 ```
 
 The runnable batch-native examples in

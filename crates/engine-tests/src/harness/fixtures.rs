@@ -41,7 +41,7 @@ pub(crate) static PG_DEST_URL: LazyLock<String> =
 
 pub(crate) static MYSQL_DEST_URL: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "mysql://user:password@localhost:{}/stratum_dest",
+        "mysql://user:password@localhost:{}/paganel_dest",
         mysql_port()
     )
 });
@@ -128,7 +128,7 @@ pub(crate) fn clear_state_store() {
         .ok();
 
     if let Some(home) = home_dir {
-        let state_path = std::path::PathBuf::from(home).join(".stratum/state");
+        let state_path = std::path::PathBuf::from(home).join(".paganel/state");
         if state_path.exists() {
             let _ = std::fs::remove_dir_all(&state_path);
         }

@@ -17,7 +17,7 @@ pub(super) fn header(out: &mut String, r: &MigrationReport, s: &Sty) {
 
     let sum = &r.summary;
     let tables = tables_to_create(r);
-    let _ = writeln!(out, "{} {} {}", s.bold("stratum plan"), s.dim("·"), name);
+    let _ = writeln!(out, "{} {} {}", s.bold("pag plan"), s.dim("·"), name);
     let _ = writeln!(
         out,
         "{}",
@@ -161,7 +161,7 @@ pub(super) fn ddl(out: &mut String, r: &MigrationReport, s: &Sty) {
             out,
             "  {}",
             s.dim(&format!(
-                "{} statement{} · verbatim - exactly what `stratum apply` runs, in order",
+                "{} statement{} · verbatim - exactly what `pag apply` runs, in order",
                 count,
                 plural(count),
             )),
@@ -278,7 +278,7 @@ pub(super) fn verdict(out: &mut String, r: &MigrationReport, s: &Sty) {
     }
     let _ = writeln!(out, "Plan: {}", parts.join(" · "));
 
-    let cmd = format!("stratum apply -c {}", r.config_path);
+    let cmd = format!("pag apply -c {}", r.config_path);
     match r.summary.status {
         PlanStatus::Ready => {
             let _ = writeln!(

@@ -141,7 +141,7 @@ fn build_dag(plan: &ExecutionPlan) -> Result<Dag, CliError> {
 
 /// Handles execution result consistently across modes
 fn handle_execution_result(result: Result<(), MigrationError>) -> Result<(), CliError> {
-    // Stage timing summary (no-op unless STRATUM_PROFILE is set).
+    // Stage timing summary (no-op unless PAGANEL_PROFILE is set).
     profile::dump();
 
     match result {

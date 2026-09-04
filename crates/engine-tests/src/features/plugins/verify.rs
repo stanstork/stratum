@@ -4,14 +4,14 @@
 mod tests {
     use crate::{
         features::plugins::fixture,
-        harness::runner::{execute, run_smql, run_verify_smql},
+        harness::runner::{execute, run_ppl, run_verify_ppl},
         reset_postgres_schema,
     };
     use tracing_test::traced_test;
 
     /// MySQL `film` -> Postgres with a transform plugin output, integrity on.
-    fn transform_smql(dest: &str) -> String {
-        crate::harness::smql::feature_smql(&format!(
+    fn transform_ppl(dest: &str) -> String {
+        crate::harness::ppl::feature_ppl(&format!(
             r#"
             plugin "adder" {{ path = "{plugin}" }}
 
@@ -37,8 +37,8 @@ mod tests {
     }
 
     /// WASM source -> Postgres, integrity on.
-    fn source_smql(dest: &str) -> String {
-        crate::harness::smql::feature_smql(&format!(
+    fn source_ppl(dest: &str) -> String {
+        crate::harness::ppl::feature_ppl(&format!(
             r#"
             plugin "feed" {{ path = "{plugin}" config {{ total = "50" page_size = "7" }} }}
 
@@ -70,9 +70,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_matches_with_transform_plugin() {
         reset_postgres_schema().await;
-        let smql = transform_smql("films_verified");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = transform_ppl("films_verified");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// A WASM-source migration verifies cleanly (verify reads only the dest, so a
@@ -81,9 +81,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_matches_with_wasm_source() {
         reset_postgres_schema().await;
-        let smql = source_smql("synth_verified");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = source_ppl("synth_verified");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// Tampering with the destination after a plugin migration is detected: the
@@ -92,13 +92,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_detects_tampered_transform_output() {
         reset_postgres_schema().await;
-        let smql = transform_smql("films_verified");
-        run_smql(&smql, true).await.expect("apply failed");
+        let ppl = transform_ppl("films_verified");
+        run_ppl(&ppl, true).await.expect("apply failed");
 
         // Corrupt the plugin-computed column in one row.
         execute("UPDATE films_verified SET total = 0 WHERE film_id = 1").await;
 
-        let result = run_verify_smql(&smql).await;
+        let result = run_verify_ppl(&ppl).await;
         assert!(result.is_err(), "verify should detect the tampered row");
     }
 }

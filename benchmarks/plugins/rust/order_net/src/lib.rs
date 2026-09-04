@@ -5,9 +5,9 @@
 //! measured on the exact same transform. The transform is trivial on purpose: it
 //! isolates each runtime's plugin-invocation cost (the WASM boundary + value
 //! marshalling, now amortized across the whole batch) rather than the arithmetic.
-use stratum_plugin_sdk::{stratum_transform, PluginInput, PluginResult};
+use paganel_plugin_sdk::{paganel_transform, PluginInput, PluginResult};
 
-#[stratum_transform(
+#[paganel_transform(
     name = "order_net",
     version = "1.0.0",
     output = "f64",

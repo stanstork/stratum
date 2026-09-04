@@ -1,5 +1,5 @@
 // JS counterpart of plugins/test_filter (passes only positive values).
-const { filter } = require("@stratum/plugin-sdk");
+const { filter } = require("@paganel/plugin-sdk");
 
 filter("test_filter", {
   version: "1.0.0",

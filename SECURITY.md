@@ -1,10 +1,10 @@
 # Security Policy
 
-Stratum moves data between databases, handles connection credentials, and
+Paganel moves data between databases, handles connection credentials, and
 executes user-supplied WASM/JavaScript plugins. This document describes how to
 report vulnerabilities and the security model you can rely on.
 
-> **Status:** Stratum is pre-1.0 software under active development. It has not
+> **Status:** Paganel is pre-1.0 software under active development. It has not
 > undergone a third-party security audit. Review the model below before running
 > it against production systems.
 
@@ -30,8 +30,8 @@ security fixes.
 
 ## Credential handling
 
-- Database credentials are supplied through the SMQL `env(...)` function and are
-  not persisted in Stratum's state store (`~/.stratum/state/`).
+- Database credentials are supplied through the PPL `env(...)` function and are
+  not persisted in Paganel's state store (`~/.paganel/state/`).
 - Connection URLs and any field whose name matches a sensitive pattern
   (`password`, `secret`, `token`, `key`, `api_key`, `auth`, `credential`, and so on) are
   masked in generated plans and log output (e.g.
@@ -84,9 +84,9 @@ WASM and JavaScript (QuickJS) plugins run inside a Wasmtime sandbox with
 
 ## Database & input safety
 
-- Stratum executes SQL derived from your own SMQL configuration against
+- Paganel executes SQL derived from your own PPL configuration against
   your own databases. The operator who writes the config is the trust
-  anchor. Treat SMQL config files like any other infrastructure code.
+  anchor. Treat PPL config files like any other infrastructure code.
 - Row data read from a source is carried as values/COPY payloads, not spliced
   into DDL.
 
@@ -96,6 +96,6 @@ In scope: credential leakage, sandbox escapes, plugins gaining unauthorized
 FS/network access, resource limits that fail to bound a plugin, and unmasked
 secrets in logs/plans/state.
 
-Out of scope: issues that require a malicious SMQL config you authored yourself,
+Out of scope: issues that require a malicious PPL config you authored yourself,
 or running an untrusted `.wasm` plugin you deliberately loaded (the sandbox
 mitigates but does not eliminate this risk; see trust boundaries above).

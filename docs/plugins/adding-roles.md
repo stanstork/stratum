@@ -1,7 +1,7 @@
 # Adding a New Plugin Role
 
 This guide walks through what it takes to add a fifth plugin role to the
-SDK (e.g. `#[stratum_aggregator]`, `#[stratum_router]`, …). It is the
+SDK (e.g. `#[paganel_aggregator]`, `#[paganel_router]`, …). It is the
 companion doc to [`macro-expansion.md`](./macro-expansion.md) - read
 that first if you want to see *what* the existing macros emit, then come
 back here to see *how* to extend the system.
@@ -13,7 +13,7 @@ a different combination of:
 
 - a user-function signature,
 - a host ABI export name,
-- an optional config-loading branch in `__stratum_initialize`,
+- an optional config-loading branch in `__paganel_initialize`,
 - a per-role role-specific payload type (input + output).
 
 ## Mental model: the five layers
@@ -24,14 +24,14 @@ When you add a role, you'll touch (roughly) five layers in this order:
    and pick names for the input and output payload types. Roles are free to
    choose their codec via the metadata `exchange_format` field: source/sink use
    JSON (`json_v1`), while the batch-native transform/filter roles use the binary
-   `columnar_v1` format (see `stratum-plugin-sdk/src/columnar.rs` and its host
+   `columnar_v1` format (see `paganel-plugin-sdk/src/columnar.rs` and its host
    mirror). A JSON payload (the aggregator example below) is the simplest place
    to start; reuse the columnar codec if your role is batch-heavy and needs the
    throughput.
 2. **Host ABI** - decide the exported symbol name (e.g.
-   `__stratum_aggregate`) and the function signature. Almost always
+   `__paganel_aggregate`) and the function signature. Almost always
    `(ptr: u32, len: u32) -> u64` for "bytes in, packed (ptr, len) out".
-3. **SDK types** (`stratum-plugin-sdk` crate) - add Rust structs for the
+3. **SDK types** (`paganel-plugin-sdk` crate) - add Rust structs for the
    input / output, with `from_json_bytes` / `to_json_bytes` helpers, and
    re-export them at the crate root.
 4. **Macro generator** (this crate) - add `src/<role>.rs` that emits the
@@ -54,9 +54,9 @@ somewhere (a design doc, a comment, a PR description):
 | Question | Example |
 |----------|---------|
 | Role name? | `aggregator` |
-| Attribute macro name? | `#[stratum_aggregator]` |
+| Attribute macro name? | `#[paganel_aggregator]` |
 | User function signature? | `fn(Vec<PluginInput>) -> PluginResult<AggregateResult>` |
-| ABI export name? | `__stratum_aggregate` |
+| ABI export name? | `__paganel_aggregate` |
 | Input wire type? | `AggregateBatch` (list of inputs + window metadata) |
 | Output wire type? | `AggregateResult` |
 | Needs config? | Yes - store reducer settings via `OnceLock` |
@@ -69,11 +69,11 @@ These answers determine every concrete decision below.
 
 ## Step 1: Add the SDK-side types
 
-Inside `crates/sdk/stratum-plugin-sdk/src/`, create a module for the new
+Inside `crates/sdk/paganel-plugin-sdk/src/`, create a module for the new
 role's payload types - mirror what `source.rs` and `sink.rs` already do.
 
 ```rust
-// crates/sdk/stratum-plugin-sdk/src/aggregator.rs
+// crates/sdk/paganel-plugin-sdk/src/aggregator.rs
 use crate::{PluginInput, PluginResult, Value};
 use serde::{Deserialize, Serialize};
 
@@ -137,8 +137,8 @@ pub fn __set_aggregator_config(cfg: AggregatorConfig) {
 
 ## Step 2: Extend `InitBody` (only for a role-specific config accessor)
 
-Every role's `__stratum_initialize` already parses the host config blob into the
-general store readable via `stratum_plugin_sdk::config()` - that's what
+Every role's `__paganel_initialize` already parses the host config blob into the
+general store readable via `paganel_plugin_sdk::config()` - that's what
 `InitBody::None` does (transform/filter use it). If `config()` is enough for
 your role, reuse `InitBody::None` and skip this step.
 
@@ -159,15 +159,15 @@ general `PluginConfig` *and* your role-specific config from the same params.
 
 ```rust
 InitBody::Aggregator => quote! {
-    ::stratum_plugin_sdk::runtime::panic::install_panic_hook();
-    let bytes = unsafe { ::stratum_plugin_sdk::runtime::abi::read_from_guest(ptr, len) };
-    match ::stratum_plugin_sdk::runtime::parse_config(&bytes) {
+    ::paganel_plugin_sdk::runtime::panic::install_panic_hook();
+    let bytes = unsafe { ::paganel_plugin_sdk::runtime::abi::read_from_guest(ptr, len) };
+    match ::paganel_plugin_sdk::runtime::parse_config(&bytes) {
         Ok(params) => {
-            ::stratum_plugin_sdk::__set_plugin_config(
-                ::stratum_plugin_sdk::PluginConfig::new(params.clone()),
+            ::paganel_plugin_sdk::__set_plugin_config(
+                ::paganel_plugin_sdk::PluginConfig::new(params.clone()),
             );
-            ::stratum_plugin_sdk::__set_aggregator_config(
-                ::stratum_plugin_sdk::AggregatorConfig::new(params),
+            ::paganel_plugin_sdk::__set_aggregator_config(
+                ::paganel_plugin_sdk::AggregatorConfig::new(params),
             );
             0
         }
@@ -203,7 +203,7 @@ pub fn expand(attr: AttrArgs, user_fn: ItemFn) -> syn::Result<TokenStream> {
     if attr.output.is_some() {
         return Err(syn::Error::new(
             span,
-            "`output` is not valid on #[stratum_aggregator]",
+            "`output` is not valid on #[paganel_aggregator]",
         ));
     }
 
@@ -223,18 +223,18 @@ pub fn expand(attr: AttrArgs, user_fn: ItemFn) -> syn::Result<TokenStream> {
 
     let role_entry = quote! {
         #[unsafe(no_mangle)]
-        pub extern "C" fn __stratum_aggregate(ptr: u32, len: u32) -> u64 {
+        pub extern "C" fn __paganel_aggregate(ptr: u32, len: u32) -> u64 {
             let input_bytes = unsafe {
-                ::stratum_plugin_sdk::runtime::abi::read_from_guest(ptr, len)
+                ::paganel_plugin_sdk::runtime::abi::read_from_guest(ptr, len)
             };
             let result = ::std::panic::catch_unwind(
                 || -> ::std::result::Result<
                     ::std::vec::Vec<u8>,
-                    ::stratum_plugin_sdk::PluginError,
+                    ::paganel_plugin_sdk::PluginError,
                 > {
                     let batch =
-                        ::stratum_plugin_sdk::AggregateBatch::from_json_bytes(&input_bytes)?;
-                    let out: ::stratum_plugin_sdk::AggregateResult =
+                        ::paganel_plugin_sdk::AggregateBatch::from_json_bytes(&input_bytes)?;
+                    let out: ::paganel_plugin_sdk::AggregateResult =
                         #user_ident(batch)?;
                     Ok(out.to_json_bytes())
                 },
@@ -261,7 +261,7 @@ Key things to keep consistent with existing roles:
 - **Use `pack_result_tail`** so all roles share identical error handling.
 - **Wrap user code in `catch_unwind`** - never trust user code not to
   panic.
-- **Use fully-qualified `::stratum_plugin_sdk::…` paths** inside `quote!`
+- **Use fully-qualified `::paganel_plugin_sdk::…` paths** inside `quote!`
   - the user's crate may not have a `use` for these types.
 - **Anchor errors on `user_fn.sig.ident.span()`** so diagnostics point
   at the user's code.
@@ -277,7 +277,7 @@ Add the module declaration and the attribute entry point:
 mod aggregator; // <-- new
 
 #[proc_macro_attribute]
-pub fn stratum_aggregator(attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn paganel_aggregator(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr = parse_macro_input!(attr as AttrArgs);
     let user_fn = parse_macro_input!(item as syn::ItemFn);
     aggregator::expand(attr, user_fn)
@@ -286,15 +286,15 @@ pub fn stratum_aggregator(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 ```
 
-Then re-export it from the SDK crate (`stratum-plugin-sdk/src/lib.rs`):
+Then re-export it from the SDK crate (`paganel-plugin-sdk/src/lib.rs`):
 
 ```rust
-pub use stratum_plugin_sdk_macros::{
-    stratum_aggregator, // <-- new
-    stratum_filter,
-    stratum_sink,
-    stratum_source,
-    stratum_transform,
+pub use paganel_plugin_sdk_macros::{
+    paganel_aggregator, // <-- new
+    paganel_filter,
+    paganel_sink,
+    paganel_source,
+    paganel_transform,
 };
 ```
 
@@ -303,7 +303,7 @@ pub use stratum_plugin_sdk_macros::{
 ## Step 5: (Optional) Extend `AttrArgs`
 
 If your role needs a new attribute key - say, `window_size = "5m"` -
-add it to [`common::AttrArgs`](../../crates/sdk/stratum-plugin-sdk-macros/src/common.rs):
+add it to [`common::AttrArgs`](../../crates/sdk/paganel-plugin-sdk-macros/src/common.rs):
 
 ```rust
 pub struct AttrArgs {
@@ -341,9 +341,9 @@ The fastest way to verify the macro produces something the host can load:
 2. Build it for `wasm32-wasip1`.
 3. Run `wasm-objdump -x target/wasm32-wasip1/release/your_plugin.wasm`
    and confirm the export table contains:
-   - `__STRATUM_PLUGIN_SENTINEL`
-   - `__stratum_alloc`, `__stratum_dealloc`
-   - `__stratum_metadata`, `__stratum_initialize`, `__stratum_shutdown`
+   - `__PAGANEL_PLUGIN_SENTINEL`
+   - `__paganel_alloc`, `__paganel_dealloc`
+   - `__paganel_metadata`, `__paganel_initialize`, `__paganel_shutdown`
    - your new role-specific export(s)
 4. Run `strings` on the `.wasm` and confirm the embedded metadata JSON
    contains your role name (`"type":"aggregator"`).
@@ -358,7 +358,7 @@ requires the host changes (layer 5).
 Outside this crate, the engine needs to:
 
 - Recognize `"type": "aggregator"` in metadata JSON.
-- Know to call `__stratum_aggregate` (not `__stratum_transform`).
+- Know to call `__paganel_aggregate` (not `__paganel_transform`).
 - Know what to send and what to expect back on the wire.
 
 Where this lives depends on the engine's plugin loader. Grep for the
@@ -371,15 +371,15 @@ find every place that needs a new arm.
 
 When you're done, you should have touched:
 
-- [ ] `stratum-plugin-sdk/src/<role>.rs` - payload types
-- [ ] `stratum-plugin-sdk/src/lib.rs` - re-exports + optional `OnceLock`
-- [ ] `stratum-plugin-sdk-macros/src/abi.rs` - new `InitBody` variant
+- [ ] `paganel-plugin-sdk/src/<role>.rs` - payload types
+- [ ] `paganel-plugin-sdk/src/lib.rs` - re-exports + optional `OnceLock`
+- [ ] `paganel-plugin-sdk-macros/src/abi.rs` - new `InitBody` variant
       (only if the role needs config)
-- [ ] `stratum-plugin-sdk-macros/src/common.rs` - new attribute keys
+- [ ] `paganel-plugin-sdk-macros/src/common.rs` - new attribute keys
       (only if the role takes any)
-- [ ] `stratum-plugin-sdk-macros/src/<role>.rs` - generator
-- [ ] `stratum-plugin-sdk-macros/src/lib.rs` - `mod <role>;` and
-      `#[proc_macro_attribute] pub fn stratum_<role>`
+- [ ] `paganel-plugin-sdk-macros/src/<role>.rs` - generator
+- [ ] `paganel-plugin-sdk-macros/src/lib.rs` - `mod <role>;` and
+      `#[proc_macro_attribute] pub fn paganel_<role>`
 - [ ] Engine host loader - new role recognition + dispatch
 - [ ] Smoke test plugin and `wasm-objdump` verification
 

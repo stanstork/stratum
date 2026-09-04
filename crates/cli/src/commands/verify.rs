@@ -324,7 +324,7 @@ mod tests {
     }
 
     fn drive(p: &mut VerifyPrinter<&mut Vec<u8>>, results: &[VerificationResult]) {
-        p.header("migration.smql");
+        p.header("migration.ppl");
         for r in results {
             if let VerificationResult::Match { receipt, .. } = r {
                 p.table_started(&receipt.pipeline_name, &receipt.table_name);
@@ -352,7 +352,7 @@ mod tests {
         let out = render(true, |p| drive(p, &results));
         println!("\n----- verify --pretty -----\n{out}---------------------------\n");
 
-        assert!(out.contains("◆ Verifying: migration.smql"));
+        assert!(out.contains("◆ Verifying: migration.ppl"));
         assert!(out.contains("⧗ migrate_actor/actor"));
         assert!(out.contains("    reading destination…"));
         assert!(out.contains("    sorting row hashes…"));

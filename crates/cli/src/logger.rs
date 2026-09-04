@@ -22,7 +22,7 @@ pub fn init(cli: &Cli, is_tui_mode: bool, is_pretty_mode: bool) {
 fn determine_log_level(cli: &Cli) -> Level {
     // Priority order:
     // 1. --log-level CLI argument
-    // 2. STRATUM_LOG_LEVEL environment variable
+    // 2. PAGANEL_LOG_LEVEL environment variable
     // 3. --quiet flag
     // 4. --verbose flag(s)
     // 5. Default to INFO
@@ -31,7 +31,7 @@ fn determine_log_level(cli: &Cli) -> Level {
         return parse_log_level(level_str);
     }
 
-    if let Ok(env_level) = std::env::var("STRATUM_LOG_LEVEL") {
+    if let Ok(env_level) = std::env::var("PAGANEL_LOG_LEVEL") {
         return parse_log_level(&env_level);
     }
 
@@ -82,11 +82,11 @@ fn determine_tui_log_path(cli: &Cli) -> String {
     if let Some(ref log_file) = cli.log_file {
         log_file.clone()
     } else {
-        // Create .stratum directory if it doesn't exist
+        // Create .paganel directory if it doesn't exist
         let home_dir = dirs::home_dir().expect("Could not determine home directory");
-        let stratum_dir = home_dir.join(".stratum");
-        std::fs::create_dir_all(&stratum_dir).expect("Failed to create .stratum directory");
-        stratum_dir.join("tui.log").to_string_lossy().to_string()
+        let paganel_dir = home_dir.join(".paganel");
+        std::fs::create_dir_all(&paganel_dir).expect("Failed to create .paganel directory");
+        paganel_dir.join("tui.log").to_string_lossy().to_string()
     }
 }
 
@@ -120,11 +120,11 @@ fn determine_pretty_log_path(cli: &Cli) -> String {
     if let Some(ref log_file) = cli.log_file {
         log_file.clone()
     } else {
-        // Create .stratum directory if it doesn't exist
+        // Create .paganel directory if it doesn't exist
         let home_dir = dirs::home_dir().expect("Could not determine home directory");
-        let stratum_dir = home_dir.join(".stratum");
-        std::fs::create_dir_all(&stratum_dir).expect("Failed to create .stratum directory");
-        stratum_dir.join("pretty.log").to_string_lossy().to_string()
+        let paganel_dir = home_dir.join(".paganel");
+        std::fs::create_dir_all(&paganel_dir).expect("Failed to create .paganel directory");
+        paganel_dir.join("pretty.log").to_string_lossy().to_string()
     }
 }
 

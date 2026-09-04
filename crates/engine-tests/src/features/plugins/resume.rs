@@ -4,15 +4,15 @@
 mod tests {
     use crate::{
         features::plugins::fixture,
-        harness::runner::{DbType, get_row_count, run_smql, run_smql_with_pause},
-        harness::smql::dest_smql,
+        harness::ppl::dest_ppl,
+        harness::runner::{DbType, get_row_count, run_ppl, run_ppl_with_pause},
         reset_postgres_schema,
     };
 
     const TOTAL: i64 = 3000;
 
-    fn smql() -> String {
-        dest_smql(&format!(
+    fn ppl() -> String {
+        dest_ppl(&format!(
             r#"
             plugin "feed" {{ path = "{plugin}" config {{ total = "{total}" page_size = "50" }} }}
 
@@ -47,7 +47,7 @@ mod tests {
         reset_postgres_schema().await;
 
         // Run 1: stop gracefully after partial progress (do NOT reset afterward).
-        run_smql_with_pause(&smql(), "resumed", 200).await;
+        run_ppl_with_pause(&ppl(), "resumed", 200).await;
 
         let partial = get_row_count("resumed", "testdb", DbType::Postgres).await;
         assert!(
@@ -56,7 +56,7 @@ mod tests {
         );
 
         // Run 2: resume from the checkpoint (same plan, state intact).
-        run_smql(&smql(), false).await.expect("resume run failed");
+        run_ppl(&ppl(), false).await.expect("resume run failed");
 
         // Every source row present exactly once: count and distinct ids match TOTAL,
         // and the id range is contiguous 0..TOTAL-1.

@@ -6,11 +6,11 @@ graph TB
     end
 
     subgraph PLANNING["Planning Layer"]
-        SMQL["smql-syntax<br/>pest parser -> AST"]
-        ENGINE_CFG["engine-config<br/>SMQL -> ExecutionPlan<br/>ValidatedSettings"]
+        PPL["ppl-syntax<br/>pest parser -> AST"]
+        ENGINE_CFG["engine-config<br/>PPL -> ExecutionPlan<br/>ValidatedSettings"]
         PLANNER["engine-planner<br/>MetadataCache<br/>Analysis & diagnostics"]
 
-        SMQL --> ENGINE_CFG
+        PPL --> ENGINE_CFG
         ENGINE_CFG --> PLANNER
     end
 
@@ -111,7 +111,7 @@ graph TB
     end
 
     subgraph INFRA["Infrastructure"]
-        STATE["engine-state<br/>SledStateStore: checkpoints, WAL, receipts<br/>RowHashLog: per-row integrity hashes<br/>~/.stratum/state/"]
+        STATE["engine-state<br/>SledStateStore: checkpoints, WAL, receipts<br/>RowHashLog: per-row integrity hashes<br/>~/.paganel/state/"]
         EVENTBUS["engine-infra / EventBus<br/>MigrationStarted<br/>BatchProcessed<br/>MigrationCompleted"]
         METRICS["engine-infra / Metrics<br/>records_processed<br/>bytes_transferred<br/>batches_processed"]
         RETRY["engine-infra / Retry<br/>exponential backoff"]
@@ -121,13 +121,13 @@ graph TB
         MODEL["model<br/>Value, CanonicalValue, Record<br/>Batch, Pipeline, Type, Transform"]
         EXPR["expression-engine<br/>binary ops, functions<br/>null handling"]
         QB["query-builder<br/>SQL AST + Render trait<br/>dialect-specific rendering<br/>offset strategies"]
-        SMQL_CRATE["smql-syntax<br/>pest parser -> AST"]
+        PPL_CRATE["ppl-syntax<br/>pest parser -> AST"]
     end
 
     subgraph EXTERNAL["External Systems"]
         MYSQL_DB["MySQL DB"]
         PG_DB["PostgreSQL DB"]
-        FS["File System<br/>CSV files<br/>~/.stratum/state/"]
+        FS["File System<br/>CSV files<br/>~/.paganel/state/"]
         TOKIO["Tokio Runtime<br/>multi-threaded async"]
     end
 

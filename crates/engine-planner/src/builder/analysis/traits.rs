@@ -152,7 +152,7 @@ mod tests {
 
     #[test]
     fn test_location_display() {
-        let loc = SourceLocation::new("pipeline.smql".to_string(), 42, 10);
-        assert_eq!(format!("{}", loc), "pipeline.smql:42:10");
+        let loc = SourceLocation::new("pipeline.ppl".to_string(), 42, 10);
+        assert_eq!(format!("{}", loc), "pipeline.ppl:42:10");
     }
 }

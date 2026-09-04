@@ -2,7 +2,7 @@
 // mapped input COLUMN, not plugin config.
 // Test:  plugin test gross_to_net.js --input '{"gross":100,"rate":0.2}'
 //        -> Float(80.0)
-const { transform } = require("@stratum/plugin-sdk");
+const { transform } = require("@paganel/plugin-sdk");
 
 transform("gross_to_net", {
   version: "1.0.0",

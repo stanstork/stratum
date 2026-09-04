@@ -3,8 +3,8 @@ mod tests {
     use crate::harness::{
         db::Dbms,
         fixtures::{reset_mysql_dest, reset_postgres_schema},
-        runner::run_smql,
-        smql::dest_connection,
+        ppl::dest_connection,
+        runner::run_ppl,
     };
     use std::io::Write;
     use tempfile::NamedTempFile;
@@ -25,7 +25,7 @@ mod tests {
         file
     }
 
-    fn smql(csv_path: &str, dst: Dbms, body: &str) -> String {
+    fn ppl(csv_path: &str, dst: Dbms, body: &str) -> String {
         format!(
             "connection \"src\" {{ driver = \"csv\" url = \"{csv_path}\" pk_column = \"id\" }}\n\
              {}\n{body}\n",
@@ -47,8 +47,8 @@ mod tests {
         let csv = temp_csv(PEOPLE_CSV);
         let path = csv.path().to_str().unwrap();
 
-        let sqml = smql(path, dst, LOAD_PEOPLE);
-        run_smql(&sqml, false).await.expect("csv migration failed");
+        let sqml = ppl(path, dst, LOAD_PEOPLE);
+        run_ppl(&sqml, false).await.expect("csv migration failed");
 
         let url = dst.dest_url();
         assert_eq!(
@@ -101,8 +101,8 @@ mod tests {
                 settings { create_missing_tables = true batch_size = 100 }
             }
         "#;
-        let sqml = smql(path, Dbms::Postgres, body);
-        run_smql(&sqml, false)
+        let sqml = ppl(path, Dbms::Postgres, body);
+        run_ppl(&sqml, false)
             .await
             .expect("csv filter migration failed");
 
