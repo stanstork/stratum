@@ -22,6 +22,12 @@
   <img src="https://img.shields.io/badge/status-early%20development-orange" alt="Early development">
 </p>
 
+<p align="center">
+  <img src="assets/demo.gif" alt="Migrate Sakila with integrity receipts, verify (all tables match), hand-edit one destination row, verify again — Paganel names the exact divergent row." width="820">
+</p>
+
+<!-- demo.gif is rendered from assets/demo.tape; regenerate with `vhs assets/demo.tape` (needs the quickstart DBs up and a release build). -->
+
 Paganel is a data migration engine written in Rust. It moves data and schema between systems with crash recovery, parallel execution, and in-flight transforms, then cryptographically verifies that the destination matches what was written, down to the row. Today that means MySQL, PostgreSQL, and CSV; sources and sinks can also be sandboxed WASM plugins, so anything with data can stand at either end of a pipeline.
 
 On a 100M-row MySQL->PostgreSQL copy with the databases on separate hosts (over a real network), it sustains ~390K rows/s on a single lane and ~940K rows/s with four parallel lanes ([benchmarks](docs/benchmarks.md)).
@@ -269,6 +275,12 @@ pag plugin --help
 > [docs/plan.md](docs/plan.md#the---json-report) for the shape, and
 > [docs/schema-plan.json](docs/schema-plan.json) for a complete example report.
 
+<p align="center">
+  <img src="assets/plan.png" alt="pag plan output: a two-stage execution DAG (migrate_payment waits for migrate_customer), per-pipeline column renames, excluded columns, joins, primary keys, and duration/memory/transfer estimates — ending in 'Ready to apply'." width="820">
+</p>
+
+<!-- plan.png is real `pag plan` output; regenerate with `./assets/plan.sh` (needs the quickstart DBs up, a release build, and tmux/freeze/ImageMagick). -->
+
 > **`apply` / `verify` output modes.** `apply` runs in default log mode, `--pretty`
 > (colored, per-event lines), or `--tui` (a live dashboard with pause/cancel
 > controls). `verify` prints stable `✓`/`✗`/`?` result lines by default and adds
@@ -467,6 +479,7 @@ Paganel stores pipeline state in `~/.paganel/state/` (sled embedded KV). If a mi
 |----------|-------------|
 | [docs/plan.md](docs/plan.md) | Reading `pag plan` - the summary, flags, sampling, and the magnitude bar |
 | [docs/ppl-reference.md](docs/ppl-reference.md) | Full PPL language reference |
+| [docs/why-ppl.md](docs/why-ppl.md) | Why a purpose-built DSL (PPL) instead of YAML/JSON/SQL - design rationale and trade-offs |
 | [docs/architecture.md](docs/architecture.md) | Crate map, design decisions, data flow |
 | [docs/plugins/](docs/plugins/README.md) | WASM plugins - roles, native Rust & JS (QuickJS) runtimes, authoring, CLI |
 | [docs/verification.md](docs/verification.md) | Cryptographic verification design and implementation |
