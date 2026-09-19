@@ -11,7 +11,7 @@ use model::{
 };
 use std::sync::Arc;
 use std::{collections::HashMap, time::Instant};
-use tracing::{debug, warn};
+use tracing::{info, warn};
 
 /// Leaves per parallel fold block.
 const FOLD_BLOCK_LEAVES: usize = 65_536;
@@ -235,10 +235,10 @@ pub async fn finalize_receipts(
             created_at: chrono::Utc::now(),
         };
 
-        debug!(
+        info!(
             table,
             rows = total_rows,
-            root = %hex8(&table_root),
+            root = %receipt.root_hex(),
             "integrity receipt written"
         );
         receipts.save_receipt(&receipt).await?;
@@ -250,7 +250,7 @@ pub async fn finalize_receipts(
                 item_id: item_id.to_string(),
                 table: table.clone(),
                 rows: total_rows,
-                root: hex8(&table_root),
+                root: receipt.root_hex(),
                 timestamp: chrono::Utc::now(),
             })
             .await;
@@ -338,16 +338,6 @@ fn fold_root(
     }
 
     Ok((root.leaf_count(), root.finish()))
-}
-
-/// First 8 bytes of a root, for logs.
-fn hex8(root: &[u8; 32]) -> String {
-    use std::fmt::Write;
-    let mut out = String::with_capacity(16);
-    for byte in root.iter().take(8) {
-        let _ = write!(out, "{byte:02x}");
-    }
-    out
 }
 
 #[cfg(test)]

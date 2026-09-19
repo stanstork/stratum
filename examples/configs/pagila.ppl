@@ -9,15 +9,15 @@
 // The compose MySQL only ships the `sakila` database, whose table names collide
 // with Pagila's. Create a fresh destination database first:
 //
-//   docker exec -i mysql_db mysql -uroot -proot -e \
+//   docker compose exec -T mysql mysql -uroot -proot -e \
 //     "CREATE DATABASE IF NOT EXISTS pagila; \
 //      GRANT ALL ON pagila.* TO 'sakila_user'@'%'; FLUSH PRIVILEGES;"
 //
 // Then add these to your .env (source is the `pagila` PG database loaded via
 // the pagila-schema.sql / pagila-data.sql dumps):
 //
-//   PAGILA_URL      = postgres://user:password@localhost:5432/pagila
-//   MYSQL_DEST_URL  = mysql://sakila_user:qwerty123@localhost:3306/pagila
+//   PAGILA_URL      = postgres://user:password@localhost:15432/pagila
+//   MYSQL_DEST_URL  = mysql://sakila_user:qwerty123@localhost:13306/pagila
 //
 // Run:
 //   pag apply -c pagila.ppl -e .env

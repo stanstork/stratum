@@ -20,23 +20,23 @@
 // tables exist.
 //
 // Setup (same as pagila.ppl - see its header for details):
-//   docker exec -i mysql_db mysql -uroot -proot -e \
+//   docker compose exec -T mysql mysql -uroot -proot -e \
 //     "CREATE DATABASE IF NOT EXISTS pagila; \
 //      GRANT ALL ON pagila.* TO 'sakila_user'@'%'; FLUSH PRIVILEGES;"
 //   MySQL needs local_infile for the LOAD DATA fast path:
-//     docker exec -i mysql_db mysql -uroot -proot -e "SET GLOBAL local_infile=1;"
+//     docker compose exec -T mysql mysql -uroot -proot -e "SET GLOBAL local_infile=1;"
 //
 // .env:
-//   PAGILA_URL     = postgres://user:password@localhost:5432/pagila
-//   MYSQL_DEST_URL = mysql://sakila_user:qwerty123@localhost:3306/pagila
+//   PAGILA_URL     = postgres://user:password@localhost:15432/pagila
+//   MYSQL_DEST_URL = mysql://sakila_user:qwerty123@localhost:13306/pagila
 //
 // Run (plan first to inspect the discovered creation order + FK ops):
 //   pag plan  -c pagila-graph.ppl -e .env
 //   pag apply -c pagila-graph.ppl -e .env
 //
 // Inspect the created relations afterwards:
-//   docker exec -i mysql_db mysql -uroot -proot pagila -e "SHOW CREATE TABLE rental\G"
-//   docker exec -i mysql_db mysql -uroot -proot pagila -e \
+//   docker compose exec -T mysql mysql -uroot -proot pagila -e "SHOW CREATE TABLE rental\G"
+//   docker compose exec -T mysql mysql -uroot -proot pagila -e \
 //     "SELECT table_name, column_name, referenced_table_name, referenced_column_name \
 //      FROM information_schema.key_column_usage \
 //      WHERE table_schema='pagila' AND referenced_table_name IS NOT NULL;"

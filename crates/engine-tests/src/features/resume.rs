@@ -3,11 +3,17 @@ mod tests {
     use crate::harness::ppl::feature_ppl;
     use crate::{
         harness::runner::{
-            DbType, get_row_count, run_ppl, run_ppl_with_pause, run_ppl_with_pause_mode,
+            DbType, execute, get_row_count, run_ppl, run_ppl_with_pause, run_ppl_with_pause_mode,
             run_verify_ppl,
         },
         reset_postgres_schema,
     };
+    use engine_core::plan::execution::ExecutionPlan;
+    use engine_processing::EnvContext;
+    use engine_state::models::{PipelineStatus, RunState, RunStatus};
+    use engine_state::{SledStateStore, StateStore};
+    use ppl_syntax::builder::parse;
+    use std::sync::Arc;
     use tracing_test::traced_test;
 
     /// MySQL `film` (1000 rows, film_id PK) -> Postgres, only the mapped columns
@@ -150,5 +156,101 @@ mod tests {
         run_verify_ppl(&ppl)
             .await
             .expect("verify should match after a resumed integrity run");
+    }
+
+    /// A run where one pipeline fails must be recorded as `failed`, not `completed`.
+    #[traced_test]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_with_a_failed_pipeline() {
+        reset_postgres_schema().await;
+
+        // Pre-fill the destination so the `actor` pipeline collides on its
+        // primary key, while the `category` pipeline in the same run succeeds.
+        let seed = feature_ppl(
+            r#"
+            pipeline "seed_actor" {
+                from { connection = connection.src  table = "actor" }
+                to   { connection = connection.dst  table = "actor" }
+                settings { create_missing_tables = true  batch_size = 100 }
+            }
+            "#,
+        );
+        run_ppl(&seed, false).await.expect("seed apply failed");
+
+        let ppl = feature_ppl(
+            r#"
+            pipeline "copy_category" {
+                from { connection = connection.src  table = "category" }
+                to   { connection = connection.dst  table = "category" }
+                settings { create_missing_tables = true  batch_size = 100 }
+            }
+
+            pipeline "copy_actor" {
+                from { connection = connection.src  table = "actor" }
+                to   { connection = connection.dst  table = "actor" }
+                settings { create_missing_tables = true  batch_size = 100 }
+            }
+            "#,
+        );
+
+        run_ppl(&ppl, false)
+            .await
+            .expect_err("the colliding pipeline must fail the run");
+
+        let run = load_run_state(&ppl).await.expect("run state was saved");
+
+        assert!(
+            matches!(run.status, RunStatus::Failed { .. }),
+            "expected the run to be recorded as failed, got {:?}",
+            run.status
+        );
+        assert_eq!(
+            status_of(&run, "copy_category"),
+            Some(PipelineStatus::Completed)
+        );
+        assert!(matches!(
+            status_of(&run, "copy_actor"),
+            Some(PipelineStatus::Failed { .. })
+        ));
+
+        // Clear the collision; re-running must retry the failed pipeline instead
+        // of reporting the whole migration already done.
+        execute("TRUNCATE TABLE actor").await;
+        run_ppl(&ppl, false).await.expect("re-run should succeed");
+
+        let run = load_run_state(&ppl).await.expect("run state was saved");
+
+        assert!(
+            matches!(run.status, RunStatus::Completed { .. }),
+            "expected the re-run to complete, got {:?}",
+            run.status
+        );
+        assert_eq!(
+            get_row_count("actor", "sakila", DbType::Postgres).await,
+            200,
+            "the retried pipeline should have migrated its rows"
+        );
+    }
+
+    fn status_of(run: &RunState, name: &str) -> Option<PipelineStatus> {
+        run.pipelines
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.status.clone())
+    }
+
+    /// Read back what the engine persisted for this config's run.
+    async fn load_run_state(ppl: &str) -> Option<RunState> {
+        let doc = parse(ppl).expect("parse");
+        let env = Arc::new(EnvContext::empty());
+        let plan = ExecutionPlan::build(&doc, env).expect("build plan");
+
+        let dir = dirs::home_dir().expect("home dir").join(".paganel/state");
+        let store = SledStateStore::open(dir).expect("open state store");
+
+        store
+            .load_run_state(&plan.run_id())
+            .await
+            .expect("load run state")
     }
 }

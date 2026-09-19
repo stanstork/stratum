@@ -35,22 +35,22 @@ execution {
 
 connection "src" {
     driver = "mysql"
-    url    = env("SRC_URL", "mysql://user:password@localhost:3306/shop")
+    url    = env("MYSQL_URL")
 }
 
 connection "dst" {
     driver = "postgres"
-    url    = env("DST_URL", "postgres://user:password@localhost:5432/warehouse")
+    url    = env("POSTGRES_URL")
 }
 
-pipeline "shop" {
+pipeline "warehouse" {
     from {
         connection = connection.src
         tables = [
-            "categories",
-            "products",
-            "customers",
-            "orders",
+            "actor",
+            "category",
+            "customer",
+            "film_category",
         ]
     }
 
@@ -59,17 +59,17 @@ pipeline "shop" {
 
         // Rename one destination table; the rest keep their source names.
         map {
-            customers = "dim_customer"
+            customer = "dim_customer"
         }
     }
 
-    // Project + rename columns for the `customers` table only. Every other
+    // Project + rename columns for the `customer` table only. Every other
     // listed table is copied in full.
-    select "customers" {
-        customer_id = customers.customer_id
-        given_name  = customers.first_name
-        family_name = customers.last_name
-        email       = customers.email
+    select "customer" {
+        customer_id = customer.customer_id
+        given_name  = customer.first_name
+        family_name = customer.last_name
+        email       = customer.email
     }
 
     settings {

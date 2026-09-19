@@ -12,13 +12,16 @@
 //
 // How it works
 // ────────────
-// During apply, each batch of rows is hashed (SHA-256 per row, then a
-// Merkle subtree root per batch). The roots are stored in a local sled
-// key-value store (~/.paganel/state/).
+// During apply, every row written is hashed (SHA-256 over its canonical
+// form) and keyed by its primary key. The leaves are folded into one Merkle
+// root per table, taken in ascending key order, so batch size, lane count and
+// read order do not change the root. The receipt and the row-hash log are
+// stored in a local sled key-value store (~/.paganel/state/).
 //
-// During verify, the same rows are re-read from the destination in
-// identical batch order, re-hashed, and compared against the stored roots.
-// Any modification, deletion, or insertion since apply is detected.
+// During verify, the destination is re-read and re-hashed, and the two
+// key-sorted streams are merge-joined against the stored log. Nothing
+// connects to the source. Any modification, deletion, or insertion since
+// apply is detected, and the report names the offending key.
 //
 // This example uses the actor and payment tables so both a small table
 // and a large paginated table are covered in one verify run.
@@ -43,8 +46,8 @@ pipeline "migrate_actor" {
 }
 
 // Large table - 16,044 rows across many batches with a keyset cursor.
-// The receipt stores one subtree root per batch, so any tampered row
-// changes exactly the batch root that covers it.
+// The receipt commits one leaf per row key, so a tampered row is reported
+// by its own payment_id rather than as a whole-table mismatch.
 pipeline "migrate_payment" {
     from { connection = connection.src  table = "payment" }
     to   { connection = connection.dst  table = "payment" }

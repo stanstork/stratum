@@ -1,60 +1,32 @@
 # Paganel Documentation
 
-## What is Paganel?
-Paganel is a declarative data pipeline engine that safely migrates data and schema between databases with:
+Paganel is a data migration engine that moves data and schema between
+systems, then cryptographically verifies that the destination matches what was
+written. For installation, the quick start, and the feature overview, start with
+the [project README](../README.md).
 
-- Parallel producer-consumer execution with batching
-- Checkpointing, retries, and circuit breakers built in
-- Declarative PPL pipelines for data movement and schema migration
-- Automatic schema inference and type coercion
-- Crash-safe resume via sled-backed state tracking
-
-## Supported Connectors
-
-**Sources:**
-- MySQL
-- PostgreSQL
-- CSV files
-
-**Destinations:**
-- PostgreSQL (with COPY fast-path)
-- MySQL (with LOAD DATA fast-path)
-
-## Core Features
-
-- DAG-based pipeline execution with parallel levels
-- Schema migration: CREATE TABLE, indexes, foreign keys, sequences, ENUMs
-- Snapshot migrations with cursor-based pagination (pk / numeric / timestamp)
-- Field-level transformations and computed columns
-- Row-level data validation
-- Dead Letter Queue for failed rows
-- WASM plugins (transform / filter / source / sink) in native Rust or JavaScript
-- Graceful shutdown (SIGINT/SIGTERM)
-- Dry-run analysis (`plan` command)
-- Automatic resume from checkpoints
-
-## Architecture at a Glance
-
-```
-PPL -> ExecutionPlan -> DAG Executor
-                           ↓  (level by level, parallel within level)
-                  PipelineOrchestrator
-                      ↓           ↓
-              Schema Ops      Data Pipeline
-          (CREATE TABLE,    run_producer() -> MPSC -> run_consumer()
-           indexes, FKs)         ↓                       ↓
-                            Source DB             Destination DB
-                                                  + SledStateStore
-                                                    (checkpoints)
-```
-
-## Documentation
+## Start here
 
 | Document | Description |
 |----------|-------------|
 | [plan.md](plan.md) | Reading `pag plan` - the summary layout, flags, sampling, and the magnitude bar |
-| [output-modes.md](output-modes.md) | `apply` and `verify` output - default logs, `--pretty`, and the `--tui` dashboard with its controls |
-| [architecture.md](architecture.md) | Full crate map, layer breakdown, design decisions |
+| [output-modes.md](output-modes.md) | `apply`, `verify` and `receipt` output - default logs, `--pretty`, the `--tui` dashboard with its controls, and receipt text/JSON |
 | [ppl-reference.md](ppl-reference.md) | PPL language reference with examples |
-| [verification.md](verification.md) | Cryptographic verification - Merkle trees, proof storage, verify command |
+
+## Design
+
+| Document | Description |
+|----------|-------------|
+| [verification.md](verification.md) | Cryptographic verification - canonical row serialization, Merkle construction, what a receipt does and does not prove |
+| [architecture.md](architecture.md) | Full crate map, layer breakdown, design decisions |
+| [why-ppl.md](why-ppl.md) | Why a purpose-built DSL instead of YAML/JSON/SQL - rationale and trade-offs |
 | [plugins/](plugins/README.md) | WASM plugins - roles, runtimes (native Rust / JS-QuickJS), authoring, CLI |
+
+## Background
+
+| Document | Description |
+|----------|-------------|
+| [benchmarks.md](benchmarks.md) | Reproducible benchmark methodology, results, and the harness |
+| [comparison.md](comparison.md) | How Paganel compares with other migration, CDC, and verification tools |
+
+Runnable configs for every feature live in [`examples/configs/`](../examples/configs/).

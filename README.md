@@ -23,14 +23,14 @@
 </p>
 
 <p align="center">
-  <img src="assets/demo.gif" alt="Migrate Sakila with integrity receipts, verify (all tables match), hand-edit one destination row, verify again — Paganel names the exact divergent row." width="820">
+  <img src="assets/demo.gif" alt="Migrate Sakila with integrity receipts, print the receipts (full Merkle root per table), verify (all tables match), hand-edit one destination row, verify again; Paganel names the exact divergent row." width="820">
 </p>
 
 <!-- demo.gif is rendered from assets/demo.tape; regenerate with `vhs assets/demo.tape` (needs the quickstart DBs up and a release build). -->
 
 Paganel is a data migration engine written in Rust. It moves data and schema between systems with crash recovery, parallel execution, and in-flight transforms, then cryptographically verifies that the destination matches what was written, down to the row. Today that means MySQL, PostgreSQL, and CSV; sources and sinks can also be sandboxed WASM plugins, so anything with data can stand at either end of a pipeline.
 
-On a 100M-row MySQL->PostgreSQL copy with the databases on separate hosts (over a real network), it sustains ~390K rows/s on a single lane and ~940K rows/s with four parallel lanes ([benchmarks](docs/benchmarks.md)).
+A complete migration is one file:
 
 ```ppl
 connection "source" {
@@ -59,43 +59,63 @@ pipeline "customers" {
 }
 ```
 
+On a 100M-row MySQL->PostgreSQL copy with the databases on separate hosts (over a real network), it sustains ~390K rows/s on a single lane and ~940K rows/s with four parallel lanes (~340K and ~670K with `--integrity` recording the receipts; see [benchmarks](docs/benchmarks.md)).
+
 ## Why Paganel?
 
-Most database migrations are either hand-written scripts or heavyweight ETL/CDC
-platforms. Paganel sits in between - one declarative tool that:
+Moving data between databases is simple until the data has to change on the way,
+the run has to survive a crash, and someone has to prove afterwards that it
+arrived intact. Paganel is one declarative tool that:
 
 - **Reads like config.** A single PPL file describes the whole
   migration: source, destination, filters, transforms, schema, and dependencies.
+  The tool parses it instead of passing SQL through, which is why `plan` can show
+  the blast radius before anything runs ([why a DSL](docs/why-ppl.md)).
 - **Is safe to re-run.** Crash-safe checkpoints mean an interrupted migration
-  resumes exactly where it stopped - no half-applied state, no re-processed rows.
-- **Checks it worked.** Cryptographic (Merkle-tree) verification re-reads the
-  destination and detects any difference from what was written, down to the
-  offending row.
+  resumes from the last committed batch. At most one batch is re-written
+  (see [State & Resume](#state--resume)).
+- **Checks it worked.** The receipt is built while writing, so `verify` runs
+  minutes or weeks later by re-reading the destination and checking it
+  against the receipt. No source connection, and a 32-byte root per table you
+  can keep in a ticket. A mismatch names the row, not just a count.
 - **Migrates schema too.** Tables, indexes, foreign keys, ENUMs, and
-  sequences - with FK-aware ordering and dependency-graph discovery.
+  sequences, with FK-aware ordering and dependency-graph discovery.
+- **Expands the graph, not just a table.** Point at a root table and the FK
+  graph is discovered and migrated with depth and exclude control. A `where` on
+  the root cascades, so only referenced rows come along: orders since January,
+  and only the customers those orders touch.
 - **Extends without forking.** Transforms, filters, sources, and sinks can be
-  sandboxed WASM/JS plugins.
+  WASM/JS plugins, sandboxed with fuel, memory and timeout caps and no
+  filesystem or network access by default.
 
-If a `pg_dump | psql` one-liner covers your case, use that. Paganel is for
-migrations that need transformation, cross-engine type mapping, dependency
-ordering, resumability, or verification.
+None of these pieces is new on its own; [docs/comparison.md](docs/comparison.md)
+lists who else has what. What was missing was all of them in one binary: schema
+and data, cross-engine, in-flight transforms, a dry-run plan, crash-safe resume,
+and row-level verification. There is no service to sign up for and no
+infrastructure to stand up, so it is one tool to get approved, and it runs
+inside your network.
+
+If dump-and-restore covers your case (`pg_dump | psql`, `mysqldump | mysql`),
+use that. Paganel is for migrations that need transformation, cross-engine type
+mapping, dependency ordering, resumability, or verification.
 
 ## Features
 
 - **Declarative pipelines** - PPL with SQL-inspired syntax
+- **Cryptographic verification** - Merkle tree receipts detect any difference between the destination and what was written
+- **Dry run** - `plan` shows output columns and types, the execution DAG, the exact DDL (`--ddl`), and duration/memory estimates
 - **Schema migration** - CREATE TABLE, indexes, foreign keys, ENUMs, sequences
-- **DAG execution** - `after = [pipeline.x]` dependencies, parallel levels
+- **Graph expansion** - auto-discover and migrate FK-dependent tables
 - **Crash recovery** - sled-backed checkpoints, automatic resume
+- **WASM plugins** - sandboxed transform / filter / source / sink plugins in native Rust or JavaScript
 - **Transformations** - field mapping, computed columns, `when` expressions, functions
 - **Data quality** - `validate` blocks with per-row `assert` / `warn` rules
 - **Fault tolerance** - circuit breaker, configurable retry, Dead Letter Queue
-- **Graph references** - auto-discover and migrate FK-dependent tables
+- **DAG execution** - `after = [pipeline.x]` dependencies, parallel levels
 - **Multi-table pipelines** - `tables = [...]` fans one block out into a full copy per table
 - **Parallel lanes** - `lanes = N` splits a large single-table copy into N primary-key ranges; graph migrations run their tables concurrently
 - **Pagination strategies** - primary key, numeric, timestamp cursor
 - **Lifecycle hooks** - `before` / `after` SQL blocks per pipeline
-- **WASM plugins** - sandboxed transform / filter / source / sink plugins in native Rust or JavaScript
-- **Cryptographic verification** - Merkle tree receipts detect any difference between the destination and what was written
 
 ## Supported Connectors
 
@@ -108,7 +128,7 @@ ordering, resumability, or verification.
 
 Most managed databases (AWS RDS, GCP Cloud SQL, Azure, Neon, Supabase,
 PlanetScale, Aiven, Heroku) require TLS. Both SQL drivers negotiate it from
-the connection URL - no extra config. Each driver uses its ecosystem's native
+the connection URL, with no extra config. Each driver uses its ecosystem's native
 parameter names; the per-driver tables below show exactly what each mode
 encrypts and verifies. To authenticate the server as well as encrypt the link, use a
 verifying mode (`verify-full` / `verify_ca`), with a CA bundle for private CAs.
@@ -129,7 +149,7 @@ These follow libpq: `require` encrypts but does not authenticate the server;
 ```ppl
 connection "dest" {
   driver = "postgres"
-  url    = env("POSTGRES_URL")  # e.g. postgres://user:pass@db.example.com:5432/app?sslmode=verify-full
+  url    = env("POSTGRES_URL")  // e.g. postgres://user:pass@db.example.com:5432/app?sslmode=verify-full
 }
 ```
 
@@ -150,7 +170,7 @@ chain can be verified: `?sslmode=verify-full&sslrootcert=/path/to/ca.pem`.
 ```ppl
 connection "source" {
   driver = "mysql"
-  url    = env("MYSQL_URL")  # e.g. mysql://user:pass@db.example.com:3306/app?require_ssl=true
+  url    = env("MYSQL_URL")  // e.g. mysql://user:pass@db.example.com:3306/app?require_ssl=true
 }
 ```
 
@@ -160,8 +180,8 @@ verification if the certificate's CN doesn't match the host:
 
 ## Project Status
 
-Paganel is pre-1.0. The engine runs real migrations today - data + schema,
-with verification, crash-safe resume, and plugins - but the PPL language and
+Paganel is pre-1.0. The engine runs real migrations today (data + schema,
+with verification, crash-safe resume, and plugins), but the PPL language and
 internal APIs still change between commits. Use it for evaluation and
 non-critical workloads; don't leave it unattended in production yet.
 
@@ -173,6 +193,9 @@ non-critical workloads; don't leave it unattended in production yet.
   not implemented.
 - **Single-node:** execution and state (sled) are local to one machine; there is
   no distributed/coordinated mode.
+- **One run at a time:** the state store is a single-process embedded database,
+  so a second `apply` (or `verify`, `receipt`, `reset`) while a migration is
+  running is refused. `status` and `pause` work during a run.
 - **Plugin host functions** (outbound HTTP, key-value, metrics) are
   capability-gated and off by default. Outbound HTTP is guarded (link-local/
   cloud-metadata blocked, per-request timeout, response-size cap, optional host
@@ -184,7 +207,7 @@ non-critical workloads; don't leave it unattended in production yet.
 **From source (requires Rust 1.88 or newer):**
 
 ```bash
-git clone https://github.com/stanstork/stratum.git
+git clone https://github.com/stanstork/stratum.git paganel
 cd paganel
 cargo build --release
 # binary at ./target/release/pag
@@ -192,9 +215,9 @@ cargo build --release
 
 ## Quick Start
 
-Spin up throwaway databases - MySQL seeded with the
+Spin up throwaway databases (MySQL seeded with the
 [Sakila](https://dev.mysql.com/doc/sakila/en/) sample database, plus an empty
-PostgreSQL - and run an example migration:
+PostgreSQL) and run an example migration:
 
 ```bash
 # 1. Start source + destination databases (credentials match .env.example)
@@ -251,6 +274,9 @@ pag verify -c migration.ppl
 # Verify and write report to file
 pag verify -c migration.ppl --output report.txt
 
+# Print the stored receipts (full table roots) to record outside the state dir
+pag receipt -c migration.ppl          # add --json for machine-readable output
+
 # Test database connectivity
 pag ping --url mysql://user:pass@localhost:3306/db
 
@@ -264,19 +290,27 @@ pag reset  -c migration.ppl   # clear all state for a migration
 pag plugin --help
 ```
 
+> **One migration at a time.** The state store (`~/.paganel/state/`) is a
+> single-process embedded database, so while a migration runs, a second `pag
+> apply` (or `verify`, `receipt`, `reset`) fails with a clear message instead
+> of opening it. `status` and `pause` are built for that moment and work
+> anyway: a running migration publishes its run status beside the store for
+> `pag status` to read, and `pag pause` requests the pause through a sentinel
+> file.
+
 > **`plan` summary vs `--json`.** The default `plan` output is a compact human
 > summary. `--json` emits the complete report it's built from - every column
 > with its type and indexes, the full row-count objects (`value` / `is_estimated`
 > / `confidence`), all mappings and joins, per-pipeline diagnostics *including* the
 > routine `info` notes the summary collapses, execution stages, and full resource
-> estimations - plus run metadata (`plan_id`, `config_hash`, resolved `defines`).
+> estimations, plus run metadata (`plan_id`, `config_hash`, resolved `defines`).
 > Use the summary to read, `--json` to gate CI or feed tooling. `stdout` carries
 > only the report, so `pag plan --json > plan.json` is always valid JSON. See
 > [docs/plan.md](docs/plan.md#the---json-report) for the shape, and
 > [docs/schema-plan.json](docs/schema-plan.json) for a complete example report.
 
 <p align="center">
-  <img src="assets/plan.png" alt="pag plan output: a two-stage execution DAG (migrate_payment waits for migrate_customer), per-pipeline column renames, excluded columns, joins, primary keys, and duration/memory/transfer estimates — ending in 'Ready to apply'." width="820">
+  <img src="assets/plan.png" alt="pag plan output: a two-stage execution DAG (migrate_payment waits for migrate_customer), per-pipeline column renames, excluded columns, joins, primary keys, and duration/memory/transfer estimates, ending in 'Ready to apply'." width="820">
 </p>
 
 <!-- plan.png is real `pag plan` output; regenerate with `./assets/plan.sh` (needs the quickstart DBs up, a release build, and tmux/freeze/ImageMagick). -->
@@ -285,7 +319,7 @@ pag plugin --help
 > (colored, per-event lines), or `--tui` (a live dashboard with pause/cancel
 > controls). `verify` prints stable `✓`/`✗`/`?` result lines by default and adds
 > headers, progress phases, and a summary under `--pretty`. See
-> [docs/output-modes.md](docs/output-modes.md) for annotated examples of each and
+> [docs/output-modes.md](docs/output-modes.md) for annotated examples of each, the `pag receipt` text/JSON shapes, and
 > the TUI keyboard reference.
 
 **Global flags:**
@@ -313,14 +347,14 @@ pag plugin --help
 ```ppl
 pipeline "dim_products" {
   from { connection = connection.src table = "products" }
-  to   { connection = connection.dst table = "dim_products", mode = "replace" }
+  to   { connection = connection.dst table = "dim_products" mode = "replace" }
 }
 
 pipeline "fact_orders" {
   after = [pipeline.dim_products]  // runs after dim_products completes
 
   from { connection = connection.src table = "orders" }
-  to   { connection = connection.dst table = "fact_orders", mode = "append" }
+  to   { connection = connection.dst table = "fact_orders" mode = "append" }
 
   with {
     products from dim_products where products.id == orders.product_id
@@ -409,7 +443,7 @@ validate {
 }
 
 on_error {
-  retry       { max_attempts = 3, backoff = "5s" }
+  retry       { max_attempts = 3 backoff = "5s" }
   failed_rows { table = "orders_errors" }
 }
 ```
@@ -453,23 +487,30 @@ pag apply -c migration.ppl --integrity
 # 2. Later, check the destination against what was written
 pag verify -c migration.ppl
 
-# ✓ migrate_customers/customers - match (13,842 rows, root a3f1b2c49d8c7b6a, 312ms)
-# ✓ migrate_orders/orders       - match (127,491 rows, root 5e2d8a1c04b93f77, 2,841ms)
+# ✓ migrate_customers/customers - match (13,842 rows, root a3f1b2c49d8c7b6a5e2d8a1c04b93f77c0ffee00112233445566778899aabbcc, 312ms)
+# ✓ migrate_orders/orders - match (127,491 rows, root 5e2d8a1c04b93f779d8c7b6a1f2e3d4c00112233445566778899aabbccddeeff, 2,841ms)
 
 # Mismatches are pinpointed to the exact row, by primary key:
 # ✗ migrate_orders/orders - MISMATCH (0 missing, 1 changed, 0 extra; 127,491 rows expected, 127,491 found; 2,841ms)
-#   expected root 5e2d8a1c04b93f77
-#   actual   root 9d8c7b6a1f2e3d4c
+#   expected root 5e2d8a1c04b93f779d8c7b6a1f2e3d4c00112233445566778899aabbccddeeff
+#   actual   root 9d8c7b6a1f2e3d4ca3f1b2c49d8c7b6affeeddccbbaa99887766554433221100
 #   order_id=3412 - changed: expected a3f1b2c49d8c7b6a actual 9d8c7b6a1f2e3d4c
+
+# 3. Keep the receipt: `pag receipt` prints each table's full root (and `--json`
+#    for tooling). A root recorded outside `~/.paganel/state/` - a ticket, a build
+#    log, a commit - is what makes later tampering with the state directory detectable.
+pag receipt -c migration.ppl --json > receipts.json
 ```
 
-Every row hash is keyed by its primary key, so verification is independent of batch size, lane count, and read order - it detects modified, deleted, and inserted rows by key.
+Every row hash is keyed by its primary key, so verification is independent of batch size, lane count, and read order, and it detects modified, deleted, and inserted rows by key. A receipt covers the whole destination table, so rows that were already there, or that another pipeline wrote, come back as `extra`. For those cases, `pag verify --allow-extra` narrows the check to the rows the receipt covers and still fails if any of them went missing or changed.
 
 Integrity costs ~0.3-0.5 µs per row, and the hashes stream to disk rather than memory: about 51 bytes per row, so a 10M-row table with an integer key leaves ~510 MB under `~/.paganel/state/` until that pipeline runs again. See [docs/verification.md](docs/verification.md) for the full design and [benchmarks](docs/benchmarks.md#the-cost-of---integrity) for the measured overhead.
 
 ## State & Resume
 
-Paganel stores pipeline state in `~/.paganel/state/` (sled embedded KV). If a migration is interrupted, re-running the same command resumes from the last checkpoint - no rows are re-processed. Integrity receipts are stored in the same directory under `receipt:{pipeline}:{table}` keys.
+Paganel stores pipeline state in `~/.paganel/state/` (sled embedded KV). If a migration is interrupted, re-running the same command resumes from the last checkpoint. The write sequence per batch is: checkpoint (`write`) -> commit the batch to the destination -> append a commit record to the WAL -> checkpoint (`committed`). A crash between the destination commit and the WAL append makes resume re-read and re-write that one batch, so recovery is at-least-once at batch granularity for a single batch. With a primary key and `on_conflict` set the replay is idempotent; with a plain COPY into a keyed table it fails on the duplicate key rather than silently duplicating; without a primary key the batch's rows can be duplicated.
+
+If a pipeline fails, the run is recorded as failed rather than completed, and re-running retries that pipeline while skipping the ones that already finished. Integrity receipts are stored in the same directory under `receipt:{pipeline}:{table}` keys.
 
 `apply` also records the throughput it achieves into a separate calibration cache (`~/.paganel/calibration`) so `pag plan` can estimate duration from this machine's measured rates rather than a generic default; until then it shows a conservative, clearly-labelled rough estimate. See [docs/plan.md](docs/plan.md#duration-estimates).
 
@@ -483,6 +524,8 @@ Paganel stores pipeline state in `~/.paganel/state/` (sled embedded KV). If a mi
 | [docs/architecture.md](docs/architecture.md) | Crate map, design decisions, data flow |
 | [docs/plugins/](docs/plugins/README.md) | WASM plugins - roles, native Rust & JS (QuickJS) runtimes, authoring, CLI |
 | [docs/verification.md](docs/verification.md) | Cryptographic verification design and implementation |
+| [docs/output-modes.md](docs/output-modes.md) | `apply` / `verify` / `receipt` output - default logs, `--pretty`, the `--tui` dashboard, receipt text and JSON |
+| [docs/comparison.md](docs/comparison.md) | How Paganel compares with other migration, CDC, and verification tools |
 | [docs/benchmarks.md](docs/benchmarks.md) | Reproducible Paganel benchmark (optional pgloader comparison) - methodology, results, `./benchmarks/run.sh` |
 | [examples/configs/](examples/configs/) | Runnable PPL examples - schema mapping, DAG dependencies, validation, DLQ, and [`when.ppl`](examples/configs/when.ppl) (conditional values & computed-column chains) |
 
@@ -504,22 +547,48 @@ cargo fmt
 ```
 
 The integration fixtures default to the `docker compose` ports (15432/13306), so
-the two commands above are all you need. To run against databases on other ports,
-set `POSTGRES_PORT` / `MYSQL_PORT` (e.g. `POSTGRES_PORT=5432 MYSQL_PORT=3306
-cargo test -p engine-tests -- --test-threads=1`).
+the two commands above are all you need. If you remap the compose ports, pass the
+same values to the tests with `POSTGRES_PORT` / `MYSQL_PORT`; they do not read
+`.env`.
+
+> **The suite is destructive on the destination.** Between tests it drops and
+> recreates the `public` schema in the target PostgreSQL database and deletes the
+> state store in `~/.paganel/state` (checkpoints and receipts included). The port
+> variables are for remapping the compose stack, not for pointing the tests at a
+> database you care about.
 
 Test fixtures and example configs are in [`examples/configs/`](examples/configs/).
 
 ## Roadmap
 
-Rough direction (not commitments):
+Rough direction, no dates and no commitments:
 
-- Additional connectors and destinations
-- Change-data-capture for incremental sync
-- Multiple-table union sources (`from` reading several tables)
-- Configurable connection pooling (pool size, timeouts)
-- Published binaries and crates
-- Persistent (cross-run) plugin key-value store - today's store is instance-scoped scratch
+**Keeping data in sync**
+
+- Incremental catch-up after a snapshot, so a cutover only has to freeze the delta
+- Change-data-capture: MySQL binlog first, then PostgreSQL logical replication
+- `drift` - re-verify a destination on a schedule and fail when it diverges
+
+**Making the proof stronger**
+
+- Source-side checksums, so a receipt can attest that the destination matches the
+  *source* for directly mapped columns, not only what was written
+- The receipt format published as a spec, with an independent validator that
+  checks a receipt on a machine without Paganel, and signed receipts
+- Verification strategies declared per pipeline: full Merkle, row count, or
+  sampling for tables too large to re-read, and excluding non-deterministic
+  columns (`now()`, `ON UPDATE`) from row hashing
+
+**Day-to-day use**
+
+- `scaffold` - generate a starting PPL config from a live database
+- Rehearsal mode - run the whole migration into a temporary schema, verify it,
+  then drop it
+- Shared state with locking, so runs can be concurrent and a team can share one
+  migration's state
+- Metrics export (OTLP push, Prometheus pull)
+- More connectors and destinations, including an analytical one
+- PPL and API stabilization toward 1.0
 
 See the [issue tracker](https://github.com/stanstork/stratum/issues) for what's
 actively in progress.

@@ -25,17 +25,22 @@ Type "pag apply --pretty -c examples/configs/merkle.ppl -e .env --integrity"
 Enter
 Sleep 4s
 
-# --- 2. verify: destination matches the receipts ---
+# --- 2. the receipts are yours to keep: full Merkle root per table ---
+Type "pag receipt -c examples/configs/merkle.ppl -e .env"
+Enter
+Sleep 4s
+
+# --- 3. verify: destination matches the receipts ---
 Type "pag verify --pretty -c examples/configs/merkle.ppl -e .env"
 Enter
 Sleep 3s
 
-# --- 3. tamper: change one non-key column of one destination row ---
+# --- 4. tamper: change one non-key column of one destination row ---
 Type `docker compose exec -T postgres psql -U user -d testdb -c "UPDATE actor SET last_name = 'TAMPERED' WHERE actor_id = 5"`
 Enter
 Sleep 2s
 
-# --- 4. verify again: fails and names the exact divergent row ---
+# --- 5. verify again: fails and names the exact divergent row ---
 Type "pag verify --pretty -c examples/configs/merkle.ppl -e .env"
 Enter
 Sleep 6s

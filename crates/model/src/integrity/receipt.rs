@@ -23,3 +23,20 @@ pub struct VerificationReceipt {
     pub algorithm: HashAlgorithm,
     pub created_at: DateTime<Utc>,
 }
+
+impl VerificationReceipt {
+    /// The full table root.
+    pub fn root_hex(&self) -> String {
+        root_hex(&self.table_root)
+    }
+}
+
+/// Render a 32-byte root as 64 lowercase hex characters.
+pub fn root_hex(root: &[u8; 32]) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(64);
+    for byte in root {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}

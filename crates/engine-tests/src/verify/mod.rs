@@ -1,12 +1,15 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        harness::runner::{DbType, execute, get_row_count, run_ppl, run_verify_ppl},
+        harness::{
+            Direction,
+            runner::{DbType, execute, get_row_count, run_ppl, run_verify_ppl},
+        },
         reset_postgres_schema,
     };
     use engine_core::plan::execution::ExecutionPlan;
     use engine_processing::EnvContext;
-    use engine_verify::verify;
+    use engine_verify::{VerifyOptions, verify, verify_with_options};
     use model::integrity::result::{DivergenceKind, VerificationResult};
     use ppl_syntax::builder::parse;
     use std::sync::Arc;
@@ -708,11 +711,161 @@ mod tests {
             .expect("cascade lane verify failed");
     }
 
+    /// A destination that already holds rows the migration under test did not
+    /// write: the first half of `actor` is loaded without integrity, then a
+    /// second pipeline appends the rest and commits a receipt for those rows
+    /// only. Verify reads the whole table, so the pre-existing half comes back
+    /// as `extra` even though nothing is corrupt.
+    #[traced_test]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn verify_reports_rows_that_were_already_in_the_destination() {
+        let ppl = seed_then_append().await;
+
+        let results = verify_results(&ppl).await;
+        let summary = results
+            .iter()
+            .find_map(|r| match r {
+                VerificationResult::Mismatch { summary, .. } => Some(summary),
+                _ => None,
+            })
+            .expect("pre-existing rows should fail a strict verify");
+
+        assert_eq!(summary.extra, 100, "the rows loaded before the migration");
+        assert_eq!(summary.missing, 0);
+        assert_eq!(summary.changed, 0);
+    }
+
+    /// The same table with `--allow-extra`: the 100 uncovered rows are accepted
+    /// and counted, and the receipt's own 100 rows still have to reproduce
+    /// `table_root` for this to be a `Match` at all.
+    #[traced_test]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn verify_allow_extra_accepts_rows_outside_the_receipt() {
+        let ppl = seed_then_append().await;
+
+        let results = verify_results_with(&ppl, VerifyOptions { allow_extra: true }).await;
+
+        let ignored = results
+            .iter()
+            .find_map(|r| match r {
+                VerificationResult::Match { extra_ignored, .. } => Some(*extra_ignored),
+                _ => None,
+            })
+            .expect("allow_extra should turn the pre-existing rows into a match");
+
+        assert_eq!(ignored, 100, "reported rather than silently dropped");
+        assert!(
+            !results
+                .iter()
+                .any(|r| matches!(r, VerificationResult::Mismatch { .. })),
+            "no table should still mismatch"
+        );
+    }
+
+    /// `--allow-extra` forgives uncovered keys and nothing else: tampering with
+    /// a row the receipt does cover still fails, and is still named by key.
+    #[traced_test]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn verify_allow_extra_still_catches_a_tampered_covered_row() {
+        let ppl = seed_then_append().await;
+
+        // actor_id 150 is in the appended half, so the receipt commits it.
+        execute("UPDATE actor SET last_name = 'TAMPERED' WHERE actor_id = 150").await;
+
+        let results = verify_results_with(&ppl, VerifyOptions { allow_extra: true }).await;
+        let named = results.iter().any(|r| match r {
+            VerificationResult::Mismatch {
+                summary,
+                divergences,
+                ..
+            } => {
+                summary.changed == 1
+                    && summary.missing == 0
+                    && divergences.iter().any(|d| d.key.contains("actor_id=150"))
+            }
+            _ => false,
+        });
+
+        assert!(named, "a changed covered row must still fail --allow-extra");
+    }
+
+    /// `--allow-extra` does not hide data loss either: deleting a row the
+    /// receipt covers is still `missing`.
+    #[traced_test]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn verify_allow_extra_still_catches_a_deleted_covered_row() {
+        let ppl = seed_then_append().await;
+
+        execute("DELETE FROM actor WHERE actor_id = 175").await;
+
+        let results = verify_results_with(&ppl, VerifyOptions { allow_extra: true }).await;
+        let missing_one = results.iter().any(|r| {
+            matches!(
+                r,
+                VerificationResult::Mismatch { summary, .. }
+                    if summary.missing == 1 && summary.changed == 0
+            )
+        });
+
+        assert!(missing_one, "a deleted covered row must still fail");
+    }
+
+    /// Load `actor` in two halves: the first without integrity (so no receipt
+    /// covers it), the second with. Returns the config for the second migration,
+    /// which is the one under verification.
+    async fn seed_then_append() -> String {
+        reset_postgres_schema().await;
+
+        let seed = Direction::MYSQL_TO_POSTGRES.ppl(
+            r#"
+            pipeline "seed_first_half" {
+                from { connection = connection.src  table = "actor" }
+                to   { connection = connection.dst  table = "actor" }
+                where "first_half" { actor.actor_id <= 100 }
+                settings { create_missing_tables = true  batch_size = 50 }
+            }
+        "#,
+        );
+        run_ppl(&seed, false).await.expect("seed apply failed");
+
+        let append = Direction::MYSQL_TO_POSTGRES.ppl(
+            r#"
+            pipeline "append_second_half" {
+                from { connection = connection.src  table = "actor" }
+                to   { connection = connection.dst  table = "actor" }
+                where "second_half" { actor.actor_id > 100 }
+                settings { create_missing_tables = true  batch_size = 50 }
+            }
+        "#,
+        );
+        run_ppl(&append, true).await.expect("append apply failed");
+
+        assert_eq!(
+            get_row_count("actor", "sakila", DbType::Postgres).await,
+            200,
+            "both halves should be in the destination"
+        );
+
+        append
+    }
+
     /// Run verify and hand back the raw results for assertions on detail.
     async fn verify_results(ppl: &str) -> Vec<VerificationResult> {
         let doc = parse(ppl).expect("parse");
         let env = Arc::new(EnvContext::empty());
         let plan = ExecutionPlan::build(&doc, env.clone()).expect("build plan");
+
         verify(plan, env).await.expect("verify call failed")
+    }
+
+    /// Run verify with explicit options and hand back the raw results.
+    async fn verify_results_with(ppl: &str, options: VerifyOptions) -> Vec<VerificationResult> {
+        let doc = parse(ppl).expect("parse");
+        let env = Arc::new(EnvContext::empty());
+        let plan = ExecutionPlan::build(&doc, env.clone()).expect("build plan");
+
+        verify_with_options(plan, env, options)
+            .await
+            .expect("verify call failed")
     }
 }

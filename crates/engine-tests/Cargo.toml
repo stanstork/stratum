@@ -15,11 +15,13 @@ engine-processing = { path = "../engine-processing" }
 engine-config = { path = "../engine-config" }
 engine-planner = { path = "../engine-planner" }
 engine-verify = { path = "../engine-verify" }
+engine-state = { path = "../engine-state" }
 ppl-syntax = { path = "../ppl-syntax" }
 chrono = { version = "0.4.39", features = ["serde"] }
 blake3 = "1.8.2"
 bigdecimal = "0.4.7"
 uuid = { version = "1.13.1", features = ["v4"] }
+dirs = "6.0.0"
 
 tracing-test = "0.2.5"
 tracing = "0.1.41"

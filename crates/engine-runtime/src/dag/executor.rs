@@ -355,10 +355,6 @@ impl DagExecutor {
         match run_result {
             // Process finalize state when the migration actually completed cleanly or handled its pipeline failures
             Ok(()) | Err(MigrationError::PipelinesFailed(_)) => {
-                run_state.status = RunStatus::Completed {
-                    completed_at: chrono::Utc::now(),
-                };
-
                 let run_id = self.exec_ctx.run_id().to_string();
                 for ps in &mut run_state.pipelines {
                     if ps.status == PipelineStatus::Pending {
@@ -383,6 +379,29 @@ impl DagExecutor {
                         ps.rows_done = total;
                     }
                 }
+
+                let failed = run_state
+                    .pipelines
+                    .iter()
+                    .filter(|p| matches!(p.status, PipelineStatus::Failed { .. }))
+                    .map(|p| p.name.clone())
+                    .collect::<Vec<_>>();
+
+                run_state.status = if failed.is_empty() {
+                    RunStatus::Completed {
+                        completed_at: chrono::Utc::now(),
+                    }
+                } else {
+                    RunStatus::Failed {
+                        error: format!(
+                            "{} of {} pipelines failed: {}",
+                            failed.len(),
+                            run_state.pipelines.len(),
+                            failed.join(", ")
+                        ),
+                        failed_at: chrono::Utc::now(),
+                    }
+                };
 
                 self.exec_ctx.state().save_run_state(&run_state).await?;
                 self.exec_ctx

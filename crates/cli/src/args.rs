@@ -59,8 +59,10 @@ impl Cli {
         )
     }
 
-    /// Returns true if running the `plan` command.
     pub fn is_plan_mode(&self) -> bool {
-        matches!(self.command, Commands::Plan { .. })
+        matches!(
+            self.command,
+            Commands::Plan { .. } | Commands::Receipt { .. }
+        )
     }
 }

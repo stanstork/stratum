@@ -17,7 +17,7 @@ pgloader configs, the data generators, and this methodology. Results land in
 included).
 
 > **pgloader is opt-in.** By default `run.sh` benchmarks Paganel only. Pass
-> `WITH_PGLOADER=1` to add pgloader on the workloads it can express - `sakila`
+> `WITH_PGLOADER=1` to add pgloader on the workloads it can express, `sakila`
 > and `synthetic`; it's skipped on `synthetic_heavy` (no computed-column
 > transforms) and `reverse` (can't target MySQL). Paganel runs from a native
 > binary when one exists at `PAGANEL_BIN` (default `target/release/pag`),
@@ -62,9 +62,9 @@ Paganel scenarios per workload:
 > scenario runs on `synthetic` (BIGINT PK) but is skipped on `sakila`.
 
 Optional comparison (`WITH_PGLOADER=1`), added only to the MySQL -> PostgreSQL
-copy workloads - `sakila` and `synthetic`. It is not run on the transform
-workloads (`synthetic_heavy`, `synthetic_plugin_rust`, `synthetic_plugin_js` -
-Paganel-only) or `reverse` (pgloader loads into PostgreSQL, so there is no
+copy workloads, `sakila` and `synthetic`. It is not run on the transform
+workloads (`synthetic_heavy`, `synthetic_plugin_rust`, `synthetic_plugin_js`,
+all Paganel-only) or `reverse` (pgloader loads into PostgreSQL, so there is no
 MySQL-destination comparison):
 
 Per run we record **wall time** (GNU `time -v`), **rows/s** (source rows /
@@ -73,13 +73,13 @@ for dockerized pgloader it is sampled via `docker stats` and marked
 approximate). Sakila scenarios run 3x (median reported); the single-table
 workloads run once by default (`SYNTH_RUNS` / `REV_RUNS` to change). After every run the harness compares
 row counts table-by-table between source and destination and fails loudly on
-any mismatch - a number only counts if the data actually arrived.
+any mismatch: a number only counts if the data actually arrived.
 
 ## Fairness rules
 
 - **Same databases, same settings**: both tools talk to the same two
   containers ([`benchmarks/compose.yml`](../benchmarks/compose.yml)). The
-  destination PostgreSQL keeps `fsync`/`synchronous_commit` on - loads are
+  destination PostgreSQL keeps `fsync`/`synchronous_commit` on, so loads are
   measured with real durability. The MySQL source relaxes durability (it is
   read-only during measured runs; the tuning only speeds up data generation).
 - **Fresh state every run**: the destination database is dropped and
@@ -89,19 +89,19 @@ any mismatch - a number only counts if the data actually arrived.
   number, so two machines generating `BENCH_ROWS` rows produce identical
   tables.
 - **Same scope on the synthetic table** (the like-for-like row): `orders`
-  has only a primary key, so both tools do identical work - create the table,
+  has only a primary key, so both tools do identical work: create the table,
   copy every row. No index-parity ambiguity.
-- **Sakila is not a like-for-like comparison** - see the caveat in its section
+- **Sakila is not a like-for-like comparison**; see the caveat in its section
   below. Paganel builds the tables, primary keys, and secondary indexes, but
   not the foreign keys; pgloader also builds the foreign keys, so it still does
   somewhat more work. Treat Sakila as directional only.
 - **JVM in UTC**: pgloader v4 must run with `-Duser.timezone=UTC`, or its
   MySQL JDBC driver throws `HOUR_OF_DAY: 3 -> 4` on any timestamp that lands in
-  a daylight-saving gap in the JVM's local zone. The data is fine - Paganel
-  reads the same rows without issue; it's a Connector/J footgun. Wall time
-  includes JVM startup + JIT warmup (~2 s), counted honestly.
+  a daylight-saving gap in the JVM's local zone. The data is fine; Paganel
+  reads the same rows without issue. It's a Connector/J footgun. Wall time
+  includes JVM startup + JIT warmup (~2 s).
 - **pgloader runs with default tuning.** The harness passes no pgloader
-  performance options - no `workers`/`concurrency`, batch/prefetch sizing, or
+  performance options: no `workers`/`concurrency`, batch/prefetch sizing, or
   `WITH` performance clauses beyond what's needed to create tables and copy
   rows. pgloader exposes several knobs (`workers`, `concurrency`, `batch rows`,
   `prefetch rows`, plus destination `work_mem`/`maintenance_work_mem`) that can
@@ -151,7 +151,7 @@ mode (`EXTERNAL_DB=1 MYSQL_HOST=… PG_HOST=…`).
 **Peak RSS** (the migrating process, not the databases): ~0.5 GB at one lane
 (0.46–0.94 GB across workloads, higher under `--integrity` and on wider
 projections), ~1.5 GB at four lanes; pgloader v4 ~0.6 GB. It's flat with table
-size and scales with lane count - full per-scenario figures are the `peak_rss_mb`
+size and scales with lane count; full per-scenario figures are the `peak_rss_mb`
 column of `summary.tsv`, and the mechanism is in [Memory behavior](#memory-behavior).
 
 pgloader is included on the `synthetic` and `sakila` rows as a familiar reference
@@ -205,7 +205,7 @@ inline as it streams (producer -> transform -> consumer -> COPY), with no extra 
 staging, or second read. So the drop from the plain copy is purely the added
 per-row expression CPU: evaluating ~19 columns cuts throughput to about
 two-thirds (355k vs 542k here; 251k vs 389k on the 100M run). `--integrity` costs
-its usual fraction of a microsecond per row on top (about -16% here) - the
+its usual fraction of a microsecond per row on top (about -16% here); the
 expression CPU does not fully hide the hashing.
 
 ### Plugins - Rust WASM vs JS (QuickJS)
@@ -219,11 +219,13 @@ realistic write width). Two findings hold on both runs:
 - **JS plugins are interpreter-bound**: the ~4-6× gap is the QuickJS
   interpreter executing the guest code.
 
-> **The boundary is batched.** Plugins are invoked once per batch: a whole batch crosses the WASM host<->guest boundary in a single call
-> over a columnar binary wire, and the guest iterates the rows internally. That is
-> why the native-Rust plugin sits close to the no-plugin rate instead of well
-> below it. The remaining Rust cost is the actual `compute` work, and the
-> remaining JS gap is the QuickJS interpreter, not per-row boundary overhead.
+> **The boundary is batched.** Plugins are invoked once per batch: a whole batch
+> crosses the WASM host<->guest boundary in a single call and the guest iterates
+> the rows internally (Rust transform/filter plugins over a columnar binary
+> encoding, JS over JSON). That is why the native-Rust plugin sits close to the
+> no-plugin rate instead of well below it. The remaining Rust cost is the actual
+> `compute` work, and the remaining JS gap is the QuickJS interpreter, not
+> per-row boundary overhead.
 
 ### Filters - the validation stage
 
@@ -257,9 +259,9 @@ Treat as directional; `synthetic` is the clean comparison.
 
 ### The cost of `--integrity`
 
-Hashing every row and folding a Merkle receipt adds a small per-row cost - a
+Hashing every row and folding a Merkle receipt adds a small per-row cost (a
 fraction of a microsecond, clustering around half a µs/row across these
-single-run measurements - so the *percentage* overhead mostly tracks the baseline
+single-run measurements), so the *percentage* overhead mostly tracks the baseline
 speed rather than the workload. Per row, on the 10M run:
 
 | workload | baseline | `--integrity` | delta | added per row |
@@ -276,8 +278,8 @@ On the fastest workload (a narrow projection through a Rust filter) that sub-µs
 cost is about a quarter of the per-row budget, so it reads as -27%; on the JS
 runs, where each row already costs ~8 µs in the interpreter, the same fraction of
 a µs disappears into single-digit noise. These are single-run measurements
-(`SYNTH_RUNS=1`), so the per-row column carries real spread - the plain
-`synthetic` copy landed at -7% and `synthetic_heavy` at -16% this run - read them
+(`SYNTH_RUNS=1`), so the per-row column carries real spread (the plain
+`synthetic` copy landed at -7% and `synthetic_heavy` at -16% this run); read them
 as "sub-µs per row, low-to-mid double-digit percent on fast workloads," not exact
 deltas. The same physics holds on the networked 100M run, where the disk under the
 hash log matters: on a local-NVMe engine `--integrity` costs ~13% single-lane and
@@ -293,7 +295,7 @@ the destination, hashing every row, and diffing it against the receipt runs at
 roughly the migration's own rate (a sequential read plus a hash per row). See
 [verification.md](verification.md#storage-footprint).
 
-## Reading the numbers honestly
+## Reading the numbers
 
 - **Benchmark at scale.** Fixed startup (runtime boot, JVM JIT
   warmup, schema introspection) is ~1-2 s for both tools. Below a few million
@@ -309,12 +311,12 @@ roughly the migration's own rate (a sequential read plus a hash per row). See
 
 ## Memory behavior
 
-Both tools stream and are bounded - neither holds the whole table, and neither's
+Both tools stream and are bounded: neither holds the whole table, and neither's
 footprint grows with table size. pgloader v4 (JVM) did 10M in ~0.79 GB with no
 tuning, bounded by the JVM heap (`-Xmx`) and its `prefetch rows`.
 
 Paganel holds only a bounded in-flight window: peak RSS is flat with table
-size - the same at 10M as at 100M - but scales with lane count, since each
+size (the same at 10M as at 100M) but scales with lane count, since each
 lane has its own window (≈0.5 GB at 1 lane -> ≈1.5 GB at 4 lanes on the sample
 box). That is a deliberate trade of memory for parallelism.
 
@@ -327,11 +329,11 @@ Two things set Paganel's per-lane footprint:
     it caps a lane's live set at ~100k rows regardless of table size.
   - *by data bytes* (128 MiB). A batch of very wide rows draws proportionally
     more of this budget, so a few wide batches can be resident instead of a
-    full channel's worth - without it, a 4 KB-row table used ~2x the memory of
+    full channel's worth. Without it, a 4 KB-row table used ~2x the memory of
     a narrow one; with it, they land within ~15% of each other.
 - **Allocator.** The pipeline is allocation-heavy (each row carries its
   column values), and the default glibc allocator spawns many per-thread
-  arenas on a high-core machine and retains freed memory in them - which
+  arenas on a high-core machine and retains freed memory in them, which
   inflated peak RSS ~2-3x as a pure artifact. Paganel links
   [mimalloc](https://github.com/microsoft/mimalloc) to keep that in check and
   return memory to the OS; it also modestly improved throughput.
@@ -340,7 +342,7 @@ Two things set Paganel's per-lane footprint:
 
 Prerequisites: Docker (with compose v2) and GNU time (`/usr/bin/time`). Paganel
 runs natively from `PAGANEL_BIN` (default `target/release/pag`) when it
-exists, otherwise it is built and run from `Dockerfile.paganel` - which compiles
+exists, otherwise it is built and run from `Dockerfile.paganel`, which compiles
 Paganel inside a Rust builder stage, so Docker alone suffices. The host Rust
 toolchain is needed only to build the native binary yourself.
 
@@ -352,14 +354,14 @@ WITH_PGLOADER=1 ./benchmarks/run.sh      # add the pgloader comparison
 ```
 
 **Separated hosts.** To reproduce the 100M reference run with the databases on
-their own machines, set `EXTERNAL_DB=1` plus `MYSQL_HOST` / `PG_HOST` - the harness
+their own machines, set `EXTERNAL_DB=1` plus `MYSQL_HOST` / `PG_HOST`; the harness
 then skips `compose` and talks to the databases over networked `mysql`/`psql`
 clients (at `MYSQL_HOST:33307` / `PG_HOST:54329`).
 
 pgloader is **opt-in** (`WITH_PGLOADER=1`) and only on the PostgreSQL-target
 workloads. Set `PGLOADER_BIN` to measure a local pgloader natively (a v4 `.jar`
 is run with `java -jar`); unset, it runs as Docker v4 built from
-`Dockerfile.pgloader`. For a fair wall-clock run both tools the same way - both
+`Dockerfile.pgloader`. For a fair wall-clock run both tools the same way: both
 native (`PAGANEL_BIN` + `PGLOADER_BIN`) or both Docker; the harness warns when
 they differ. Key env vars:
 
@@ -385,7 +387,7 @@ text `COPY` path, as does any individual value that can't be encoded. Force the
 CSV path for comparison or debugging with `to { postgres { copy_format = "text" } }`.
 
 `run.sh` drives the `paganel-lanes` scenario (4 lanes, `synthetic_lanes.ppl`)
-directly. Lanes are an PPL setting, not an env var, so for a different lane
+directly. Lanes are a PPL setting, not an env var, so for a different lane
 count copy that config and change `lanes = N`, or run it manually against the
 harness's databases:
 

@@ -28,9 +28,9 @@ versions. Record in a verification receipt which rules ran. Push a filter
 through a foreign-key graph. A config the tool can only *execute*, but not
 *reason about*, caps every one of those features.
 
-## The four ways tools do this
+## The five ways tools do this
 
-Migration tools take one of four approaches to config. Each is good at
+Migration tools take one of five approaches to config. Each is good at
 something, and each breaks down in its own way as migrations grow.
 
 ### 1. CLI flags
@@ -81,14 +81,39 @@ consoles and APIs.
 deeply nested locators, and expressiveness that stops exactly where you need it
 (per-table column filters; no joins, no computed values).
 
-### 4. Purpose-built DSLs
+### 4. Console-first tools
 
-The oldest tool in this category settled this years ago:
-pgloader's `LOAD DATABASE … WITH … CAST …` command is a real DSL, and its users,
-largely DBAs, never found that strange. DBAs will learn a language if it does
-enough for them.
+Fivetran HVR, BladePipe, Airbyte, and the classic ETL suites (Talend,
+Informatica) are configured in a web console or designer: connections, table
+mappings, and per-column expressions are clicked together and stored in the
+tool's repository, with an export (JSON, XML) for backup and automation.
 
-PPL is the same idea with a syntax closer to SQL and HCL:
+**Great at:** discoverability; an operator who has never seen the tool can set
+up a copy in an afternoon.
+**Decays when:** the migration has to be reviewed, diffed, or reproduced. The
+export is a serialization of UI state, not something a person writes, so review
+means clicking through screens on a staging hub, and "the same migration on
+four environments" means four sets of clicks or scripting against the tool's
+API.
+
+### 5. Purpose-built DSLs
+
+PPL is not the first DSL here, and the earlier ones show DBAs will learn a
+language if it does enough for them:
+
+- pgloader's `LOAD DATABASE … WITH … CAST … BEFORE LOAD DO …` command is a real
+  DSL for the batch copy: table selection, type casts, and SQL hooks. It has no
+  expression language, so a computed column or a row filter is out of scope.
+- Striim's TQL is a SQL-like language for streaming pipelines
+  (`CREATE SOURCE … CREATE CQ … SELECT … CREATE TARGET`), so transforms are
+  first-class, but it describes a running application on a cluster, not a
+  migration you run once and verify.
+- Redpanda Connect's Bloblang is a mapping DSL embedded in YAML: expressive for
+  per-message transforms, but it only sees the message, so the schema,
+  dependency order, and verification live elsewhere.
+
+PPL is the same idea, scoped to the batch migration and with a syntax closer to
+SQL and HCL:
 
 ```ppl
 pipeline "customers" {
@@ -158,11 +183,11 @@ PPL avoids becoming a programming language on purpose:
 - **You shouldn't have to start from a blank file.** The biggest real cost of
   any DSL is the blank-page problem. The runnable
   [`examples/configs/`](../examples/configs/) ship complete, commented configs
-  for every feature - schema mapping, DAG dependencies, joins, validation, DLQ -
+  for every feature (schema mapping, DAG dependencies, joins, validation, DLQ),
   so the normal workflow is *copy the closest example and edit*, not *learn and
   type*.
 
-## The trade-offs, honestly
+## The trade-offs
 
 A DSL has real costs:
 
