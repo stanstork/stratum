@@ -277,14 +277,14 @@ pag verify -c migration.ppl --output report.txt
 # Print the stored receipts (full table roots) to record outside the state dir
 pag receipt -c migration.ppl          # add --json for machine-readable output
 
-# Test database connectivity
+# Test database connectivity (--format mysql|postgres if the URL scheme is ambiguous)
 pag ping --url mysql://user:pass@localhost:3306/db
 
 # Inspect or control a run
 pag status -c migration.ppl   # show run status
 pag pause  -c migration.ppl   # request a graceful pause
 pag resume -c migration.ppl   # resume a paused run
-pag reset  -c migration.ppl   # clear all state for a migration
+pag reset  -c migration.ppl   # clear all state for a migration (--force skips the prompt)
 
 # Plugin tooling (compile / inspect / validate / test WASM & JS plugins)
 pag plugin --help

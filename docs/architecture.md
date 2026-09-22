@@ -429,7 +429,7 @@ Structural bounds, fixed by the code (not machine-dependent):
 | MPSC channel bound | 4 batches or 128 MiB (whichever binds first) |
 | Checkpoint interval | Every batch |
 | Retry backoff | 1s -> 30s exponential |
-| Graceful shutdown | <5s to drain in-flight batches |
+| Graceful shutdown | 30s deadline to drain in-flight batches (`SHUTDOWN_TIMEOUT`), then the pipeline is abandoned |
 
 Behavioral shape (for measured figures see [benchmarks.md](benchmarks.md), which
 records the box they were taken on; treat any absolute number as

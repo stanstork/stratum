@@ -109,22 +109,37 @@ See [The TUI dashboard](#the-tui-dashboard) for the full walkthrough.
 │ PAGANEL  RUNNING                                                                  View: Overview │
 │                                                                                                  │
 │Pipeline          Status        Progress                        Rows          Rate        ETA     │
-│> migrate_actor   ✔ Done        [████████████████████]  100%    200           --/s        0s      │
-│  migrate_custom  ▶ Running     [███████████         ]   58%    8.0K/13.8K    --/s        --      │
-│  migrate_orders  ○ Pending     [                    ]    0%    0/127.5K      --/s        --      │
+│> migrate_actor   ✔ Done        [████████████████████]  100%    200           4.6K/s      0s      │
+│  migrate_custom  ▶ Running     [█████████           ]   50%    298/599       305/s       0s      │
+│  migrate_paymen  ○ Pending     [                    ]    0%    0/16.0K       --/s        --      │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
 │                                                                                                  │
 │┌ Execution Stages ──────────────────────────────────────────────────────────────────────────────┐│
-││Stage 0: migrate_actor ✓                                                                        ││
-││Stage 1: migrate_customers  migrate_orders ●                                                    ││
+││Stage 0: migrate_actor                                                                          ││
+││Stage 1: migrate_customer ●                                                                     ││
+││Stage 2: migrate_payment                                                                        ││
+││                                                                                                ││
+││                                                                                                ││
+││                                                                                                ││
+││                                                                                                ││
 │└────────────────────────────────────────────────────────────────────────────────────────────────┘│
 │┌ Progress ─────────────┐┌ Throughput ──────────┐┌ Timing ───────────────┐┌ Data Volume ─────────┐│
-││█░░░░░░░░░░░░░░░ 5.8%  ││Rate: 0/s             ││Elapsed: 0s            ││Volume: 0 B           ││
-││1 / 3 pipelines        ││Peak: 0/s             ││ETA:     --            ││Rate:   0 B/s         ││
-││Rows: 8.2K / 141.5K    ││                      ││                       ││Peak:   0 B/s         ││
+││░░░░░░░░░░░░░░░░ 3.0%  ││Rate: 305/s           ││Elapsed: 1s            ││Volume: 59.58 KB      ││
+││1 / 3 pipelines        ││Peak: 305/s           ││ETA:     52s           ││Rate:   29.82 KB/s    ││
+││Rows: 498 / 16.7K      ││ █                    ││                       ││Peak:   33.79 KB/s    ││
 │└───────────────────────┘└──────────────────────┘└───────────────────────┘└──────────────────────┘│
+│                                                                                                  │
 │                             [Q]uit  [Tab]View  [Space]Pause  [C]ancel                            │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+*A real run captured at 100x30: Sakila to PostgreSQL, three pipelines where
+`migrate_payment` waits on `migrate_customer`, so one is done, one is mid-copy
+and one is still queued.*
 
 **Views** (cycle with `Tab`, or jump with `1`-`4`):
 
@@ -155,6 +170,25 @@ Two consequences to expect:
 If you need proof that the destination holds exactly what was written, that's
 what [`pag verify`](#verify-output) and `--integrity` are for.
 The dashboard estimate is for progress feedback.
+
+### Throughput, peak, and ETA
+
+**Rate** is a sliding 30-second window over progress samples, so it tracks what a
+pipeline is doing now rather than its average since the start. The window needs
+two samples before it can divide anything, and a finished pipeline stops
+producing samples at all, so in both cases the dashboard falls back to the
+pipeline's own average: rows it moved this run over the time it ran. That is why
+a completed pipeline keeps showing the rate it achieved instead of going blank,
+and why a migration that finishes in a second still reports a number.
+
+A pipeline that has not started shows `--/s`: nothing has moved, so there is
+nothing to average. **ETA** is derived from the same rate and stays `--` until
+there is one.
+
+The aggregate **Throughput** panel sums the rates of the pipelines currently
+running. When none are (the run has ended, or every pipeline finished before the
+window could sample) it falls back to the whole run's average, so it agrees with
+the per-pipeline column beside it.
 
 ### Keyboard controls
 
@@ -264,6 +298,10 @@ Migration for 'migration.ppl' already completed.
 The same guard applies to `--pretty` and default modes; the default mode logs it
 as an `info` line. Use `pag reset -c migration.ppl` to clear the state and
 run again from scratch.
+
+The guard is only for runs that finished cleanly. A run where a pipeline failed
+is recorded as *failed*, not completed, so re-running it retries that pipeline
+and leaves the ones that already finished alone; no `reset` needed.
 
 ---
 

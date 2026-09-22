@@ -23,7 +23,7 @@ fn calculate_discount(inputs: Vec<PluginInput>) -> PluginResult<Vec<f64>> {
 ```
 
 The handler takes the whole batch (`Vec<PluginInput>`) and returns one output
-per input - the ABI is batch-native, so there is no per-row entry point. The
+per input: the ABI is batch-native, so there is no per-row entry point. The
 macro decodes the batch, calls your function, and encodes the results.
 
 ## What the compiler sees after expansion
@@ -162,8 +162,8 @@ stash a role-specific config. The role-specific entry points differ as follows.
 Same shape as transform (batch in, batch out, `columnar_v1`), but:
 
 - Export renamed `__paganel_evaluate`
-- The handler returns `Vec<FilterDecision>` directly - no `.into()`, since
-  `FilterDecision` is concrete - and the decisions are encoded as a two-column
+- The handler returns `Vec<FilterDecision>` directly (no `.into()`, since
+  `FilterDecision` is concrete), and the decisions are encoded as a two-column
   columnar batch (`pass`: bool, `reason`: string).
 
 ```rust
@@ -199,6 +199,11 @@ pub extern "C" fn __paganel_read_page(ptr: u32, len: u32) -> u64 {
 
 pub extern "C" fn __paganel_estimated_count() -> i64 { -1 }
 ```
+
+> `__paganel_estimated_count` and `__paganel_shutdown` are emitted for every
+> plugin, but the host does not call either one yet. Overriding the count does
+> not currently feed progress or `plan` estimates, and cleanup should not rely
+> on a shutdown callback firing; do it inside the role call instead.
 
 ### Sink (`#[paganel_sink]`)
 

@@ -311,7 +311,7 @@ impl App {
     }
 
     fn sync_global_stats(&mut self) {
-        if !self.state.is_running() {
+        if self.pipelines.is_empty() {
             return;
         }
 

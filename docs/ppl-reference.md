@@ -67,7 +67,7 @@ connection "customers_csv" {
 ```
 
 **Supported drivers:** `"mysql"`, `"postgres"`, `"csv"` (source only), and
-`"wasm"` - a plugin endpoint, where `plugin = "<name>"` names a declared
+`"wasm"`, a plugin endpoint, where `plugin = "<name>"` names a declared
 [`plugin`](#plugin) block and the plugin acts as the source or the sink:
 
 ```ppl
@@ -232,7 +232,7 @@ from {
 ```
 
 **Multiple tables (fan-out).** List several tables and the pipeline expands into
-one independent full-copy pipeline per table - the connections and settings are
+one independent full-copy pipeline per table, so the connections and settings are
 declared once instead of repeated. See
 [Multi-Table Pipelines](#multi-table-pipelines) for the full feature (per-table
 renames, projections, execution order, and restrictions).
@@ -372,7 +372,7 @@ is joined before `products` references it). All joined tables become available i
 
 Field mapping block. Syntax is `destination_col = expression`.
 
-> **`select` projects - it restricts output to the columns you list.** With a
+> **`select` projects: it restricts output to the columns you list.** With a
 > `select` block the destination gets only the columns defined here; without
 > one, every source column is copied straight through.
 
@@ -512,7 +512,7 @@ validate {
 Expression checks are compiled and run by the expression engine; plugin checks
 are dispatched to the WASM/JS runtime by a batch-native validator that crosses
 the plugin boundary once per batch (not once per row) and gets back one verdict
-per row. A plugin call is only allowed as the *entire* `check` - it cannot be
+per row. A plugin call is only allowed as the *entire* `check`; it cannot be
 embedded inside a larger expression. When a plugin rejects a row, the reason it
 returns is used as the failure message, so `message` is typically omitted for
 plugin checks.
@@ -543,7 +543,7 @@ on_error {
 }
 ```
 
-`failed_rows` needs a nested destination block - either `table { … }` (as
+`failed_rows` needs a nested destination block, either `table { … }` (as
 above) or `file { … }` for a JSON dead-letter file:
 
 ```ppl
@@ -707,7 +707,7 @@ settings {
 | `skip_check` | bool | `false` | Don't create CHECK constraints on the destination |
 | `lanes` | integer (1–32) | `1` | Parallel copy workers - see [lanes](#lanes---parallel-copy) below |
 
-> The `skip_*` schema flags apply only to tables Paganel creates (`create_missing_tables = true`) and only for SQL destinations. All default to `false` - the destination reproduces the source's indexes, sequences, and constraints for the columns that survive any projection.
+> The `skip_*` schema flags apply only to tables Paganel creates (`create_missing_tables = true`) and only for SQL destinations. All default to `false`, so the destination reproduces the source's indexes, sequences, and constraints for the columns that survive any projection.
 
 #### `lanes` - parallel copy
 
@@ -795,8 +795,8 @@ condition_a or  condition_b
 | `env(name, [default])` | Environment variable value | `env("REGION", "us-east-1")` |
 
 `date` returns the date with the time dropped, while `year`, `month`, and
-`quarter` return integers. They require a timestamp or date input - a
-non-temporal value (e.g. a string) raises an error - and return `null` when the
+`quarter` return integers. They require a timestamp or date input (a
+non-temporal value such as a string raises an error) and return `null` when the
 input is `null`. `coalesce` returns the first non-null argument (or `null` if
 all are null) and takes the type of its first argument when a computed column is
 auto-created. `now()` returns the current UTC
@@ -824,8 +824,8 @@ discount_rate = when {
 }
 ```
 
-Branches may use any expression - column references, arithmetic, functions,
-nested `when`, `is null` checks - **except a direct plugin call** (see below). A
+Branches may use any expression (column references, arithmetic, functions,
+nested `when`, `is null` checks) **except a direct plugin call** (see below). A
 `when` can reference an earlier computed column in the same `select`; computed
 columns are evaluated top to bottom, so later ones build on earlier ones:
 
@@ -841,7 +841,7 @@ select {
 ```
 
 A plugin call cannot appear *directly inside* a `when` branch, but you can
-assign the plugin output to its own column and branch on that column - plugin
+assign the plugin output to its own column and branch on that column: plugin
 transforms run before computed columns, so the value is available:
 
 ```ppl
@@ -857,8 +857,8 @@ select {
 ### Environment Variables
 
 `env(...)` reads a value from the environment at load time. It can be used
-anywhere an expression is valid - most commonly a `connection.url`, a `define`,
-or a setting - so secrets and per-environment values stay out of the config
+anywhere an expression is valid (most commonly a `connection.url`, a `define`,
+or a setting), so secrets and per-environment values stay out of the config
 file.
 
 ```ppl
@@ -928,9 +928,10 @@ from {
   table      = "orders"
 
   with references {
-    data    = cascade          // cascade | schema_only (default: schema_only)
-    depth   = all              // all | 1, 2, 3... (default: all)
-    exclude = ["audit_logs", "temp_*", "*_staging"]
+    data             = cascade   // cascade | schema_only (default: schema_only)
+    depth            = all       // all | 1, 2, 3... (default: all)
+    exclude          = ["audit_logs", "temp_*", "*_staging"]
+    drop_constraints = false     // drop existing FKs before the data phase
   }
 }
 ```
@@ -940,6 +941,7 @@ from {
 | `data` | `cascade`, `schema_only` | `schema_only` | Whether to copy row data for referenced tables |
 | `depth` | `all` or integer | `all` | How many FK levels to follow |
 | `exclude` | array of strings/patterns | `[]` | Tables to skip (supports wildcards: `audit_*`, `*_log`, `*log*`, `*`) |
+| `drop_constraints` | `true`, `false` | `false` | Drop the destination's existing foreign keys before the data phase, then re-create them in the post phase as usual. Needed when an earlier `schema_only` run already created the FKs and a later `cascade` run would otherwise load data into constrained tables |
 
 **Schema behavior:**
 
@@ -1080,14 +1082,14 @@ pipeline "warehouse" {
 
 This is a fan-out of full-table copies: each table is copied whole into its
 own destination table (every row, every column). It does not follow foreign
-keys - for FK-graph discovery (which copies only FK-reachable rows) use
+keys; for FK-graph discovery (which copies only FK-reachable rows) use
 [`with references`](#with-references-block) instead. `tables` is also not a
 union: the tables are not combined into a single destination.
 
 ### Per-table renames and projections
 
 Tables you don't name are copied verbatim. To change an individual table, reuse
-the same constructs the graph feature uses - they match a listed table by name:
+the same constructs the graph feature uses; they match a listed table by name:
 
 - **`select "T" { ... }`** - becomes table `T`'s projection / column renames.
 - **`to { map { T = "dest" } }`** - renames table `T`'s destination table.
@@ -1123,7 +1125,7 @@ pipelines:
 - no `execution` block -> **sequential** (the default): one table at a time;
 - `strategy = "parallel"` -> up to `max_concurrency` tables concurrently.
 
-Fanning out does not itself change scheduling - the expansions are ordinary
+Fanning out does not itself change scheduling: the expansions are ordinary
 pipelines named `<pipeline>:<table>` (e.g. `warehouse:customer`).
 
 ### Restrictions
@@ -1146,7 +1148,7 @@ and a table may not be listed twice.
 
 ## Complete Example
 
-An e-commerce warehouse showing every pipeline block together - a star schema
+An e-commerce warehouse showing every pipeline block together: a star schema
 built from explicit dimension/fact pipelines, plus a graph-cascade pipeline
 that auto-follows FK references (`with references`, `map`, and named `select`).
 
