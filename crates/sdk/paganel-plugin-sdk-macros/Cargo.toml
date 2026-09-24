@@ -2,7 +2,15 @@
 name = "paganel-plugin-sdk-macros"
 version = "0.1.0"
 edition = "2024"
-license = "AGPL-3.0-or-later"
+license = "MIT"
+rust-version = "1.88"
+description = "Attribute macros for paganel-plugin-sdk: #[paganel_transform], #[paganel_filter], #[paganel_source], #[paganel_sink]"
+repository = "https://github.com/stanstork/paganel"
+homepage = "https://github.com/stanstork/paganel"
+documentation = "https://docs.rs/paganel-plugin-sdk-macros"
+readme = "README.md"
+keywords = ["wasm", "plugin", "macros", "etl", "database"]
+categories = ["database", "wasm", "development-tools::procedural-macro-helpers"]
 
 [lib]
 proc-macro = true

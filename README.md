@@ -598,6 +598,11 @@ actively in progress.
 Paganel is licensed under the **GNU Affero General Public License v3.0 or later**
 (`AGPL-3.0-or-later`). See [LICENSE](LICENSE) for the full text.
 
+The plugin SDK is **MIT**, deliberately: `paganel-plugin-sdk` and
+`paganel-plugin-sdk-macros` are what you compile into your own plugin, so
+linking them puts no obligation on your code. The engine's copyleft stops at
+the plugin boundary.
+
 ```
 Copyright (C) 2026 Paganel contributors
 

@@ -26,7 +26,7 @@ with `driver = "wasm"`), with checkpoint/resume support.
   [javascript.md](./javascript.md).
 
 Both runtimes implement the same host ABI and are loaded by the same engine, so
-a plugin's role and behavior are identical regardless of language - only the
+a plugin's role and behavior are identical regardless of language; only the
 authoring experience and resource budget differ.
 
 ## The ABI is batch-native
@@ -35,7 +35,7 @@ Transform and filter plugins are called once per batch. The host serializes
 the whole batch, crosses the WASM boundary a single time, and the guest returns
 exactly one result per input row (in order). This amortizes the boundary
 crossing (alloc / serialize / call / deserialize) over the entire batch instead
-of paying it per row - the dominant cost in a trivial transform. Both authoring
+of paying it per row, which is the dominant cost in a trivial transform. Both authoring
 SDKs surface this directly: a Rust handler takes `Vec<PluginInput>` and returns
 a `Vec` of outputs; a JS handler takes the array of rows and returns an array of
 results. The author owns the loop over the batch.
@@ -107,7 +107,7 @@ pipeline "ingest" {
 ```
 
 A WASM source -> SQL destination can create the destination table
-automatically (`create_missing_tables = true`) - the schema is inferred from the
+automatically (`create_missing_tables = true`): the schema is inferred from the
 source plugin's declared `output` columns.
 
 ## Plugin configuration
@@ -122,7 +122,7 @@ plugin "sampler" {
 }
 ```
 
-Config reaches handlers in both runtimes, all roles - see the per-language
+Config reaches handlers in both runtimes, all roles; see the per-language
 docs for the exact accessor (`config()` / `source_config()` in Rust; the handler
 `config` argument in JS).
 
@@ -162,7 +162,7 @@ pag plugin compile plugins/upper.js -o plugins/upper.wasm
 # Print a plugin's metadata (name, version, role, schema)
 pag plugin inspect plugins/upper.wasm
 
-# Validate every plugin referenced by an PPL config (offline, no DB)
+# Validate every plugin referenced by a PPL config (offline, no DB)
 pag plugin validate -c migration.ppl
 
 # Run a plugin over a batch of sample rows (input is a JSON ARRAY of rows;
@@ -193,6 +193,14 @@ and sink reports `rows_written`.
 
 `plugin validate` cross-checks each plugin's declared input schema and role
 against how the pipelines use it, without touching a database.
+
+## License
+
+The SDKs are permissive: the Rust crates (`paganel-plugin-sdk`,
+`paganel-plugin-sdk-macros`) are MIT, and the JavaScript SDK
+(`@paganel/plugin-sdk`) is Apache-2.0. You compile them into your plugin, so
+your plugin's license is yours to choose; the engine's AGPL does not reach
+across the plugin boundary.
 
 ## Performance
 
