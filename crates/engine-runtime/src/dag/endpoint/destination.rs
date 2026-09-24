@@ -236,8 +236,8 @@ impl DestinationEndpoint for WasmDestinationEndpoint {
         _cascade: &[String],
     ) -> Result<Vec<TableMetadata>, MigrationError> {
         // Authoritative metadata from the plugin's declared `input` schema
-        // (set via `#[stratum_sink(input = [...])]` and round-tripped through
-        // `__stratum_metadata`). The destination table name comes from ctx.
+        // (set via `#[paganel_sink(input = [...])]` and round-tripped through
+        // `__paganel_metadata`). The destination table name comes from ctx.
         Ok(vec![dest_meta_from_schema(
             &ctx.destination.name,
             &self.input_schema,

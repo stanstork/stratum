@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use crate::harness::smql::feature_smql;
+    use crate::harness::ppl::feature_ppl;
     use crate::{
         features::plugins::fixture,
         harness::runner::{
-            DbType, get_cell_as_string, get_cell_as_usize, get_row_count, run_smql_with_env,
+            DbType, get_cell_as_string, get_cell_as_usize, get_row_count, run_ppl_with_env,
         },
         reset_postgres_schema,
     };
@@ -18,14 +18,14 @@ mod tests {
         reset_postgres_schema().await;
 
         // A file the plugin reads via the fs capability.
-        let dir = std::env::temp_dir().join("stratum-caps-e2e");
+        let dir = std::env::temp_dir().join("paganel-caps-e2e");
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("probe.txt");
         std::fs::write(&file, "filecontents\n").unwrap();
         let file_path = file.to_string_lossy().into_owned();
         let dir_path = dir.to_string_lossy().into_owned();
 
-        let doc = feature_smql(&format!(
+        let doc = feature_ppl(&format!(
             r#"
             plugin "caps" {{
                 path          = "{plugin}"
@@ -49,7 +49,7 @@ mod tests {
             dir = dir_path,
         ));
 
-        run_smql_with_env(&doc, &[("CAPS_ENV", "envvalue"), ("CAPS_FILE", &file_path)])
+        run_ppl_with_env(&doc, &[("CAPS_ENV", "envvalue"), ("CAPS_FILE", &file_path)])
             .await
             .expect("migration succeeds");
 

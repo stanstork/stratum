@@ -1,9 +1,10 @@
 use crate::SledStateStore;
 use crate::error::StateStoreError;
 use crate::models::{Checkpoint, CheckpointStage, CheckpointSummary, RunState, WalEntry};
-use crate::store::{to_ser, to_storage};
+use crate::store::{live, to_ser, to_storage};
 use async_trait::async_trait;
 use sled::transaction::{ConflictableTransactionError, TransactionError};
+use tracing::warn;
 
 #[async_trait]
 pub trait StateStore: Send + Sync {
@@ -133,6 +134,12 @@ impl StateStore for SledStateStore {
         let value = bincode::serialize(state).map_err(to_ser)?;
 
         self.db.insert(key, value).map_err(to_storage)?;
+
+        // Publish the same state beside the database so `pag status` can read it.
+        if let Err(e) = live::write_live_run(&self.dir, state) {
+            warn!(run_id = %state.run_id, error = %e, "could not publish run status");
+        }
+
         Ok(())
     }
 
@@ -173,6 +180,8 @@ impl StateStore for SledStateStore {
 
         self.db.apply_batch(batch).map_err(to_storage)?;
         self.db.flush().map_err(to_storage)?;
+
+        live::remove_live_run(&self.dir, run_id);
 
         Ok(())
     }

@@ -1,0 +1,52 @@
+// Benchmark: full Sakila migration, MySQL -> PostgreSQL.
+//
+// One pipeline block listing every table via `from { tables = [...] }`. 
+// Paganel fans this out into one full-copy pipeline per table, so the
+// connections are declared once. `film_text` (an orphan full-text table nothing
+// references) is left off both sides, matching the pgloader template.
+//
+// Paganel's scope here: create destination tables + primary keys, copy every
+// row. No secondary indexes and no FK constraints - each fanned-out table is an
+// independent single-table pipeline, so no FKs are emitted. No `select` block,
+// so every column is copied straight through.
+//
+// NOT scope-matched with pgloader: pgloader v4 always builds the full schema, 
+// so its Sakila numbers aren't a like-for-like comparison. See the caveat in
+// ../pgloader/sakila.load.tpl and docs/benchmarks.md.
+//
+// URLs come from the environment; run.sh exports them for the bench databases.
+
+execution {
+    strategy        = "parallel"
+    max_concurrency = 8
+}
+
+connection "src" {
+    driver = "mysql"
+    url    = env("BENCH_SAKILA_MYSQL_URL")
+}
+
+connection "dst" {
+    driver = "postgres"
+    url    = env("BENCH_SAKILA_PG_URL")
+}
+
+pipeline "sakila" {
+    from {
+        connection = connection.src
+        tables = [
+            "actor", "address", "category", "city", "country", "customer",
+            "film", "film_actor", "film_category", "inventory", "language",
+            "payment", "rental", "staff", "store",
+        ]
+    }
+
+    to {
+        connection = connection.dst
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 25000
+    }
+}

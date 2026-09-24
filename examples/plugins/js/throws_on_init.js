@@ -4,7 +4,7 @@
 // surface a clean compile error - never a panic or a silent success.
 //   plugin compile throws_on_init.js -o /tmp/x.wasm   -> error "boom: ..."
 //   plugin inspect throws_on_init.js                  -> same error
-const { transform } = require("@stratum/plugin-sdk");
+const { transform } = require("@paganel/plugin-sdk");
 
 throw new Error("boom: this plugin fails to load on purpose");
 

@@ -49,7 +49,7 @@ impl MySqlDriver {
         &self.pool
     }
 
-    /// One-time, read-only advisory run before the first bulk write. Stratum does
+    /// One-time, read-only advisory run before the first bulk write. Paganel does
     /// not change server config - it only surfaces settings the DBA controls that
     /// throttle bulk loads, so the operator knows what to ask for. No-op after the
     /// first call and never invoked on read-only source connections.

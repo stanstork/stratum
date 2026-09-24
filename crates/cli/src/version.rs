@@ -22,7 +22,7 @@ pub fn print() {
     let build_timestamp = env!("BUILD_TIMESTAMP");
     let rustc_version = env!("RUSTC_VERSION");
 
-    println!("stratum {}", version);
+    println!("pag {}", version);
     println!("Git commit:  {} ({})", git_hash, git_branch);
     println!("Build date:  {}", build_timestamp);
     println!("Rust:        {}", rustc_version);

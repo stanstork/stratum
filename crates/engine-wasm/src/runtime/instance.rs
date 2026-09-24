@@ -61,7 +61,7 @@ macro_rules! process_batch {
 
         if outputs.len() != $input_len {
             let action = $export_name
-                .strip_prefix("__stratum_")
+                .strip_prefix("__paganel_")
                 .unwrap_or($export_name);
             return Err(WasmError::InvalidOutput {
                 plugin: $self.metadata.name.clone(),
@@ -160,30 +160,30 @@ impl PluginInstance {
             &mut store,
             &instance,
             &plugin_name,
-            "__stratum_alloc",
+            "__paganel_alloc",
         )?;
         let dealloc_fn = Self::get_typed_func::<(u32, u32), ()>(
             &mut store,
             &instance,
             &plugin_name,
-            "__stratum_dealloc",
+            "__paganel_dealloc",
         )?;
 
         // Resolve role-specific exports (optional - determined by which ones exist)
-        let transform_fn = Self::try_get_typed_func(&mut store, &instance, "__stratum_transform");
-        let evaluate_fn = Self::try_get_typed_func(&mut store, &instance, "__stratum_evaluate");
-        let read_page_fn = Self::try_get_typed_func(&mut store, &instance, "__stratum_read_page");
+        let transform_fn = Self::try_get_typed_func(&mut store, &instance, "__paganel_transform");
+        let evaluate_fn = Self::try_get_typed_func(&mut store, &instance, "__paganel_evaluate");
+        let read_page_fn = Self::try_get_typed_func(&mut store, &instance, "__paganel_read_page");
         let write_batch_fn =
-            Self::try_get_typed_func(&mut store, &instance, "__stratum_write_batch");
-        let prepare_fn = Self::try_get_typed_func(&mut store, &instance, "__stratum_prepare");
-        let finalize_fn = Self::try_get_typed_func(&mut store, &instance, "__stratum_finalize");
+            Self::try_get_typed_func(&mut store, &instance, "__paganel_write_batch");
+        let prepare_fn = Self::try_get_typed_func(&mut store, &instance, "__paganel_prepare");
+        let finalize_fn = Self::try_get_typed_func(&mut store, &instance, "__paganel_finalize");
 
         // Load metadata
         let metadata_fn = Self::get_typed_func::<(), u64>(
             &mut store,
             &instance,
             &plugin_name,
-            "__stratum_metadata",
+            "__paganel_metadata",
         )?;
         let metadata = Self::load_metadata(
             &mut store,
@@ -198,7 +198,7 @@ impl PluginInstance {
             &mut store,
             &instance,
             &plugin_name,
-            "__stratum_initialize",
+            "__paganel_initialize",
         )?;
 
         let config_bytes = config_json.unwrap_or(b"{}");
@@ -259,7 +259,7 @@ impl PluginInstance {
         process_batch!(
             self,
             transform_fn,
-            "__stratum_transform",
+            "__paganel_transform",
             inputs.len(),
             |is_columnar| {
                 if is_columnar {
@@ -293,7 +293,7 @@ impl PluginInstance {
         process_batch!(
             self,
             transform_fn,
-            "__stratum_transform",
+            "__paganel_transform",
             rows.len(),
             |is_columnar| {
                 if is_columnar {
@@ -333,7 +333,7 @@ impl PluginInstance {
         process_batch!(
             self,
             evaluate_fn,
-            "__stratum_evaluate",
+            "__paganel_evaluate",
             inputs.len(),
             |is_columnar| {
                 if is_columnar {
@@ -363,7 +363,7 @@ impl PluginInstance {
         process_batch!(
             self,
             evaluate_fn,
-            "__stratum_evaluate",
+            "__paganel_evaluate",
             rows.len(),
             |is_columnar| {
                 if is_columnar {
@@ -397,7 +397,7 @@ impl PluginInstance {
         cursor: Option<&str>,
         _batch_size: usize,
     ) -> Result<SourcePage, WasmError> {
-        let func = require_export!(self, read_page_fn, "__stratum_read_page");
+        let func = require_export!(self, read_page_fn, "__paganel_read_page");
 
         let input_bytes = json_v1::serialize_cursor(cursor)?;
         // The cursor is a single small payload; the page the plugin produces is
@@ -413,7 +413,7 @@ impl PluginInstance {
     /// supplied to the plugin via its config at init time, so the wire
     /// payload carries only the records.
     pub fn call_write_batch(&mut self, rows: &[Record]) -> Result<WriteResult, WasmError> {
-        let func = require_export!(self, write_batch_fn, "__stratum_write_batch");
+        let func = require_export!(self, write_batch_fn, "__paganel_write_batch");
 
         let batch = PluginBatch {
             records: rows.to_vec(),
@@ -428,13 +428,13 @@ impl PluginInstance {
         json_v1::deserialize_write_result(&output_bytes, &self.metadata.name)
     }
 
-    /// Call a sink plugin's prepare hook (`__stratum_prepare`). Invoked once
+    /// Call a sink plugin's prepare hook (`__paganel_prepare`). Invoked once
     /// before the first batch so the plugin can open connections, create staging tables, etc.
     pub fn call_prepare(&mut self) -> Result<(), WasmError> {
         exec_hook!(self, prepare_fn, "prepare", (0, 0))
     }
 
-    /// Call a sink plugin's finalize hook (`__stratum_finalize`). Invoked once
+    /// Call a sink plugin's finalize hook (`__paganel_finalize`). Invoked once
     /// after the final batch so the plugin can flush buffers or commit.
     pub fn call_finalize(&mut self) -> Result<(), WasmError> {
         exec_hook!(self, finalize_fn, "finalize", ())
@@ -469,14 +469,14 @@ impl PluginInstance {
             &mut store,
             &instance,
             "<inspect>",
-            "__stratum_dealloc",
+            "__paganel_dealloc",
         )?;
 
         let meta_fn = Self::get_typed_func::<(), u64>(
             &mut store,
             &instance,
             "<inspect>",
-            "__stratum_metadata",
+            "__paganel_metadata",
         )?;
 
         Self::load_metadata(&mut store, &instance, &meta_fn, &dealloc, "<inspect>")

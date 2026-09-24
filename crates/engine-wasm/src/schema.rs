@@ -76,7 +76,7 @@ impl PluginField {
     }
 }
 
-/// Plugin metadata, loaded from __stratum_metadata.
+/// Plugin metadata, loaded from __paganel_metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginMetadata {
     pub name: String,

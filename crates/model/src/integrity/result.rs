@@ -9,6 +9,8 @@ pub enum VerificationResult {
     Match {
         receipt: VerificationReceipt,
         duration_ms: u64,
+        #[serde(default)]
+        extra_ignored: u64,
     },
     Mismatch {
         receipt: VerificationReceipt,

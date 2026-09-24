@@ -1,10 +1,10 @@
-use stratum_plugin_sdk::{PluginInput, PluginResult, stratum_transform};
+use paganel_plugin_sdk::{PluginInput, PluginResult, paganel_transform};
 
 /// Grows the WASM linear memory directly until the host's
 /// `ResourceLimiter` denies the growth, then traps with `unreachable`.
 /// Used by `test_memory_limit` to verify the runtime enforces memory
 /// caps.
-#[stratum_transform(
+#[paganel_transform(
     name = "test_memory_hog",
     version = "1.0.0",
     output = "f64",

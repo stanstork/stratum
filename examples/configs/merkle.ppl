@@ -1,0 +1,64 @@
+// merkle.ppl - Merkle-tree integrity verification
+//
+// Paganel can compute a cryptographic receipt for every migration and later
+// verify that the destination matches it exactly. The workflow is:
+//
+//   1. Apply with integrity flag - migrates data and writes a receipt:
+//        pag apply -c merkle.ppl --integrity -e .env
+//
+//   2. Verify at any later point - re-reads the destination and compares
+//      row hashes against the stored receipt:
+//        pag verify -c merkle.ppl
+//
+// How it works
+// ────────────
+// During apply, every row written is hashed (SHA-256 over its canonical
+// form) and keyed by its primary key. The leaves are folded into one Merkle
+// root per table, taken in ascending key order, so batch size, lane count and
+// read order do not change the root. The receipt and the row-hash log are
+// stored in a local sled key-value store (~/.paganel/state/).
+//
+// During verify, the destination is re-read and re-hashed, and the two
+// key-sorted streams are merge-joined against the stored log. Nothing
+// connects to the source. Any modification, deletion, or insertion since
+// apply is detected, and the report names the offending key.
+//
+// This example uses the actor and payment tables so both a small table
+// and a large paginated table are covered in one verify run.
+
+define {
+    mysql_url    = env("MYSQL_URL")
+    postgres_url = env("POSTGRES_URL")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+// Small table - all 200 rows in a single receipt batch.
+pipeline "migrate_actor" {
+    from { connection = connection.src  table = "actor" }
+    to   { connection = connection.dst  table = "actor" }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 200
+    }
+}
+
+// Large table - 16,044 rows across many batches with a keyset cursor.
+// The receipt commits one leaf per row key, so a tampered row is reported
+// by its own payment_id rather than as a whole-table mismatch.
+pipeline "migrate_payment" {
+    from { connection = connection.src  table = "payment" }
+    to   { connection = connection.dst  table = "payment" }
+
+    paginate {
+        strategy = "pk"
+        cursor   = "payment.payment_id"
+    }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 1000
+    }
+}

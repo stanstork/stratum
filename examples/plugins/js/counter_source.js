@@ -2,7 +2,7 @@
 // pages of PAGE_SIZE.
 // Test:  plugin test counter_source.js --json            -> first page (3 rows)
 //        plugin test counter_source.js --cursor 3 --json  -> next page
-const { source } = require("@stratum/plugin-sdk");
+const { source } = require("@paganel/plugin-sdk");
 
 const TOTAL = 7;
 const PAGE_SIZE = 3;

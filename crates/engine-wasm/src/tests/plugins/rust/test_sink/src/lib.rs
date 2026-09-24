@@ -1,13 +1,13 @@
 //! A minimal sink plugin for integration tests.
 
 use core::sync::atomic::{AtomicU64, Ordering};
-use stratum_plugin_sdk::{
-    PluginBatch, PluginError, PluginResult, WriteResult, log_info, sink_config, stratum_sink,
+use paganel_plugin_sdk::{
+    PluginBatch, PluginError, PluginResult, WriteResult, log_info, sink_config, paganel_sink,
 };
 
 static TOTAL: AtomicU64 = AtomicU64::new(0);
 
-#[stratum_sink(
+#[paganel_sink(
     name = "test_sink",
     version = "1.0.0",
     input = [

@@ -6,7 +6,7 @@ use wasmtime::{Caller, Linker};
 pub(super) fn link(linker: &mut Linker<PluginState>) -> Result<(), WasmError> {
     linker
         .func_wrap(
-            "stratum",
+            "paganel",
             "metric_counter",
             |mut caller: Caller<'_, PluginState>, name_ptr: u32, name_len: u32, value: i64| {
                 if !caller.data().capabilities.metrics {
@@ -23,7 +23,7 @@ pub(super) fn link(linker: &mut Linker<PluginState>) -> Result<(), WasmError> {
 
     linker
         .func_wrap(
-            "stratum",
+            "paganel",
             "metric_gauge",
             |mut caller: Caller<'_, PluginState>, name_ptr: u32, name_len: u32, value: f64| {
                 if !caller.data().capabilities.metrics {
@@ -47,7 +47,7 @@ mod tests {
 
     const METRIC_WAT: &str = r#"
         (module
-          (import "stratum" "metric_counter" (func $mc (param i32 i32 i64)))
+          (import "paganel" "metric_counter" (func $mc (param i32 i32 i64)))
           (memory (export "memory") 1)
           (data (i32.const 16) "rows")
           (func (export "run")

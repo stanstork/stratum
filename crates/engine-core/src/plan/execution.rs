@@ -10,14 +10,14 @@ use model::execution::{
     pipeline::Pipeline,
     plugin::PluginDecl,
 };
+use ppl_syntax::ast::doc::PplDocument;
 use serde::{Deserialize, Serialize};
-use smql_syntax::ast::doc::SmqlDocument;
 use std::{
     collections::HashMap,
     sync::{Arc, OnceLock},
 };
 
-/// Top-level execution plan compiled from SMQL AST
+/// Top-level execution plan compiled from PPL AST
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionPlan {
     pub definitions: GlobalDefinitions,
@@ -40,8 +40,8 @@ pub struct ExecutionPlan {
 }
 
 impl ExecutionPlan {
-    /// Build execution plan from SMQL document
-    pub fn build(doc: &SmqlDocument, env: Arc<EnvContext>) -> Result<ExecutionPlan, ConvertError> {
+    /// Build execution plan from PPL document
+    pub fn build(doc: &PplDocument, env: Arc<EnvContext>) -> Result<ExecutionPlan, ConvertError> {
         let mut builder = PlanBuilder::new(env);
 
         if let Some(def_block) = &doc.define_block {
@@ -173,20 +173,20 @@ fn write_canonical(value: &serde_json::Value, buf: &mut String) {
 mod tests {
     use crate::{context::env::EnvContext, plan::execution::ExecutionPlan};
     use model::{core::value::Value, execution::pipeline::WriteMode};
-    use smql_syntax::builder::parse;
+    use ppl_syntax::builder::parse;
     use std::sync::Arc;
 
-    fn build_plan(smql: &str) -> ExecutionPlan {
-        let doc = parse(smql).expect("Failed to parse SMQL");
+    fn build_plan(ppl: &str) -> ExecutionPlan {
+        let doc = parse(ppl).expect("Failed to parse PPL");
         ExecutionPlan::build(&doc, Arc::new(EnvContext::empty())).expect("Failed to build plan")
     }
 
-    fn build_plan_with_env(smql: &str, vars: &[(&str, &str)]) -> ExecutionPlan {
+    fn build_plan_with_env(ppl: &str, vars: &[(&str, &str)]) -> ExecutionPlan {
         let mut env = EnvContext::empty();
         for (k, v) in vars {
             env.set(k.to_string(), v.to_string());
         }
-        let doc = parse(smql).expect("Failed to parse SMQL");
+        let doc = parse(ppl).expect("Failed to parse PPL");
         ExecutionPlan::build(&doc, Arc::new(env)).expect("Failed to build plan")
     }
 
@@ -295,7 +295,7 @@ mod tests {
     /// Same config parsed multiple times must always produce the same run_id.
     #[test]
     fn test_run_id_is_stable_across_builds() {
-        let smql = r#"
+        let ppl = r#"
             connection "src" { driver = "mysql" host = "localhost" }
             connection "dst" { driver = "postgres" host = "localhost" }
             pipeline "p1" {
@@ -304,7 +304,7 @@ mod tests {
             }
         "#;
 
-        let ids: Vec<String> = (0..50).map(|_| build_plan(smql).run_id()).collect();
+        let ids: Vec<String> = (0..50).map(|_| build_plan(ppl).run_id()).collect();
         assert!(
             ids.windows(2).all(|w| w[0] == w[1]),
             "run_id varied across 50 builds: found {:?} and {:?}",
@@ -313,12 +313,12 @@ mod tests {
         );
     }
 
-    /// Connection declaration order in SMQL must not affect run_id.
+    /// Connection declaration order in PPL must not affect run_id.
     /// Connections are stored in a HashMap internally - the sort-by-name
     /// in build() ensures deterministic serialization.
     #[test]
     fn test_run_id_stable_regardless_of_connection_declaration_order() {
-        let smql_ab = r#"
+        let ppl_ab = r#"
             connection "aaa" { driver = "mysql" host = "host1" }
             connection "zzz" { driver = "postgres" host = "host2" }
             pipeline "p1" {
@@ -326,7 +326,7 @@ mod tests {
                 to   { connection = connection.zzz table = "t1" }
             }
         "#;
-        let smql_ba = r#"
+        let ppl_ba = r#"
             connection "zzz" { driver = "postgres" host = "host2" }
             connection "aaa" { driver = "mysql" host = "host1" }
             pipeline "p1" {
@@ -335,22 +335,22 @@ mod tests {
             }
         "#;
 
-        let id_ab = build_plan(smql_ab).run_id();
-        let id_ba = build_plan(smql_ba).run_id();
+        let id_ab = build_plan(ppl_ab).run_id();
+        let id_ba = build_plan(ppl_ba).run_id();
         assert_eq!(id_ab, id_ba, "connection declaration order affected run_id");
     }
 
     /// Different connection URLs must produce different run_ids.
     #[test]
     fn test_run_id_differs_for_different_connections() {
-        let smql_a = r#"
+        let ppl_a = r#"
             connection "db" { driver = "postgres" url = "postgres://localhost/db_a" }
             pipeline "p" {
                 from { connection = connection.db table = "t" }
                 to   { connection = connection.db table = "t2" }
             }
         "#;
-        let smql_b = r#"
+        let ppl_b = r#"
             connection "db" { driver = "postgres" url = "postgres://localhost/db_b" }
             pipeline "p" {
                 from { connection = connection.db table = "t" }
@@ -358,13 +358,13 @@ mod tests {
             }
         "#;
 
-        assert_ne!(build_plan(smql_a).run_id(), build_plan(smql_b).run_id());
+        assert_ne!(build_plan(ppl_a).run_id(), build_plan(ppl_b).run_id());
     }
 
     /// Different env var values must produce different run_ids.
     #[test]
     fn test_run_id_differs_for_different_env_values() {
-        let smql = r#"
+        let ppl = r#"
             connection "db" { driver = "postgres" url = env("DB_URL", "fallback") }
             pipeline "p" {
                 from { connection = connection.db table = "t" }
@@ -372,8 +372,8 @@ mod tests {
             }
         "#;
 
-        let id_a = build_plan_with_env(smql, &[("DB_URL", "postgres://host_a/db")]).run_id();
-        let id_b = build_plan_with_env(smql, &[("DB_URL", "postgres://host_b/db")]).run_id();
+        let id_a = build_plan_with_env(ppl, &[("DB_URL", "postgres://host_a/db")]).run_id();
+        let id_b = build_plan_with_env(ppl, &[("DB_URL", "postgres://host_b/db")]).run_id();
         assert_ne!(
             id_a, id_b,
             "different env values should produce different run_ids"
@@ -383,7 +383,7 @@ mod tests {
     /// config_path is metadata - must not affect the hash.
     #[test]
     fn test_run_id_not_affected_by_config_path() {
-        let smql = r#"
+        let ppl = r#"
             connection "db" { driver = "postgres" host = "localhost" }
             pipeline "p" {
                 from { connection = connection.db table = "t" }
@@ -391,11 +391,11 @@ mod tests {
             }
         "#;
 
-        let mut plan_a = build_plan(smql);
-        plan_a.config_path = "/home/user/project/migration.smql".to_string();
+        let mut plan_a = build_plan(ppl);
+        plan_a.config_path = "/home/user/project/migration.ppl".to_string();
 
-        let mut plan_b = build_plan(smql);
-        plan_b.config_path = "/tmp/other.smql".to_string();
+        let mut plan_b = build_plan(ppl);
+        plan_b.config_path = "/tmp/other.ppl".to_string();
 
         assert_eq!(
             plan_a.run_id(),
@@ -407,14 +407,14 @@ mod tests {
     /// Different pipeline definitions must produce different run_ids.
     #[test]
     fn test_run_id_differs_for_different_pipelines() {
-        let smql_a = r#"
+        let ppl_a = r#"
             connection "db" { driver = "postgres" host = "localhost" }
             pipeline "p" {
                 from { connection = connection.db table = "users" }
                 to   { connection = connection.db table = "users_copy" }
             }
         "#;
-        let smql_b = r#"
+        let ppl_b = r#"
             connection "db" { driver = "postgres" host = "localhost" }
             pipeline "p" {
                 from { connection = connection.db table = "orders" }
@@ -422,13 +422,13 @@ mod tests {
             }
         "#;
 
-        assert_ne!(build_plan(smql_a).run_id(), build_plan(smql_b).run_id());
+        assert_ne!(build_plan(ppl_a).run_id(), build_plan(ppl_b).run_id());
     }
 
     /// Plans with definitions using HashMaps must hash deterministically.
     #[test]
     fn test_run_id_stable_with_definitions() {
-        let smql = r#"
+        let ppl = r#"
             define {
                 rate = 1.5
                 prefix = "prod"
@@ -441,7 +441,7 @@ mod tests {
             }
         "#;
 
-        let ids: Vec<String> = (0..20).map(|_| build_plan(smql).run_id()).collect();
+        let ids: Vec<String> = (0..20).map(|_| build_plan(ppl).run_id()).collect();
         assert!(
             ids.windows(2).all(|w| w[0] == w[1]),
             "run_id with definitions was non-deterministic"
@@ -451,7 +451,7 @@ mod tests {
     /// Plans with settings (HashMap) must hash deterministically.
     #[test]
     fn test_run_id_stable_with_settings() {
-        let smql = r#"
+        let ppl = r#"
             connection "db" { driver = "postgres" host = "localhost" }
             pipeline "p" {
                 from { connection = connection.db table = "t" }
@@ -463,7 +463,7 @@ mod tests {
             }
         "#;
 
-        let ids: Vec<String> = (0..20).map(|_| build_plan(smql).run_id()).collect();
+        let ids: Vec<String> = (0..20).map(|_| build_plan(ppl).run_id()).collect();
         assert!(
             ids.windows(2).all(|w| w[0] == w[1]),
             "run_id with settings was non-deterministic"
@@ -473,7 +473,7 @@ mod tests {
     /// Many connections (higher chance of HashMap reordering) must still be stable.
     #[test]
     fn test_run_id_stable_with_many_connections() {
-        let smql = r#"
+        let ppl = r#"
             connection "alpha"   { driver = "mysql"    host = "h1" }
             connection "bravo"   { driver = "postgres" host = "h2" }
             connection "charlie" { driver = "mysql"    host = "h3" }
@@ -484,14 +484,14 @@ mod tests {
             }
         "#;
 
-        let ids: Vec<String> = (0..50).map(|_| build_plan(smql).run_id()).collect();
+        let ids: Vec<String> = (0..50).map(|_| build_plan(ppl).run_id()).collect();
         assert!(
             ids.windows(2).all(|w| w[0] == w[1]),
             "run_id with many connections was non-deterministic"
         );
     }
 
-    /// Whitespace/formatting changes in SMQL produce the same AST and same run_id.
+    /// Whitespace/formatting changes in PPL produce the same AST and same run_id.
     #[test]
     fn test_run_id_not_affected_by_whitespace() {
         let compact = r#"connection "db" { driver = "postgres" host = "localhost" }
@@ -553,7 +553,7 @@ pipeline "copy_customers" {
 }
         "#;
 
-        let doc = parse(input).expect("Failed to parse SMQL");
+        let doc = parse(input).expect("Failed to parse PPL");
         let plan = ExecutionPlan::build(&doc, Arc::new(EnvContext::empty()))
             .expect("Failed to build execution plan");
 
@@ -611,7 +611,7 @@ pipeline "warehouse" {
 }
         "#;
 
-        let doc = parse(input).expect("Failed to parse SMQL");
+        let doc = parse(input).expect("Failed to parse PPL");
         let plan = ExecutionPlan::build(&doc, Arc::new(EnvContext::empty()))
             .expect("Failed to build execution plan");
 

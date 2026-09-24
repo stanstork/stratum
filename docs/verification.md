@@ -8,6 +8,7 @@ Keyed Merkle receipts for post-migration integrity verification
 
 - [What Verification Proves](#what-verification-proves)
 - [What Verification Does Not Prove](#what-verification-does-not-prove)
+  - [A receipt covers a table, not a run](#a-receipt-covers-a-table-not-a-run)
   - [Trust boundary](#trust-boundary)
 - [Architecture](#architecture)
 - [The Receipt](#the-receipt)
@@ -32,7 +33,7 @@ Keyed Merkle receipts for post-migration integrity verification
 
 Conventional migration verification relies on row count comparison. Matching counts do not guarantee matching data: silent corruption, partial writes, network-level bit flips, and OOM kills mid-batch can all produce a destination with the correct row count but incorrect data.
 
-Stratum hashes each post-transform row, keys that hash by the row's primary key, and commits the whole keyed set to a single Merkle root stored in a `VerificationReceipt`. The `verify` command re-reads the destination, rebuilds the same keyed set, and compares - reporting each difference by primary key.
+Paganel hashes each post-transform row, keys that hash by the row's primary key, and commits the whole keyed set to a single Merkle root stored in a `VerificationReceipt`. The `verify` command re-reads the destination, rebuilds the same keyed set, and compares, reporting each difference by primary key.
 
 This detects:
 
@@ -41,7 +42,7 @@ This detects:
 - Rows modified in the destination after migration (**changed**)
 - Rows silently dropped or corrupted during the write phase
 
-Because rows are keyed rather than positioned, the comparison is **order-independent**: nothing about how the migration ran - batch size, lane count, FK traversal order, retries - has to be replayed for verification to work.
+Because rows are keyed rather than positioned, the comparison is **order-independent**: nothing about how the migration ran (batch size, lane count, FK traversal order, retries) has to be replayed for verification to work.
 
 The receipt's `table_root` is the portable half of the artifact: 32 bytes that commit to the entire table. It survives after the per-row hashes are deleted, and can be logged, recorded, or handed to an auditor. Retained somewhere outside the state directory, it also makes later tampering with the row-hash store detectable rather than silent (see [Trust boundary](#trust-boundary)).
 
@@ -49,33 +50,58 @@ The receipt's `table_root` is the portable half of the artifact: 32 bytes that c
 
 **Transform correctness is checked by unit and integration tests, not by verification.**
 
-The hash is computed over post-transform output. Whether `lower(trim(email))` does the right thing, whether a `when` expression maps tiers correctly - that is validated by tests. Verification checks that the destination matches what was written, not whether what was written is semantically correct.
+The hash is computed over post-transform output. Whether `lower(trim(email))` does the right thing, whether a `when` expression maps tiers correctly: that is validated by tests. Verification checks that the destination matches what was written, not whether what was written is semantically correct.
 
-Verification also does not prove that the correct rows were selected from the source. If a `where` filter was wrong and selected the wrong rows, the destination hash will still match the stored receipt - because the receipt was computed from whatever was written.
+Verification also does not prove that the correct rows were selected from the source. If a `where` filter was wrong and selected the wrong rows, the destination hash will still match the stored receipt, because the receipt was computed from whatever was written.
 
-**Self-attestation.** Both halves of the comparison are produced by Stratum: the receipt records what the producer computed, and verify re-reads what the destination holds. This is strong evidence against data loss, corruption, partial writes, and after-the-fact modification. It is not an end-to-end proof that source and destination agree - that needs a second commitment taken on the source side, which is out of scope here (see [Future Extensions](#future-extensions)).
+**Self-attestation.** Both halves of the comparison are produced by Paganel: the receipt records what the producer computed, and verify re-reads what the destination holds. This is strong evidence against data loss, corruption, partial writes, and after-the-fact modification. It is not an end-to-end proof that source and destination agree; that needs a second commitment taken on the source side, which is out of scope here (see [Future Extensions](#future-extensions)).
+
+### A receipt covers a table, not a run
+
+A receipt commits the keyed set of rows one `apply --integrity` wrote, and
+`verify` reads the destination table start to finish. Every destination key that
+is not in the receipt is therefore reported as `extra`, and by default that is a
+mismatch, whether the row is a tampered insert or was simply already there.
+
+Three ordinary situations land on that path, none of them corruption:
+
+- the destination table already held rows before the migration,
+- the same pipeline ran twice to append more rows (each run resets its row-hash
+  log, so the newer receipt covers only the newer rows), or
+- two pipelines write into one destination table (receipts are per
+  `pipeline:table`, so each run's rows are uncovered by the other's receipt).
+
+`mode = "replace"` (TRUNCATE + INSERT) always verifies clean, because the
+destination then holds exactly what the run wrote.
+
+For the append cases, `verify --allow-extra` narrows the check to the rows the
+receipt covers: uncovered rows are counted and reported in the result line, but
+are not folded into the recomputed root, so the receipt's own rows still have to
+reproduce `table_root` exactly and any `missing` or `changed` row among them
+still fails. What is given up is the ability to detect rows inserted into the
+destination after the migration; use the default when that matters.
 
 ### Trust boundary
 
-The construction is cryptographic - collision-resistant hashing and a binding Merkle commitment - but what that buys you depends on where the root ends up.
+The construction is cryptographic (collision-resistant hashing and a binding Merkle commitment), but what that buys you depends on where the root ends up.
 
 Against **accident** the guarantee is unconditional. Silent truncation, partial writes, bit flips, a batch lost to an OOM kill: none of these can produce a row set that still folds to the recorded root, so verification catches them with no further precautions.
 
 Against a **deliberate** local modification it is conditional. The receipt is unsigned and lives in the same state directory as the row hashes it commits to. Anyone able to rewrite the destination can also rewrite the row-hash store *and* the receipt, then recompute a root consistent with the result. Nothing in the file layout prevents that.
 
-What closes the gap is retaining the root somewhere the modification cannot reach - a build log, a ticket, a commit, an append-only store. Verification prints `table_root` in its output and `apply` logs it at debug level; comparing a later run's root against a copy you kept is what turns "the data is self-consistent" into "the data is unchanged since the migration".
+What closes the gap is retaining the root somewhere the modification cannot reach: a build log, a ticket, a commit, an append-only store. `apply` prints the full `table_root` when each receipt is written, `verify` prints it next to every result, and `pag receipt` (`--json` for tooling) prints the stored receipts again on demand; comparing a later run's root against a copy you kept is what turns "the data is self-consistent" into "the data is unchanged since the migration".
 
 Two related limits, for completeness:
 
-- **No authorship.** The root commits to content, not to who produced it. Anyone can compute a valid root for any data, so a receipt cannot distinguish one Stratum run from a forged file. Signing the root would be the fix; nothing here does that today.
-- **No secret.** There is no keyed MAC, so the commitment is verifiable by anyone - which is what makes it auditable, and also why it proves nothing about provenance.
+- **No authorship.** The root commits to content, not to who produced it. Anyone can compute a valid root for any data, so a receipt cannot distinguish one Paganel run from a forged file. Signing the root would be the fix; nothing here does that today.
+- **No secret.** There is no keyed MAC, so the commitment is verifiable by anyone, which is what makes it auditable, and also why it proves nothing about provenance.
 
 ### Non-deterministic destination columns
 
 The receipt records the values written from the source at apply time; `verify`
 re-reads the destination and compares. So if a verified column's destination
 value is generated non-deterministically rather than copied, the read-back will
-not match the receipt and `verify` reports a **false mismatch** - even though the
+not match the receipt and `verify` reports a **false mismatch**, even though the
 data movement was correct. This happens when a destination column:
 
 - has a non-deterministic default (`now()` / `CURRENT_TIMESTAMP`, `random()`,
@@ -84,10 +110,10 @@ data movement was correct. This happens when a destination column:
 - is regenerated on write by an `ON UPDATE CURRENT_TIMESTAMP` clause or a
   trigger (e.g. on an `on_conflict = "do_update"` upsert).
 
-Stratum does not strip such defaults from the destination: a destination
+Paganel does not strip such defaults from the destination: a destination
 column may legitimately need one, and a pre-existing destination table is outside
 the migration's control. If a table has non-deterministic columns, expect
-`verify` to flag it - the mismatch is in those generated columns, not in the
+`verify` to flag it: the mismatch is in those generated columns, not in the
 copied data.
 
 > **Planned:** a future verification update will let you exclude such columns
@@ -112,9 +138,9 @@ Sink (BatchWriter)
   -> StateManager (checkpoint)
 ```
 
-The engine holds no row hashes of its own: each batch's `(row key, row hash)` pairs are appended to the table's row-hash log and the batch is dropped. Appends are unordered - lanes write into the same log, in whatever order rows arrive. When every lane has finished, the log is sealed: sorted by key and deduplicated by external merge sort, then folded into one Merkle root per table, and the receipts are written.
+The engine holds no row hashes of its own: each batch's `(row key, row hash)` pairs are appended to the table's row-hash log and the batch is dropped. Appends are unordered: lanes write into the same log, in whatever order rows arrive. When every lane has finished, the log is sealed: sorted by key and deduplicated by external merge sort, then folded into one Merkle root per table, and the receipts are written.
 
-The row-hash log's own footprint is flat as well - see [Row hashes](#row-hashes) for how, and [Performance](#performance) for the measurements.
+The row-hash log's own footprint is flat as well; see [Row hashes](#row-hashes) for how, and [Performance](#performance) for the measurements.
 
 ### Crate Responsibilities
 
@@ -143,7 +169,7 @@ The row-hash log's own footprint is flat as well - see [Row hashes](#row-hashes)
 3. Hash and key each row with the receipt's own `column_order` and `key_columns`, staging the pairs under the verify scope.
 4. Merge-join the two key-sorted streams: fold the destination side into `actual_root` and record every `missing` / `extra` / `changed` key in one pass.
 5. Drop the staged verify-side hashes.
-6. Return `Vec<VerificationResult>` - one result per table.
+6. Return `Vec<VerificationResult>`, one result per table.
 
 ### Diagram
 
@@ -208,7 +234,7 @@ The row-hash log's own footprint is flat as well - see [Row hashes](#row-hashes)
 ## The Receipt
 
 One receipt per destination table per pipeline, written to the state store at
-`receipt:{pipeline_name}:{table_name}` - a key that is stable across runs, so each
+`receipt:{pipeline_name}:{table_name}`, a key that is stable across runs, so each
 `apply --integrity` overwrites the previous one and `verify` always compares
 against the most recent migration.
 
@@ -231,9 +257,14 @@ The column order and key columns are embedded rather than re-derived at verify
 time. Introspecting the destination again would let a schema change between apply
 and verify silently alter the encoding, which would look like a data mismatch.
 
-The per-row `(key, hash)` set the root commits to is **not** in the receipt - it
+The per-row `(key, hash)` set the root commits to is **not** in the receipt; it
 lives beside it in the row-hash log (`rowhash/apply/…`). The receipt stays a fixed
 ~200 bytes whatever the table size.
+
+The receipt is yours to read back at any time: `pag receipt -c migration.ppl`
+prints every stored receipt for the config with its full root, and `--json`
+exports them as text you can commit or attach (see
+[output-modes.md](output-modes.md#receipt-output) for the exact shapes).
 
 ## Reading a Result
 
@@ -250,7 +281,7 @@ lives beside it in the row-hash log (`rowhash/apply/…`). The receipt stays a f
 - **LogUnavailable** - a receipt exists, but the row-hash log it commits to is
   missing or truncated (cleared by hand, or `verify` run against a different
   state directory than the one `apply` wrote to). The destination cannot be
-  diffed against the committed set, so the result is **inconclusive** - `verify`
+  diffed against the committed set, so the result is **inconclusive**: `verify`
   exits non-zero rather than reporting every intact row as `extra`. Re-run
   `apply --integrity` to rebuild the log.
 
@@ -263,7 +294,7 @@ unbounded report.
 
 ## Canonical Row Serialization
 
-The same row must always produce the same byte sequence regardless of whether it is read from the producer transform output or from a destination `SELECT`. `RowHasher` in `model` implements it, behind a single entry point shared by the apply and verify paths - there is deliberately no second encoder that could drift out of sync with the first.
+The same row must always produce the same byte sequence regardless of whether it is read from the producer transform output or from a destination `SELECT`. `RowHasher` in `model` implements it, behind a single entry point shared by the apply and verify paths; there is deliberately no second encoder that could drift out of sync with the first.
 
 ### Encoding Protocol
 
@@ -284,7 +315,7 @@ for each column_name in column_order (lexicographic order):
 | `UInt(u)` | `0x02` | 8-byte little-endian u64 (values ≤ i64::MAX normalize to `0x01`) |
 | `Boolean(b)` | `0x03` | normalized to `0x01` Int(0/1) for cross-engine parity |
 | `String(s)` | `0x10` | 4-byte LE length + UTF-8 bytes |
-| `Decimal(d)` | `0x11` | normalized decimal text, 4-byte LE length prefix |
+| `Decimal(d)` | `0x11` | form byte `0x00` + 16-byte LE mantissa + 8-byte LE exponent, trailing zeros stripped (so `1.50` = `1.5`, and `0.00` = `0`); mantissas over i128 fall back to form byte `0x01` + length-prefixed normalized text |
 | `Float(f)` | `0x12` | 8-byte big-endian IEEE 754 (NaN -> `0x00` Null tag) |
 | `Date(d)` | `0x20` | 4-byte LE signed days since Unix epoch |
 | `Timestamp(ts)` | `0x21` | 8-byte LE microseconds since Unix epoch, UTC |
@@ -294,7 +325,7 @@ for each column_name in column_order (lexicographic order):
 | `Array(a)` | `0x60` | 4-byte LE element count + recursively encoded elements |
 | `Enum { value }` | `0x70` | string value only - no type name |
 
-Every encoding is self-delimiting, so a stored key can be decoded back into readable text (`actor_id=42`) when a divergence is reported - nothing human-readable has to be stored per row.
+Every encoding is self-delimiting, so a stored key can be decoded back into readable text (`actor_id=42`) when a divergence is reported; nothing human-readable has to be stored per row.
 
 ### Column Order
 
@@ -304,7 +335,7 @@ Every encoding is self-delimiting, so a stored key can be decoded back into read
 
 A value can be stored by the destination in a different shape than it was handed over in, and verify re-reads the stored shape. Where that happens, the hash has to be taken over what the destination will store, not over what the pipeline produced:
 
-- **A comma-joined string written to an array-like column** - a PostgreSQL array (`TEXT[]`) or a MySQL `SET` - is split into `Value::Array` before hashing. Both destinations store it as a collection and read it back as one (`Value::Array` from PostgreSQL, `Value::Set` from MySQL, which canonicalize identically), so hashing the string as written would never match the read-back.
+- **A comma-joined string written to an array-like column** (a PostgreSQL array (`TEXT[]`) or a MySQL `SET`) is split into `Value::Array` before hashing. Both destinations store it as a collection and read it back as one (`Value::Array` from PostgreSQL, `Value::Set` from MySQL, which canonicalize identically), so hashing the string as written would never match the read-back.
 
 This is a property of the destination column type, not of any one write path: it applies equally to PostgreSQL `COPY`, MySQL `LOAD DATA`, and plain `INSERT`.
 
@@ -344,7 +375,7 @@ leaf = H(0x00 || u32_le(len(key)) || key || row_hash)
 node = H(0x01 || left || right)
 ```
 
-Leaves and internal nodes are hashed in separate domains (RFC 6962 style), so a chosen row hash can never be substituted for an interior node - the general Merkle second-preimage attack. The key is bound into the leaf and length-prefixed, so moving a row to a different key changes the root and adjacent key/hash pairs cannot be re-cut to collide.
+Leaves and internal nodes are hashed in separate domains (RFC 6962 style), so a chosen row hash can never be substituted for an interior node, the general Merkle second-preimage attack. The key is bound into the leaf and length-prefixed, so moving a row to a different key changes the root and adjacent key/hash pairs cannot be re-cut to collide.
 
 ### Streaming fold
 
@@ -360,7 +391,7 @@ Row leaves (ascending key order): l0  l1  l2  l3  l4
                                           Root
 ```
 
-Memory is O(log n) - a 10M-row table holds ~24 pending hashes, not 10M. The resulting tree shape is identical to a level-by-level build that promotes an odd trailing node unchanged; a unit test asserts the two agree for every leaf count from 0 to 65.
+Memory is O(log n): a 10M-row table holds ~24 pending hashes, not 10M. The resulting tree shape is identical to a level-by-level build that promotes an odd trailing node unchanged; a unit test asserts the two agree for every leaf count from 0 to 65.
 
 ### Order independence
 
@@ -387,7 +418,7 @@ would charge per-record index memory for an index no one queries. They live in a
 append-and-sort log:
 
 ```
-~/.stratum/state/rowhash/{scope}/{pipeline}/{table}/
+~/.paganel/state/rowhash/{scope}/{pipeline}/{table}/
     pending.log     appended during the run, unsorted
     run-000.tmp     sorted chunks, only while sealing a set too large to sort in memory
     sorted.log      the sealed set: sorted by key, one record per key
@@ -409,11 +440,11 @@ The lifecycle has three steps:
   then merged through a small heap. Chunks are independent, so they are sorted
   across threads; the sort budget is the total across the chunks held at once, so
   concurrency costs run count rather than memory. A set small enough for one
-  chunk - most tables - is sorted in memory and written straight out, with no
+  chunk (most tables) is sorted in memory and written straight out, with no
   runs and no merge. Peak memory is the budget (64 MiB), whatever the table size.
 - **Stream.** The sealed file is read in key order, once, by the Merkle fold and
   again by the verify diff. Leaf hashing dominates the fold and is independent
-  per row, so it too is spread across threads - in blocks of a power-of-two
+  per row, so it too is spread across threads, in blocks of a power-of-two
   number of leaves, because the tree pairs leaves by absolute position and a
   misaligned split would build a different tree.
 
@@ -423,7 +454,7 @@ wins. An interrupted run leaves a sealed file behind; the resumed run's seal fol
 it back in as one more sorted input, ranked below anything written since, so the
 two runs' rows combine into one complete set.
 
-Apply-scope hashes are cleared at the start of a fresh run - the receipt overwrites
+Apply-scope hashes are cleared at the start of a fresh run: the receipt overwrites
 in place, so a key left over from a larger earlier run would otherwise read as a
 missing row forever. Clearing is a directory removal, independent of row count.
 
@@ -439,21 +470,21 @@ not RAM. Measured through the real log, 1M rows per key shape:
 | Composite `(INT, INT)` | 60 | 600 MB | 6.0 GB |
 
 A record is a 2-byte key length, an 8-byte order, the 32-byte hash, and the
-canonically encoded key - so the fixed 42 bytes dominate, and even a UUID key adds
+canonically encoded key, so the fixed 42 bytes dominate, and even a UUID key adds
 under 20%.
 
 Before running a large migration with `--integrity`:
 
 - **The sealed set is retained**, not deleted at the end of the run. `verify` reads
   it, so it has to outlive `apply`. It is replaced the next time the same pipeline
-  runs, and removed by `stratum reset`. A 10M-row table with an integer key leaves
-  ~510 MB on disk under `~/.stratum/state/rowhash/apply/`.
+  runs, and removed by `pag reset`. A 10M-row table with an integer key leaves
+  ~510 MB on disk under `~/.paganel/state/rowhash/apply/`.
 - **Sealing needs headroom.** The pending log, the sorted runs, and the merged
   output all exist at once for part of the seal, so peak disk during finalize is up
-  to ~3x the sealed size - about **1.5 GB** for that 10M-row table, falling back to
+  to ~3x the sealed size, about **1.5 GB** for that 10M-row table, falling back to
   510 MB once the runs are deleted.
 - **Verify doubles it, briefly.** Verify stages the destination's own keyed set
-  under `verify/` to compare against, so both sets exist while it runs - another
+  under `verify/` to compare against, so both sets exist while it runs, another
   ~510 MB for the table above, cleared when it finishes.
 
 Per pipeline and per table: a cascade migration touching four tables keeps four
@@ -463,7 +494,7 @@ sets, sized by each table's row count.
 
 Receipts need a key-value store: small, updated in place, read by key.
 
-Row hashes need almost nothing - sequential append, sequential read, delete - and
+Row hashes need almost nothing (sequential append, sequential read, delete) and
 in particular no index and no random access. Keeping the two apart is what lets a
 ten-million-row integrity run hold a flat ~30 MB rather than growing with the
 table.
@@ -475,7 +506,7 @@ table.
 ### Entry point
 
 `engine-verify` takes an execution plan and returns one result per
-(pipeline, table) pair. It has no dependency on `engine-runtime` - verification
+(pipeline, table) pair. It has no dependency on `engine-runtime`: verification
 never goes through the migration machinery.
 
 ### Staging the destination
@@ -516,13 +547,20 @@ The CLI also supports writing the report to a file via `--output`.
 
 ```bash
 # Run migration and commit a keyed Merkle receipt per destination table
-stratum apply -c migration.smql --integrity
+pag apply -c migration.ppl --integrity
 
 # Verify the destination against the stored receipt
-stratum verify -c migration.smql
+pag verify -c migration.ppl
 
 # Write the verification report to a file
-stratum verify -c migration.smql --output report.txt
+pag verify -c migration.ppl --output report.txt
+
+# Verify a table that also holds rows this run did not write
+pag verify -c migration.ppl --allow-extra
+
+# Print the stored receipts (full table roots) - or export them as JSON
+pag receipt -c migration.ppl
+pag receipt -c migration.ppl --json > receipts.json
 ```
 
 Without `--integrity`, hashing is disabled and costs nothing. There is
@@ -545,7 +583,7 @@ finished set rather than as rows stream past.
 - **Cascade tables** (`with references { data = cascade }`) are populated in
   FK-join order, and a given row may be pulled in alongside many different source
   batches. Each row is stored under its own key, so a repeat write lands on the
-  same entry - the set converges on one leaf per distinct row however many times
+  same entry: the set converges on one leaf per distinct row however many times
   it was seen, and each row remains individually identifiable in a report.
 
 - **Parallel lanes** all write into the same per-table set. Lanes need no
@@ -590,8 +628,7 @@ finished set rather than as rows stream past.
 | Row key encoding | ~20 ns/row | A few bytes for a typical integer PK. |
 | Row-hash append | one buffered sequential write per batch per table | ~47 bytes per row, to disk. |
 | Seal (once per table) | one external sort pass, chunks sorted in parallel | ~500 MB read + written at 10M rows. |
-| Merkle fold (once per table) | ~2 hashes per row, leaves hashed in parallel | streams the sealed file. |
-| Merkle fold | ~1 hash/row, once | Streaming, O(log n) memory. |
+| Merkle fold (once per table) | ~2 hashes per row, leaves hashed in parallel | Streams the sealed file, O(log n) memory. |
 
 End to end, `--integrity` adds roughly **0.3-0.5 µs per row**, near enough
 constant across workloads: 15% on a plain 10M-row copy, up to 23% on the fastest
@@ -613,8 +650,8 @@ Merkle fold keeps one partial subtree per level (~24 hashes at 10M rows); the
 verify diff walks both streams with one entry from each in hand. None of it grows
 with the table.
 
-**The storage layer's,** measured end to end through the real API - append, seal,
-stream, clear:
+**The storage layer's,** measured end to end through the real API (append, seal,
+stream, clear):
 
 | Row hashes | Resident during append | Peak (during seal) |
 | --- | --- | --- |
@@ -622,7 +659,7 @@ stream, clear:
 | 10M | 28 MB | 73 MB |
 
 The append phase does not grow at all, and the peak is the sort budget rather
-than a function of the row count. Disk is the resource that scales instead - see
+than a function of the row count. Disk is the resource that scales instead; see
 [Storage footprint](#storage-footprint).
 
 ### Verification path cost
@@ -635,12 +672,12 @@ result, seals it, and merge-joins the two streams. Measured on the same 10M-row
 ✓ orders/orders - match (10000000 rows, root 3e00a3e5b1cfedec, 18567ms)
 ```
 
-**18.6 s, ~540k rows/s** - about 93% of the rate `apply` sustained writing the
+**18.6 s, ~540k rows/s**, about 93% of the rate `apply` sustained writing the
 same table (579k rows/s). That is the shape to expect: verification is a
 sequential read of the destination plus a hash per row, so it costs roughly what
 the migration cost, not a multiple of it.
 
-Memory stays flat - the staging pass and the diff both stream. Disk does not:
+Memory stays flat: the staging pass and the diff both stream. Disk does not:
 staging writes a second copy of the keyed set, so the footprint in
 [Storage footprint](#storage-footprint) roughly doubles while verify runs, and
 the staged copy is deleted when it finishes.
@@ -655,7 +692,7 @@ Take the same keyed commitment on the source as it is read, and the comparison b
 
 ### Inclusion proofs
 
-The tree already supports it: an O(log n) proof that a specific row, with specific contents, was part of the migration - checkable against the published root without access to the rest of the table.
+The tree already supports it: an O(log n) proof that a specific row, with specific contents, was part of the migration, checkable against the published root without access to the rest of the table.
 
 ### Incremental verification
 

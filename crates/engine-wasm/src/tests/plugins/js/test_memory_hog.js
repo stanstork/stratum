@@ -2,7 +2,7 @@
 // Allocates without bound so the WASM linear memory keeps growing until the
 // host's ResourceLimiter denies it and the instance traps. Verifies the runtime
 // enforces memory caps on JS plugins.
-const { transform } = require("@stratum/plugin-sdk");
+const { transform } = require("@paganel/plugin-sdk");
 
 transform("test_memory_hog", {
   version: "1.0.0",

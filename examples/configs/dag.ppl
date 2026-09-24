@@ -1,0 +1,97 @@
+// dag.ppl - Pipeline Dependency Graph (DAG) Execution
+//
+// Demonstrates how pipelines can declare dependencies on each other using
+// `after = [...]`. Paganel builds a directed acyclic graph from those
+// declarations, topologically sorts it into levels, and runs each level
+// in parallel before advancing to the next.
+//
+// Dependency tree used in this example (Sakila database):
+//
+//   Level 0 (parallel)  language ──┐
+//                        actor   ──┤
+//                                  │
+//   Level 1 (parallel)  film ──────┤  (after: language)
+//                        category ─┘  (after: language)
+//                                  │
+//   Level 2 (sequential) film_actor  (after: film + actor)
+//
+// Run:
+//   pag apply -c dag.ppl -e .env
+
+define {
+    mysql_url    = env("MYSQL_URL")
+    postgres_url = env("POSTGRES_URL")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+// ── Level 0: independent roots, run in parallel ───────────────────────────
+
+pipeline "migrate_language" {
+    from { connection = connection.src  table = "language" }
+    to   { connection = connection.dst  table = "language" }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 20
+    }
+}
+
+pipeline "migrate_actor" {
+    from { connection = connection.src  table = "actor" }
+    to   { connection = connection.dst  table = "actor" }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 200
+    }
+}
+
+// ── Level 1: run after Level 0 completes, both pipelines run in parallel ──
+
+// film references language (FK), so language must exist first.
+pipeline "migrate_film" {
+    after = ["migrate_language"]
+
+    from { connection = connection.src  table = "film" }
+    to   { connection = connection.dst  table = "film" }
+
+    settings {
+        create_missing_tables = true
+        skip_pk               = true
+        skip_fk               = true   // original_language_id FK skipped
+        batch_size            = 200
+    }
+}
+
+// category has no FK dependencies but logically belongs in the same level.
+pipeline "migrate_category" {
+    after = ["migrate_language"]
+
+    from { connection = connection.src  table = "category" }
+    to   { connection = connection.dst  table = "category" }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 20
+    }
+}
+
+// ── Level 2: requires both film and actor to be present ───────────────────
+
+// film_actor is the many-to-many join table between film and actor.
+// It can only be migrated after both parent tables are ready.
+pipeline "migrate_film_actor" {
+    after = ["migrate_film", "migrate_actor"]
+
+    from { connection = connection.src  table = "film_actor" }
+    to   { connection = connection.dst  table = "film_actor" }
+
+    settings {
+        create_missing_tables = true
+        skip_pk               = true
+        skip_fk               = true   // FKs to film/actor skipped
+        batch_size            = 500
+    }
+}

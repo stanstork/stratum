@@ -156,7 +156,7 @@ pub enum RunStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PauseReason {
-    /// User sent pause signal (SIGUSR1 or `stratum pause`)
+    /// User sent pause signal (SIGUSR1 or `pag pause`)
     Manual,
     /// Time limit reached (--run-for, --run-until)
     TimeLimit,

@@ -7,7 +7,7 @@ license.workspace = true
 [dependencies]
 query-builder = { path = "../query-builder" }
 model = { path = "../model" }
-smql-syntax = { path = "../smql-syntax" }
+ppl-syntax = { path = "../ppl-syntax" }
 engine-core = { path = "../engine-core" }
 engine-schema = { path = "../engine-schema" }
 engine-processing = { path = "../engine-processing" }

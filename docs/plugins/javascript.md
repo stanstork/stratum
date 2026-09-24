@@ -1,7 +1,7 @@
 # JavaScript plugins
 
 A JavaScript plugin is a single `.js` file that registers a handler with the
-`@stratum/plugin-sdk` package. You don't need a Rust toolchain - Stratum bundles
+`@paganel/plugin-sdk` package. You don't need a Rust toolchain - Paganel bundles
 your code into a prebuilt QuickJS WebAssembly runtime and runs it through the
 same engine as native plugins.
 
@@ -9,9 +9,9 @@ same engine as native plugins.
 
 JavaScript can't be loaded by the WASM engine directly, so a `.js` plugin is
 turned into a `.wasm` module in three steps (handled by
-`stratum-plugin-compiler`):
+`paganel-plugin-compiler`):
 
-1. **Bundle.** `esbuild` bundles your file together with `@stratum/plugin-sdk`
+1. **Bundle.** `esbuild` bundles your file together with `@paganel/plugin-sdk`
    into a single self-contained IIFE script. The SDK's registry attaches its
    metadata/dispatch hooks to `globalThis` as a load-time side effect, so the
    bundle is self-exposing.
@@ -21,13 +21,13 @@ turned into a `.wasm` module in three steps (handled by
    compile time.
 3. **Patch.** The bundled JS and the metadata JSON are written into two reserved
    data segments of a prebuilt runtime WASM
-   (`stratum-plugin-js-runtime`, a QuickJS interpreter compiled to
+   (`paganel-plugin-js-runtime`, a QuickJS interpreter compiled to
    `wasm32-wasip1` via `rquickjs`). The result is an ordinary `.wasm` plugin.
 
 At migration time the engine loads that `.wasm` like any other: on
-`__stratum_initialize` the runtime boots a QuickJS context, evaluates the
+`__paganel_initialize` the runtime boots a QuickJS context, evaluates the
 embedded bundle (registering your handler), and applies the config; each
-role call (`__stratum_transform`, `__stratum_read_page`, …) marshals the payload
+role call (`__paganel_transform`, `__paganel_read_page`, …) marshals the payload
 to/from JS values and invokes your handler. Transform and filter are called
 once per batch - your handler receives the array of rows and returns an array
 of results, one per row. JS plugins use the flat `json_v1` wire format (plain
@@ -41,45 +41,45 @@ Every JS plugin therefore embeds its own copy of the QuickJS runtime
 ### Compilation is automatic
 
 You normally never run the compiler yourself. When a `plugin` block points at a
-`.js` file, `stratum plan` / `stratum apply` compile it on demand and cache the
-result under `~/.stratum/plugin-cache/` (keyed by a hash of the source + runtime,
+`.js` file, `pag plan` / `pag apply` compile it on demand and cache the
+result under `~/.paganel/plugin-cache/` (keyed by a hash of the source + runtime,
 so an unchanged plugin is only compiled once).
 
-```smql
+```ppl
 plugin "upper" { path = "plugins/upper.js" }   # compiled + cached on first use
 ```
 
 To compile ahead of time (e.g. for CI or to ship a `.wasm`):
 
 ```bash
-stratum plugin compile plugins/upper.js -o plugins/upper.wasm
+pag plugin compile plugins/upper.js -o plugins/upper.wasm
 ```
 
 ### Requirements
 
 Compiling a JS plugin to `.wasm` needs esbuild, and nothing else. The compiler
-resolves it in this order: the `--esbuild-path` flag, then `$STRATUM_ESBUILD`,
+resolves it in this order: the `--esbuild-path` flag, then `$PAGANEL_ESBUILD`,
 then an `esbuild` binary on `PATH`, then `npx esbuild` (so Node.js alone is
 enough, with no global install). When none is found the compile fails with a
 message telling you how to provide one. This is an authoring prerequisite, like
 needing the `wasm32-wasip1` target to build a native Rust plugin.
 
-The `@stratum/plugin-sdk` package is bundled into the CLI and handed to esbuild
+The `@paganel/plugin-sdk` package is bundled into the CLI and handed to esbuild
 automatically, so a `.js` compiles from any directory without `npm install`, a
-`node_modules` tree, or `STRATUM_JS_RUNTIME`. The QuickJS runtime is embedded in
-the Stratum binary; `STRATUM_JS_RUNTIME` / `--runtime-wasm` only override it, for
+`node_modules` tree, or `PAGANEL_JS_RUNTIME`. The QuickJS runtime is embedded in
+the Paganel binary; `PAGANEL_JS_RUNTIME` / `--runtime-wasm` only override it, for
 air-gapped builds. The bundled SDK always matches that embedded runtime.
 
-Compilation happens either explicitly (`stratum plugin compile`) or on demand the
+Compilation happens either explicitly (`pag plugin compile`) or on demand the
 first time a `plan`/`apply` references a `.js` plugin (cached under
-`~/.stratum/plugin-cache/`, so it runs once). Running a compiled plugin needs
+`~/.paganel/plugin-cache/`, so it runs once). Running a compiled plugin needs
 neither esbuild nor Node: a prebuilt `.wasm` - one you shipped, or built ahead
-with `stratum plugin compile foo.js -o foo.wasm` - loads with no dependencies.
+with `pag plugin compile foo.js -o foo.wasm` - loads with no dependencies.
 Keep Node out of production by compiling to `.wasm` once and deploying that.
 
 ## Authoring API
 
-`require("@stratum/plugin-sdk")` exposes `transform`, `filter`, `source`, `sink`,
+`require("@paganel/plugin-sdk")` exposes `transform`, `filter`, `source`, `sink`,
 plus the `http` and `log` capability helpers. Call exactly one role registrar per
 file.
 
@@ -89,7 +89,7 @@ file.
 and must return an array of the same length - one output value per row.
 
 ```js
-const { transform } = require("@stratum/plugin-sdk");
+const { transform } = require("@paganel/plugin-sdk");
 
 transform("adder", {
   version: "1.0.0",
@@ -107,7 +107,7 @@ transform("adder", {
 one `{ pass }` object per row, in order.
 
 ```js
-const { filter } = require("@stratum/plugin-sdk");
+const { filter } = require("@paganel/plugin-sdk");
 
 filter("positive", {
   version: "1.0.0",
@@ -123,7 +123,7 @@ filter("positive", {
 ### source
 
 ```js
-const { source } = require("@stratum/plugin-sdk");
+const { source } = require("@paganel/plugin-sdk");
 
 source("counter", {
   version: "1.0.0",
@@ -143,7 +143,7 @@ source("counter", {
 ### sink
 
 ```js
-const { sink, log } = require("@stratum/plugin-sdk");
+const { sink, log } = require("@paganel/plugin-sdk");
 
 let total = 0;
 sink("counter_sink", {
@@ -172,7 +172,7 @@ Values are strings - parse them in the handler.
 ## Capabilities
 
 JavaScript plugins get the same host capabilities as native ones, gated by
-the same `plugin` declaration - `require("@stratum/plugin-sdk")` exposes `log`,
+the same `plugin` declaration - `require("@paganel/plugin-sdk")` exposes `log`,
 `http`, `kv`, `metrics`, `env`, and `fs`.
 
 - `log.info` / `log.warn` / `log.error` / `log.debug` - host logging (on by

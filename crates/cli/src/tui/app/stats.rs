@@ -171,14 +171,27 @@ impl GlobalStats {
         self.current_throughput = pipelines
             .iter()
             .filter(|p| p.status == PipelineStatus::Running)
-            .map(|p| p.throughput.current_throughput())
+            .map(|p| p.effective_rate())
             .sum();
 
         // Peak throughput is the sum of individual pipeline peaks
         // This ensures we capture the maximum rate even if pipelines don't peak simultaneously
-        self.peak_throughput = pipelines
+        let summed_peaks: f64 = pipelines
             .iter()
             .map(|p| p.throughput.peak_throughput())
             .sum();
+
+        if self.current_throughput == 0.0 {
+            let rows: u64 = pipelines.iter().map(|p| p.run_processed_rows()).sum();
+            let elapsed = self.started_at.elapsed().as_secs_f64();
+
+            if rows > 0 && elapsed > 0.0 {
+                self.current_throughput = rows as f64 / elapsed;
+            }
+        }
+
+        self.peak_throughput = summed_peaks
+            .max(self.current_throughput)
+            .max(self.peak_throughput);
     }
 }

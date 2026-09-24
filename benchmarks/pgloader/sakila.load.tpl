@@ -1,7 +1,7 @@
 -- pgloader full Sakila load, MySQL to PostgreSQL. See ../README.md for scope.
 -- Copies every row of all 15 data tables (film_text excluded on both sides).
 -- SCOPE CAVEAT: pgloader v4 always builds indexes and foreign keys,
--- while stratum builds tables and primary keys only, 
+-- while paganel builds tables and primary keys only, 
 -- so the two are not scope-matched on Sakila. Placeholders come from run.sh.
 -- The CAST maps the address.location GEOMETRY column to bytea, since the bench
 -- PostgreSQL has no PostGIS (v4 dropped the default geometry cast v3 had).

@@ -1,4 +1,4 @@
-use super::open_state_store;
+use super::{state_dir, try_open_state_store};
 use crate::{config, error::CliError};
 use chrono::{DateTime, Utc};
 use engine_processing::EnvContext;
@@ -6,19 +6,45 @@ use engine_state::{
     SledStateStore, StateStore,
     error::StateStoreError,
     models::{PipelineStatus, RunState, RunStatus},
+    store::live,
 };
 use std::sync::Arc;
 
 const DATE_FORMAT: &str = "%Y-%m-%d %H:%M:%S UTC";
 
 pub async fn execute(config_path: Option<String>, env: Arc<EnvContext>) -> Result<(), CliError> {
-    let state = open_state_store()?;
+    // A running migration holds the state store open, so fall back to the status
+    // it publishes beside the database.
+    let Some(state) = try_open_state_store()? else {
+        eprintln!("A migration is running; showing the status it publishes.");
+        return show_live(config_path, env).await;
+    };
 
     if let Some(path) = config_path {
         show_config_status(&state, &path, env).await
     } else {
-        show_all_runs(&state).await
+        print_runs(state.list_runs().await.map_err(state_err)?)
     }
+}
+
+/// Status for a run that currently holds the lock, read from its published file.
+async fn show_live(config_path: Option<String>, env: Arc<EnvContext>) -> Result<(), CliError> {
+    let dir = state_dir()?;
+
+    let Some(config_path) = config_path else {
+        return print_runs(live::list_live_runs(&dir));
+    };
+
+    let resolved = config::resolve_path(Some(config_path))?;
+    let plan = config::load_plan(&resolved, false, env).await?;
+    let run_id = plan.run_id();
+
+    match live::read_live_run(&dir, &run_id) {
+        Some(run) => print_run_detail(&run),
+        None => println!("No published status for config '{resolved}' (run_id: {run_id})"),
+    }
+
+    Ok(())
 }
 
 async fn show_config_status(
@@ -38,9 +64,7 @@ async fn show_config_status(
     Ok(())
 }
 
-async fn show_all_runs(state: &SledStateStore) -> Result<(), CliError> {
-    let mut runs = state.list_runs().await.map_err(state_err)?;
-
+fn print_runs(mut runs: Vec<RunState>) -> Result<(), CliError> {
     if runs.is_empty() {
         println!("No migration runs found.");
         return Ok(());

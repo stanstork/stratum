@@ -3,7 +3,7 @@
 // Deliberately identical logic to ../rust/order_net so the two plugin runtimes
 // (native Rust WASM vs JS-on-QuickJS WASM) are measured on the same transform -
 // isolating each runtime's invocation cost, not the arithmetic.
-const { transform } = require("@stratum/plugin-sdk");
+const { transform } = require("@paganel/plugin-sdk");
 
 transform("order_net", {
   version: "1.0.0",

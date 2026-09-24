@@ -194,16 +194,16 @@ mod tests {
             }
         "#;
         dir.reset().await;
-        let smql = dir.smql(body);
+        let ppl = dir.ppl(body);
 
-        runner::run_smql(&smql, true)
+        runner::run_ppl(&ppl, true)
             .await
             .unwrap_or_else(|e| panic!("[{dir}] integrity apply failed: {e:?}"));
 
         dir.assert_row_parity("actor", "actor").await;
         dir.assert_row_parity("category", "category").await;
 
-        runner::run_verify_smql(&smql)
+        runner::run_verify_ppl(&ppl)
             .await
             .unwrap_or_else(|e| panic!("[{dir}] verify failed: {e:?}"));
     }

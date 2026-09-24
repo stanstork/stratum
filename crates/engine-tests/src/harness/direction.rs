@@ -1,4 +1,4 @@
-use crate::harness::{db::Dbms, runner, smql};
+use crate::harness::{db::Dbms, ppl, runner};
 use std::fmt;
 
 /// One source -> destination pairing.
@@ -170,25 +170,25 @@ impl Direction {
 
     /// Wrap a pipeline body with the `connection` blocks for this direction.
     /// Bodies refer to `connection.src` and `connection.dst`, never to a URL.
-    pub fn smql(&self, body: &str) -> String {
-        smql::render(*self, body)
+    pub fn ppl(&self, body: &str) -> String {
+        ppl::render(*self, body)
     }
 
     /// Render a config file from `configs/` for this direction. The file holds a
     /// pipeline body only; the connections are supplied here.
     pub fn config(&self, name: &str) -> String {
-        smql::render(*self, &smql::body(name))
+        ppl::render(*self, &ppl::body(name))
     }
 
     /// Reset the destination, then run a config file for this direction.
     pub async fn run_config(&self, name: &str) {
-        self.run(&smql::body(name)).await;
+        self.run(&ppl::body(name)).await;
     }
 
     /// Reset the destination, then run `body` for this direction.
     pub async fn run(&self, body: &str) {
         self.reset().await;
-        runner::run_smql(&self.smql(body), false)
+        runner::run_ppl(&self.ppl(body), false)
             .await
             .unwrap_or_else(|e| panic!("[{self}] migration failed: {e:?}"));
     }

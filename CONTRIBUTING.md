@@ -1,8 +1,8 @@
 # Contributing
 
-Thanks for your interest in Stratum - it's genuinely appreciated.
+Thanks for your interest in Paganel - it's genuinely appreciated.
 
-Stratum is in early, fast-moving development: the architecture, the SMQL
+Paganel is in early, fast-moving development: the architecture, the PPL
 language, and internal APIs still change frequently. The most valuable way to
 help right now is to **use it and tell me what you find**:
 
@@ -22,4 +22,4 @@ This will change as the project stabilizes: this document will be updated with a
 proper contribution guide (dev setup, coding standards, and the review process)
 once external PRs are welcome.
 
-Thanks for understanding, and for taking the time to look at Stratum!
+Thanks for understanding, and for taking the time to look at Paganel!

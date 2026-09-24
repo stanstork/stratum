@@ -19,7 +19,7 @@ fn render_title(frame: &mut Frame, area: Rect, app: &App) {
     let (status_text, color) = get_app_status(&app.state);
 
     let title = Line::from(vec![
-        Span::styled(" STRATUM ", styles::header_title()),
+        Span::styled(" PAGANEL ", styles::header_title()),
         Span::styled(
             format!(" {} ", status_text),
             Style::default()

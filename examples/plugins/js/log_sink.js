@@ -2,7 +2,7 @@
 // on by default). Uses the optional prepare/finalize lifecycle hooks.
 // Test:  plugin test log_sink.js --mode sink --input '[{"id":1},{"id":2}]'
 //        -> rows_written=2, plus "info" logs incl. a FINALIZE line.
-const { sink, log } = require("@stratum/plugin-sdk");
+const { sink, log } = require("@paganel/plugin-sdk");
 
 let total = 0;
 

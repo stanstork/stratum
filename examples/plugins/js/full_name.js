@@ -7,7 +7,7 @@
 // input field to appear in the pipeline mapping, even nullable ones. So if you
 // add `middle: { type: "string", nullable: true }` here, every config using
 // full_name must still map `middle`. Kept to two required fields to stay clean.
-const { transform } = require("@stratum/plugin-sdk");
+const { transform } = require("@paganel/plugin-sdk");
 
 transform("full_name", {
   version: "1.0.0",

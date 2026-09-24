@@ -22,7 +22,7 @@ pub async fn execute(config_path: Option<String>, env: Arc<EnvContext>) -> Resul
 
     println!("Pause requested for migration (run_id: {run_id})");
     println!("The migration will pause at the next batch boundary.");
-    println!("Check status with: stratum status -c {config_path}");
+    println!("Check status with: pag status -c {config_path}");
 
     Ok(())
 }

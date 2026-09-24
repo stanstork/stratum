@@ -12,7 +12,7 @@ use std::{
     sync::Arc,
 };
 
-/// `stratum plugin validate -c <config.smql>` - confirm every declared plugin
+/// `pag plugin validate -c <config.ppl>` - confirm every declared plugin
 /// loads and initializes, then cross-check each plugin's input schema against
 /// how the pipelines actually use it.
 pub async fn run(

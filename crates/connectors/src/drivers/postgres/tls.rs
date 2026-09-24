@@ -247,12 +247,12 @@ mod tests {
     #[test]
     fn other_query_params_are_preserved() {
         let (out, _, _) =
-            normalize_url("postgres://u:p@host/db?application_name=stratum&sslmode=require")
+            normalize_url("postgres://u:p@host/db?application_name=paganel&sslmode=require")
                 .unwrap();
         let params = query_params(&out);
         assert_eq!(
             params.get("application_name").map(String::as_str),
-            Some("stratum")
+            Some("paganel")
         );
         assert_eq!(params.get("sslmode").map(String::as_str), Some("require"));
     }

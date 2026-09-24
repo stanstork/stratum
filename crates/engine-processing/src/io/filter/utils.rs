@@ -9,7 +9,7 @@ pub fn combine_filters(filters: &[Filter]) -> Option<CompiledExpression> {
     }
 
     // Combine all filter conditions with AND logic.
-    // Multiple where blocks or conditions in SMQL are semantically joined with AND,
+    // Multiple where blocks or conditions in PPL are semantically joined with AND,
     // meaning ALL conditions must be satisfied (standard SQL WHERE clause behavior).
     //
     // Example: where { age > 18 } where { status == "active" }

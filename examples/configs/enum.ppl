@@ -1,0 +1,63 @@
+// enum.ppl - MySQL ENUM column migration
+//
+// MySQL ENUM columns have no native equivalent in PostgreSQL. Paganel maps
+// them to VARCHAR, preserving the string value of each row. The column
+// definition in the destination will be VARCHAR(255) rather than a
+// constrained ENUM type.
+//
+// This example migrates the Sakila `film` table, which has:
+//   rating  ENUM('G', 'PG', 'PG-13', 'R', 'NC-17')
+//
+// In PostgreSQL the `rating` column is created as VARCHAR and the original
+// string values ('G', 'PG', etc.) are stored as-is.
+//
+// Run:
+//   pag apply -c enum.ppl -e .env
+
+define {
+    mysql_url    = env("MYSQL_URL")
+    postgres_url = env("POSTGRES_URL")
+}
+
+connection "src" { driver = "mysql"    url = define.mysql_url    }
+connection "dst" { driver = "postgres" url = define.postgres_url }
+
+// language must exist first because film.language_id is a foreign key.
+pipeline "migrate_language" {
+    from { connection = connection.src  table = "language" }
+    to   { connection = connection.dst  table = "language" }
+
+    settings {
+        create_missing_tables = true
+        batch_size            = 20
+    }
+}
+
+pipeline "migrate_film" {
+    after = ["migrate_language"]
+
+    from { connection = connection.src  table = "film" }
+    to   { connection = connection.dst  table = "film" }
+
+    select {
+        film_id          = film.film_id
+        title            = film.title
+        description      = film.description
+        release_year     = film.release_year
+        rental_duration  = film.rental_duration
+        rental_rate      = film.rental_rate
+        length           = film.length
+        replacement_cost = film.replacement_cost
+        // rating is ENUM('G','PG','PG-13','R','NC-17') in MySQL.
+        // Paganel maps it to VARCHAR in PostgreSQL, preserving the value.
+        rating           = film.rating
+        last_update      = film.last_update
+    }
+
+    settings {
+        create_missing_tables = true
+        skip_pk               = true
+        skip_fk               = true   // original_language_id FK skipped
+        batch_size            = 200
+    }
+}

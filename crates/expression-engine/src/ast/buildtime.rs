@@ -1,6 +1,6 @@
 use crate::{context::EvalContext, error::ExpressionError, functions::FunctionRegistry};
 use model::{core::value::Value, execution::define::DefinitionInfo};
-use smql_syntax::ast::{
+use ppl_syntax::ast::{
     expr::{Expression, ExpressionKind},
     literal::Literal,
 };

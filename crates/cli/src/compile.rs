@@ -1,7 +1,7 @@
 use crate::error::CliError;
 use engine_core::plan::execution::ExecutionPlan;
+use paganel_plugin_compiler::CompileOpts;
 use std::path::{Path, PathBuf};
-use stratum_plugin_compiler::CompileOpts;
 use tracing::{debug, info};
 
 /// Rewrite every plugin whose `path` is a `.js` source into a compiled `.wasm`,
@@ -26,11 +26,11 @@ pub fn resolve_plugin_wasm(path: &Path) -> Result<PathBuf, CliError> {
     }
 }
 
-/// Compile `src` to WASM via the plugin compiler, caching under `~/.stratum/plugin-cache`.
+/// Compile `src` to WASM via the plugin compiler, caching under `~/.paganel/plugin-cache`.
 fn compile_cached(src: &Path) -> Result<PathBuf, CliError> {
     let opts = CompileOpts::default();
     let dir = cache_dir()?;
-    let build = stratum_plugin_compiler::compile_cached(src, &opts, &dir).map_err(|e| {
+    let build = paganel_plugin_compiler::compile_cached(src, &opts, &dir).map_err(|e| {
         CliError::UserMessage(format!("compiling JS plugin {}: {e}", src.display()))
     })?;
     if build.from_cache {
@@ -41,9 +41,9 @@ fn compile_cached(src: &Path) -> Result<PathBuf, CliError> {
     Ok(build.path)
 }
 
-/// `~/.stratum/plugin-cache` - compiled JS plugins keyed by content hash.
+/// `~/.paganel/plugin-cache` - compiled JS plugins keyed by content hash.
 fn cache_dir() -> Result<PathBuf, CliError> {
     let home = dirs::home_dir()
         .ok_or_else(|| CliError::UserMessage("cannot locate home dir for plugin cache".into()))?;
-    Ok(home.join(".stratum").join("plugin-cache"))
+    Ok(home.join(".paganel").join("plugin-cache"))
 }

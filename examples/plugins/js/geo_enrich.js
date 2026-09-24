@@ -5,7 +5,7 @@
 //
 // NOTE: needs network + a reachable endpoint. For an offline test, point it at
 // a local stub. Returns the resolved country code for an IP.
-const { transform, http } = require("@stratum/plugin-sdk");
+const { transform, http } = require("@paganel/plugin-sdk");
 
 transform("geo_enrich", {
   version: "1.0.0",

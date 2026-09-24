@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        harness::runner::{run_smql, run_verify_smql},
+        harness::runner::{run_ppl, run_verify_ppl},
         reset_postgres_schema,
     };
     use tracing_test::traced_test;
@@ -23,9 +23,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_cascade_payment() {
         reset_postgres_schema().await;
-        let smql = phase2_config!("p2-02-cascade-data.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = phase2_config!("p2-02-cascade-data.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// Verify works on a full-graph cascade from rental through all Sakila tables.
@@ -36,9 +36,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_full_chain() {
         reset_postgres_schema().await;
-        let smql = phase2_config!("p2-03-full-chain.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = phase2_config!("p2-03-full-chain.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// Verify works after a circular-FK migration (store ↔ staff).
@@ -49,9 +49,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_circular_fk() {
         reset_postgres_schema().await;
-        let smql = phase2_config!("p2-06-circular-fk.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = phase2_config!("p2-06-circular-fk.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// Verify works after an ENUM migration.
@@ -63,9 +63,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_enum_migration() {
         reset_postgres_schema().await;
-        let smql = phase2_config!("p2-08-enum-migration.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = phase2_config!("p2-08-enum-migration.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// Verify works after a migration that includes MySQL STORED generated columns.
@@ -117,9 +117,9 @@ mod tests {
         reset_postgres_schema().await;
 
         let result = async {
-            let smql = phase2_config!("p2-09-generated-columns.smql");
-            run_smql(&smql, true).await.expect("apply failed");
-            run_verify_smql(&smql).await.expect("verify failed");
+            let ppl = phase2_config!("p2-09-generated-columns.ppl");
+            run_ppl(&ppl, true).await.expect("apply failed");
+            run_verify_ppl(&ppl).await.expect("verify failed");
         }
         .await;
 
@@ -147,9 +147,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_table_rename() {
         reset_postgres_schema().await;
-        let smql = phase2_config!("p2-10-table-rename.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = phase2_config!("p2-10-table-rename.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 
     /// Verify works on the full Sakila warehouse migration.
@@ -162,8 +162,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn verify_phase2_full_sakila() {
         reset_postgres_schema().await;
-        let smql = phase2_config!("p2-11-full-sakila.smql");
-        run_smql(&smql, true).await.expect("apply failed");
-        run_verify_smql(&smql).await.expect("verify failed");
+        let ppl = phase2_config!("p2-11-full-sakila.ppl");
+        run_ppl(&ppl, true).await.expect("apply failed");
+        run_verify_ppl(&ppl).await.expect("verify failed");
     }
 }

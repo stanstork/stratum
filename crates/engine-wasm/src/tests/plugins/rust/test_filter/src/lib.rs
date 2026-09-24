@@ -1,6 +1,6 @@
-use stratum_plugin_sdk::{FilterDecision, PluginInput, PluginResult, stratum_filter};
+use paganel_plugin_sdk::{FilterDecision, PluginInput, PluginResult, paganel_filter};
 
-#[stratum_filter(
+#[paganel_filter(
     name = "test_filter",
     version = "1.0.0",
     input = [

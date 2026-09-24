@@ -30,7 +30,7 @@ mod tests {
 
     // Phase 2 Test 01 - Schema-Only: with references { data = schema_only, depth = all }
     //
-    // Config: crates/engine-tests/configs/schema-objects/p2-01-schema-only.smql
+    // Config: crates/engine-tests/configs/schema-objects/p2-01-schema-only.ppl
     //
     // Scenario:
     //   - Source: sakila.film (MySQL)
@@ -46,7 +46,7 @@ mod tests {
         reset_postgres_schema().await;
 
         // CARGO_MANIFEST_DIR = crates/engine-tests; configs live in configs/ inside this crate
-        let config = "schema-objects/p2-01-schema-only.smql";
+        let config = "schema-objects/p2-01-schema-only.ppl";
         run_config(config)
             .await
             .expect("schema-only migration failed");
@@ -68,7 +68,7 @@ mod tests {
 
     // Phase 2 Test 02 - Cascade Data: with references { data = cascade, depth = 1 }
     //
-    // Config: crates/engine-tests/configs/schema-objects/p2-02-cascade-data.smql
+    // Config: crates/engine-tests/configs/schema-objects/p2-02-cascade-data.ppl
     //
     // Scenario:
     //   - Source: sakila.payment (MySQL), depth = 1
@@ -84,7 +84,7 @@ mod tests {
     async fn cascade_migrates_schema_and_data_with_fk_integrity() {
         reset_postgres_schema().await;
 
-        let config = "schema-objects/p2-02-cascade-data.smql";
+        let config = "schema-objects/p2-02-cascade-data.ppl";
         run_config(config)
             .await
             .expect("cascade-data migration failed");
@@ -116,7 +116,7 @@ mod tests {
 
     // Phase 2 Test 04 - Depth Limiting: with references { data = schema_only, depth = 1 }
     //
-    // Config: crates/engine-tests/configs/schema-objects/p2-04-depth-limit.smql
+    // Config: crates/engine-tests/configs/schema-objects/p2-04-depth-limit.ppl
     //
     // Scenario:
     //   - Source: sakila.rental (MySQL), depth = 1
@@ -134,7 +134,7 @@ mod tests {
     async fn depth_limit_creates_only_direct_fk_tables() {
         reset_postgres_schema().await;
 
-        let config = "schema-objects/p2-04-depth-limit.smql";
+        let config = "schema-objects/p2-04-depth-limit.ppl";
         run_config(config)
             .await
             .expect("depth-limit migration failed");
@@ -166,7 +166,7 @@ mod tests {
 
     // Phase 2 Test 08 - ENUM Migration: MySQL ENUM -> PostgreSQL TYPE ... AS ENUM
     //
-    // Config: crates/engine-tests/configs/schema-objects/p2-08-enum-migration.smql
+    // Config: crates/engine-tests/configs/schema-objects/p2-08-enum-migration.ppl
     //
     // Scenario:
     //   - Source: sakila.film (MySQL), depth=1, exclude=[film_actor, film_category, inventory]
@@ -184,7 +184,7 @@ mod tests {
     async fn enum_type_created_before_table_with_correct_labels() {
         reset_postgres_schema().await;
 
-        let config = "schema-objects/p2-08-enum-migration.smql";
+        let config = "schema-objects/p2-08-enum-migration.ppl";
         run_config(config).await.expect("enum-migration failed");
 
         for table in &["language", "film"] {
@@ -256,7 +256,7 @@ mod tests {
 
     // Phase 2 Test 07 - Schema Op Deduplication Across Pipelines
     //
-    // Config: crates/engine-tests/configs/schema-objects/p2-07-schema-dedup.smql
+    // Config: crates/engine-tests/configs/schema-objects/p2-07-schema-dedup.ppl
     //
     // Scenario:
     //   - Pipeline 1 (migrate_film, depth=1): discovers language, film, film_actor,
@@ -275,7 +275,7 @@ mod tests {
     async fn schema_dedup_across_pipelines_no_duplicate_errors() {
         reset_postgres_schema().await;
 
-        let config = "schema-objects/p2-07-schema-dedup.smql";
+        let config = "schema-objects/p2-07-schema-dedup.ppl";
         run_config(config)
             .await
             .expect("schema-dedup migration failed");
@@ -305,7 +305,7 @@ mod tests {
 
     // Phase 2 Test 06 - Circular FK: store ↔ staff mutual dependency
     //
-    // Config: crates/engine-tests/configs/schema-objects/p2-06-circular-fk.smql
+    // Config: crates/engine-tests/configs/schema-objects/p2-06-circular-fk.ppl
     //
     // Scenario:
     //   - Source: sakila.store (MySQL), depth = 1, data = cascade
@@ -322,7 +322,7 @@ mod tests {
     async fn circular_fk_migrates_with_both_constraints_intact() {
         reset_postgres_schema().await;
 
-        let config = "schema-objects/p2-06-circular-fk.smql";
+        let config = "schema-objects/p2-06-circular-fk.ppl";
         run_config(config)
             .await
             .expect("circular-fk migration failed");
@@ -402,7 +402,7 @@ mod tests {
 
     // Phase 2 Test 09 - Generated Columns
     //
-    // Config: crates/engine-tests/configs/schema-objects/p2-09-generated-columns.smql
+    // Config: crates/engine-tests/configs/schema-objects/p2-09-generated-columns.ppl
     //
     // Scenario:
     //   - Source: sakila.film (MySQL), depth = 1, data = cascade
@@ -462,7 +462,7 @@ mod tests {
         reset_postgres_schema().await;
 
         let result = async {
-            let config = "schema-objects/p2-09-generated-columns.smql";
+            let config = "schema-objects/p2-09-generated-columns.ppl";
             run_config(config)
                 .await
                 .expect("generated-columns migration failed");
@@ -568,7 +568,7 @@ mod tests {
 
     // Phase 2 Test 05 - Exclusion Patterns: with references { data = schema_only, exclude = [...] }
     //
-    // Config: crates/engine-tests/configs/schema-objects/p2-05-exclusion.smql
+    // Config: crates/engine-tests/configs/schema-objects/p2-05-exclusion.ppl
     //
     // Scenario:
     //   - Source: sakila.customer (MySQL), depth = all
@@ -584,7 +584,7 @@ mod tests {
     async fn exclusion_creates_only_non_excluded_tables() {
         reset_postgres_schema().await;
 
-        let config = "schema-objects/p2-05-exclusion.smql";
+        let config = "schema-objects/p2-05-exclusion.ppl";
         run_config(config)
             .await
             .expect("exclusion migration failed");
@@ -616,7 +616,7 @@ mod tests {
 
     // Phase 2 Test 03 - Full FK Chain: with references { data = cascade, depth = all }
     //
-    // Config: crates/engine-tests/configs/schema-objects/p2-03-full-chain.smql
+    // Config: crates/engine-tests/configs/schema-objects/p2-03-full-chain.ppl
     //
     // Scenario:
     //   - Source: sakila.rental (MySQL), depth = all
@@ -633,7 +633,7 @@ mod tests {
     async fn full_chain_fk_constraints_satisfied() {
         reset_postgres_schema().await;
 
-        let config = "schema-objects/p2-03-full-chain.smql";
+        let config = "schema-objects/p2-03-full-chain.ppl";
         run_config(config)
             .await
             .expect("full-chain migration failed");
@@ -663,7 +663,7 @@ mod tests {
 
     // Phase 2 Test 10 - Table Rename via `map` block
     //
-    // Config: crates/engine-tests/configs/schema-objects/p2-10-table-rename.smql
+    // Config: crates/engine-tests/configs/schema-objects/p2-10-table-rename.ppl
     //
     // Scenario:
     //   - Source: sakila.film (MySQL) with cascade depth=1
@@ -678,7 +678,7 @@ mod tests {
     async fn table_rename_map_creates_renamed_tables_with_fk_integrity() {
         reset_postgres_schema().await;
 
-        let config = "schema-objects/p2-10-table-rename.smql";
+        let config = "schema-objects/p2-10-table-rename.ppl";
         run_config(config)
             .await
             .expect("table-rename migration failed");
@@ -725,7 +725,7 @@ mod tests {
 
     // Phase 2 Test 11 - Full Sakila with warehouse naming and computed column
     //
-    // Config: crates/engine-tests/configs/schema-objects/p2-11-full-sakila.smql
+    // Config: crates/engine-tests/configs/schema-objects/p2-11-full-sakila.ppl
     //
     // Scenario:
     //   - All Sakila tables migrated via payment's FK graph (depth=all)
@@ -743,7 +743,7 @@ mod tests {
     async fn full_sakila_warehouse_naming_with_computed_column() {
         reset_postgres_schema().await;
 
-        let config = "schema-objects/p2-11-full-sakila.smql";
+        let config = "schema-objects/p2-11-full-sakila.ppl";
         run_config(config)
             .await
             .expect("full-sakila warehouse migration failed");

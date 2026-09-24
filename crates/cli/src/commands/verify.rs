@@ -2,8 +2,15 @@ use crate::{args::Cli, config, error::CliError};
 use crossterm::execute;
 use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
 use engine_processing::EnvContext;
-use engine_verify::{VerifyProgress, error::VerifyError, verifier::verify_with_progress};
-use model::integrity::result::{DivergenceKind, VerificationResult};
+use engine_verify::{
+    VerifyProgress,
+    error::VerifyError,
+    verifier::{VerifyOptions, verify_with_progress},
+};
+use model::integrity::{
+    receipt::root_hex,
+    result::{DivergenceKind, VerificationResult},
+};
 use std::{
     fmt::Write as _,
     fs::File,
@@ -18,6 +25,7 @@ pub async fn execute(
     config_path: Option<String>,
     output: Option<String>,
     pretty: bool,
+    allow_extra: bool,
     env: Arc<EnvContext>,
 ) -> Result<(), CliError> {
     let config_path = config::resolve_path(config_path)?;
@@ -34,7 +42,8 @@ pub async fn execute(
 
     printer.header(&config_path);
 
-    let results = verify_with_progress(plan, env, &mut printer).await?;
+    let options = VerifyOptions { allow_extra };
+    let results = verify_with_progress(plan, env, &mut printer, options).await?;
 
     if let Some(path) = output.as_ref() {
         write_report(path, &results)?;
@@ -176,14 +185,22 @@ pub fn format_result(result: &VerificationResult) -> String {
         VerificationResult::Match {
             receipt,
             duration_ms,
-        } => format!(
-            "✓ {}/{} - match ({} rows, root {}, {}ms)",
-            receipt.pipeline_name,
-            receipt.table_name,
-            commas(receipt.total_rows),
-            short_root(&receipt.table_root),
-            commas(*duration_ms),
-        ),
+            extra_ignored,
+        } => {
+            let ignored = match extra_ignored {
+                0 => String::new(),
+                n => format!(", {} uncovered rows ignored", commas(*n)),
+            };
+            format!(
+                "✓ {}/{} - match ({} rows{}, root {}, {}ms)",
+                receipt.pipeline_name,
+                receipt.table_name,
+                commas(receipt.total_rows),
+                ignored,
+                receipt.root_hex(),
+                commas(*duration_ms),
+            )
+        }
         VerificationResult::Mismatch {
             receipt,
             actual_root,
@@ -202,8 +219,8 @@ pub fn format_result(result: &VerificationResult) -> String {
                 commas(summary.expected_rows),
                 commas(summary.actual_rows),
                 commas(*duration_ms),
-                short_root(&receipt.table_root),
-                short_root(actual_root),
+                receipt.root_hex(),
+                root_hex(actual_root),
             );
 
             for d in divergences {
@@ -260,7 +277,7 @@ pub fn format_result(result: &VerificationResult) -> String {
 }
 
 /// Thousands-separated integer, e.g. 1234567 -> "1,234,567".
-fn commas(n: u64) -> String {
+pub(crate) fn commas(n: u64) -> String {
     let s = n.to_string();
     let bytes = s.as_bytes();
     let mut out = String::with_capacity(s.len() + s.len() / 3);
@@ -274,7 +291,7 @@ fn commas(n: u64) -> String {
     out
 }
 
-/// First 8 bytes of a 32-byte root - enough to compare by eye.
+/// First 8 bytes of a per-row hash - enough to tell two rows apart by eye.
 fn short_root(root: &[u8; 32]) -> String {
     use std::fmt::Write;
     let mut out = String::with_capacity(16);
@@ -324,7 +341,7 @@ mod tests {
     }
 
     fn drive(p: &mut VerifyPrinter<&mut Vec<u8>>, results: &[VerificationResult]) {
-        p.header("migration.smql");
+        p.header("migration.ppl");
         for r in results {
             if let VerificationResult::Match { receipt, .. } = r {
                 p.table_started(&receipt.pipeline_name, &receipt.table_name);
@@ -343,6 +360,7 @@ mod tests {
             VerificationResult::Match {
                 receipt: receipt(200),
                 duration_ms: 45,
+                extra_ignored: 0,
             },
             VerificationResult::NoPriorRun {
                 pipeline: "migrate_film".into(),
@@ -352,7 +370,7 @@ mod tests {
         let out = render(true, |p| drive(p, &results));
         println!("\n----- verify --pretty -----\n{out}---------------------------\n");
 
-        assert!(out.contains("◆ Verifying: migration.smql"));
+        assert!(out.contains("◆ Verifying: migration.ppl"));
         assert!(out.contains("⧗ migrate_actor/actor"));
         assert!(out.contains("    reading destination…"));
         assert!(out.contains("    sorting row hashes…"));
@@ -361,12 +379,26 @@ mod tests {
         assert!(out.contains("✓ 1 matched, 1 without a receipt"));
     }
 
+    /// A clean tick over a table that was only partly checked has to say so.
+    #[test]
+    fn ignored_rows_are_named_in_the_match_line() {
+        let out = format_result(&VerificationResult::Match {
+            receipt: receipt(200),
+            duration_ms: 45,
+            extra_ignored: 1_500,
+        });
+
+        assert!(out.starts_with("✓ migrate_actor/actor - match (200 rows"));
+        assert!(out.contains("1,500 uncovered rows ignored"), "{out}");
+    }
+
     #[test]
     fn plain_mode_keeps_status_markers_but_no_decoration() {
         let results = vec![
             VerificationResult::Match {
                 receipt: receipt(200),
                 duration_ms: 45,
+                extra_ignored: 0,
             },
             VerificationResult::NoPriorRun {
                 pipeline: "migrate_film".into(),
@@ -380,7 +412,8 @@ mod tests {
         // but none of the --pretty decoration: no header, phase lines, summary.
         assert_eq!(
             out,
-            "✓ migrate_actor/actor - match (200 rows, root abababababababab, 45ms)\n\
+            "✓ migrate_actor/actor - match (200 rows, root \
+             abababababababababababababababababababababababababababababababab, 45ms)\n\
              ? migrate_film - no integrity receipt (run `apply --integrity` first)\n"
         );
         for deco in ["◆", "⧗", "matched"] {

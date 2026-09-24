@@ -2,10 +2,10 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::harness::smql::feature_smql;
+    use crate::harness::ppl::feature_ppl;
     use crate::{
         features::plugins::fixture,
-        harness::runner::{DbType, get_row_count, run_smql},
+        harness::runner::{DbType, get_row_count, run_ppl},
         reset_postgres_schema,
     };
     use tracing_test::traced_test;
@@ -14,8 +14,8 @@ mod tests {
 
     /// `test_alloc` transform draining `actor` (200 rows) into `<dest>`, capped at
     /// `limit_bytes`, allocating `alloc_mb` MiB per row.
-    fn alloc_smql(dest: &str, limit_bytes: u64, alloc_mb: u64) -> String {
-        feature_smql(&format!(
+    fn alloc_ppl(dest: &str, limit_bytes: u64, alloc_mb: u64) -> String {
+        feature_ppl(&format!(
             r#"
             plugin "al" {{
                 path = "{plugin}"
@@ -52,7 +52,7 @@ mod tests {
     async fn allocation_under_memory_limit_succeeds() {
         reset_postgres_schema().await;
 
-        run_smql(&alloc_smql("alloc_ok", LIMIT_64MB, 16), false)
+        run_ppl(&alloc_ppl("alloc_ok", LIMIT_64MB, 16), false)
             .await
             .expect("migration succeeds");
 
@@ -69,7 +69,7 @@ mod tests {
         reset_postgres_schema().await;
 
         // Transform traps are non-fatal -> migration completes with rows dropped.
-        let _ = run_smql(&alloc_smql("alloc_over", LIMIT_64MB, 256), false).await;
+        let _ = run_ppl(&alloc_ppl("alloc_over", LIMIT_64MB, 256), false).await;
 
         let migrated = get_row_count("alloc_over", "testdb", DbType::Postgres).await;
         assert_eq!(migrated, 0, "over-limit allocation should trap every row");
@@ -82,7 +82,7 @@ mod tests {
     async fn runaway_allocation_is_contained() {
         reset_postgres_schema().await;
 
-        let doc = feature_smql(&format!(
+        let doc = feature_ppl(&format!(
             r#"
             plugin "hog" {{ path = "{plugin}" memory_limit_bytes = {limit} }}
 
@@ -106,7 +106,7 @@ mod tests {
             limit = 32 * 1024 * 1024,
         ));
 
-        let _ = run_smql(&doc, false).await;
+        let _ = run_ppl(&doc, false).await;
 
         let migrated = get_row_count("hog_out", "testdb", DbType::Postgres).await;
         assert_eq!(

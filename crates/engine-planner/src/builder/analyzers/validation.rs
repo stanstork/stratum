@@ -110,7 +110,7 @@ impl ValidationAnalyzer {
                 plugin_name,
                 input_mapping,
             } => {
-                // Plugin logic isn't introspectable from SMQL, so we can't run a
+                // Plugin logic isn't introspectable from PPL, so we can't run a
                 // SQL-side probability estimate. Surface the plugin descriptor so
                 // sample previews and diagnostics can show the rule.
                 let check_view = ValidationCheck {

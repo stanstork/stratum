@@ -1,6 +1,6 @@
 use crate::{compile::ensure_plugins_compiled, error::CliError};
 use engine_core::{context::env::EnvContext, plan::execution::ExecutionPlan};
-use smql_syntax::ast::doc::SmqlDocument;
+use ppl_syntax::ast::doc::PplDocument;
 use std::{path::PathBuf, sync::Arc};
 use tracing::{debug, info};
 
@@ -8,7 +8,7 @@ use tracing::{debug, info};
 pub fn resolve_path(config: Option<String>) -> Result<String, CliError> {
     // Priority order:
     // 1. Explicit --config argument
-    // 2. STRATUM_CONFIG environment variable
+    // 2. PAGANEL_CONFIG environment variable
     // 3. Auto-discovery
 
     match config {
@@ -18,8 +18,8 @@ pub fn resolve_path(config: Option<String>) -> Result<String, CliError> {
         }
         None => {
             // Check environment variable
-            if let Ok(env_path) = std::env::var("STRATUM_CONFIG") {
-                info!(path = %env_path, "using config from STRATUM_CONFIG");
+            if let Ok(env_path) = std::env::var("PAGANEL_CONFIG") {
+                info!(path = %env_path, "using config from PAGANEL_CONFIG");
                 return Ok(env_path);
             }
 
@@ -42,12 +42,12 @@ pub async fn load_plan(
     env: Arc<EnvContext>,
 ) -> Result<ExecutionPlan, CliError> {
     let source = tokio::fs::read_to_string(path).await?;
-    let doc: SmqlDocument = if from_ast {
+    let doc: PplDocument = if from_ast {
         // If `from_ast` is true, read the config file as a pre-parsed AST
         serde_json::from_str(&source)?
     } else {
         // Otherwise, read the config file and parse it
-        smql_syntax::builder::parse(&source)?
+        ppl_syntax::builder::parse(&source)?
     };
     let mut plan = ExecutionPlan::build(&doc, env)?;
     plan.config_path = path.to_string();
@@ -59,11 +59,11 @@ pub async fn load_plan(
 /// Discovers the config file path by searching in multiple locations
 ///
 /// Search order:
-/// 1. Current working directory: stratum.smql
-/// 2. Current working directory: .stratum.smql
-/// 3. Current working directory: config/stratum.smql
-/// 4. User home directory: ~/.stratum/stratum.smql
-/// 5. User home directory: ~/.config/stratum/stratum.smql
+/// 1. Current working directory: paganel.ppl
+/// 2. Current working directory: .paganel.ppl
+/// 3. Current working directory: config/paganel.ppl
+/// 4. User home directory: ~/.paganel/paganel.ppl
+/// 5. User home directory: ~/.config/paganel/paganel.ppl
 fn discover_config() -> Option<PathBuf> {
     let search_paths = get_search_paths();
 
@@ -83,14 +83,14 @@ fn get_search_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
     // Current working directory variations
-    paths.push(PathBuf::from("stratum.smql"));
-    paths.push(PathBuf::from(".stratum.smql"));
-    paths.push(PathBuf::from("config/stratum.smql"));
+    paths.push(PathBuf::from("paganel.ppl"));
+    paths.push(PathBuf::from(".paganel.ppl"));
+    paths.push(PathBuf::from("config/paganel.ppl"));
 
     // Home directory variations
     if let Some(home) = home_dir() {
-        paths.push(home.join(".stratum").join("stratum.smql"));
-        paths.push(home.join(".config").join("stratum").join("stratum.smql"));
+        paths.push(home.join(".paganel").join("paganel.ppl"));
+        paths.push(home.join(".config").join("paganel").join("paganel.ppl"));
     }
 
     paths
@@ -133,9 +133,9 @@ mod tests {
     #[test]
     fn test_search_paths_include_cwd() {
         let paths = get_search_paths();
-        assert!(paths.contains(&PathBuf::from("stratum.smql")));
-        assert!(paths.contains(&PathBuf::from(".stratum.smql")));
-        assert!(paths.contains(&PathBuf::from("config/stratum.smql")));
+        assert!(paths.contains(&PathBuf::from("paganel.ppl")));
+        assert!(paths.contains(&PathBuf::from(".paganel.ppl")));
+        assert!(paths.contains(&PathBuf::from("config/paganel.ppl")));
     }
 
     #[test]
@@ -148,6 +148,6 @@ mod tests {
     fn test_display_search_paths() {
         let output = display_search_paths();
         assert!(output.contains("Config file search order:"));
-        assert!(output.contains("stratum.smql"));
+        assert!(output.contains("paganel.ppl"));
     }
 }

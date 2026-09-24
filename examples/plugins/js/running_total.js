@@ -9,8 +9,8 @@
 // Demonstrates: kv.get / kv.set (carry state between rows), metrics.counter /
 // metrics.gauge (emit on the host's `plugin::metrics` tracing target).
 //
-// Test: run via configs/stateful_kv.smql.
-const { transform, kv, metrics } = require("@stratum/plugin-sdk");
+// Test: run via configs/stateful_kv.ppl.
+const { transform, kv, metrics } = require("@paganel/plugin-sdk");
 
 transform("running_total", {
   version: "1.0.0",

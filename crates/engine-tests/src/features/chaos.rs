@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use crate::harness::smql::dest_connection;
-    use crate::harness::{db::Dbms, fixtures::reset_postgres_schema, runner::run_smql};
+    use crate::harness::ppl::dest_connection;
+    use crate::harness::{db::Dbms, fixtures::reset_postgres_schema, runner::run_ppl};
     use bigdecimal::BigDecimal;
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use connectors::drivers::postgres::encoding::binary::{BinaryColumnType, PgBinaryEncoder};
@@ -193,7 +193,7 @@ mod tests {
         let csv = pathological_csv();
         let path = csv.path().to_str().expect("csv path is valid utf-8");
 
-        let smql = format!(
+        let ppl = format!(
             "connection \"src\" {{ driver = \"csv\" url = \"{path}\" pk_column = \"id\" }}\n\
              {}\n\
              pipeline \"chaos_load\" {{\n\
@@ -206,6 +206,6 @@ mod tests {
 
         // The contract is "no panic": either outcome is acceptable, as long as the
         // engine returns control instead of unwinding.
-        let _ = run_smql(&smql, false).await;
+        let _ = run_ppl(&ppl, false).await;
     }
 }

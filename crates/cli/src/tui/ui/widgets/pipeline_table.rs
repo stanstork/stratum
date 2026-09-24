@@ -156,7 +156,7 @@ fn create_rows<'a>(sorted_names: &[String], app: &App, cols: &ColumnLayout) -> V
             }));
 
             if cols.show_rate {
-                cells.push(Line::from(format_rate(p.throughput.current_throughput())));
+                cells.push(Line::from(format_rate(p.effective_rate())));
             }
             if cols.show_eta {
                 cells.push(Line::from(

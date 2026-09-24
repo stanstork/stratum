@@ -23,8 +23,7 @@ use model::{
         },
     },
 };
-use query_builder::ast::load_data::LoadDataConflict;
-use smql_syntax::ast::{
+use ppl_syntax::ast::{
     attribute::Attribute,
     block::{ConnectionBlock, DefineBlock, ExecutionBlock, PluginBlock},
     expr::{Expression, ExpressionKind},
@@ -35,6 +34,7 @@ use smql_syntax::ast::{
     span::Span,
     validation::ValidationKind,
 };
+use query_builder::ast::load_data::LoadDataConflict;
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -669,7 +669,7 @@ impl PlanBuilder {
     /// Map a plugin call's input fields to `plugin_field -> source column name`.
     /// The source column is the last segment of the dotted reference (e.g.
     /// `orders.amount` -> `amount`), matching how records are keyed.
-    fn plugin_input_mapping(call: &smql_syntax::ast::expr::PluginCall) -> HashMap<String, String> {
+    fn plugin_input_mapping(call: &ppl_syntax::ast::expr::PluginCall) -> HashMap<String, String> {
         call.inputs
             .iter()
             .map(|input| {
@@ -809,7 +809,7 @@ impl PlanBuilder {
                 RetryConfig {
                     max_attempts,
                     delay_ms,
-                    // Backoff strategy is not yet configurable from SMQL; the
+                    // Backoff strategy is not yet configurable from PPL; the
                     // per-attempt delay grows exponentially from `delay_ms`.
                     backoff: BackoffStrategy::Exponential,
                 }
@@ -1313,7 +1313,7 @@ impl PlanBuilder {
             }
         }
 
-        // Nested `config { ... }` block -> JSON bytes passed to the plugin at __stratum_initialize.
+        // Nested `config { ... }` block -> JSON bytes passed to the plugin at __paganel_initialize.
         if let Some(cfg) = block.nested_blocks.iter().find(|b| b.kind == "config") {
             let mut map = serde_json::Map::new();
             for attr in &cfg.attributes {
@@ -1335,7 +1335,7 @@ impl PlanBuilder {
         Ok(decl)
     }
 
-    /// Convert an evaluated SMQL value into plain JSON for a plugin's config
+    /// Convert an evaluated PPL value into plain JSON for a plugin's config
     /// (natural scalars/arrays, not the `{type,value}` exchange envelope).
     fn value_to_plain_json(v: &Value) -> serde_json::Value {
         match v {
@@ -1653,7 +1653,7 @@ fn string_attr(key: &str, value: &str, span: Span) -> Attribute {
 mod tests {
     use super::*;
     use model::execution::define::DefinitionSource;
-    use smql_syntax::ast::{
+    use ppl_syntax::ast::{
         attribute::Attribute,
         dotpath::DotPath,
         ident::Identifier,
@@ -1912,7 +1912,7 @@ mod tests {
         );
         let expr = Expression::new(
             ExpressionKind::WhenExpression {
-                branches: vec![smql_syntax::ast::expr::WhenBranch {
+                branches: vec![ppl_syntax::ast::expr::WhenBranch {
                     condition,
                     value: make_string_expr("on"),
                     span: test_span(),
@@ -2626,9 +2626,7 @@ mod tests {
 
     // ----- expand_pipeline (multi-table `tables = [...]`) --------------------
 
-    use smql_syntax::ast::pipeline::{
-        FieldMapping, FromBlock, MapBlock, NamedSelectBlock, ToBlock,
-    };
+    use ppl_syntax::ast::pipeline::{FieldMapping, FromBlock, MapBlock, NamedSelectBlock, ToBlock};
 
     fn make_array_expr(items: Vec<&str>) -> Expression {
         Expression::new(

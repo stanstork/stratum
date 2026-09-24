@@ -169,7 +169,7 @@ impl Sink for PostgresSink {
             return Ok(());
         };
 
-        let staging_table = format!("__stratum_stage_{}", Uuid::new_v4().simple());
+        let staging_table = format!("__paganel_stage_{}", Uuid::new_v4().simple());
 
         debug!(table = %staging_table, "using staging table");
 

@@ -44,7 +44,7 @@ impl CalibrationData {
     const DB_KEY: &'static str = "calibration_v1";
 
     pub fn path_for(home: &Path) -> PathBuf {
-        home.join(".stratum/calibration")
+        home.join(".paganel/calibration")
     }
 
     pub fn load(db_path: impl AsRef<Path>) -> Result<Self, Box<dyn Error + Send + Sync>> {

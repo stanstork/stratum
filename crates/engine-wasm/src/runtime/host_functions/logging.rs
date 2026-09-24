@@ -6,7 +6,7 @@ use wasmtime::{Caller, Linker};
 pub(super) fn link(linker: &mut Linker<PluginState>) -> Result<(), WasmError> {
     linker
         .func_wrap(
-            "stratum",
+            "paganel",
             "log_debug",
             |mut caller: Caller<'_, PluginState>, ptr: u32, len: u32| {
                 if caller.data().capabilities.logging
@@ -20,7 +20,7 @@ pub(super) fn link(linker: &mut Linker<PluginState>) -> Result<(), WasmError> {
 
     linker
         .func_wrap(
-            "stratum",
+            "paganel",
             "log_info",
             |mut caller: Caller<'_, PluginState>, ptr: u32, len: u32| {
                 if caller.data().capabilities.logging
@@ -34,7 +34,7 @@ pub(super) fn link(linker: &mut Linker<PluginState>) -> Result<(), WasmError> {
 
     linker
         .func_wrap(
-            "stratum",
+            "paganel",
             "log_warn",
             |mut caller: Caller<'_, PluginState>, ptr: u32, len: u32| {
                 if caller.data().capabilities.logging
@@ -48,7 +48,7 @@ pub(super) fn link(linker: &mut Linker<PluginState>) -> Result<(), WasmError> {
 
     linker
         .func_wrap(
-            "stratum",
+            "paganel",
             "log_error",
             |mut caller: Caller<'_, PluginState>, ptr: u32, len: u32| {
                 if caller.data().capabilities.logging

@@ -109,7 +109,7 @@ impl MySqlDriver {
             .await
             .map_err(|e| DriverError::QueryError(format!("{:?}", e)))?;
         // Surface (once) any server settings the DBA controls that throttle bulk
-        // loads. Read-only; stratum never changes server config.
+        // loads. Read-only; paganel never changes server config.
         self.bulk_preflight_advisory(&mut conn).await;
         Ok(conn)
     }

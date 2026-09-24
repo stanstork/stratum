@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "crates/model",
-    "crates/smql-syntax",
+    "crates/ppl-syntax",
     "crates/query-builder",
     "crates/connectors",
     "crates/engine-core",
@@ -17,16 +17,16 @@ members = [
     "crates/engine-schema",
     "crates/engine-verify",
     "crates/engine-wasm",
-    "crates/sdk/stratum-plugin-compiler",
+    "crates/sdk/paganel-plugin-compiler",
 ]
 
 exclude = [
     "crates/engine-wasm/src/tests/plugins/rust",
-    "crates/sdk/stratum-plugin-sdk",
-    "crates/sdk/stratum-plugin-sdk-macros",
+    "crates/sdk/paganel-plugin-sdk",
+    "crates/sdk/paganel-plugin-sdk-macros",
     # WASM-only QuickJS runtime: built solely for wasm32-wasip1 (see
     # build_fixtures.sh) and committed as a fixture.
-    "crates/sdk/stratum-plugin-js-runtime",
+    "crates/sdk/paganel-plugin-js-runtime",
     # Benchmark transform/filter plugins: wasm32 cdylibs built by benchmarks/run.sh.
     "benchmarks/plugins/rust/order_net",
     "benchmarks/plugins/rust/order_ok",

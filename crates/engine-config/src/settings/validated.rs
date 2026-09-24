@@ -147,7 +147,7 @@ impl ValidatedSettings {
 }
 
 /// Read a settings value as a positive integer, accepting either `UInt` or a
-/// positive `Int` (SMQL literals can land as either). Returns `None` otherwise.
+/// positive `Int` (PPL literals can land as either). Returns `None` otherwise.
 fn read_usize(settings: &HashMap<String, Value>, key: &str) -> Option<usize> {
     match settings.get(key) {
         Some(Value::UInt(n)) => Some(*n as usize),

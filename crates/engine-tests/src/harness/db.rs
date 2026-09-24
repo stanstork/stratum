@@ -10,7 +10,7 @@ pub enum Dbms {
 }
 
 impl Dbms {
-    /// SMQL `driver` name.
+    /// PPL `driver` name.
     pub fn driver(self) -> &'static str {
         match self {
             Dbms::MySql => "mysql",

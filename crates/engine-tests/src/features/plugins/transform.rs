@@ -2,21 +2,21 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::harness::smql::feature_smql;
+    use crate::harness::ppl::feature_ppl;
     use crate::{
         features::plugins::fixture,
         harness::runner::{
             DbType, assert_column_exists, assert_table_exists, get_cell_as_f64, get_column_names,
-            get_pg_column_type, get_row_count, run_smql,
+            get_pg_column_type, get_row_count, run_ppl,
         },
         reset_postgres_schema,
     };
     use tracing_test::traced_test;
 
-    /// Build an SMQL doc for a `film -> <dest>` pipeline whose `select` block is
+    /// Build an PPL doc for a `film -> <dest>` pipeline whose `select` block is
     /// supplied by the caller. The `test_transform` plugin is declared as `adder`.
-    fn smql(dest_table: &str, select_block: &str) -> String {
-        feature_smql(&format!(
+    fn ppl(dest_table: &str, select_block: &str) -> String {
+        feature_ppl(&format!(
             r#"
             plugin "adder" {{ path = "{plugin}" }}
 
@@ -46,13 +46,13 @@ mod tests {
     async fn transform_creates_output_column_and_copies_all_rows() {
         reset_postgres_schema().await;
 
-        let doc = smql(
+        let doc = ppl(
             "films_priced",
             r#"film_id    = film.film_id
                total_cost = plugin.adder({ a: film.rental_rate, b: film.replacement_cost })"#,
         );
 
-        run_smql(&doc, false).await.expect("migration succeeds");
+        run_ppl(&doc, false).await.expect("migration succeeds");
 
         assert_table_exists("films_priced", true).await;
         assert_column_exists("films_priced", "total_cost", true).await;
@@ -79,13 +79,13 @@ mod tests {
     async fn transform_output_column_is_double_precision() {
         reset_postgres_schema().await;
 
-        let doc = smql(
+        let doc = ppl(
             "films_priced",
             r#"film_id    = film.film_id
                total_cost = plugin.adder({ a: film.rental_rate, b: film.replacement_cost })"#,
         );
 
-        run_smql(&doc, false).await.expect("migration succeeds");
+        run_ppl(&doc, false).await.expect("migration succeeds");
 
         let ty = get_pg_column_type("films_priced", "total_cost").await;
         assert_eq!(ty, "double precision", "plugin f64 output column type");
@@ -98,13 +98,13 @@ mod tests {
     async fn transform_computes_sum_with_decimal_inputs() {
         reset_postgres_schema().await;
 
-        let doc = smql(
+        let doc = ppl(
             "films_priced",
             r#"film_id    = film.film_id
                total_cost = plugin.adder({ a: film.rental_rate, b: film.replacement_cost })"#,
         );
 
-        run_smql(&doc, false).await.expect("migration succeeds");
+        run_ppl(&doc, false).await.expect("migration succeeds");
 
         for film_id in [1, 2, 3, 500, 1000] {
             let expected = get_cell_as_f64(
@@ -139,7 +139,7 @@ mod tests {
     async fn transform_alongside_mapped_source_columns() {
         reset_postgres_schema().await;
 
-        let doc = smql(
+        let doc = ppl(
             "films_priced",
             r#"film_id          = film.film_id
                title            = film.title
@@ -148,7 +148,7 @@ mod tests {
                total_cost       = plugin.adder({ a: film.rental_rate, b: film.replacement_cost })"#,
         );
 
-        run_smql(&doc, false).await.expect("migration succeeds");
+        run_ppl(&doc, false).await.expect("migration succeeds");
 
         for col in [
             "film_id",
@@ -174,13 +174,13 @@ mod tests {
         reset_postgres_schema().await;
 
         // `length` is SMALLINT in Sakila; the plugin output is f64.
-        let doc = smql(
+        let doc = ppl(
             "films_shadow",
             r#"film_id = film.film_id
                length  = plugin.adder({ a: film.rental_rate, b: film.replacement_cost })"#,
         );
 
-        run_smql(&doc, false).await.expect("migration succeeds");
+        run_ppl(&doc, false).await.expect("migration succeeds");
 
         let ty = get_pg_column_type("films_shadow", "length").await;
         assert_eq!(

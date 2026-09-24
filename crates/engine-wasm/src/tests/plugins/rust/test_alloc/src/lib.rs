@@ -2,9 +2,9 @@
 //! used to exercise the runtime's memory-limit enforcement.
 
 use std::hint::black_box;
-use stratum_plugin_sdk::{PluginInput, PluginResult, config, stratum_transform};
+use paganel_plugin_sdk::{PluginInput, PluginResult, config, paganel_transform};
 
-#[stratum_transform(
+#[paganel_transform(
     name = "test_alloc",
     version = "1.0.0",
     output = "i64",

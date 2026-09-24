@@ -2,20 +2,18 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::harness::smql::feature_smql;
+    use crate::harness::ppl::feature_ppl;
     use crate::{
         features::plugins::fixture,
-        harness::runner::{
-            DbType, assert_table_exists, get_cell_as_usize, get_row_count, run_smql,
-        },
+        harness::runner::{DbType, assert_table_exists, get_cell_as_usize, get_row_count, run_ppl},
         reset_postgres_schema,
     };
     use tracing_test::traced_test;
 
-    /// Build an SMQL doc for `customer -> <dest>` with a single filter rule. The
+    /// Build an PPL doc for `customer -> <dest>` with a single filter rule. The
     /// JS `test_filter` plugin is declared as `positive`.
-    fn smql(dest_table: &str, filter_field: &str, action: &str) -> String {
-        feature_smql(&format!(
+    fn ppl(dest_table: &str, filter_field: &str, action: &str) -> String {
+        feature_ppl(&format!(
             r#"
             plugin "positive" {{ path = "{plugin}" }}
 
@@ -56,7 +54,7 @@ mod tests {
     async fn js_filter_skips_rejected_rows() {
         reset_postgres_schema().await;
 
-        run_smql(&smql("customers_active", "active", "skip"), false)
+        run_ppl(&ppl("customers_active", "active", "skip"), false)
             .await
             .expect("migration succeeds");
 
@@ -89,7 +87,7 @@ mod tests {
     async fn js_filter_passes_all_valid_rows() {
         reset_postgres_schema().await;
 
-        run_smql(&smql("customers_all", "customer_id", "skip"), false)
+        run_ppl(&ppl("customers_all", "customer_id", "skip"), false)
             .await
             .expect("migration succeeds");
 
@@ -106,7 +104,7 @@ mod tests {
         reset_postgres_schema().await;
 
         // Expected to error out (validation failure is fatal).
-        let _ = run_smql(&smql("customers_strict", "active", "fail"), false).await;
+        let _ = run_ppl(&ppl("customers_strict", "active", "fail"), false).await;
 
         // Table is created during schema setup, but no rows are committed.
         assert_table_exists("customers_strict", true).await;

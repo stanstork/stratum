@@ -55,6 +55,13 @@ const READ_BATCH_ROWS: usize = 1000;
 /// Rows between clock reads in the per-row diff loop.
 const DIFF_CLOCK_SAMPLE: u64 = 1 << 16;
 
+/// How strictly the destination must match the receipt.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct VerifyOptions {
+    /// Accept destination rows the receipt does not cover.
+    pub allow_extra: bool,
+}
+
 /// Outcome of merge-joining the receipt's committed set against the destination.
 struct DiffOutcome {
     actual_root: [u8; 32],
@@ -67,14 +74,22 @@ pub async fn verify(
     plan: ExecutionPlan,
     env: Arc<EnvContext>,
 ) -> Result<Vec<VerificationResult>, VerifyError> {
-    verify_with_progress(plan, env, &mut NoopProgress).await
+    verify_with_options(plan, env, VerifyOptions::default()).await
 }
 
-/// Like [`verify`], but reports each table as it starts and finishes.
+pub async fn verify_with_options(
+    plan: ExecutionPlan,
+    env: Arc<EnvContext>,
+    options: VerifyOptions,
+) -> Result<Vec<VerificationResult>, VerifyError> {
+    verify_with_progress(plan, env, &mut NoopProgress, options).await
+}
+
 pub async fn verify_with_progress(
     plan: ExecutionPlan,
     env: Arc<EnvContext>,
     progress: &mut dyn VerifyProgress,
+    options: VerifyOptions,
 ) -> Result<Vec<VerificationResult>, VerifyError> {
     let (state, hash_log) = init_state()?;
     let exec_ctx = ExecutionContext::new(&plan, state.clone(), hash_log.clone(), env);
@@ -88,6 +103,7 @@ pub async fn verify_with_progress(
             &hash_log,
             progress,
             &mut results,
+            options,
         )
         .await?;
     }
@@ -100,7 +116,7 @@ fn init_state() -> Result<(Arc<SledStateStore>, Arc<RowHashLog>), VerifyError> {
         .ok_or_else(|| {
             VerifyError::InitializationError("Failed to determine home directory".to_string())
         })?
-        .join(".stratum/state");
+        .join(".paganel/state");
 
     let state = SledStateStore::open(&state_dir)
         .map(Arc::new)
@@ -109,6 +125,7 @@ fn init_state() -> Result<(Arc<SledStateStore>, Arc<RowHashLog>), VerifyError> {
     Ok((state, Arc::new(RowHashLog::in_state_dir(&state_dir))))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn verify_pipeline(
     pipeline: &Pipeline,
     exec_ctx: &ExecutionContext,
@@ -116,6 +133,7 @@ async fn verify_pipeline(
     hash_log: &RowHashLog,
     progress: &mut dyn VerifyProgress,
     results: &mut Vec<VerificationResult>,
+    options: VerifyOptions,
 ) -> Result<(), VerifyError> {
     let driver = exec_ctx
         .resolve_driver(&pipeline.destination.connection)
@@ -152,6 +170,7 @@ async fn verify_pipeline(
             &receipt,
             hash_log,
             progress,
+            options,
         )
         .await?;
         progress.table_finished(&result);
@@ -163,6 +182,7 @@ async fn verify_pipeline(
 
 /// Re-read every row of `table` from the destination, key and hash each one,
 /// then diff that keyed set against the set the migration committed.
+#[allow(clippy::too_many_arguments)]
 async fn verify_table(
     driver: &DriverRef,
     pipeline_name: &str,
@@ -170,6 +190,7 @@ async fn verify_table(
     receipt: &VerificationReceipt,
     hash_log: &RowHashLog,
     progress: &mut dyn VerifyProgress,
+    options: VerifyOptions,
 ) -> Result<VerificationResult, VerifyError> {
     let start = Instant::now();
 
@@ -198,6 +219,7 @@ async fn verify_table(
         pipeline_name,
         hash_log,
         progress,
+        options,
     )
     .await;
 
@@ -222,12 +244,20 @@ async fn verify_table(
         });
     }
 
-    let is_match = summary.is_clean() && actual_root == receipt.table_root;
+    // With `allow_extra`, uncovered rows were neither folded into the root nor
+    // recorded, so the root still has to reproduce for the receipt's own rows.
+    let clean = if options.allow_extra {
+        summary.missing == 0 && summary.changed == 0
+    } else {
+        summary.is_clean()
+    };
+    let is_match = clean && actual_root == receipt.table_root;
 
     Ok(if is_match {
         VerificationResult::Match {
             receipt: receipt.clone(),
             duration_ms,
+            extra_ignored: summary.extra,
         }
     } else {
         VerificationResult::Mismatch {
@@ -241,6 +271,7 @@ async fn verify_table(
 }
 
 /// Stage the destination's rows, then diff them against the receipt's set.
+#[allow(clippy::too_many_arguments)]
 async fn stage_and_diff(
     reader: &TableReader,
     receipt: &VerificationReceipt,
@@ -248,6 +279,7 @@ async fn stage_and_diff(
     pipeline_name: &str,
     hash_log: &RowHashLog,
     progress: &mut dyn VerifyProgress,
+    options: VerifyOptions,
 ) -> Result<DiffOutcome, VerifyError> {
     progress.table_phase("reading destination");
     let dest_rows = stage_destination(reader, receipt, col_types, pipeline_name, hash_log).await?;
@@ -264,9 +296,12 @@ async fn stage_and_diff(
     // The merge-join walks the whole table off disk.
     progress.table_phase("comparing");
     let receipt = receipt.clone();
-    tokio::task::spawn_blocking(move || diff_keyed_sets(expected, actual, &receipt, dest_rows))
-        .await
-        .map_err(|e| VerifyError::InitializationError(format!("verification task failed: {e}")))?
+
+    tokio::task::spawn_blocking(move || {
+        diff_keyed_sets(expected, actual, &receipt, dest_rows, options)
+    })
+    .await
+    .map_err(|e| VerifyError::InitializationError(format!("verification task failed: {e}")))?
 }
 
 /// Read the destination table start to finish, hashing and keying each row with
@@ -331,6 +366,7 @@ fn diff_keyed_sets(
     actual: RowHashIter,
     receipt: &VerificationReceipt,
     dest_rows_read: u64,
+    options: VerifyOptions,
 ) -> Result<DiffOutcome, VerifyError> {
     let mut compared = 0u64;
     let mut expected_seen = 0u64;
@@ -384,15 +420,16 @@ fn diff_keyed_sets(
             }
             (None, Some(act)) => {
                 summary.extra += 1;
-                summary.actual_rows += 1;
-                acc.push_row(&act.key, &act.hash);
-
-                record(
-                    DivergenceKind::Extra {
-                        actual_hash: act.hash,
-                    },
-                    &act.key,
-                );
+                if !options.allow_extra {
+                    summary.actual_rows += 1;
+                    acc.push_row(&act.key, &act.hash);
+                    record(
+                        DivergenceKind::Extra {
+                            actual_hash: act.hash,
+                        },
+                        &act.key,
+                    );
+                }
                 actual.advance()?;
             }
             (Some(exp), Some(act)) => match exp.key.cmp(&act.key) {
@@ -409,15 +446,16 @@ fn diff_keyed_sets(
                 }
                 std::cmp::Ordering::Greater => {
                     summary.extra += 1;
-                    summary.actual_rows += 1;
-                    acc.push_row(&act.key, &act.hash);
-
-                    record(
-                        DivergenceKind::Extra {
-                            actual_hash: act.hash,
-                        },
-                        &act.key,
-                    );
+                    if !options.allow_extra {
+                        summary.actual_rows += 1;
+                        acc.push_row(&act.key, &act.hash);
+                        record(
+                            DivergenceKind::Extra {
+                                actual_hash: act.hash,
+                            },
+                            &act.key,
+                        );
+                    }
                     actual.advance()?;
                 }
                 std::cmp::Ordering::Equal => {
@@ -612,9 +650,17 @@ mod tests {
         expected: &[(&[u8], u8)],
         actual: &[(&[u8], u8)],
     ) -> ([u8; 32], DivergenceSummary, Vec<Divergence>) {
+        diff_with(expected, actual, VerifyOptions::default())
+    }
+
+    fn diff_with(
+        expected: &[(&[u8], u8)],
+        actual: &[(&[u8], u8)],
+        options: VerifyOptions,
+    ) -> ([u8; 32], DivergenceSummary, Vec<Divergence>) {
         let r = receipt(expected);
         let rows = actual.len() as u64;
-        let out = diff_keyed_sets(iter(expected), iter(actual), &r, rows).expect("diff");
+        let out = diff_keyed_sets(iter(expected), iter(actual), &r, rows, options).expect("diff");
         // Every committed row is streamed off the (in-memory) apply set here, so
         // the log-consistency invariant verify relies on must hold.
         assert_eq!(out.expected_seen, expected.len() as u64);
@@ -679,6 +725,60 @@ mod tests {
 
     /// A tampered row keeps its key, so it is one `changed` - not a missing row
     /// plus an unrelated extra one.
+    #[test]
+    fn rows_already_in_the_destination_are_reported_as_extra() {
+        let migrated: &[(&[u8], u8)] = &[(b"b", 2), (b"c", 3)];
+        let destination: &[(&[u8], u8)] = &[(b"a", 9), (b"b", 2), (b"c", 3)];
+
+        let (root, summary, divergences) = diff(migrated, destination);
+
+        assert!(!summary.is_clean());
+        assert_eq!(summary.extra, 1);
+        assert_eq!(summary.missing, 0);
+        assert_eq!(summary.changed, 0);
+        assert_ne!(root, receipt(migrated).table_root);
+        assert!(matches!(
+            divergences.as_slice(),
+            [Divergence {
+                kind: DivergenceKind::Extra { .. },
+                ..
+            }]
+        ));
+    }
+
+    /// The same table, verified with `--allow-extra`: the uncovered row is
+    /// counted for the report but not folded in, so the receipt's own rows still
+    /// have to reproduce the root exactly.
+    #[test]
+    fn allow_extra_ignores_uncovered_rows_and_still_reproduces_the_root() {
+        let migrated: &[(&[u8], u8)] = &[(b"b", 2), (b"c", 3)];
+        let destination: &[(&[u8], u8)] = &[(b"a", 9), (b"b", 2), (b"c", 3)];
+
+        let (root, summary, divergences) =
+            diff_with(migrated, destination, VerifyOptions { allow_extra: true });
+
+        assert_eq!(summary.extra, 1, "counted, so the report can say so");
+        assert_eq!(summary.missing, 0);
+        assert_eq!(summary.changed, 0);
+        assert_eq!(root, receipt(migrated).table_root);
+        assert!(divergences.is_empty());
+    }
+
+    /// `--allow-extra` forgives uncovered keys and nothing else: a committed row
+    /// that is gone or altered still fails.
+    #[test]
+    fn allow_extra_still_catches_missing_and_changed_rows() {
+        let migrated: &[(&[u8], u8)] = &[(b"b", 2), (b"c", 3)];
+        let destination: &[(&[u8], u8)] = &[(b"a", 9), (b"c", 7)];
+
+        let (root, summary, _) =
+            diff_with(migrated, destination, VerifyOptions { allow_extra: true });
+
+        assert_eq!(summary.missing, 1, "b");
+        assert_eq!(summary.changed, 1, "c");
+        assert_ne!(root, receipt(migrated).table_root);
+    }
+
     #[test]
     fn tampered_row_is_reported_as_changed() {
         let (_, summary, divergences) = diff(&[(b"a", 1), (b"b", 2)], &[(b"a", 1), (b"b", 7)]);

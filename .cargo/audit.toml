@@ -12,7 +12,7 @@ ignore = [
     # rkyv is only an *optional* dependency of `rust_decimal`, whose `rkyv`
     # feature we never enable (`connectors` uses only `db-postgres`). It is
     # present in Cargo.lock but not in any build graph - `cargo tree -i rkyv
-    # -e normal` prints nothing - so no Stratum binary links it. rust_decimal
+    # -e normal` prints nothing - so no Paganel binary links it. rust_decimal
     # pins rkyv to ^0.7, so it can't be bumped to the fixed 0.8.17 without an
     # upstream release. Revisit when rust_decimal moves to rkyv 0.8.
     "RUSTSEC-2026-0235",

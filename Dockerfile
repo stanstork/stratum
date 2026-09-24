@@ -13,7 +13,7 @@ RUN apt-get update && \
         libssl-dev && \
     rm -rf /var/lib/apt/lists/*
 
-WORKDIR /usr/src/stratum
+WORKDIR /usr/src/paganel
 
 # Copy the whole workspace and build only the CLI binary (and its deps), not the
 # test crates. The build context is kept small by .dockerignore (excludes
@@ -31,13 +31,13 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Run as a non-root user.
-RUN useradd --user-group --create-home stratum
-WORKDIR /home/stratum
+RUN useradd --user-group --create-home paganel
+WORKDIR /home/paganel
 
-# Copy the built binary. The `cli` crate produces a binary named `stratum`.
-COPY --from=builder /usr/src/stratum/target/release/stratum /usr/local/bin/stratum
-RUN chmod +x /usr/local/bin/stratum
+# Copy the built binary. The `cli` crate produces a binary named `paganel`.
+COPY --from=builder /usr/src/paganel/target/release/pag /usr/local/bin/paganel
+RUN chmod +x /usr/local/bin/paganel
 
-USER stratum
+USER paganel
 
-ENTRYPOINT ["/usr/local/bin/stratum"]
+ENTRYPOINT ["/usr/local/bin/paganel"]

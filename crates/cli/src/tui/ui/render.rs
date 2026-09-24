@@ -144,7 +144,7 @@ mod tests {
         );
 
         println!("\n{out}");
-        assert!(out.contains("STRATUM"));
+        assert!(out.contains("PAGANEL"));
         assert!(out.contains("migrate_customers"));
     }
 
@@ -193,7 +193,7 @@ mod tests {
             },
         );
         println!("\n{out}");
-        assert!(out.contains("STRATUM"));
+        assert!(out.contains("PAGANEL"));
     }
 
     #[test]
@@ -218,7 +218,7 @@ mod tests {
             },
         );
         println!("\n{out}");
-        assert!(out.contains("STRATUM"));
+        assert!(out.contains("PAGANEL"));
     }
 
     #[test]
@@ -332,7 +332,7 @@ mod tests {
     fn help_view_renders() {
         let out = dump(100, 30, vec![], |app| app.current_view = View::Help);
         println!("\n{out}");
-        assert!(out.contains("STRATUM"));
+        assert!(out.contains("PAGANEL"));
     }
 
     #[test]
@@ -356,7 +356,7 @@ mod tests {
             |_app| {},
         );
         println!("\n{out}");
-        assert!(out.contains("STRATUM"));
+        assert!(out.contains("PAGANEL"));
         assert!(
             out.contains("Pipeline"),
             "name column header must be present"

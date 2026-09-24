@@ -13,8 +13,8 @@
 // local stub that returns the same JSON shape.
 //
 // Test (needs network + the capability, so run via the config, not `plugin test`):
-//   stratum apply -c examples/plugins/configs/api_source.smql -e .env
-const { source, http } = require("@stratum/plugin-sdk");
+//   pag apply -c examples/plugins/configs/api_source.ppl -e .env
+const { source, http } = require("@paganel/plugin-sdk");
 
 const API_URL = "https://jsonplaceholder.typicode.com/users";
 

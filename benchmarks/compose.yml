@@ -1,4 +1,4 @@
-# Dedicated databases for the Stratum vs pgloader benchmark.
+# Dedicated databases for the Paganel and pgloader benchmark.
 #
 # Server tuning notes (identical for every tool measured - this cannot bias
 # the comparison, both tools talk to the same instances):
@@ -10,7 +10,7 @@
 #     --innodb-redo-log-capacity=4G        the default (100M) throttles bulk
 #                                          loads 2-3x on checkpoint flushing;
 #                                          size it to the load. THIS IS A SERVER
-#                                          SETTING - stratum never changes it, it
+#                                          SETTING - paganel never changes it, it
 #                                          only warns when it's small.
 #     --innodb-doublewrite=0               throwaway bench data; drops the 2x
 #                                          write amplification (do NOT do this on
@@ -23,7 +23,7 @@
 services:
   mysql-bench:
     image: mysql:8.0
-    container_name: stratum-bench-mysql
+    container_name: paganel-bench-mysql
     command:
       [
         "--local-infile=1",
@@ -54,7 +54,7 @@ services:
 
   postgres-bench:
     image: postgres:16
-    container_name: stratum-bench-postgres
+    container_name: paganel-bench-postgres
     command:
       [
         "postgres",

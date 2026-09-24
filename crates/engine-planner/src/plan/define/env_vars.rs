@@ -3,7 +3,7 @@ use serde::Serialize;
 #[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ValueSource {
-    /// Literal value in SMQL config
+    /// Literal value in PPL config
     Literal,
 
     /// From env("VAR") - required

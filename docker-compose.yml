@@ -1,4 +1,4 @@
-# Throwaway source + destination databases for trying Stratum locally.
+# Throwaway source + destination databases for trying Paganel locally.
 # Credentials match .env.example.
 #
 # MySQL is seeded with Sakila (a MySQL->PostgreSQL source) and an empty

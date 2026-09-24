@@ -2,16 +2,16 @@ use model::{
     core::value::Value,
     execution::define::{DefinitionSource, EnvVar},
 };
-use smql_syntax::ast::{
+use ppl_syntax::ast::{
     block::{ConnectionBlock, DefineBlock, ExecutionBlock},
-    doc::SmqlDocument,
+    doc::PplDocument,
     expr::{Expression, ExpressionKind},
     literal::Literal,
     pipeline::PipelineBlock,
 };
 use std::collections::HashMap;
 
-/// Collects environment variable usage across an SMQL configuration
+/// Collects environment variable usage across an PPL configuration
 pub struct EnvVarCollector {
     pub env_vars: HashMap<String, EnvVar>,
 }
@@ -23,8 +23,8 @@ impl EnvVarCollector {
         }
     }
 
-    /// Collect all environment variable usage in an entire SMQL document
-    pub fn collect_document<F>(&mut self, document: &SmqlDocument, eval_fn: F)
+    /// Collect all environment variable usage in an entire PPL document
+    pub fn collect_document<F>(&mut self, document: &PplDocument, eval_fn: F)
     where
         F: Fn(&Expression) -> Option<Value>,
     {

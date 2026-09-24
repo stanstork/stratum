@@ -5,16 +5,16 @@
 //! { "total": "10", "page_size": "3" }
 //! ```
 //!
-//! Behavior: each call to `__stratum_read_page` returns up to `page_size` rows
+//! Behavior: each call to `__paganel_read_page` returns up to `page_size` rows
 //! starting at the cursor offset. The cursor is the next offset encoded as a
 //! decimal string; `None` means "start from 0". `has_more` is `false` on the
 //! final page so the host stops paging.
 
-use stratum_plugin_sdk::{
-    PluginResult, Record, SourcePage, source_config, stratum_source,
+use paganel_plugin_sdk::{
+    PluginResult, Record, SourcePage, source_config, paganel_source,
 };
 
-#[stratum_source(
+#[paganel_source(
     name = "test_source",
     version = "1.0.0",
     output_schema = [

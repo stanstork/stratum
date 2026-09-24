@@ -1,5 +1,5 @@
 <!--
-Heads up: Stratum is not yet accepting external pull requests (see CONTRIBUTING.md).
+Heads up: Paganel is not yet accepting external pull requests (see CONTRIBUTING.md).
 The foundations are still shifting, so the best way to get a change considered is to
 open an issue describing it first. Externally-opened PRs may be closed with a pointer
 back to an issue. The effort is appreciated, but external code can't be reviewed or merged

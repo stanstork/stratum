@@ -2,7 +2,7 @@
 
 ## High-Level Architecture
 
-Stratum is organized into 18 workspace crates following a layered architecture
+Paganel is organized into 18 workspace crates following a layered architecture
 (plus the plugin SDK crates, which are excluded from the workspace because they
 build for `wasm32` targets):
 
@@ -18,7 +18,7 @@ graph TB
     Connectors --> Core[Core & Infra<br/>engine-core, engine-state, engine-infra]
     Wasm --> Lang
     Processing --> Core
-    Core --> Lang[Language & Model<br/>smql-syntax, model, expression-engine, query-builder]
+    Core --> Lang[Language & Model<br/>ppl-syntax, model, expression-engine, query-builder]
 ```
 
 ## Crate Map
@@ -26,7 +26,7 @@ graph TB
 | Crate | Layer | Responsibility |
 |-------|-------|----------------|
 | `model` | Language | Core domain types (`Value`, `Pipeline`, `Record`, transformations) |
-| `smql-syntax` | Language | SMQL parser -> AST (pest-based) |
+| `ppl-syntax` | Language | PPL parser -> AST (pest-based) |
 | `expression-engine` | Language | Expression evaluation (filters, computed columns, functions) |
 | `query-builder` | Language | SQL AST + dialect-aware rendering |
 | `connectors` | Data Access | MySQL, PostgreSQL, CSV drivers; unified `Driver` trait hierarchy |
@@ -34,7 +34,7 @@ graph TB
 | `engine-infra` | Infrastructure | EventBus, Metrics, Progress, Retry utilities |
 | `engine-schema` | Schema | Type system, DDL generation, FK dependency graph, schema planning |
 | `engine-core` | Core Services | ExecutionContext, DriverRef, plan builder |
-| `engine-config` | Config | SMQL -> validated settings, connection resolution |
+| `engine-config` | Config | PPL -> validated settings, connection resolution |
 | `engine-planner` | Planning | Execution plan analysis, metadata cache, diagnostics |
 | `engine-wasm` | Execution | WASM plugin host: registry, wasmtime runtime, resource limits, host<->guest wire |
 | `engine-processing` | Execution | Producer-consumer pipeline, transforms, Source/Sink/Destination abstractions |
@@ -42,7 +42,7 @@ graph TB
 | `engine-verify` | Verification | Re-reads the destination and diffs it against the migration's Merkle receipt |
 | `cli` | Interface | Commands (plan, apply, verify, ping), TUI, signal handling |
 | `engine-tests` | Testing | Integration test suite (MySQL ↔ PostgreSQL, Sakila database) |
-| `sdk/stratum-plugin-compiler` | Tooling | Compiles plugin sources to WASM modules for `stratum plugin` |
+| `sdk/paganel-plugin-compiler` | Tooling | Compiles plugin sources to WASM modules for `pag plugin` |
 
 ---
 
@@ -79,13 +79,13 @@ graph TB
 ### 2. Planning Layer (`crates/engine-planner`, `crates/engine-config`)
 
 **Responsibilities:**
-- Parse and validate SMQL configuration
+- Parse and validate PPL configuration
 - Build `ExecutionPlan` with deterministic hash (for resume identification)
 - Resolve environment variables (`env("VAR", "default")`)
 - Analyze pipelines: estimate row counts, detect schema mismatches
 
 **Key Components:**
-- **`engine-config`**: Loads SMQL -> `ExecutionPlan` with validated settings per pipeline
+- **`engine-config`**: Loads PPL -> `ExecutionPlan` with validated settings per pipeline
 - **`engine-planner`**: Builds analysis context, caches table metadata via `MetadataCache<D>`
 
 ---
@@ -114,13 +114,13 @@ graph TB
 #### ExecutionContext (`engine-core/context/exec.rs`)
 - Shared across all pipelines in a run
 - Holds connection pool (reuses drivers), `run_id`, `SledStateStore`, `RowHashLog`, `EnvContext`
-- `run_id` is deterministic: `"run-{plan_hash[:16]}"` - same plan always resumes the same state
+- `run_id` is deterministic: `"run-{plan_hash[:16]}"`, so the same plan always resumes the same state
 
 ---
 
 ### 4. Schema Layer (`crates/engine-schema`)
 
-New in Phase 2. Handles schema object migration independent of data pipelines.
+Handles schema object migration independent of data pipelines.
 
 **Modules:**
 - **`planner.rs`** - `SchemaPlanner`: introspects source schema, builds `SchemaPlan`
@@ -136,7 +136,7 @@ New in Phase 2. Handles schema object migration independent of data pipelines.
 **Three-Phase Schema Execution:**
 ```
 Phase 1: CREATE TABLE (topologically sorted, FKs omitted)
-Phase 2: Data migration (existing pipeline system)
+Phase 2: Data migration (the pipeline system)
 Phase 3: CREATE INDEX + ALTER TABLE ADD CONSTRAINT (FK creation)
 ```
 
@@ -235,8 +235,9 @@ end, resume from a plugin source, and `verify` over a plugin-sourced migration.
 
 #### The host<->guest boundary is batched, not per row
 A whole batch crosses in a single call. `columnar_v1` serializes the batch
-column-by-column into a binary wire, the guest iterates the rows internally and
-returns one batch back; `json_v1` remains for debugging and older guests. This is
+column-by-column into a binary wire for native transform and filter guests, which
+iterate the rows internally and return one batch back; `json_v1` carries the same
+batched call for JS guests and for the source/sink roles. This is
 why a native-Rust plugin runs near the no-plugin rate: the remaining cost is the
 guest's own compute. A JavaScript plugin lands ~4x slower, and that gap is the
 QuickJS interpreter executing guest code, not the boundary.
@@ -260,7 +261,7 @@ Driver (Send + Sync + 'static)
 └── Transactional: Driver       - begin/commit/rollback
 ```
 
-`DriverRef` (`engine-core/src/drivers/mod.rs`) - enum wrapping `Arc<MySqlDriver>` or `Arc<PgDriver>`; resolved via the `dispatch_driver!` macro, which is how callers reach a concrete driver's trait impls without a `dyn` layer.
+`DriverRef` (`engine-core/src/drivers/mod.rs`) is an enum wrapping `Arc<MySqlDriver>` or `Arc<PgDriver>`, resolved via the `dispatch_driver!` macro, which is how callers reach a concrete driver's trait impls without a `dyn` layer.
 
 #### Available Drivers
 
@@ -288,12 +289,12 @@ Special conversions:
 
 ### 8. Infrastructure Layer (`crates/engine-state`, `crates/engine-infra`)
 
-Extracted from `engine-core` to keep it slim. Consumers depend on them directly -
+Extracted from `engine-core` to keep it slim. Consumers depend on them directly:
 `engine-core` exposes only `context`, `drivers`, `error`, `plan`, and `utils`, and
 no longer re-exports the infrastructure crates under aliases.
 
 #### StateStore (`engine-state/store`)
-Sled embedded KV database at `~/.stratum/state/`:
+Sled embedded KV database at `~/.paganel/state/`:
 - `SledStateStore` - ACID checkpoints with WAL
 - Checkpoint stores: cursor position, row counts, timestamps
 - Resume: on restart, load checkpoint and skip processed rows
@@ -301,16 +302,16 @@ Sled embedded KV database at `~/.stratum/state/`:
 - `MerkleStore` - integrity receipts, one per pipeline and table
 
 #### RowHashLog (`engine-state/log`)
-A peer of the store, not part of it, at `~/.stratum/state/rowhash/`. Per-row
-integrity hashes are bulk data with a narrow access pattern - appended once, read
-back once in key order, deleted - so they live in an append-only log sorted by
+A peer of the store, not part of it, at `~/.paganel/state/rowhash/`. Per-row
+integrity hashes are bulk data with a narrow access pattern (appended once, read
+back once in key order, deleted), so they live in an append-only log sorted by
 external merge sort rather than in the key-value store, which would charge
 per-record index memory for an index nothing queries. Memory stays flat with
 table size; disk carries the set (~51 bytes/row). See
 [verification.md](verification.md#row-hashes).
 
-`engine-state` also holds `CalibrationData` - a small, separate sled db at
-`~/.stratum/calibration` recording achieved throughput per destination write
+`engine-state` also holds `CalibrationData`, a small, separate sled db at
+`~/.paganel/calibration` recording achieved throughput per destination write
 path. `apply` records into it; `plan` reads it to estimate duration from this
 machine's real rates instead of a cold-start prior (see [plan.md](plan.md)). It's
 a regenerable cache, independent of the run state store.
@@ -332,7 +333,7 @@ Atomic counters per pipeline:
 Configurable retry policy with exponential backoff, used by circuit breaker.
 
 #### Shutdown (`engine-infra/shutdown.rs`)
-`ShutdownSignal` - the cancellation token pair the CLI drives from SIGINT/SIGTERM
+`ShutdownSignal` is the cancellation token pair the CLI drives from SIGINT/SIGTERM
 and `pause` uses to stop a run at a batch boundary.
 
 ---
@@ -341,7 +342,7 @@ and `pause` uses to stop a run at a batch boundary.
 
 | Crate | Description |
 |-------|-------------|
-| `smql-syntax` | pest-based parser -> AST (`PipelineBlock`, `ConnectionBlock`, etc.) |
+| `ppl-syntax` | pest-based parser -> AST (`PipelineBlock`, `ConnectionBlock`, etc.) |
 | `model` | `Value`, `CanonicalValue`, `Record`, `Batch`, `Pipeline`, `Type`, `Transform`, execution types |
 | `expression-engine` | Expression evaluator: binary ops, string/date/math functions, null handling |
 | `query-builder` | SQL AST nodes + `Render` trait; dialect-specific rendering (MySQL, PostgreSQL); offset strategies |
@@ -353,7 +354,7 @@ and `pause` uses to stop a run at a batch boundary.
 ### Typical Migration
 
 ```
-1. Parse SMQL  ->  AST  (smql-syntax)
+1. Parse PPL  ->  AST  (ppl-syntax)
 2. Build plan  ->  ExecutionPlan + hash  (engine-config, engine-core)
 3. Analyze     ->  MetadataCache, row counts, diagnostics  (engine-planner)
 4. Initialize  ->  ExecutionContext (connection pool, SledStateStore, run_id)
@@ -384,17 +385,17 @@ and `pause` uses to stop a run at a batch boundary.
 ## Key Design Decisions
 
 ### Actors as Async Functions, Not Structs
-Producer and consumer are actors in the usual sense - each owns a mailbox (`ProducerMsg` / `ConsumerMsg`), processes control messages (`StartSnapshot`, `Start`, `Flush`, `Stop`) interleaved with its work via `tokio::select!`, and is supervised by `PipelineCoordinator`, which holds the senders and spawns both tasks. What is deliberately absent is the *struct* wrapper: the loop is a free function taking its receiver and dependencies as arguments, rather than a type with a `handle()` method and internal state. Same concurrency, cancellation, and supervision properties, less ceremony.
+Producer and consumer are actors in the usual sense: each owns a mailbox (`ProducerMsg` / `ConsumerMsg`), processes control messages (`StartSnapshot`, `Start`, `Flush`, `Stop`) interleaved with its work via `tokio::select!`, and is supervised by `PipelineCoordinator`, which holds the senders and spawns both tasks. What is deliberately absent is the *struct* wrapper: the loop is a free function taking its receiver and dependencies as arguments, rather than a type with a `handle()` method and internal state. The concurrency, cancellation, and supervision properties are the same, with less ceremony.
 
 > **CDC is scaffolding, not a feature.** `ProducerMsg::StartCdc`, the
 > `CdcStarted`/`CdcStopped` events, `ProducerMode::Cdc`, and
-> `PipelineCoordinator::start_cdc{,_pipeline}` all exist, but nothing calls them -
+> `PipelineCoordinator::start_cdc{,_pipeline}` all exist, but nothing calls them:
 > no config reaches them, and `ProducerMode::Cdc`'s tick body is a sleep with a
-> `// CDC logic here` placeholder. Stratum does snapshot/batch migration only;
+> `// CDC logic here` placeholder. Paganel does snapshot/batch migration only;
 > change-data-capture is planned. Treat those paths as a reserved shape.
 
 ### DAG-Based Parallelism
-Pipelines declare dependencies via `after = [...]`. Topological sort produces execution levels; all pipelines within a level run in parallel. Independent pipelines get maximum throughput; dependent pipelines are automatically serialized.
+Pipelines declare dependencies via `after = [...]`. Topological sort produces execution levels; all pipelines within a level run in parallel. Independent pipelines run concurrently; dependent pipelines are serialized.
 
 ### Two-Phase FK Creation
 FKs are created after data migration to prevent constraint violations during bulk insert. Schema ops use three phases: create tables -> migrate data -> create indexes and FKs.
@@ -403,19 +404,19 @@ FKs are created after data migration to prevent constraint violations during bul
 When FK dependencies form a cycle (mutual references, self-references), a BFS-based `partial_topological_order()` places acyclic tables first, then cycle members alphabetically. This produces deterministic DDL regardless of `HashMap` iteration order.
 
 ### Bounded MPSC Channel (4 batches or 128 MiB)
-The producer -> consumer channel is bounded two ways, whichever binds first: by batch count (`BATCH_CHANNEL_CAPACITY = 4`) and by in-flight bytes (`MAX_INFLIGHT_BYTES = 128 MiB`). The byte bound is the wide-row guard - a batch of very wide rows draws proportionally more of the budget, so the window can't balloon on wide tables. This provides natural backpressure (the producer blocks when the consumer can't keep up) and bounds per-lane memory regardless of source speed or table size. The depth was deliberately kept shallow: a deep channel just parks more fully-materialized batches in RAM without improving throughput - extra read-ahead only helps if the consumer has spare capacity to drain it, which the slower side (usually the write, or per-row transform CPU) doesn't. Per-lane footprint scales with lane count, not table size - see [benchmarks.md](benchmarks.md).
+The producer -> consumer channel is bounded two ways, whichever binds first: by batch count (`BATCH_CHANNEL_CAPACITY = 4`) and by in-flight bytes (`MAX_INFLIGHT_BYTES = 128 MiB`). The byte bound is the wide-row guard: a batch of very wide rows draws proportionally more of the budget, so the window can't balloon on wide tables. This provides natural backpressure (the producer blocks when the consumer can't keep up) and bounds per-lane memory regardless of source speed or table size. The depth was deliberately kept shallow: a deep channel just parks more fully-materialized batches in RAM without improving throughput. Extra read-ahead only helps if the consumer has spare capacity to drain it, which the slower side (usually the write, or per-row transform CPU) doesn't. Per-lane footprint scales with lane count, not table size; see [benchmarks.md](benchmarks.md).
 
 ### Sled for StateStore
 Embedded, no external dependency, ACID-transactional, B+ tree with lock-free reads, crash-safe WAL. Checkpoints are written after every batch so crash recovery loses at most one batch. It holds the small keyed records: checkpoints, WAL entries, run state, and integrity receipts.
 
 ### A Log, Not the KV Store, for Row Hashes
-Per-row integrity hashes have the opposite shape to everything else in the state store: appended once, read back once in key order, deleted, and never looked up by key. Storing them in the B+ tree charged per-record index memory for an index nothing queries - measured at ~0.4-0.7 KB resident per 40-byte record, which put a ten-million-row table into gigabytes and out of memory. They live instead in an append-only log sorted once by external merge sort (`engine-state/log`), which keeps memory flat with table size and moves the cost to disk. The two mechanisms sit side by side in the state directory and share nothing else.
+Per-row integrity hashes have the opposite shape to everything else in the state store: appended once, read back once in key order, deleted, and never looked up by key. Storing them in the B+ tree charged per-record index memory for an index nothing queries: measured at ~0.4-0.7 KB resident per 40-byte record, it put a ten-million-row table into gigabytes and out of memory. They live instead in an append-only log sorted once by external merge sort (`engine-state/log`), which keeps memory flat with table size and moves the cost to disk. The two mechanisms sit side by side in the state directory and share nothing else.
 
 ### DriverRef + dispatch_driver! Macro
 Instead of `Arc<dyn Driver>` (which loses type information), `DriverRef` is an enum over concrete driver types. The `dispatch_driver!` macro generates match arms, allowing monomorphic dispatch without dynamic dispatch overhead on hot paths.
 
 ### mimalloc as the Global Allocator
-The CLI sets [mimalloc](https://github.com/microsoft/mimalloc) as the `#[global_allocator]` (`crates/cli/src/main.rs`). The producer/consumer pipeline is allocation-heavy - every row carries owned column values (`String`, `BigDecimal`, `Vec`) that are allocated on read and freed after encoding, so a load churns hundreds of millions of short-lived allocations. On a high-core machine the default glibc allocator spreads these across many per-thread arenas and holds freed memory in them rather than returning it to the OS, which inflated peak RSS ~2–3× as a pure artifact (unrelated to the bounded in-flight window the pipeline actually keeps). mimalloc keeps peak RSS flat and returns memory to the OS promptly; it also modestly improved throughput on the churn-heavy path. This is a link-time choice with no code impact beyond the one `global_allocator` line - see the note in `crates/cli/Cargo.toml`. Peak-RSS numbers and the full rationale are in [benchmarks.md](benchmarks.md).
+The CLI sets [mimalloc](https://github.com/microsoft/mimalloc) as the `#[global_allocator]` (`crates/cli/src/main.rs`). The producer/consumer pipeline is allocation-heavy: every row carries owned column values (`String`, `BigDecimal`, `Vec`) that are allocated on read and freed after encoding, so a load churns hundreds of millions of short-lived allocations. On a high-core machine the default glibc allocator spreads these across many per-thread arenas and holds freed memory in them rather than returning it to the OS, which inflated peak RSS ~2–3× as a pure artifact (unrelated to the bounded in-flight window the pipeline actually keeps). mimalloc keeps peak RSS flat and returns memory to the OS promptly; it also modestly improved throughput on the churn-heavy path. This is a link-time choice with no code impact beyond the one `global_allocator` line; see the note in `crates/cli/Cargo.toml`. Peak-RSS numbers and the full rationale are in [benchmarks.md](benchmarks.md).
 
 ---
 
@@ -428,21 +429,21 @@ Structural bounds, fixed by the code (not machine-dependent):
 | MPSC channel bound | 4 batches or 128 MiB (whichever binds first) |
 | Checkpoint interval | Every batch |
 | Retry backoff | 1s -> 30s exponential |
-| Graceful shutdown | <5s to drain in-flight batches |
+| Graceful shutdown | 30s deadline to drain in-flight batches (`SHUTDOWN_TIMEOUT`), then the pipeline is abandoned |
 
 Behavioral shape (for measured figures see [benchmarks.md](benchmarks.md), which
-records the box they were taken on - treat any absolute number as
+records the box they were taken on; treat any absolute number as
 machine-specific, not a reference spec):
 
 - **The bottleneck depends on the workload.** For a plain bulk copy it's usually
-  the destination write - the COPY / `LOAD DATA` into the target (PostgreSQL
+  the destination write, the COPY / `LOAD DATA` into the target (PostgreSQL
   binary COPY is the fastest target; InnoDB `LOAD DATA` is slower because every
-  write maintains the clustered index). Heavy per-row work - many computed
-  columns, or a WASM/JS plugin - shifts it to expression/plugin CPU instead, and
+  write maintains the clustered index). Heavy per-row work (many computed
+  columns, or a WASM/JS plugin) shifts it to expression/plugin CPU instead, and
   a slow source or a remote network link can bind too.
 - **`lanes = N` trades connections and memory for total throughput**, scaling
   sublinearly and flattening near the destination's ingest ceiling past ~2 lanes.
-- **Integrity costs ~0.3-0.5 µs per row**, near enough constant across workloads -
+- **Integrity costs ~0.3-0.5 µs per row**, near enough constant across workloads,
   so it reads as ~15% on a plain copy, up to ~23% on the fastest ones, and nothing
   measurable on a workload already bound by expression evaluation. Row hashing runs
   in-flight, overlapped with the write; the finalize step that sorts the keyed set
@@ -456,7 +457,7 @@ machine-specific, not a reference spec):
 ## Reliability Features
 
 ### Checkpoint & Resume
-After each successful batch: cursor position + row counts committed to Sled. On restart: same `run_id` (deterministic from plan hash) -> load checkpoint -> resume from cursor.
+Per batch: checkpoint (`write`, with the pending cursor) -> commit the batch to the destination -> append `BatchCommit` to the WAL -> checkpoint (`committed`, cursor advanced), all in Sled. On restart: same `run_id` (deterministic from plan hash) -> load checkpoint -> if the last checkpoint is `write`, consult the WAL: a `BatchCommit` for that batch means it landed, so resume from the pending cursor; no record means resume from the previous cursor and re-write the batch. The window is one batch, so recovery is at-least-once at batch granularity; `on_conflict` makes the replay idempotent for keyed tables, a plain COPY into a keyed table fails on the duplicate key, and a table without a primary key can end up with that batch duplicated.
 
 ### Circuit Breaker
 4 consecutive failures -> circuit opens. Exponential backoff (1s…30s). Resets on next success. Prevents resource exhaustion from flapping destinations.

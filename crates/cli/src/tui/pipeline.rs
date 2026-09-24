@@ -210,6 +210,25 @@ impl PipelineState {
         }
     }
 
+    /// Rows this run moved.
+    pub fn run_processed_rows(&self) -> u64 {
+        self.processed_rows.saturating_sub(self.resume_baseline)
+    }
+
+    /// The rate to display for this pipeline.
+    pub fn effective_rate(&self) -> f64 {
+        let windowed = self.throughput.current_throughput();
+        if windowed > 0.0 {
+            return windowed;
+        }
+
+        let rows = self.run_processed_rows();
+        match self.duration() {
+            Some(d) if rows > 0 && d.as_secs_f64() > 0.0 => rows as f64 / d.as_secs_f64(),
+            _ => 0.0,
+        }
+    }
+
     /// Returns the estimated time remaining based on current throughput
     pub fn eta(&self) -> Option<Duration> {
         if self.status.is_terminal() || self.processed_rows >= self.source_rows {

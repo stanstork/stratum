@@ -7,4 +7,4 @@ pub mod reader;
 pub mod verifier;
 
 pub use progress::{NoopProgress, VerifyProgress};
-pub use verifier::{verify, verify_with_progress};
+pub use verifier::{VerifyOptions, verify, verify_with_options, verify_with_progress};

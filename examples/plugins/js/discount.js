@@ -4,7 +4,7 @@
 // Test:  plugin test discount.js --config-json <(echo '{"rate":"0.2"}') \
 //          --input '{"price":100}'                  -> Float(80.0)
 //        plugin test discount.js --input '{"price":100}'   -> Float(100.0) (no config)
-const { transform } = require("@stratum/plugin-sdk");
+const { transform } = require("@paganel/plugin-sdk");
 
 transform("discount", {
   version: "1.0.0",

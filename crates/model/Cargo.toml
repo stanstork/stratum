@@ -5,7 +5,7 @@ edition = "2024"
 license.workspace = true
 
 [dependencies]
-smql-syntax = { path = "../smql-syntax" }
+ppl-syntax = { path = "../ppl-syntax" }
 
 async-trait = "0.1.86"
 bigdecimal = { version = "0.4.7", features = ["serde"] }

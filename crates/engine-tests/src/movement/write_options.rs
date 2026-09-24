@@ -46,7 +46,7 @@ mod tests {
             dialect = dir.dst.driver(),
             action = action,
         );
-        runner::run_smql(&dir.smql(&reload), false)
+        runner::run_ppl(&dir.ppl(&reload), false)
             .await
             .unwrap_or_else(|e| panic!("[{dir}] {action} reload failed: {e:?}"));
 

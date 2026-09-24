@@ -182,10 +182,10 @@ jobs:
                   -- every write silently falls back to plain INSERTs.
                   SET GLOBAL local_infile = 1;
 
-                  -- Databases. `stratum_dest` is the scratch MySQL destination for
+                  -- Databases. `paganel_dest` is the scratch MySQL destination for
                   -- the source x destination matrix; it is emptied by each test.
                   CREATE DATABASE IF NOT EXISTS sakila;
-                  CREATE DATABASE IF NOT EXISTS stratum_dest;
+                  CREATE DATABASE IF NOT EXISTS paganel_dest;
 
                   -- Users
                   CREATE USER IF NOT EXISTS 'sakila_user'@'%' IDENTIFIED BY 'qwerty123';
@@ -193,7 +193,7 @@ jobs:
 
                   -- Grants
                   GRANT ALL PRIVILEGES ON sakila.* TO 'sakila_user'@'%';
-                  GRANT ALL PRIVILEGES ON stratum_dest.* TO 'user'@'%';
+                  GRANT ALL PRIVILEGES ON paganel_dest.* TO 'user'@'%';
                   FLUSH PRIVILEGES;
                   SQL
 
@@ -244,10 +244,13 @@ jobs:
         steps:
             - uses: actions/checkout@v4
 
-            - name: Run cargo-audit
-              uses: rustsec/audit-check@v2
+            - name: Install cargo-audit
+              uses: taiki-e/install-action@v2
               with:
-                  token: ${{ secrets.GITHUB_TOKEN }}
+                  tool: cargo-audit
+
+            - name: Run cargo-audit
+              run: cargo audit
 
     # Check that everything passed
     ci-success:

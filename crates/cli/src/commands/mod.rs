@@ -11,15 +11,16 @@ pub mod pause;
 pub mod ping;
 pub mod plan;
 pub mod plugin;
+pub mod receipt;
 pub mod reset;
 pub mod resume;
 pub mod status;
 pub mod verify;
 pub mod version;
 
-const STATE_DIR: &str = ".stratum/state";
+const STATE_DIR: &str = ".paganel/state";
 
-/// Returns the path to the state directory (~/.stratum/state/).
+/// Returns the path to the state directory (~/.paganel/state/).
 pub fn state_dir() -> Result<PathBuf, CliError> {
     let home = dirs::home_dir()
         .ok_or_else(|| CliError::Unknown("Could not determine home directory".to_string()))?;
@@ -40,7 +41,19 @@ pub async fn run_completed(run_id: &str) -> bool {
 /// Opens the sled state store from the default location.
 pub fn open_state_store() -> Result<SledStateStore, CliError> {
     let path = state_dir()?;
-    SledStateStore::open(&path).map_err(|e| {
+    match try_open_state_store()? {
+        Some(store) => Ok(store),
+        None => Err(CliError::UserMessage(format!(
+            "A migration is already running and holds the state store at {}.\nWait for it to finish, or use `pag status` (it reads the running migration's published status) and `pag pause`.",
+            path.display()
+        ))),
+    }
+}
+
+/// Open the state store, or `None` when a running migration holds the lock.
+pub fn try_open_state_store() -> Result<Option<SledStateStore>, CliError> {
+    let path = state_dir()?;
+    SledStateStore::try_open(&path).map_err(|e| {
         CliError::Unknown(format!(
             "Failed to open state store at {}: {e}",
             path.display()
@@ -82,7 +95,7 @@ pub enum PluginCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Validate every plugin referenced in an SMQL config.
+    /// Validate every plugin referenced in an PPL config.
     Validate {
         #[arg(short = 'c', long)]
         config: Option<String>,
@@ -117,7 +130,7 @@ pub enum Commands {
         #[arg(
             short = 'c',
             long,
-            help = "Path to SMQL config file (auto-discovered if not specified)"
+            help = "Path to PPL config file (auto-discovered if not specified)"
         )]
         config: Option<String>,
 
@@ -165,7 +178,7 @@ pub enum Commands {
         #[arg(
             short = 'c',
             long,
-            help = "Path to SMQL config file (auto-discovered if not specified)"
+            help = "Path to PPL config file (auto-discovered if not specified)"
         )]
         config: Option<String>,
 
@@ -182,12 +195,12 @@ pub enum Commands {
         #[arg(long, help = "Compute integrity hashes and receipts during migration")]
         integrity: bool,
     },
-    /// Verify migrated data matches source data
+    /// Check the destination against the integrity receipts from `apply --integrity` (no source connection)
     Verify {
         #[arg(
             short = 'c',
             long,
-            help = "Path to SMQL config file (auto-discovered if not specified)"
+            help = "Path to PPL config file (auto-discovered if not specified)"
         )]
         config: Option<String>,
 
@@ -200,6 +213,12 @@ pub enum Commands {
 
         #[arg(long, help = "Run with pretty colored output")]
         pretty: bool,
+
+        #[arg(
+            long,
+            help = "Accept destination rows the receipt does not cover (data that was already there, or another run's rows) instead of failing on them"
+        )]
+        allow_extra: bool,
     },
     /// Test database connectivity
     Ping {
@@ -220,7 +239,7 @@ pub enum Commands {
         #[arg(
             short = 'c',
             long,
-            help = "Path to SMQL config file. If provided, shows status for that migration only"
+            help = "Path to PPL config file. If provided, shows status for that migration only"
         )]
         config: Option<String>,
     },
@@ -229,7 +248,7 @@ pub enum Commands {
         #[arg(
             short = 'c',
             long,
-            help = "Path to SMQL config file (auto-discovered if not specified)"
+            help = "Path to PPL config file (auto-discovered if not specified)"
         )]
         config: Option<String>,
 
@@ -247,16 +266,29 @@ pub enum Commands {
         #[arg(
             short = 'c',
             long,
-            help = "Path to SMQL config file (auto-discovered if not specified)"
+            help = "Path to PPL config file (auto-discovered if not specified)"
         )]
         config: Option<String>,
 
         #[arg(long, help = "Skip confirmation prompt")]
         force: bool,
     },
+    /// Print stored integrity receipts (full table roots) from `apply --integrity`
+    Receipt {
+        #[arg(
+            short = 'c',
+            long,
+            help = "Path to PPL config file. If provided, shows receipts for that migration's pipelines only"
+        )]
+        config: Option<String>,
+
+        /// Emit the receipts as JSON instead of text
+        #[arg(long)]
+        json: bool,
+    },
     /// Send pause signal to a running migration
     Pause {
-        #[arg(short = 'c', long, help = "Path to SMQL config file")]
+        #[arg(short = 'c', long, help = "Path to PPL config file")]
         config: String,
     },
     /// Show version information
@@ -299,7 +331,18 @@ pub async fn execute_command(
             config,
             output,
             pretty,
-        } => verify::execute(cli, config.clone(), output.clone(), *pretty, env.clone()).await,
+            allow_extra,
+        } => {
+            verify::execute(
+                cli,
+                config.clone(),
+                output.clone(),
+                *pretty,
+                *allow_extra,
+                env.clone(),
+            )
+            .await
+        }
         Commands::Status { config } => status::execute(config.clone(), env).await,
         Commands::Ping { url, format } => ping::execute(cli, url.clone(), format.clone()).await,
         Commands::Version => {
@@ -317,6 +360,7 @@ pub async fn execute_command(
         }
         Commands::Reset { config, force } => reset::execute(config.clone(), *force, env).await,
         Commands::Pause { config } => pause::execute(Some(config.clone()), env).await,
+        Commands::Receipt { config, json } => receipt::execute(config.clone(), *json, env).await,
         Commands::Plugin { cmd } => plugin::run(cmd, env.clone()).await,
     }
 }

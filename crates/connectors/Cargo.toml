@@ -7,7 +7,7 @@ license.workspace = true
 [dependencies]
 model = { path = "../model" }
 query-builder = { path = "../query-builder" }
-smql-syntax = { path = "../smql-syntax" }
+ppl-syntax = { path = "../ppl-syntax" }
 
 async-trait = "0.1.86"
 tokio = { version = "1.43.0", features = ["full"] }
