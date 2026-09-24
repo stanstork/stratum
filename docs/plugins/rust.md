@@ -47,7 +47,7 @@ crate-type = ["cdylib"]      # produces a .wasm cdylib
 [dependencies]
 # The SDK is not on crates.io yet. Depend on it from git (pin a rev or tag
 # for a reproducible build) or from a local checkout:
-paganel-plugin-sdk = { git = "https://github.com/stanstork/stratum.git" }
+paganel-plugin-sdk = { git = "https://github.com/stanstork/paganel.git" }
 # paganel-plugin-sdk = { path = "../paganel/crates/sdk/paganel-plugin-sdk" }
 ```
 

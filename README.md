@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/stanstork/stratum/actions/workflows/ci.yml"><img src="https://github.com/stanstork/stratum/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/stanstork/paganel/actions/workflows/ci.yml"><img src="https://github.com/stanstork/paganel/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL%20v3-blue.svg" alt="AGPL v3"></a>
   <img src="https://img.shields.io/badge/status-early%20development-orange" alt="Early development">
 </p>
@@ -207,7 +207,7 @@ non-critical workloads; don't leave it unattended in production yet.
 **From source (requires Rust 1.88 or newer):**
 
 ```bash
-git clone https://github.com/stanstork/stratum.git paganel
+git clone https://github.com/stanstork/paganel.git paganel
 cd paganel
 cargo build --release
 # binary at ./target/release/pag
@@ -590,7 +590,7 @@ Rough direction, no dates and no commitments:
 - More connectors and destinations, including an analytical one
 - PPL and API stabilization toward 1.0
 
-See the [issue tracker](https://github.com/stanstork/stratum/issues) for what's
+See the [issue tracker](https://github.com/stanstork/paganel/issues) for what's
 actively in progress.
 
 ## License

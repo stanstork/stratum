@@ -21,6 +21,15 @@ RUNTIME_WASM="$REPO_ROOT/crates/sdk/paganel-plugin-compiler/assets/paganel-plugi
 
 TARGET="${1:-all}"
 
+# Absolute build paths end up inside the .wasm.
+CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
+RUSTUP_HOME_DIR="${RUSTUP_HOME:-$HOME/.rustup}"
+WASM_RUSTFLAGS="--remap-path-prefix=$REPO_ROOT=/paganel"
+WASM_RUSTFLAGS="$WASM_RUSTFLAGS --remap-path-prefix=$CARGO_HOME_DIR=/cargo"
+WASM_RUSTFLAGS="$WASM_RUSTFLAGS --remap-path-prefix=$RUSTUP_HOME_DIR=/rustup"
+
+WASM_CFLAGS="-ffile-prefix-map=$REPO_ROOT=/paganel"
+
 mkdir -p "$FIXTURES_DIR"
 
 build_rust() {
@@ -28,7 +37,7 @@ build_rust() {
     for plugin_dir in "$RUST_PLUGINS_DIR"/test_*; do
         plugin_name=$(basename "$plugin_dir")
         echo "Building $plugin_name..."
-        (cd "$plugin_dir" && cargo build --target wasm32-wasip1 --release)
+        (cd "$plugin_dir" && RUSTFLAGS="$WASM_RUSTFLAGS" cargo build --target wasm32-wasip1 --release)
         cp "$RUST_PLUGINS_DIR/target/wasm32-wasip1/release/${plugin_name}.wasm" "$FIXTURES_DIR/"
     done
 }
@@ -47,7 +56,8 @@ build_js() {
     #    manifest path; its artifacts land in the crate's own target dir.
     echo "Building JS runtime (paganel-plugin-js-runtime)..."
     JS_RUNTIME_DIR="$REPO_ROOT/crates/sdk/paganel-plugin-js-runtime"
-    cargo build --manifest-path "$JS_RUNTIME_DIR/Cargo.toml" --target wasm32-wasip1 --release
+    RUSTFLAGS="$WASM_RUSTFLAGS" CFLAGS_wasm32_wasip1="$WASM_CFLAGS" \
+        cargo build --manifest-path "$JS_RUNTIME_DIR/Cargo.toml" --target wasm32-wasip1 --release
     mkdir -p "$(dirname "$RUNTIME_WASM")"
     cp "$JS_RUNTIME_DIR/target/wasm32-wasip1/release/paganel_plugin_js_runtime.wasm" "$RUNTIME_WASM"
 
