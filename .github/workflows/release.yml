@@ -30,12 +30,13 @@ jobs:
                     - os: ubuntu-22.04-arm
                       target: aarch64-unknown-linux-gnu
                       features: vendored-tls
-                    - os: macos-13
-                      target: x86_64-apple-darwin
-                      features: vendored-tls
-                    - os: macos-14
+                    - os: macos-15
                       target: aarch64-apple-darwin
                       features: vendored-tls
+                    - os: macos-15
+                      target: x86_64-apple-darwin
+                      features: vendored-tls
+                      cross: true
                     # Windows native-tls uses SChannel, so nothing to vendor.
                     - os: windows-latest
                       target: x86_64-pc-windows-msvc
@@ -79,6 +80,7 @@ jobs:
                   cargo build "${args[@]}"
 
             - name: Smoke-test the binary
+              if: matrix.cross != true
               shell: bash
               run: |
                   bin="target/${{ matrix.target }}/release/pag"
