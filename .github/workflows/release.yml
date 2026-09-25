@@ -61,9 +61,11 @@ jobs:
               shell: bash
               run: |
                   tag="${GITHUB_REF_NAME#v}"
+                  # Allow release candidates: v0.1.0-rc.1 releases version 0.1.0.
+                  base="${tag%%-*}"
                   manifest=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-                  if [ "$tag" != "$manifest" ]; then
-                      echo "tag $tag does not match Cargo.toml version $manifest" >&2
+                  if [ "$base" != "$manifest" ]; then
+                      echo "tag $GITHUB_REF_NAME implies version $base, but Cargo.toml says $manifest" >&2
                       exit 1
                   fi
 
