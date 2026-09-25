@@ -52,3 +52,7 @@ indicatif = "0.17"
 
 [build-dependencies]
 chrono = "0.4"
+
+[features]
+# Release builds use this so `pag` runs on hosts without OpenSSL 3 installed.
+vendored-tls = ["connectors/vendored-tls"]

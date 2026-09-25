@@ -1,0 +1,148 @@
+name: Release
+
+on:
+    push:
+        tags: ["v*"]
+    workflow_dispatch:
+        inputs:
+            dry_run:
+                description: "Build the artifacts but do not create a release"
+                type: boolean
+                default: true
+
+permissions:
+    contents: write
+
+env:
+    CARGO_TERM_COLOR: always
+
+jobs:
+    build:
+        name: ${{ matrix.target }}
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - os: ubuntu-22.04
+                      target: x86_64-unknown-linux-gnu
+                      features: vendored-tls
+                    - os: ubuntu-22.04-arm
+                      target: aarch64-unknown-linux-gnu
+                      features: vendored-tls
+                    - os: macos-13
+                      target: x86_64-apple-darwin
+                      features: vendored-tls
+                    - os: macos-14
+                      target: aarch64-apple-darwin
+                      features: vendored-tls
+                    # Windows native-tls uses SChannel, so nothing to vendor.
+                    - os: windows-latest
+                      target: x86_64-pc-windows-msvc
+                      features: ""
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@master
+              with:
+                  toolchain: stable
+                  targets: ${{ matrix.target }}
+
+            - name: Setup Rust cache
+              uses: Swatinem/rust-cache@v2
+              with:
+                  cache-on-failure: true
+                  key: release-${{ matrix.target }}
+
+            - name: Check the tag matches the workspace version
+              if: startsWith(github.ref, 'refs/tags/v')
+              shell: bash
+              run: |
+                  tag="${GITHUB_REF_NAME#v}"
+                  manifest=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+                  if [ "$tag" != "$manifest" ]; then
+                      echo "tag $tag does not match Cargo.toml version $manifest" >&2
+                      exit 1
+                  fi
+
+            - name: Build
+              shell: bash
+              run: |
+                  args=(--release --locked -p cli --target "${{ matrix.target }}")
+                  if [ -n "${{ matrix.features }}" ]; then
+                      args+=(--features "${{ matrix.features }}")
+                  fi
+                  cargo build "${args[@]}"
+
+            - name: Smoke-test the binary
+              shell: bash
+              run: |
+                  bin="target/${{ matrix.target }}/release/pag"
+                  if [ "${{ runner.os }}" = "Windows" ]; then
+                      bin="$bin.exe"
+                  fi
+                  "$bin" --version
+                  "$bin" plan --help > /dev/null
+                  
+            - name: Assert no dynamic OpenSSL (Linux)
+              if: runner.os == 'Linux'
+              run: |
+                  if ldd "target/${{ matrix.target }}/release/pag" | grep -E "libssl|libcrypto"; then
+                      echo "release binary links the host OpenSSL" >&2
+                      exit 1
+                  fi
+                  ldd "target/${{ matrix.target }}/release/pag"
+
+            - name: Package
+              shell: bash
+              run: |
+                  if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+                      version="dev"
+                  else
+                      version="${GITHUB_REF_NAME#v}"
+                  fi
+                  staging="pag-${version}-${{ matrix.target }}"
+                  mkdir -p "$staging"
+                  cp README.md LICENSE "$staging/"
+                  if [ "${{ runner.os }}" = "Windows" ]; then
+                      cp "target/${{ matrix.target }}/release/pag.exe" "$staging/"
+                      7z a "$staging.zip" "$staging" > /dev/null
+                      echo "ASSET=$staging.zip" >> "$GITHUB_ENV"
+                  else
+                      cp "target/${{ matrix.target }}/release/pag" "$staging/"
+                      tar czf "$staging.tar.gz" "$staging"
+                      echo "ASSET=$staging.tar.gz" >> "$GITHUB_ENV"
+                  fi
+
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ${{ matrix.target }}
+                  path: ${{ env.ASSET }}
+                  if-no-files-found: error
+
+    release:
+        name: Publish release
+        needs: build
+        runs-on: ubuntu-latest
+        if: startsWith(github.ref, 'refs/tags/v')
+        steps:
+            - uses: actions/download-artifact@v4
+              with:
+                  path: dist
+                  merge-multiple: true
+
+            - name: Checksums
+              run: |
+                  cd dist
+                  sha256sum * > SHA256SUMS
+                  cat SHA256SUMS
+
+            - name: Create the release
+              uses: softprops/action-gh-release@v2
+              with:
+                  files: dist/*
+                  generate_release_notes: true
+                  draft: true
