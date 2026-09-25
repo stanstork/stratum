@@ -36,6 +36,34 @@ fn add(inputs: Vec<PluginInput>) -> PluginResult<Vec<f64>> {
 }
 ```
 
+Money needs a different shape. Tag both the input and the `output` as
+`decimal`. With `f64` the amount travels through a float, `plan` warns that
+precision may be lost, and the destination column ends up floating point.
+
+That costs two extra steps next to the example above: add `bigdecimal = "0.4"`
+to your `Cargo.toml`, because the SDK hands you `BigDecimal` values without
+exporting the type itself, and return `Vec<Value>` with each result wrapped in
+`Value::Decimal`, because the plain `Vec<T>` return only covers primitives.
+
+```rust,no_run
+use bigdecimal::BigDecimal;
+use paganel_plugin_sdk::{paganel_transform, PluginInput, PluginResult, Value};
+
+#[paganel_transform(
+    name = "net_after_fee",
+    version = "1.0.0",
+    output = "decimal",
+    input = [{ name = "amount", type = "decimal", nullable = false }]
+)]
+fn net_after_fee(inputs: Vec<PluginInput>) -> PluginResult<Vec<Value>> {
+    let rate: BigDecimal = "0.971".parse().expect("valid literal");
+    inputs
+        .iter()
+        .map(|row| Ok(Value::Decimal((row.get_decimal("amount")? * &rate).round(2))))
+        .collect()
+}
+```
+
 Build it for the sandbox and point a pipeline at the result:
 
 ```bash

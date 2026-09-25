@@ -180,9 +180,10 @@ pag plugin test plugins/sink.wasm  --mode sink --input '[{"id":1},{"id":2}]'
 > embedded in the `.wasm`. Native Rust plugins never involve Node.
 
 > **Building a Rust plugin needs the Rust toolchain and the `wasm32-wasip1`
-> target.** Add the target with `rustup target add wasm32-wasip1`, and pull the
-> `paganel-plugin-sdk` dependency from git or a local path (it is not on crates.io
-> yet); see [rust.md § Crate setup](rust.md#crate-setup). Paganel does not compile
+> target.** Add the target with `rustup target add wasm32-wasip1` and depend on
+> [`paganel-plugin-sdk`](https://crates.io/crates/paganel-plugin-sdk) from
+> crates.io (cloning this repository is not required); see
+> [rust.md § Crate setup](rust.md#crate-setup). Paganel does not compile
 > Rust for you: you build the `.wasm` with `cargo`, then point a `plugin` block at
 > it. The resulting `.wasm` loads like any other, with no toolchain or env vars.
 

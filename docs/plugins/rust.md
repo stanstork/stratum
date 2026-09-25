@@ -3,7 +3,7 @@
 A native plugin is an ordinary Rust crate compiled to `wasm32-wasip1`. You write
 one function and annotate it with a `#[paganel_*]` attribute macro from
 `paganel-plugin-sdk`; the macro emits the full host ABI around it. This is the
-smallest, fastest plugin form - no JavaScript engine is embedded.
+smallest, fastest plugin form: no JavaScript engine is embedded.
 
 ## How it works
 
@@ -11,11 +11,11 @@ The SDK (`paganel-plugin-sdk`) provides the value types, typed accessors, and th
 role macros (`#[paganel_transform]`, `#[paganel_filter]`, `#[paganel_source]`,
 `#[paganel_sink]`). Each macro generates:
 
-- a **sentinel** symbol (defining two role macros in one crate is a link error -
+- a **sentinel** symbol (defining two role macros in one crate is a link error;
   one role per module),
 - host **allocator** hooks (`__paganel_alloc` / `__paganel_dealloc`) so the host
   can hand bytes into the plugin's linear memory,
-- a **metadata** export (`__paganel_metadata`) - the name/version/role/schema
+- a **metadata** export (`__paganel_metadata`) with the name/version/role/schema
   baked in as JSON at compile time,
 - an **initialize** export that parses the host-supplied `config` blob,
 - the **role entry point** (`__paganel_transform`, `__paganel_read_page`, …)
@@ -27,7 +27,7 @@ filter are invoked once per batch: the entry point decodes the whole batch
 into a `Vec<PluginInput>`, hands it to your function, and encodes the `Vec` of
 results you return. Native transform/filter plugins use the compact binary
 `columnar_v1` format at the boundary (baked into the plugin's metadata as
-`exchange_format`); source/sink use JSON. You never write any of that - you only
+`exchange_format`); source/sink use JSON. You never write any of that; you only
 write the handler body.
 
 For the gory details see [macro-expansion.md](./macro-expansion.md).
@@ -45,10 +45,9 @@ edition = "2024"
 crate-type = ["cdylib"]      # produces a .wasm cdylib
 
 [dependencies]
-# The SDK is not on crates.io yet. Depend on it from git (pin a rev or tag
-# for a reproducible build) or from a local checkout:
-paganel-plugin-sdk = { git = "https://github.com/stanstork/paganel.git" }
-# paganel-plugin-sdk = { path = "../paganel/crates/sdk/paganel-plugin-sdk" }
+paganel-plugin-sdk = "0.1"
+# ...or track the repo if you need an unreleased change:
+# paganel-plugin-sdk = { git = "https://github.com/stanstork/paganel.git" }
 ```
 
 Build:
@@ -93,15 +92,57 @@ fn add(inputs: Vec<PluginInput>) -> PluginResult<Vec<f64>> {
 }
 ```
 
+**Money, and anything else that must stay exact.** Declaring `f64` for a
+`DECIMAL`/`NUMERIC` source column makes `plan` warn
+(`PLUGIN_INPUT_TYPE_LOSSY`) and lands a float in the destination. Use the
+`decimal` tag on both sides to keep the column `numeric`:
+
+```rust
+use bigdecimal::BigDecimal;   // add `bigdecimal = "0.4"` to your Cargo.toml
+use paganel_plugin_sdk::{paganel_transform, PluginInput, PluginResult, Value};
+
+#[paganel_transform(
+    name = "net_after_fee",
+    version = "1.0.0",
+    output = "decimal",
+    input = [
+        { name = "amount", type = "decimal", nullable = false },
+    ]
+)]
+fn net_after_fee(inputs: Vec<PluginInput>) -> PluginResult<Vec<Value>> {
+    let rate: BigDecimal = "0.971".parse().expect("valid literal");
+    inputs
+        .iter()
+        .map(|row| {
+            let net = (row.get_decimal("amount")? * &rate).round(2);
+            Ok(Value::Decimal(net))
+        })
+        .collect()
+}
+```
+
+Two things differ from the `f64` example. The SDK does not re-export
+`BigDecimal`, so declare `bigdecimal` yourself and keep it on `0.4.x` so both
+crates resolve to the same type. And `Value` has no `From<BigDecimal>`, so the
+handler returns `Vec<Value>` and wraps each result in `Value::Decimal` rather
+than relying on `T: Into<Value>`. The same applies to the other non-primitive
+tags (`date`, `timestamp`, `uuid`, `bytes`, `json`).
+
+`pag plugin test` cannot feed a `decimal` input: its rows are plain
+JSON, where a number decodes to `f64` and a quoted value to `string`, so a
+decimal-typed field always reports a type mismatch. Exercise a decimal plugin
+with a real migration against a `DECIMAL` column, or unit-test the inner
+function directly.
+
 The `Vec<PluginInput>` signature is deliberate: it lets a plugin do real
 batch-level work (vectorized math, a single shared HTTP round-trip for the whole
 batch, etc.). For a trivial per-row transform, `iter().map(...).collect()` is the
-idiom - the length of the returned `Vec` must equal the number of inputs, or the
+idiom. The length of the returned `Vec` must equal the number of inputs, or the
 host rejects the batch.
 
 ### filter
 
-`fn(Vec<PluginInput>) -> PluginResult<Vec<FilterDecision>>` - one decision per
+`fn(Vec<PluginInput>) -> PluginResult<Vec<FilterDecision>>`: one decision per
 input, in order. No `output`.
 
 ```rust
@@ -128,7 +169,7 @@ fn positive(inputs: Vec<PluginInput>) -> PluginResult<Vec<FilterDecision>> {
 
 ### source
 
-`fn(Option<String>) -> PluginResult<SourcePage>` - the argument is the cursor
+`fn(Option<String>) -> PluginResult<SourcePage>`: the argument is the cursor
 (opaque string; `None` on the first call). Declare the rows you emit with
 `output_schema`. Return the page plus the next cursor and a `has_more` flag so
 the host knows when to stop.
@@ -229,7 +270,7 @@ SDK exposes them only when granted:
 - `allow_env` - list of environment-variable **names** the plugin may read via
   WASI. Values are resolved from the run's environment (the `EnvContext`, so
   `.env`-file variables count alongside the process environment); a name that
-  isn't set is simply not exposed. Only the listed names are visible - nothing
+  isn't set is simply not exposed. Only the listed names are visible; nothing
   else from the host environment leaks in.
 - `allow_fs_read` / `allow_fs_write` - lists of host directories preopened for
   the plugin via WASI (read-only / read-write). Each directory must already
